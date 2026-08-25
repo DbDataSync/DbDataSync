@@ -10,6 +10,9 @@ dist/
 dist-ssr/
 *.local
 
+# Local tooling state
+.claude/
+
 # IDE
 .vs/
 .vscode/*

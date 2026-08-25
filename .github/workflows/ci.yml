@@ -19,7 +19,10 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Test
-        run: dotnet test --no-build --configuration Release
+        # Excludes DataSync.Drivers.MsSql.Tests' Category=Integration tests, which need a real SQL
+        # Server instance (see architecture/implementation/phase-3-mssql-driver.md). Standing one up
+        # in CI is a Phase 7 (end-to-end validation) concern.
+        run: dotnet test --no-build --configuration Release --filter "Category!=Integration"
 
   web:
     runs-on: ubuntu-latest
