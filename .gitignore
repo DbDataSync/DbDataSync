@@ -1,0 +1,25 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+
+# Node / Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDE
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test/coverage output
+[Tt]est[Rr]esult*/
+coverage/

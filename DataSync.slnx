@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DataSync.Api/DataSync.Api.csproj" />
+    <Project Path="src/DataSync.Core/DataSync.Core.csproj" />
+    <Project Path="src/DataSync.Drivers.Abstractions/DataSync.Drivers.Abstractions.csproj" />
+    <Project Path="src/DataSync.Drivers.MsSql/DataSync.Drivers.MsSql.csproj" />
+    <Project Path="src/DataSync.State/DataSync.State.csproj" />
+    <Project Path="src/DataSync.TaskRunner/DataSync.TaskRunner.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DataSync.Api.Tests/DataSync.Api.Tests.csproj" />
+    <Project Path="tests/DataSync.Core.Tests/DataSync.Core.Tests.csproj" />
+    <Project Path="tests/DataSync.Drivers.MsSql.Tests/DataSync.Drivers.MsSql.Tests.csproj" />
+    <Project Path="tests/DataSync.State.Tests/DataSync.State.Tests.csproj" />
+    <Project Path="tests/DataSync.TaskRunner.Tests/DataSync.TaskRunner.Tests.csproj" />
+  </Folder>
+</Solution>
