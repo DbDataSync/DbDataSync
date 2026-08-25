@@ -134,6 +134,17 @@ public sealed class ConfigRepository
             .ToList();
     }
 
+    public void DeleteReplicationTask(string replicationName, GitAuthor author)
+    {
+        var dir = ConfigPaths.ReplicationDir(_configRoot, replicationName);
+        if (!Directory.Exists(dir))
+            return;
+
+        var files = Directory.GetFiles(dir, "*.yaml", SearchOption.AllDirectories);
+        Directory.Delete(dir, recursive: true);
+        _git.CommitChanges(files, $"Delete replication task '{replicationName}'", author);
+    }
+
     // ---- Table mappings ----
 
     public TableMappingConfig SaveTableMapping(string replicationName, TableMappingConfig mapping, GitAuthor author)
@@ -157,6 +168,16 @@ public sealed class ConfigRepository
                 $"Table mapping '{mappingName}' was not found on replication '{replicationName}'.", path);
 
         return YamlConfigSerializer.Deserialize<TableMappingConfig>(File.ReadAllText(path));
+    }
+
+    public void DeleteTableMapping(string replicationName, string mappingName, GitAuthor author)
+    {
+        var path = ConfigPaths.TableMappingFile(_configRoot, replicationName, mappingName);
+        if (!File.Exists(path))
+            return;
+
+        File.Delete(path);
+        _git.CommitChanges([path], $"Delete table mapping '{mappingName}' on replication '{replicationName}'", author);
     }
 
     public IReadOnlyList<string> ListTableMappings(string replicationName) =>

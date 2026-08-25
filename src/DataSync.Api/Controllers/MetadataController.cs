@@ -1,0 +1,49 @@
+using DataSync.Api.Services;
+using Microsoft.AspNetCore.Mvc;
+
+namespace DataSync.Api.Controllers;
+
+[ApiController]
+[Route("api/connections/{connectionName}/metadata")]
+public sealed class MetadataController(MetadataService metadataService) : ControllerBase
+{
+    [HttpGet("databases")]
+    public async Task<IActionResult> ListDatabases(string connectionName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await metadataService.ListDatabasesAsync(connectionName, cancellationToken));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    [HttpGet("databases/{database}/tables")]
+    public async Task<IActionResult> ListTables(string connectionName, string database, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await metadataService.ListTablesAsync(connectionName, database, cancellationToken));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    [HttpGet("databases/{database}/schemas/{schema}/tables/{table}/columns")]
+    public async Task<IActionResult> ListColumns(
+        string connectionName, string database, string schema, string table, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await metadataService.ListColumnsAsync(connectionName, database, schema, table, cancellationToken));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+}

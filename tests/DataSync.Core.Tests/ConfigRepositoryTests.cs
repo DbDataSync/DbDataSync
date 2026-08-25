@@ -202,6 +202,53 @@ public sealed class ConfigRepositoryTests : IDisposable
         Assert.Equal(["orders"], _repository.ListTableMappings("crm-sync"));
     }
 
+    [Fact]
+    public void DeleteTableMapping_RemovesFileAndCommits()
+    {
+        _repository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableRef { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
+            Targets = [new TableRef { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
+        }, Author);
+
+        _repository.DeleteTableMapping("crm-sync", "orders", Author);
+
+        Assert.Empty(_repository.ListTableMappings("crm-sync"));
+        using var repo = new Repository(_repoRoot);
+        Assert.Contains("Delete table mapping", repo.Head.Tip.Message);
+    }
+
+    [Fact]
+    public void DeleteReplicationTask_RemovesTaskAndTableMappingsAndCommits()
+    {
+        var task = new ReplicationTaskConfig
+        {
+            Name = "crm-sync",
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 30 },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+            },
+        };
+        _repository.SaveReplicationTask(task, Author);
+        _repository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableRef { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
+            Targets = [new TableRef { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
+        }, Author);
+
+        _repository.DeleteReplicationTask("crm-sync", Author);
+
+        Assert.DoesNotContain("crm-sync", _repository.ListReplications());
+        Assert.False(Directory.Exists(Path.Combine(_configRoot, "replications", "crm-sync")));
+        using var repo = new Repository(_repoRoot);
+        Assert.Contains("Delete replication task", repo.Head.Tip.Message);
+    }
+
     private static ConnectionInput SqlAuthInput(string name, string? password = "P@ssw0rd1") =>
         new()
         {
