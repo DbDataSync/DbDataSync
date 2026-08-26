@@ -256,6 +256,14 @@ public sealed class RunExecutor(
                 var staged = await stagingProvider.StageAsync(
                     targetConnection, target, read.Rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
 
+                // Only meaningful now that staging has drained the reader's stream. A run that skipped
+                // rows is a run whose source was changing under it — worth surfacing next to a mapping
+                // that looks slow or keeps retrying, rather than leaving it invisible.
+                if (read.Diagnostics is { RowsSkippedSourceRowGone: > 0 } diagnostics)
+                    Log(item.RunId, LogSeverity.Warning,
+                        $"{diagnostics.RowsSkippedSourceRowGone} row(s) skipped: the source row was deleted while " +
+                        "this pass was reading it. Each one's deletion is applied on a later pass.");
+
                 try
                 {
                     var written = await writer.ApplyAsync(
