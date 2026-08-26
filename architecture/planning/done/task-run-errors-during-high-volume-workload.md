@@ -81,3 +81,18 @@ which is why the end state reconciled.
 
 Option 2 looks like the one to do unconditionally; option 1 is a worthwhile extra for operators who
 can enable it, since it avoids the wasted read-and-skip.
+
+### Outcome — resolved 2026-08-26
+
+Agreed: **option 2 plus option 1 as an opt-in.** Fix the reader unconditionally (stop `base.*`
+clobbering the primary key; skip and count non-`'D'` rows whose source row has vanished), and add
+`snapshotIsolation` as an off-by-default reader option for operators who can enable
+`ALLOW_SNAPSHOT_ISOLATION` on the source.
+
+The design of record is
+`architecture/implementation/todo/phase-012-change-tracking-read-consistency.md`. Nothing is built
+yet — this doc moves to `done/` because the question it asked has been answered, not because the code
+exists.
+
+No change to the watermark-on-success-only behaviour: it is what made these failures transient and
+self-healing, and it is correct as it stands.
