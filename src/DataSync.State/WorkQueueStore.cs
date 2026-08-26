@@ -23,7 +23,7 @@ public sealed record WorkItem(
     WorkItemStatus Status);
 
 /// <summary>
-/// Durable, SQLite-backed cross-process work queue (architecture/implementation/phase-9-work-queue-schema.md).
+/// Durable, SQLite-backed cross-process work queue (architecture/implementation/done/phase-8-work-queue-schema.md).
 /// The API process (handling backfill triggers and scheduled due-ness) and the TaskRunner worker
 /// process(es) it spawns communicate exclusively through DataSync.State — this table is the mechanism,
 /// not an in-memory queue, since the API can't reach into a separate OS process directly.

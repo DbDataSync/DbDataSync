@@ -15,7 +15,7 @@ namespace DataSync.Api.Services;
 /// possibility now that a claimed unit of work can complete in well under this service's 1-second
 /// tick (no per-run process spawn overhead standing in the way). Process.HasExited is not used at
 /// all: one worker process now backs many concurrently-active RunIds. See
-/// architecture/implementation/phase-9-work-queue-schema.md.
+/// architecture/implementation/done/phase-8-work-queue-schema.md.
 /// </para>
 /// </summary>
 public sealed class RunMonitorService(

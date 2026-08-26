@@ -26,12 +26,12 @@ public sealed class MsSqlDriver : IDriver
             InitialCatalog = connection.Database ?? "master",
             // Dev/test default for connecting to self-signed instances (e.g. the local Docker
             // container used in Phase 3 testing). Revisit before any hardened-production deployment
-            // guidance ships — see architecture/implementation/phase-3-mssql-driver.md.
+            // guidance ships — see architecture/implementation/done/phase-3-mssql-driver.md.
             TrustServerCertificate = true,
             // Required: a source read (an open, streaming SqlDataReader from CHANGETABLE/a batch
             // query) and a staging SqlBulkCopy/MERGE against the target can both be in flight on one
             // connection at once when source and target share a server. Without MARS that combination
-            // deadlocks rather than throwing — see architecture/implementation/phase-3-mssql-driver.md.
+            // deadlocks rather than throwing — see architecture/implementation/done/phase-3-mssql-driver.md.
             MultipleActiveResultSets = true,
         };
 

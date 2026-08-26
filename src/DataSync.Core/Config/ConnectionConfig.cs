@@ -1,6 +1,6 @@
 namespace DataSync.Core.Config;
 
-/// <summary>Database engines a connection can target. Extended as new drivers are added (see Phase 8 backlog).</summary>
+/// <summary>Database engines a connection can target. Extended as new drivers are added (see implementation-plan.md's Backlog section).</summary>
 public enum ConnectionDriverType
 {
     MsSql,

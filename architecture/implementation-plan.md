@@ -147,19 +147,22 @@ for someone else to stand up.
 - **Exit criteria**: a fresh clone + documented setup steps produces a working local replication
   end-to-end, performed by someone other than the original implementer if possible.
 
-## Phase 8 — Backlog (explicitly future, not v1)
+## Backlog (explicitly future, not v1)
 
-Not scheduled; recorded so scope stays deliberate:
+Not a phase — nothing here has been built, so unlike the numbered phases above (each of which
+delivered and documented real work, including pure design/architecture passes), there's no
+implementation doc for this section. Recorded so scope stays deliberate:
 
 - **CDC reader** for MSSQL — deferred during Phase 3 (Change Tracking + the watermark fallback were
-  enough to complete the v1 pipeline); see `architecture/implementation/phase-3-mssql-driver.md`'s
+  enough to complete the v1 pipeline); see `architecture/implementation/done/phase-3-mssql-driver.md`'s
   Notes section for the original deferral rationale.
 - **Batch reload** — a full or list/range-segmented reload/backfill of a table, distinct from the
   ongoing incremental `IChangeReader`s above (Change Tracking, the watermark fallback, and the
   deferred CDC reader all describe *incremental* sync). Fully designed (four review passes; see
-  `architecture/implementation/phase-9-work-queue-schema.md`'s "Design history"); its foundation — the
+  `architecture/implementation/done/phase-8-work-queue-schema.md`'s "Design history"); its foundation — the
   per-mapping `RunKind`/lock model and the durable work-queue-driven worker, needed so hundreds of
-  queued mappings/backfills don't require one process per trigger — is built (Phase 9). The
+  queued mappings/backfills don't require one process per trigger — is built (Phase 8, the next
+  numbered phase after this backlog list — this section was never itself a phase). The
   feature-specific pieces (segment types, the two new writers, the Backfill trigger endpoint, SPA) are
   not yet built.
 - Additional source/target database engine drivers (Postgres, MySQL, Oracle, etc.).

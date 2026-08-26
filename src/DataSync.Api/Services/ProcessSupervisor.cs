@@ -12,7 +12,7 @@ namespace DataSync.Api.Services;
 /// regardless of how TaskRunner itself was published. Tracked per replication name, not per run: one
 /// worker process claims and drains a replication's pending WorkQueue items with internal bounded
 /// concurrency across however many table mappings it has, rather than one process per triggered run
-/// (see architecture/implementation/phase-9-work-queue-schema.md — a replication can have hundreds of
+/// (see architecture/implementation/done/phase-8-work-queue-schema.md — a replication can have hundreds of
 /// mappings, and spawning per mapping/trigger would be far too heavy at that scale).
 /// </summary>
 public sealed class ProcessSupervisor(
@@ -86,7 +86,7 @@ public sealed class ProcessSupervisor(
 
     /// <summary>A Pending (not yet claimed) item is cancelled directly — cheap, no process
     /// interaction. A Claimed/Running item has no per-item cancellation lever yet (see
-    /// architecture/implementation/phase-9-work-queue-schema.md); the only available action is
+    /// architecture/implementation/done/phase-8-work-queue-schema.md); the only available action is
     /// stopping the whole worker process for that replication, which also affects any other item that
     /// same process happens to be concurrently processing right now — an accepted v1 limitation,
     /// same spirit as this method's previous single-run version.</summary>
@@ -125,7 +125,7 @@ public sealed class ProcessSupervisor(
     /// need no special handling: they're simply still Pending in WorkQueue, picked up by the next
     /// EnsureWorkerRunning. A run that's still genuinely alive keeps running to completion and writes
     /// its own final TaskRuns row when done — it just isn't tracked by this API instance until then
-    /// (v1 limitation — see architecture/implementation/phase-5-api-orchestrator.md).</summary>
+    /// (v1 limitation — see architecture/implementation/done/phase-5-api-orchestrator.md).</summary>
     public void ReconcileOrphanedRuns()
     {
         foreach (var run in taskRunStore.GetRunningRuns())

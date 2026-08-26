@@ -14,7 +14,7 @@ public enum RunStatus
 /// Distinguishes a replication's ongoing incremental sync (Primary — one per table mapping, driven by
 /// its own schedule, the only kind that ever advances a ChangeWatermarks row) from an on-demand
 /// reload/backfill of one table mapping (Backfill — never touches the incremental watermark). See
-/// architecture/implementation/phase-9-work-queue-schema.md.
+/// architecture/implementation/done/phase-8-work-queue-schema.md.
 /// </summary>
 public enum RunKind
 {

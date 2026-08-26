@@ -1,7 +1,7 @@
 namespace DataSync.TaskRunner;
 
 // No single --run-id anymore: work is claimed from the durable WorkQueue (one RunId minted per claimed
-// item, not supplied externally) — see architecture/implementation/phase-9-work-queue-schema.md.
+// item, not supplied externally) — see architecture/implementation/done/phase-8-work-queue-schema.md.
 public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, string Replication, int DegreeOfParallelism = 4)
 {
     /// <summary>config/ lives at a fixed location under the git repo root — the same convention

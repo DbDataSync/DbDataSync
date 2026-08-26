@@ -122,7 +122,7 @@ relying on polling cadence to eventually land on it.
   v1 internal tool; revisit if the UI surface grows significantly.
 - **Hardcoded MSSQL-only driver kind lists** (`driverKinds.ts`) rather than a driver-capability
   endpoint — there's only one driver in the solution right now, so an endpoint would be speculative.
-  Revisit when a second engine driver is added (Phase 8+ backlog).
+  Revisit when a second engine driver is added (see implementation-plan.md's Backlog section).
 - **`querySql`'s sqlcmd invocation now passes `-h -1`** (suppress column headers) — the original
   test asserted an exact row count by counting non-blank lines in raw `sqlcmd` output, which silently
   included the header and separator lines. A test-authoring bug, not an application bug; worth noting

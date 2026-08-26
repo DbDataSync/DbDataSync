@@ -45,8 +45,8 @@ name that concept needs.
 - `MsSqlDriver.Readers` registry entry, `driverKinds.ts`'s `READER_KINDS` list, and every test
   referencing the old kind/class name updated to match.
 
-**"Batch reload" reserved as a term, not built**: added to `implementation-plan.md`'s Phase 8
-backlog as a distinct, explicitly not-yet-designed concept — a full or list/range-segmented
+**"Batch reload" reserved as a term, not built**: added to `implementation-plan.md`'s Backlog section
+as a distinct, explicitly not-yet-designed concept — a full or list/range-segmented
 reload/backfill of a table, separate from the three *incremental* readers (Change Tracking, the
 renamed Watermark fallback, and the still-deferred CDC reader). While there, also added CDC's
 deferral to that same backlog list — it had only ever been noted in `phase-3-mssql-driver.md`'s Notes

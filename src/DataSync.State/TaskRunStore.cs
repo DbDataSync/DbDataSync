@@ -164,7 +164,7 @@ public sealed class TaskRunStore(StateDatabase database)
     /// polling ticks, which GetActiveRuns() alone can miss entirely: a run that never once overlaps a
     /// poll was never "seen" as active, so nothing would otherwise trigger a runCompleted broadcast for
     /// it. Only possible now that a claimed unit of work can complete in well under a second (no
-    /// per-run process spawn overhead) — see phase-9-work-queue-schema.md.</summary>
+    /// per-run process spawn overhead) — see phase-8-work-queue-schema.md.</summary>
     public IReadOnlyList<TaskRunRecord> GetRecentlyEndedRuns(DateTimeOffset sinceUtc) =>
         SqliteRetry.Execute(() =>
         {
@@ -184,7 +184,7 @@ public sealed class TaskRunStore(StateDatabase database)
 
     /// <summary>Rows in Queued or Running status — what RunMonitorService watches for completion once
     /// one worker process can back many concurrently-active RunIds (Process.HasExited stops being a
-    /// meaningful completion signal at that point). See phase-9-work-queue-schema.md.</summary>
+    /// meaningful completion signal at that point). See phase-8-work-queue-schema.md.</summary>
     public IReadOnlyList<TaskRunRecord> GetActiveRuns() =>
         SqliteRetry.Execute(() =>
         {

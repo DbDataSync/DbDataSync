@@ -10,7 +10,7 @@ namespace DataSync.TaskRunner;
 /// <summary>
 /// The read -> stage -> apply -> watermark-update pipeline from architecture/detailed-design.md §3.3,
 /// driven by a durable work queue rather than a fixed, up-front list of mappings — see
-/// architecture/implementation/phase-9-work-queue-schema.md. One process (spawned by
+/// architecture/implementation/done/phase-8-work-queue-schema.md. One process (spawned by
 /// DataSync.Api.Services.ProcessSupervisor) claims and drains a replication's pending WorkQueue items
 /// with bounded internal concurrency, rather than one process being spawned per triggered run: a
 /// replication can have hundreds of table mappings, and backfills for many of them can be queued
@@ -85,7 +85,7 @@ public sealed class RunExecutor(
     /// enqueue to land during this specific window, rather than eliminating it structurally — a full
     /// fix (e.g. a worker heartbeat EnsureWorkerRunning can check against, not just OS process
     /// liveness) is real follow-on work, not built here. See
-    /// architecture/implementation/phase-9-work-queue-schema.md.</summary>
+    /// architecture/implementation/done/phase-8-work-queue-schema.md.</summary>
     private const int EmptyPollsBeforeExit = 5;
 
     /// <summary>Claims the next available item for this task in a loop, feeding it to the bounded

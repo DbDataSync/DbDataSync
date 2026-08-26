@@ -1,7 +1,7 @@
-# Phase 9 — Durable Work Queue & Per-Mapping Run Model
+# Phase 8 — Durable Work Queue & Per-Mapping Run Model
 
 **Status**: Complete
-**Plan reference**: `architecture/implementation-plan.md` § Phase 8 backlog ("Batch reload"); design
+**Plan reference**: `architecture/implementation-plan.md` § Backlog ("Batch reload"); design
 history in the plan file used for this feature's design review (four passes, three user-driven
 architectural corrections — see "Design history" below).
 

@@ -12,7 +12,7 @@ const repoRoot = path.resolve(__dirname, '../..')
 const scratchRepoRoot = path.join(os.tmpdir(), 'datasync-web-e2e-scratch-repo')
 
 // The password used for the real SQL Server test database (started via docker-compose.yml's mssql-source service —
-// see architecture/implementation/phase-3-mssql-driver.md). This sandbox has no OS keychain, so the
+// see architecture/implementation/done/phase-3-mssql-driver.md). This sandbox has no OS keychain, so the
 // API's SecretStore falls back to environment variables — presetting these lets the *spawned
 // TaskRunner child process* resolve the connection credentials it needs to actually run a
 // replication, matching how phase-4/5's manual and integration tests worked around the same gap.
@@ -42,7 +42,7 @@ export default defineConfig({
       // wrapper process around the real app process, and killing the wrapper doesn't reliably kill
       // its child, which can leave an orphaned API instance running against a since-deleted scratch
       // repo path. Run `dotnet build src/DataSync.Api` before this suite (see tests/DataSync.Web.Tests
-      // in architecture/implementation/phase-6-spa.md).
+      // in architecture/implementation/done/phase-6-spa.md).
       command: 'dotnet exec src/DataSync.Api/bin/Debug/net10.0/DataSync.Api.dll',
       cwd: repoRoot,
       url: 'http://127.0.0.1:5183/api/health',
