@@ -26,7 +26,7 @@ Four pillars shape every component decision in this design:
    that process is solely responsible for reading, staging, and applying changes for that one task.
 4. **The web app is the orchestrator, not a data mover.** It hosts the UI, the config/git layer, an
    in-process scheduler, and process supervision — but the actual driver/reader/writer/caching logic
-   (per `architecture/planning/architecture.md`) lives in libraries shared with the Task Runner, not
+   (per `architecture/planning/done/architecture.md`) lives in libraries shared with the Task Runner, not
    in the web app itself.
 
 ## 2. High-Level Component Diagram
@@ -79,7 +79,7 @@ The API process is the only long-running server component in v1. It owns:
   hand-typed names. This reuses the driver abstraction (§3.4) in "metadata-only" mode; no data moves.
 - **Scheduler** (`IHostedService`) — evaluates every enabled task's scheduling config
   (`Continuous` with a frequency, or `Periodic` on a cron expression, per
-  `architecture/planning/architecture.md`) on a tick and decides which tasks are due to run.
+  `architecture/planning/done/architecture.md`) on a tick and decides which tasks are due to run.
 - **Process Supervisor** — spawns a `DataSync.TaskRunner` child process for each due run
   (`System.Diagnostics.Process`), passing the task's config path and a generated run id. Tracks PID,
   start time, and liveness; writes/updates the run's row in the central SQLite `TaskRuns` table;
@@ -104,7 +104,7 @@ Talks to `DataSync.Api` over REST for CRUD and SignalR for live updates. Core vi
   source filters, choose scheduling (continuous vs. periodic + parameters), and choose change
   processing settings (which reader/cache/writer, parallelism, custom options) from what the selected
   driver advertises as supported (per the driver-capability model in
-  `architecture/planning/architecture.md`).
+  `architecture/planning/done/architecture.md`).
 - **Run Dashboard** — per-task run history, current status, rows read/written, errors; a live log
   tail view backed by the SignalR hub for in-progress runs.
 - **Config History** — a read-only view of a replication's git log (commit list + diffs), giving
@@ -141,7 +141,7 @@ transaction per line — see §3.6 concurrency notes) so the API can surface the
 ### 3.4 Driver Abstraction Layer (`DataSync.Drivers.Abstractions`)
 
 Shared library referenced by both `DataSync.Api` (metadata browsing) and `DataSync.TaskRunner` (data
-movement). Directly mirrors `architecture/planning/architecture.md`'s concepts as interfaces:
+movement). Directly mirrors `architecture/planning/done/architecture.md`'s concepts as interfaces:
 
 - `IDriver` — identifies a database engine; advertises which `IChangeReader`, `IStagingProvider`, and
   `IChangeWriter` implementations it supports, plus metadata introspection (databases/tables/columns,

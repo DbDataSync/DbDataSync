@@ -24,7 +24,7 @@ public sealed class ColumnMapping
 
 /// <summary>
 /// Persisted as config/replications/&lt;replication&gt;/table-mappings/&lt;name&gt;.yaml. Sources/Targets
-/// are lists per architecture/planning/architecture.md's "based on source or target tables, or both" —
+/// are lists per architecture/planning/done/architecture.md's "based on source or target tables, or both" —
 /// v1 usage is expected to be 1 source : 1 target, but the shape doesn't foreclose fan-in/fan-out later.
 /// </summary>
 public sealed class TableMappingConfig

@@ -10,7 +10,7 @@ All new code lives in `src/DataSync.Core`, since both `DataSync.Api` (writes on 
 behavior — putting it in a dedicated project would just be indirection with one real caller each.
 
 **Domain models** (`Config/`): `ConnectionConfig`/`ConnectionInput`, `SchedulingConfig` (Continuous
-w/ frequency or Periodic w/ cron, per `architecture/planning/architecture.md`),
+w/ frequency or Periodic w/ cron, per `architecture/planning/done/architecture.md`),
 `ChangeProcessingConfig` (`ReaderConfig`/`CacheConfig`/`WriterConfig`, each a string `Kind` +
 `Options` dict — validated against real drivers starting Phase 3, not yet), `ReplicationTaskConfig`,
 `TableMappingConfig` (+ `TableRef`/`SourceTableRef`/`ColumnMapping`).

@@ -10,6 +10,10 @@ count as planned or as done.
 - **`todo/`** — work that has been designed but not yet implemented. One file per phase.
 - **`done/`** — work that has been implemented, verified, and committed. One file per phase.
 
+Upstream of this folder is `architecture/planning/`, where a thought is captured *before* anyone knows
+what to do about it; a planning doc moves to its own `done/` once we've agreed on a plan, which is
+typically the moment a phase doc appears in this folder's `todo/`. See `architecture/planning/README.md`.
+
 A phase moves from `todo/` to `done/` exactly once, at the point its implementation is verified and
 committed — see "Workflow" below. Nothing is ever deleted; a phase whose plan changed materially before
 implementation gets its `todo/` file edited in place (with a note on what changed and why), not

@@ -5,7 +5,7 @@ mapping, schedule, change-processing settings) entirely through a web UI, and Da
 target in sync — full initial load, then incremental change capture and apply on a schedule or on
 demand.
 
-v1 supports MSSQL → MSSQL. See `architecture/planning/overview.md` for the broader ambition and
+v1 supports MSSQL → MSSQL. See `architecture/planning/done/overview.md` for the broader ambition and
 `architecture/detailed-design.md` for the full system design.
 
 ## Quick start: the dev harness

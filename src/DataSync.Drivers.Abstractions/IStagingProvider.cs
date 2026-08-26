@@ -5,7 +5,7 @@ namespace DataSync.Drivers.Abstractions;
 
 /// <summary>
 /// Persists a change set before it's applied to the target (the "Change Cache" in
-/// architecture/planning/architecture.md). Implementations may be target-specific (a staging table
+/// architecture/planning/done/architecture.md). Implementations may be target-specific (a staging table
 /// via bulk insert) or generic (e.g. parquet, deferred past v1).
 /// </summary>
 public interface IStagingProvider
