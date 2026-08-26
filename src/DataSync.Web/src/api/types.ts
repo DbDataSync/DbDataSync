@@ -104,13 +104,17 @@ export interface ColumnMetadata {
   isPrimaryKey: boolean
 }
 
-export type RunStatus = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'
+export type RunStatus = 'Queued' | 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'
+export type RunKind = 'Primary' | 'Backfill'
 
 export interface TaskRunRecord {
   runId: string
   taskName: string
   pid: number | null
   status: RunStatus
+  runKind: RunKind
+  mappingName: string
+  segmentLabel: string | null
   startedAtUtc: string
   endedAtUtc: string | null
   rowsRead: number
@@ -136,8 +140,10 @@ export interface CommitInfo {
   whenUtc: string
 }
 
+// A trigger now enqueues one Primary pass per table mapping the replication has, not one run for the
+// whole replication — see architecture/implementation/phase-9-work-queue-schema.md.
 export interface TriggerResponse {
-  runId: string
+  runIds: string[]
 }
 
 export interface ApiErrorBody {

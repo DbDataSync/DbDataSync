@@ -10,7 +10,7 @@ if (!TaskRunnerOptions.TryParse(args, out var options, out var parseError))
 {
     Console.Error.WriteLine($"Argument error: {parseError}");
     Console.Error.WriteLine(
-        "Usage: DataSync.TaskRunner --repo-root <path> --state-db <path> --replication <name> [--run-id <guid>]");
+        "Usage: DataSync.TaskRunner --repo-root <path> --state-db <path> --replication <name> [--degree-of-parallelism <n>]");
     return (int)ExitCode.ConfigError;
 }
 
@@ -29,6 +29,7 @@ var executor = new RunExecutor(
     new TaskRunStore(stateDatabase),
     new ChangeWatermarkStore(stateDatabase),
     new RunLockStore(stateDatabase),
+    new WorkQueueStore(stateDatabase),
     logWriter);
 
 using var cts = new CancellationTokenSource();
@@ -38,5 +39,5 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-var exitCode = await executor.ExecuteAsync(options.Replication, options.RunId, cts.Token);
+var exitCode = await executor.ExecuteWorkerAsync(options.Replication, options.DegreeOfParallelism, cts.Token);
 return (int)exitCode;

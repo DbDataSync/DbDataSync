@@ -156,7 +156,12 @@ Not scheduled; recorded so scope stays deliberate:
   Notes section for the original deferral rationale.
 - **Batch reload** — a full or list/range-segmented reload/backfill of a table, distinct from the
   ongoing incremental `IChangeReader`s above (Change Tracking, the watermark fallback, and the
-  deferred CDC reader all describe *incremental* sync). Not yet designed or built.
+  deferred CDC reader all describe *incremental* sync). Fully designed (four review passes; see
+  `architecture/implementation/phase-9-work-queue-schema.md`'s "Design history"); its foundation — the
+  per-mapping `RunKind`/lock model and the durable work-queue-driven worker, needed so hundreds of
+  queued mappings/backfills don't require one process per trigger — is built (Phase 9). The
+  feature-specific pieces (segment types, the two new writers, the Backfill trigger endpoint, SPA) are
+  not yet built.
 - Additional source/target database engine drivers (Postgres, MySQL, Oracle, etc.).
 - Parquet (or other generic) staging provider.
 - Alternate `DataSync.State` backends beyond SQLite.

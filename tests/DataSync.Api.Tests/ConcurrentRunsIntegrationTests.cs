@@ -97,7 +97,9 @@ public sealed class ConcurrentRunsIntegrationTests : IClassFixture<TestApiFactor
         {
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-            runIds.Add(Guid.Parse(body.GetProperty("runId").GetString()!));
+            // Each of these replications has exactly one table mapping, so "runIds" always has a
+            // single element — a trigger now enqueues one Primary pass per mapping.
+            runIds.Add(Guid.Parse(body.GetProperty("runIds").EnumerateArray().Single().GetString()!));
         }
 
         var finalRuns = await Task.WhenAll(runIds.Select(PollUntilTerminalAsync));

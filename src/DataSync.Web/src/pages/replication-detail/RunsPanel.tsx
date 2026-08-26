@@ -25,7 +25,12 @@ export function RunsPanel({ replicationName }: { replicationName: string }) {
 
   const onTrigger = async () => {
     const result = await trigger.mutateAsync()
-    setActiveRunId(result.runId)
+    // A trigger now enqueues one Primary pass per table mapping, so this can return several RunIds —
+    // this panel still only live-watches one at a time (the first), matching how single-table-mapping
+    // replications behave today. Watching every mapping's own run live is future SPA work (see
+    // architecture/implementation/phase-9-work-queue-schema.md); the full history table below already
+    // reflects every mapping's runs regardless.
+    setActiveRunId(result.runIds[0])
   }
 
   return (

@@ -7,45 +7,34 @@ using DataSync.State;
 namespace DataSync.Api.Services;
 
 /// <summary>
-/// Spawns DataSync.TaskRunner as a genuine child process per run (architecture/detailed-design.md
+/// Spawns DataSync.TaskRunner as a genuine child process per replication (architecture/detailed-design.md
 /// §3.1) via `dotnet exec &lt;TaskRunnerDllPath&gt;` — the same host running the API, so this works
-/// regardless of how TaskRunner itself was published. Tracks active runs for RunMonitorService to
-/// poll, and reconciles TaskRuns rows left "Running" by a previous API process on startup.
+/// regardless of how TaskRunner itself was published. Tracked per replication name, not per run: one
+/// worker process claims and drains a replication's pending WorkQueue items with internal bounded
+/// concurrency across however many table mappings it has, rather than one process per triggered run
+/// (see architecture/implementation/phase-9-work-queue-schema.md — a replication can have hundreds of
+/// mappings, and spawning per mapping/trigger would be far too heavy at that scale).
 /// </summary>
 public sealed class ProcessSupervisor(
     ApiOptions options,
     ConfigRepository configRepository,
     TaskRunStore taskRunStore,
-    RunLockStore runLockStore)
+    RunLockStore runLockStore,
+    WorkQueueStore workQueueStore)
 {
-    private sealed record ActiveRun(Process Process, string ReplicationName);
+    private readonly ConcurrentDictionary<string, Process> _workers = new();
 
-    private readonly ConcurrentDictionary<Guid, ActiveRun> _activeRuns = new();
+    public IReadOnlyCollection<string> ActiveTaskNames => _workers.Keys.ToList();
 
-    public IReadOnlyCollection<Guid> ActiveRunIds => _activeRuns.Keys.ToList();
-
-    public Task<TriggerResult> TriggerRunAsync(string replicationName)
+    /// <summary>Idempotent: no-op if a live worker process is already tracked for this replication.
+    /// Spawning a process is comparatively slow and never has to be on a request's critical path —
+    /// callers enqueue work first (cheap, a few SQLite writes) and call this after.</summary>
+    public TriggerResult EnsureWorkerRunning(string taskName)
     {
-        try
-        {
-            configRepository.LoadReplicationTask(replicationName);
-        }
-        catch (FileNotFoundException)
-        {
-            return Task.FromResult(TriggerResult.NotFound());
-        }
+        if (_workers.TryGetValue(taskName, out var existing) && !existing.HasExited)
+            return TriggerResult.Started([]);
 
-        // Fast path for a quick REST response; DataSync.TaskRunner's own atomic RunLocks acquisition
-        // (Phase 4) is what actually prevents a race from double-executing.
-        if (runLockStore.IsLocked(replicationName))
-            return Task.FromResult(TriggerResult.AlreadyRunning());
-
-        var runId = Guid.NewGuid();
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            UseShellExecute = false,
-        };
+        var startInfo = new ProcessStartInfo { FileName = "dotnet", UseShellExecute = false };
         startInfo.ArgumentList.Add("exec");
         startInfo.ArgumentList.Add(options.TaskRunnerDllPath);
         startInfo.ArgumentList.Add("--repo-root");
@@ -53,70 +42,90 @@ public sealed class ProcessSupervisor(
         startInfo.ArgumentList.Add("--state-db");
         startInfo.ArgumentList.Add(options.StateDbPath);
         startInfo.ArgumentList.Add("--replication");
-        startInfo.ArgumentList.Add(replicationName);
-        startInfo.ArgumentList.Add("--run-id");
-        startInfo.ArgumentList.Add(runId.ToString());
+        startInfo.ArgumentList.Add(taskName);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         try
         {
             if (!process.Start())
-                return Task.FromResult(TriggerResult.FailedToStart("Process.Start returned false."));
+                return TriggerResult.FailedToStart("Process.Start returned false.");
         }
         catch (Exception ex)
         {
-            return Task.FromResult(TriggerResult.FailedToStart(ex.Message));
+            return TriggerResult.FailedToStart(ex.Message);
         }
 
-        _activeRuns[runId] = new ActiveRun(process, replicationName);
-        return Task.FromResult(TriggerResult.Started(runId));
+        _workers[taskName] = process;
+        return TriggerResult.Started([]);
     }
 
-    /// <summary>Best-effort process kill. TaskRunner's own RunExecutor writes the final TaskRuns row
-    /// on graceful completion; here the Supervisor writes it directly since killing the process skips
-    /// that entirely. A run that finishes naturally at almost exactly the same moment this is called
-    /// could have its real terminal status overwritten with Cancelled — an accepted, rare race for v1.</summary>
+    /// <summary>The "Run Now" convenience: enqueues a Primary pass for every table mapping of a
+    /// replication, then ensures a worker is running to pick them up. Enqueueing a mapping that
+    /// already has a Primary pass queued/in-flight is a no-op (see WorkQueueStore.Enqueue) — this
+    /// never fails with "already running" the way a single whole-replication lock used to.</summary>
+    public TriggerResult TriggerReplication(string replicationName)
+    {
+        List<string> mappingNames;
+        try
+        {
+            configRepository.LoadReplicationTask(replicationName);
+            mappingNames = configRepository.ListTableMappings(replicationName).ToList();
+        }
+        catch (FileNotFoundException)
+        {
+            return TriggerResult.NotFound();
+        }
+
+        var runIds = mappingNames
+            .Select(mappingName => workQueueStore.Enqueue(replicationName, RunKind.Primary, mappingName))
+            .ToList();
+
+        var ensureResult = EnsureWorkerRunning(replicationName);
+        return ensureResult.Outcome == TriggerOutcome.FailedToStart ? ensureResult : TriggerResult.Started(runIds);
+    }
+
+    /// <summary>A Pending (not yet claimed) item is cancelled directly — cheap, no process
+    /// interaction. A Claimed/Running item has no per-item cancellation lever yet (see
+    /// architecture/implementation/phase-9-work-queue-schema.md); the only available action is
+    /// stopping the whole worker process for that replication, which also affects any other item that
+    /// same process happens to be concurrently processing right now — an accepted v1 limitation,
+    /// same spirit as this method's previous single-run version.</summary>
     public bool CancelRun(Guid runId)
     {
-        if (!_activeRuns.TryGetValue(runId, out var active))
+        var run = taskRunStore.GetRun(runId);
+        if (run is null)
+            return false;
+
+        if (workQueueStore.TryCancelPending(runId))
+        {
+            taskRunStore.CompleteRun(runId, RunStatus.Cancelled, 0, 0, "Cancelled by user request.");
+            return true;
+        }
+
+        if (!_workers.TryGetValue(run.TaskName, out var process))
             return false;
 
         try
         {
-            if (!active.Process.HasExited)
-                active.Process.Kill(entireProcessTree: true);
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
         }
         catch (InvalidOperationException)
         {
-            // Already exited between the check and the kill — fine, fall through to record the outcome.
+            // Already exited between the check and the kill — fine, fall through to reconcile.
         }
 
-        taskRunStore.CompleteRun(runId, RunStatus.Cancelled, 0, 0, "Cancelled by user request.");
-        runLockStore.Release(active.ReplicationName);
-        _activeRuns.TryRemove(runId, out _);
+        ReconcileDeadWorker(run.TaskName);
         return true;
     }
 
-    public bool TryGetProcess(Guid runId, out Process? process)
-    {
-        if (_activeRuns.TryGetValue(runId, out var active))
-        {
-            process = active.Process;
-            return true;
-        }
-
-        process = null;
-        return false;
-    }
-
-    public void RemoveActiveRun(Guid runId) => _activeRuns.TryRemove(runId, out _);
-
-    /// <summary>Runs marked "Running" in the state store but with no live OS process behind them —
-    /// left over from a previous API process (crash, restart, deploy) — are marked Failed and their
-    /// RunLocks released, so a task doesn't stay permanently un-schedulable. A run that's still
-    /// genuinely alive keeps running to completion and writes its own final TaskRuns row when done;
-    /// it just isn't monitorable/cancellable via this API instance until then (v1 limitation — see
-    /// architecture/implementation/phase-5-api-orchestrator.md).</summary>
+    /// <summary>Runs left Running in the store but with no live OS process behind them — left over
+    /// from a previous API process (crash, restart, deploy) — are marked Failed and their locks
+    /// released, so a mapping doesn't stay permanently un-schedulable. Queued (not yet claimed) rows
+    /// need no special handling: they're simply still Pending in WorkQueue, picked up by the next
+    /// EnsureWorkerRunning. A run that's still genuinely alive keeps running to completion and writes
+    /// its own final TaskRuns row when done — it just isn't tracked by this API instance until then
+    /// (v1 limitation — see architecture/implementation/phase-5-api-orchestrator.md).</summary>
     public void ReconcileOrphanedRuns()
     {
         foreach (var run in taskRunStore.GetRunningRuns())
@@ -125,7 +134,20 @@ public sealed class ProcessSupervisor(
                 continue;
 
             taskRunStore.CompleteRun(run.RunId, RunStatus.Failed, 0, 0, "Orphaned: no live process found after API restart.");
-            runLockStore.Release(run.TaskName);
+            runLockStore.Release(run.TaskName, run.RunKind, run.MappingName);
+        }
+    }
+
+    /// <summary>A worker process backs many concurrently-active RunIds, so its death (whether via
+    /// CancelRun's kill or discovered later by ReconcileOrphanedRuns) invalidates its whole in-flight
+    /// set at once, not just the one RunId a caller happened to ask about.</summary>
+    private void ReconcileDeadWorker(string taskName)
+    {
+        _workers.TryRemove(taskName, out _);
+        foreach (var run in taskRunStore.GetRunningRuns().Where(r => r.TaskName == taskName))
+        {
+            taskRunStore.CompleteRun(run.RunId, RunStatus.Failed, 0, 0, "Worker process was stopped.");
+            runLockStore.Release(run.TaskName, run.RunKind, run.MappingName);
         }
     }
 

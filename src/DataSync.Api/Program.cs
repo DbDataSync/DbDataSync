@@ -40,6 +40,7 @@ builder.Services.AddSingleton(sp => new StateDatabase(sp.GetRequiredService<ApiO
 builder.Services.AddSingleton(sp => new TaskRunStore(sp.GetRequiredService<StateDatabase>()));
 builder.Services.AddSingleton(sp => new ChangeWatermarkStore(sp.GetRequiredService<StateDatabase>()));
 builder.Services.AddSingleton(sp => new RunLockStore(sp.GetRequiredService<StateDatabase>()));
+builder.Services.AddSingleton(sp => new WorkQueueStore(sp.GetRequiredService<StateDatabase>()));
 builder.Services.AddSingleton(sp => new LogWriter(sp.GetRequiredService<StateDatabase>()));
 
 builder.Services.AddSingleton(_ =>

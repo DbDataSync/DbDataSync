@@ -146,7 +146,9 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
         var triggerResponse = await _client.PostAsync($"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json"));
         triggerResponse.EnsureSuccessStatusCode();
         var triggerBody = await triggerResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var runId = Guid.Parse(triggerBody.GetProperty("runId").GetString()!);
+        // This replication has exactly one table mapping, so "runIds" always has a single element —
+        // a trigger now enqueues one Primary pass per mapping.
+        var runId = Guid.Parse(triggerBody.GetProperty("runIds").EnumerateArray().Single().GetString()!);
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
         while (DateTimeOffset.UtcNow < deadline)

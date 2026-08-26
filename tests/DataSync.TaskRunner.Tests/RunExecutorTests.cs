@@ -25,6 +25,7 @@ public sealed class RunExecutorTests : IDisposable
     private readonly StateDatabase _stateDatabase;
     private readonly TaskRunStore _taskRunStore;
     private readonly RunLockStore _runLockStore;
+    private readonly WorkQueueStore _workQueueStore;
     private readonly LogWriter _logWriter;
     private readonly RunExecutor _executor;
 
@@ -38,6 +39,7 @@ public sealed class RunExecutorTests : IDisposable
         _stateDatabase = new StateDatabase(Path.Combine(_repoRoot, "state.db"));
         _taskRunStore = new TaskRunStore(_stateDatabase);
         _runLockStore = new RunLockStore(_stateDatabase);
+        _workQueueStore = new WorkQueueStore(_stateDatabase);
         _logWriter = new LogWriter(_stateDatabase);
 
         var driverRegistry = new DriverRegistry();
@@ -45,7 +47,7 @@ public sealed class RunExecutorTests : IDisposable
 
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore, _taskRunStore,
-            new ChangeWatermarkStore(_stateDatabase), _runLockStore, _logWriter);
+            new ChangeWatermarkStore(_stateDatabase), _runLockStore, _workQueueStore, _logWriter);
     }
 
     public void Dispose()
@@ -67,16 +69,36 @@ public sealed class RunExecutorTests : IDisposable
             },
         }, Author);
 
-    [Fact]
-    public async Task ExecuteAsync_WhenReplicationDoesNotExist_ReturnsConfigError()
+    /// <summary>Enqueues a Primary pass for one mapping and drains the queue with a single-consumer
+    /// worker — the smallest unit that exercises the real claim -> lock -> run -> complete pipeline.</summary>
+    private async Task<Guid> EnqueueAndDrainAsync(string taskName, string mappingName)
     {
-        var result = await _executor.ExecuteAsync("nonexistent", Guid.NewGuid(), CancellationToken.None);
+        var runId = _workQueueStore.Enqueue(taskName, RunKind.Primary, mappingName);
+        await _executor.ExecuteWorkerAsync(taskName, degreeOfParallelism: 1, CancellationToken.None);
+        return runId;
+    }
+
+    [Fact]
+    public async Task ExecuteWorkerAsync_WhenReplicationDoesNotExist_ReturnsConfigError()
+    {
+        var result = await _executor.ExecuteWorkerAsync("nonexistent", degreeOfParallelism: 1, CancellationToken.None);
 
         Assert.Equal(ExitCode.ConfigError, result);
     }
 
     [Fact]
-    public async Task ExecuteAsync_WhenTableMappingHasMultipleSources_ReturnsConfigError()
+    public async Task ExecuteWorkerAsync_WhenConfigError_NeverCreatesATaskRunRow()
+    {
+        // A config-load failure happens before any WorkQueue item could exist for this task name —
+        // there's nothing real to attribute a run row to for a replication that doesn't exist.
+        var result = await _executor.ExecuteWorkerAsync("nonexistent", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(ExitCode.ConfigError, result);
+        Assert.Empty(_taskRunStore.GetRunHistory("nonexistent"));
+    }
+
+    [Fact]
+    public async Task ExecuteWorkerAsync_WhenTableMappingHasMultipleSources_FailsThatMappingsRunOnly()
     {
         SaveTask("crm-sync");
         _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
@@ -90,30 +112,18 @@ public sealed class RunExecutorTests : IDisposable
             Targets = [new TableRef { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
         }, Author);
 
-        var result = await _executor.ExecuteAsync("crm-sync", Guid.NewGuid(), CancellationToken.None);
+        var runId = await EnqueueAndDrainAsync("crm-sync", "orders");
 
-        Assert.Equal(ExitCode.ConfigError, result);
+        // The worker itself started and drained cleanly — per-item outcomes live in TaskRuns, not the
+        // overall exit code, once work is queue-driven rather than one shared run per invocation.
+        var run = _taskRunStore.GetRun(runId);
+        Assert.NotNull(run);
+        Assert.Equal(RunStatus.Failed, run!.Status);
+        Assert.Contains("1:1 mappings", run.ErrorSummary);
     }
 
     [Fact]
-    public async Task ExecuteAsync_WhenTaskAlreadyLocked_ReturnsAlreadyRunning()
-    {
-        SaveTask("crm-sync");
-        _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
-        {
-            Name = "orders",
-            Sources = [new SourceTableRef { ConnectionName = "src", Database = "App", Table = "Orders" }],
-            Targets = [new TableRef { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
-        }, Author);
-        _runLockStore.TryAcquire("crm-sync", Guid.NewGuid());
-
-        var result = await _executor.ExecuteAsync("crm-sync", Guid.NewGuid(), CancellationToken.None);
-
-        Assert.Equal(ExitCode.AlreadyRunning, result);
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_WhenSourceConnectionUnreachable_ReturnsConnectivityErrorAndReleasesLock()
+    public async Task ExecuteWorkerAsync_WhenSourceConnectionUnreachable_RecordsFailureAndReleasesLock()
     {
         SaveTask("crm-sync");
         _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
@@ -135,33 +145,28 @@ public sealed class RunExecutorTests : IDisposable
             Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
         }, Author);
 
-        var result = await _executor.ExecuteAsync("crm-sync", Guid.NewGuid(), CancellationToken.None);
+        var runId = await EnqueueAndDrainAsync("crm-sync", "orders");
 
-        Assert.Equal(ExitCode.ConnectivityError, result);
-        Assert.False(_runLockStore.IsLocked("crm-sync"));
+        var run = _taskRunStore.GetRun(runId);
+        Assert.NotNull(run);
+        Assert.Equal(RunStatus.Failed, run!.Status);
+        Assert.NotNull(run.ErrorSummary);
+        Assert.False(_runLockStore.IsLocked("crm-sync", RunKind.Primary, "orders"));
     }
 
     [Fact]
-    public async Task ExecuteAsync_WhenConfigError_NeverCreatesATaskRunRow()
-    {
-        // A config/validation failure is caught before StartRun is ever called — there's nothing
-        // real to attribute a run row to for a replication that doesn't exist.
-        var result = await _executor.ExecuteAsync("nonexistent", Guid.NewGuid(), CancellationToken.None);
-
-        Assert.Equal(ExitCode.ConfigError, result);
-        Assert.Empty(_taskRunStore.GetRunHistory("nonexistent"));
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_WhenConnectivityFails_StillRecordsAFailedTaskRunRow()
+    public async Task ExecuteWorkerAsync_MultipleMappings_EachGetsItsOwnRunIdAndLock()
     {
         SaveTask("crm-sync");
-        _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+        foreach (var name in new[] { "orders", "customers" })
         {
-            Name = "orders",
-            Sources = [new SourceTableRef { ConnectionName = "src", Database = "App", Table = "Orders" }],
-            Targets = [new TableRef { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
-        }, Author);
+            _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+            {
+                Name = name,
+                Sources = [new SourceTableRef { ConnectionName = "src", Database = "App", Table = name }],
+                Targets = [new TableRef { ConnectionName = "tgt", Database = "DW", Table = name }],
+            }, Author);
+        }
         _configRepository.SaveConnection(new ConnectionInput
         {
             Name = "src",
@@ -172,14 +177,18 @@ public sealed class RunExecutorTests : IDisposable
             AuthMode = AuthMode.IntegratedAuth,
             Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
         }, Author);
-        var runId = Guid.NewGuid();
 
-        var result = await _executor.ExecuteAsync("crm-sync", runId, CancellationToken.None);
+        var ordersRunId = _workQueueStore.Enqueue("crm-sync", RunKind.Primary, "orders");
+        var customersRunId = _workQueueStore.Enqueue("crm-sync", RunKind.Primary, "customers");
+        Assert.NotEqual(ordersRunId, customersRunId);
 
-        Assert.Equal(ExitCode.ConnectivityError, result);
-        var run = _taskRunStore.GetRun(runId);
-        Assert.NotNull(run);
-        Assert.Equal(RunStatus.Failed, run!.Status);
-        Assert.NotNull(run.ErrorSummary);
+        await _executor.ExecuteWorkerAsync("crm-sync", degreeOfParallelism: 2, CancellationToken.None);
+
+        var ordersRun = _taskRunStore.GetRun(ordersRunId);
+        var customersRun = _taskRunStore.GetRun(customersRunId);
+        Assert.Equal("orders", ordersRun!.MappingName);
+        Assert.Equal("customers", customersRun!.MappingName);
+        Assert.False(_runLockStore.IsLocked("crm-sync", RunKind.Primary, "orders"));
+        Assert.False(_runLockStore.IsLocked("crm-sync", RunKind.Primary, "customers"));
     }
 }

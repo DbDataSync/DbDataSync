@@ -36,6 +36,8 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
 
     private ConfigRepository _configRepository = null!;
     private RunExecutor _executor = null!;
+    private WorkQueueStore _workQueueStore = null!;
+    private TaskRunStore _taskRunStore = null!;
     private SqlConnection _adminConnection = null!;
 
     public async Task InitializeAsync()
@@ -68,9 +70,11 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         driverRegistry.Register(new MsSqlDriver());
 
         _configRepository = new ConfigRepository(Path.Combine(_repoRoot, "config"), new GitCommitService(_repoRoot), secretStore);
+        _taskRunStore = new TaskRunStore(stateDatabase);
+        _workQueueStore = new WorkQueueStore(stateDatabase);
         _executor = new RunExecutor(
-            _configRepository, driverRegistry, secretStore, new TaskRunStore(stateDatabase),
-            new ChangeWatermarkStore(stateDatabase), new RunLockStore(stateDatabase), new LogWriter(stateDatabase));
+            _configRepository, driverRegistry, secretStore, _taskRunStore,
+            new ChangeWatermarkStore(stateDatabase), new RunLockStore(stateDatabase), _workQueueStore, new LogWriter(stateDatabase));
 
         SetUpConfig();
     }
@@ -146,25 +150,32 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         return results;
     }
 
+    /// <summary>Enqueues a Primary pass for the "main" mapping and drains it with a single-consumer
+    /// worker, returning the final TaskRuns row for that pass.</summary>
+    private async Task<TaskRunRecord> EnqueueAndDrainAsync()
+    {
+        var runId = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
+        return _taskRunStore.GetRun(runId)!;
+    }
+
     [Fact]
     public async Task FullPipeline_FullLoadThenIncrementalRun_ReplicatesAndRecordsState()
     {
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob');");
 
-        var firstRunId = Guid.NewGuid();
-        var firstResult = await _executor.ExecuteAsync("e2e-sync", firstRunId, CancellationToken.None);
+        var firstRun = await EnqueueAndDrainAsync();
 
-        Assert.Equal(ExitCode.Success, firstResult);
+        Assert.Equal(RunStatus.Succeeded, firstRun.Status);
         Assert.Equal(new Dictionary<int, string> { [1] = "Alice", [2] = "Bob" }, await GetTargetRowsAsync());
 
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (3, 'Carol');");
         await ExecuteAsync(_adminConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'Robert' WHERE Id = 2;");
         await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 1;");
 
-        var secondRunId = Guid.NewGuid();
-        var secondResult = await _executor.ExecuteAsync("e2e-sync", secondRunId, CancellationToken.None);
+        var secondRun = await EnqueueAndDrainAsync();
 
-        Assert.Equal(ExitCode.Success, secondResult);
+        Assert.Equal(RunStatus.Succeeded, secondRun.Status);
         Assert.Equal(new Dictionary<int, string> { [2] = "Robert", [3] = "Carol" }, await GetTargetRowsAsync());
     }
 }

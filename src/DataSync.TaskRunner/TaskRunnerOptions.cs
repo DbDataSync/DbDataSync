@@ -1,6 +1,8 @@
 namespace DataSync.TaskRunner;
 
-public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, string Replication, Guid RunId)
+// No single --run-id anymore: work is claimed from the durable WorkQueue (one RunId minted per claimed
+// item, not supplied externally) — see architecture/implementation/phase-9-work-queue-schema.md.
+public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, string Replication, int DegreeOfParallelism = 4)
 {
     /// <summary>config/ lives at a fixed location under the git repo root — the same convention
     /// DataSync.Core.Config.ConfigPaths uses.</summary>
@@ -11,7 +13,7 @@ public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, stri
         string? repoRoot = null;
         string? stateDbPath = null;
         string? replication = null;
-        Guid? runId = null;
+        int? degreeOfParallelism = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -26,14 +28,14 @@ public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, stri
                 case "--replication" when i + 1 < args.Length:
                     replication = args[++i];
                     break;
-                case "--run-id" when i + 1 < args.Length:
-                    if (!Guid.TryParse(args[++i], out var parsedRunId))
+                case "--degree-of-parallelism" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], out var parsedDop) || parsedDop < 1)
                     {
                         options = null;
-                        error = $"'--run-id' value '{args[i]}' is not a valid GUID.";
+                        error = $"'--degree-of-parallelism' value '{args[i]}' must be a positive integer.";
                         return false;
                     }
-                    runId = parsedRunId;
+                    degreeOfParallelism = parsedDop;
                     break;
                 default:
                     options = null;
@@ -53,7 +55,7 @@ public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, stri
             return false;
         }
 
-        options = new TaskRunnerOptions(repoRoot!, stateDbPath!, replication!, runId ?? Guid.NewGuid());
+        options = new TaskRunnerOptions(repoRoot!, stateDbPath!, replication!, degreeOfParallelism ?? 4);
         error = null;
         return true;
     }

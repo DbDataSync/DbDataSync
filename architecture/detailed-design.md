@@ -223,25 +223,49 @@ A single SQLite database file, shared by `DataSync.Api` and every `DataSync.Task
 | Table | Purpose |
 |---|---|
 | `Tasks` | One row per configured replication task (mirrors config, for fast joins/reporting — config file remains source of truth). |
-| `TaskRuns` | One row per run: run id, task id, PID, start/end time, status (`Pending`/`Running`/`Succeeded`/`Failed`/`Cancelled`), rows read/written, error summary. |
-| `ChangeWatermarks` | Per task + source table: last-processed watermark (change-tracking version/LSN, or a plain column value for the fallback reader), updated at end of a successful reader stage. |
+| `TaskRuns` | One row per **unit of work** — a table mapping's own Primary (incremental) pass, or one segment of a Backfill (reload) — not one row per replication invocation. Run id, task/mapping name, run kind (`Primary`/`Backfill`), segment label, PID, start/end time, status (`Queued`/`Pending`/`Running`/`Succeeded`/`Failed`/`Cancelled`), rows read/written, error summary. |
+| `ChangeWatermarks` | Per task + source table: last-processed watermark (change-tracking version/LSN, or a plain column value for the fallback reader), updated at end of a successful **Primary** reader stage only — a Backfill unit of work never touches this table. |
 | `Logs` | Structured log lines: run id, timestamp, level, message. |
-| `RunLocks` | One row per task while a run is in flight, used to prevent overlapping scheduled/manual runs of the same task. |
+| `RunLocks` | One row per `(task, run kind, table mapping)` while that mapping's unit of work is in flight — a Primary pass and a Backfill both scoped to the same mapping serialize against each other; different mappings of the same replication (even under the same run kind) don't. |
+| `WorkQueue` | Durable, SQLite-backed cross-process work queue: the API enqueues Primary passes (scheduled or manually triggered) and Backfill segments here; a spawned TaskRunner worker process claims and drains them. See "Per-mapping run model" below. |
+
+**Per-mapping run model** (architecture/implementation/phase-9-work-queue-schema.md) — a "run" is
+scoped to one table mapping's one unit of work, not a whole replication. This matters at scale: a
+replication can have hundreds of table mappings, and treating "trigger a replication" as one shared
+run/lock would mean one slow or already-in-flight mapping blocks every other mapping's schedule. A
+`RunKind` (`Primary` | `Backfill`) distinguishes a mapping's ongoing incremental sync from an on-demand
+reload — only `Primary` ever advances `ChangeWatermarks`, which is what guarantees a Backfill can never
+disturb the incremental cursor a `Primary` pass depends on, regardless of which reader/writer it uses
+internally.
+
+At most one TaskRunner worker process runs per *replication* (not per mapping, not per trigger) —
+spawned on demand (`ProcessSupervisor.EnsureWorkerRunning`, idempotent), it claims items from
+`WorkQueue` via a two-step select-then-conditional-update (mirroring `RunLocks`' own
+`ON CONFLICT DO NOTHING` idiom) into a bounded internal producer/consumer pipeline
+(`System.Threading.Channels`), not a fixed-collection fan-out — the queue's contents can keep growing
+while it drains (new due mappings, newly-queued backfills), which a `Parallel.ForEach` over a
+pre-enumerated list doesn't accommodate. A `NOT EXISTS` pre-filter in the claim query keeps two
+consumers from ever claiming two in-flight items for the same mapping, so different mappings run fully
+concurrently while one mapping's own units of work serialize.
 
 **Concurrency strategy** — this is the load-bearing part of choosing a *central* database over
 per-task files:
 
-- **WAL mode** enabled on the database, so readers (API dashboard queries) don't block writers (Task
-  Runner log/status writes).
+- **Not WAL mode** — WAL's cross-process shared-memory coordination proved unreliable in this
+  project's sandboxed dev environment (see `architecture/implementation/phase-6-spa.md`); the default
+  rollback-journal mode is used instead, backed by the next two mitigations.
 - **`busy_timeout`** set on every connection, plus **retry-on-`SQLITE_BUSY`** wrapping every write, so
   transient writer contention is absorbed instead of surfacing as errors.
-- **Short transactions** — log lines are batched (buffered in-process, flushed periodically or on a
-  size threshold) rather than one commit per line, and watermark/status updates are single-row
+- **Short transactions** — log lines are batched (buffered in-process, flushed periodically, on a size
+  threshold, *and* immediately before any run's terminal status is written — see the phase-9 doc's log-
+  flush-ordering fix) rather than one commit per line, and watermark/status updates are single-row
   upserts, minimizing the time any writer holds the write lock.
 - All of the above lives in **one shared library** (`DataSync.State`) used identically by the API
   process and every Task Runner process, so the concurrency pattern can't silently drift between
-  callers. If contention proves problematic in practice under real task-count/frequency, this is the
-  seam where a future migration to a different embedded/local engine would happen — see §8.
+  callers. A dedicated concurrency stress test (`architecture/implementation/phase-7-e2e-validation.md`)
+  found no contention failures at 8 concurrently-processed mappings — a realistic v1 scale. If
+  contention proves problematic at larger scale in practice, the per-task-SQLite-files fallback behind
+  this same `DataSync.State` interface remains available.
 
 ## 4. End-to-End Data Flow
 

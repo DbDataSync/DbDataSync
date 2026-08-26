@@ -175,7 +175,9 @@ public sealed class RunLifecycleIntegrationTests : IClassFixture<TestApiFactory>
         var triggerResponse = await _client.PostAsync($"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json"));
         triggerResponse.EnsureSuccessStatusCode();
         var triggerBody = await triggerResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var runId = triggerBody.GetProperty("runId").GetString();
+        // A trigger now enqueues one Primary pass per table mapping and returns all of their RunIds —
+        // this replication has exactly one mapping, so its single element is the run to watch.
+        var runId = triggerBody.GetProperty("runIds").EnumerateArray().Single().GetString();
 
         await hubConnection.InvokeAsync("JoinRun", runId);
 
