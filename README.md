@@ -164,5 +164,7 @@ Screenshots of each screen land in `tests/DataSync.Web.Tests/screenshots/`.
 - `src/DataSync.TaskRunner` — the console process actually spawned per replication run.
 - `tools/DataSync.DevHarness` — the dev harness above (environment setup, workload generation,
   drift injection, source/target verification). Not part of the shipped product.
+- `tools/DataSync.Benchmarks` — `scripts/benchmarks`, which measures how much the in-memory shape of a
+  change batch costs, through a real `SqlBulkCopy` and through a typed sink. Also not shipped.
 - `architecture/` — design docs; `architecture/implementation/` has a written summary of each build
   phase, including real bugs found and how they were fixed.

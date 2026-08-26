@@ -128,7 +128,9 @@ that the typed win was "unredeemable" generalised `SqlBulkCopy`'s object-per-cel
 whole architecture. `IStagingProvider` is engine-neutral; a Postgres binary COPY or a Parquet writer
 has no such constraint. **That claim was wrong and is withdrawn.**
 
-Re-measured properly: 200,000 rows × 50 columns (10M cells) into a real 50-column SQL Server table,
+Re-measured properly with `scripts/benchmarks` (`tools/DataSync.Benchmarks`, committed so these
+numbers can be re-checked rather than taken on trust): 200,000 rows × 50 columns (10M cells) into a
+real 50-column SQL Server table,
 each variant in **its own process** so peak working set belongs to it alone, with GC counts, GC pause
 time and a 2 ms-sampled peak managed heap. `columnar` is hand-rolled batches over `ArrayPool`-rented
 typed arrays, boxing only at `GetValue`, one cell at a time.

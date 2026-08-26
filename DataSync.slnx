@@ -8,6 +8,7 @@
     <Project Path="src/DataSync.TaskRunner/DataSync.TaskRunner.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/DataSync.Benchmarks/DataSync.Benchmarks.csproj" />
     <Project Path="tools/DataSync.DevHarness/DataSync.DevHarness.csproj" />
   </Folder>
   <Folder Name="/tests/">

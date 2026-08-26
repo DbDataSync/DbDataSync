@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+# Launcher for tools/DataSync.Benchmarks. See `scripts/benchmarks --help`.
+#
+# Built in Release: measurements taken from a Debug build would be meaningless. Otherwise the same
+# shape as scripts/dev-harness — build every time and `exec` the assembly, so the harness is one
+# process rather than a `dotnet run` wrapper plus a child.
+set -e
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(dirname "$script_dir")
+project="$repo_root/tools/DataSync.Benchmarks/DataSync.Benchmarks.csproj"
+
+dotnet build "$project" -c Release -v quiet --nologo >&2
+
+exec dotnet exec "$repo_root/tools/DataSync.Benchmarks/bin/Release/net10.0/DataSync.Benchmarks.dll" "$@"
