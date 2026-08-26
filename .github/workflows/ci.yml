@@ -19,10 +19,52 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Test
-        # Excludes DataSync.Drivers.MsSql.Tests' Category=Integration tests, which need a real SQL
-        # Server instance (see architecture/implementation/phase-3-mssql-driver.md). Standing one up
-        # in CI is a Phase 7 (end-to-end validation) concern.
+        # Category=Integration tests need real SQL Server instances — see the dotnet-integration job
+        # below, which stands two up as service containers (architecture/implementation/phase-7-e2e-validation.md).
         run: dotnet test --no-build --configuration Release --filter "Category!=Integration"
+
+  dotnet-integration:
+    runs-on: ubuntu-latest
+    services:
+      mssql-source:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: DataSync_Test_Pw1
+        ports:
+          - 14330:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mssql-target:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: DataSync_Test_Pw1
+        ports:
+          - 14331:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore
+        run: dotnet restore
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+      - name: Test (Integration)
+        # Same two-container topology as docker-compose.yml (source: 14330, target: 14331) so the
+        # tests' localhost-based defaults work unchanged in CI.
+        run: dotnet test --no-build --configuration Release --filter "Category=Integration"
 
   web:
     runs-on: ubuntu-latest

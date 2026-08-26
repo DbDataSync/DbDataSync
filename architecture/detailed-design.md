@@ -304,10 +304,23 @@ the implementation phases that depend on them (see `implementation-plan.md`):
 
 - **Auth/authz** — no login/permission model is specified yet; v1 may need to assume a
   trusted-network single-user deployment unless this is scoped in.
-- **Multi-user concurrent config editing** — auto-commit-on-save works cleanly for one editor at a
-  time; concurrent edits to the same file from two browser sessions need at least a last-write-wins
-  policy decision (or optimistic concurrency check) before it's a real problem.
-- **Central SQLite contention in practice** — the mitigations in §3.6 are standard best practice, but
-  should be validated under realistic concurrent task-run counts during Phase 7 (end-to-end
-  validation); if contention proves material, the fallback is per-task SQLite files behind the same
-  `DataSync.State` interface, not a rewrite.
+- **Multi-user concurrent config editing** — **investigated in Phase 7**
+  (`architecture/implementation/phase-7-e2e-validation.md`) with a stress test that triggers 8
+  independent replications' config writes concurrently. This surfaced a real bug, not just a policy
+  gap: `GitCommitService.CommitChanges` reliably threw `LibGit2Sharp.LockedFileException` ("the index
+  is locked") under genuine concurrent writes from the same process — libgit2's index-write lock is
+  held too briefly to survive two truly simultaneous `Stage`+`Commit` calls. Fixed with an in-process
+  lock around the write path (`GitCommitService` is a DI singleton and the API process is the only
+  writer of the config repo, so this fully closes the bug without any cross-process coordination).
+  What's still open is the *policy* question this item originally asked: two editors racing to save
+  the *same* file now serialize safely (no crash, no interleaved/corrupt commit) but still get
+  last-write-wins with no conflict warning — that UX decision remains unmade.
+- **Central SQLite contention in practice** — **investigated in Phase 7** with a stress test
+  triggering 8 concurrent replications (each a real spawned `DataSync.TaskRunner` child process
+  writing `TaskRuns`/`Logs`/`RunLocks`/`ChangeWatermarks` rows to the same central SQLite file at
+  once), run repeatedly with no failures. The existing mitigations (`busy_timeout`, `SqliteRetry`,
+  and the self-healing schema re-check added in Phase 6 — see
+  `architecture/implementation/phase-6-spa.md`) held up fine at this scale; no `SQLITE_BUSY` or
+  contention-related failures were observed. Not exhaustively load-tested at much higher concurrency
+  (dozens+ of simultaneous runs), so the per-task-SQLite-files fallback in §3.7 remains available if
+  a real deployment ever needs it, but 8 concurrent runs — a realistic v1 scale — shows no problem.

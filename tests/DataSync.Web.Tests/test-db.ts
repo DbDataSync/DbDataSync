@@ -8,7 +8,7 @@ export const TGT_CONNECTION_NAME = 'playwright-tgt'
 export const SA_PASSWORD = 'DataSync_Test_Pw1'
 
 export function runSql(sql: string, database?: string): void {
-  const args = ['exec', 'datasync-mssql', '/opt/mssql-tools/bin/sqlcmd', '-S', 'localhost', '-U', 'sa', '-P', SA_PASSWORD]
+  const args = ['exec', 'datasync-mssql-source', '/opt/mssql-tools/bin/sqlcmd', '-S', 'localhost', '-U', 'sa', '-P', SA_PASSWORD]
   if (database) args.push('-d', database)
   args.push('-Q', sql)
   execFileSync('docker', args, { stdio: 'inherit' })
@@ -20,7 +20,7 @@ export function runSql(sql: string, database?: string): void {
  * separator lines mixed in with them.
  */
 export function querySql(sql: string, database?: string): string {
-  const args = ['exec', 'datasync-mssql', '/opt/mssql-tools/bin/sqlcmd', '-S', 'localhost', '-U', 'sa', '-P', SA_PASSWORD, '-h', '-1']
+  const args = ['exec', 'datasync-mssql-source', '/opt/mssql-tools/bin/sqlcmd', '-S', 'localhost', '-U', 'sa', '-P', SA_PASSWORD, '-h', '-1']
   if (database) args.push('-d', database)
   args.push('-Q', sql)
   return execFileSync('docker', args, { encoding: 'utf-8' })

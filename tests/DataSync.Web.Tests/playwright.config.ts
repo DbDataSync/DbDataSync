@@ -11,7 +11,7 @@ const repoRoot = path.resolve(__dirname, '../..')
 // IsRepositoryAt XML doc) uses that discovery-based check.
 const scratchRepoRoot = path.join(os.tmpdir(), 'datasync-web-e2e-scratch-repo')
 
-// The password used for the real SQL Server test database (started as `datasync-mssql` in Docker —
+// The password used for the real SQL Server test database (started via docker-compose.yml's mssql-source service —
 // see architecture/implementation/phase-3-mssql-driver.md). This sandbox has no OS keychain, so the
 // API's SecretStore falls back to environment variables — presetting these lets the *spawned
 // TaskRunner child process* resolve the connection credentials it needs to actually run a

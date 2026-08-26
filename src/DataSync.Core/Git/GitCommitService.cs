@@ -11,6 +11,15 @@ public sealed class GitCommitService
 {
     private readonly string _repositoryRoot;
 
+    // libgit2's index write takes its own on-disk lock (.git/index.lock) only for the instant it
+    // holds the write — too short a window to survive two genuinely concurrent Stage+Commit calls
+    // from this same process without collisions (LockedFileException: "the index is locked").
+    // GitCommitService is registered as a DI singleton (one instance for the whole API process), and
+    // the only writer of this repo is this process (DataSync.TaskRunner only reads config) — so an
+    // in-process lock around the write path is sufficient; no cross-process coordination is needed.
+    // Found via architecture/implementation/phase-7-e2e-validation.md's concurrent-run stress test.
+    private readonly object _writeLock = new();
+
     public GitCommitService(string repositoryRoot)
     {
         Directory.CreateDirectory(repositoryRoot);
@@ -48,23 +57,26 @@ public sealed class GitCommitService
 
     public void CommitChanges(IReadOnlyCollection<string> absoluteFilePaths, string message, GitAuthor author)
     {
-        EnsureInitialized();
-        using var repo = new Repository(_repositoryRoot);
+        lock (_writeLock)
+        {
+            EnsureInitialized();
+            using var repo = new Repository(_repositoryRoot);
 
-        foreach (var path in absoluteFilePaths)
-        {
-            var relative = Path.GetRelativePath(_repositoryRoot, path).Replace('\\', '/');
-            Commands.Stage(repo, relative);
-        }
+            foreach (var path in absoluteFilePaths)
+            {
+                var relative = Path.GetRelativePath(_repositoryRoot, path).Replace('\\', '/');
+                Commands.Stage(repo, relative);
+            }
 
-        var signature = new Signature(author.Name, author.Email, DateTimeOffset.Now);
-        try
-        {
-            repo.Commit(message, signature, signature, new CommitOptions { AllowEmptyCommit = false });
-        }
-        catch (EmptyCommitException)
-        {
-            // Content is identical to what's already committed (e.g. a no-op re-save) — nothing to record.
+            var signature = new Signature(author.Name, author.Email, DateTimeOffset.Now);
+            try
+            {
+                repo.Commit(message, signature, signature, new CommitOptions { AllowEmptyCommit = false });
+            }
+            catch (EmptyCommitException)
+            {
+                // Content is identical to what's already committed (e.g. a no-op re-save) — nothing to record.
+            }
         }
     }
 

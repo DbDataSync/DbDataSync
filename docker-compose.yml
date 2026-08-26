@@ -1,0 +1,40 @@
+services:
+  mssql-source:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: datasync-mssql-source
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${DATASYNC_MSSQL_SA_PASSWORD:-DataSync_Test_Pw1}
+    ports:
+      - "14330:1433"
+    volumes:
+      - mssql-source-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  mssql-target:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: datasync-mssql-target
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${DATASYNC_MSSQL_SA_PASSWORD:-DataSync_Test_Pw1}
+    ports:
+      - "14331:1433"
+    volumes:
+      - mssql-target-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mssql-source-data:
+  mssql-target-data:
