@@ -9,10 +9,19 @@ namespace DataSync.Drivers.MsSql;
 /// primary writer path). Requires the target's primary key column(s) to be included in
 /// <see cref="ColumnMapping"/> — used both as the MERGE join key and to distinguish which mapped
 /// columns are safe to include in the UPDATE SET list.
+/// <para>
+/// Upsert-only: it inserts, updates and applies the change set's explicit deletes, but a target row
+/// the change set simply doesn't mention is left alone. That's exactly right for an incremental feed
+/// (where "not mentioned" means "unchanged"), and exactly wrong for a reload (where it means "gone
+/// from the source") — hence <see cref="SupportsReconciliation"/> being false, and
+/// <see cref="MsSqlMergeReconcileWriter"/> existing.
+/// </para>
 /// </summary>
 public sealed class MsSqlMergeWriter : IChangeWriter
 {
     public string Kind => MsSqlDriverKinds.Merge;
+
+    public bool SupportsReconciliation => false;
 
     public async Task<WriteResult> ApplyAsync(
         DbConnection targetConnection,
@@ -24,37 +33,25 @@ public sealed class MsSqlMergeWriter : IChangeWriter
     {
         targetConnection.ChangeDatabase(target.Database);
 
-        var pkColumns = await MsSqlSchemaQueries.GetPrimaryKeyColumnsAsync(targetConnection, target.Schema, target.Table, cancellationToken);
-        if (pkColumns.Count == 0)
-            throw new InvalidOperationException($"Target table '{target.Schema}.{target.Table}' has no primary key; MERGE requires one.");
-
-        var mappedTargetColumns = columnMappings.Select(m => m.TargetColumn).Distinct().ToList();
-        var missingPk = pkColumns.Where(pk => !mappedTargetColumns.Contains(pk, StringComparer.OrdinalIgnoreCase)).ToList();
-        if (missingPk.Count > 0)
-            throw new InvalidOperationException(
-                $"Column mappings must include the target primary key column(s): {string.Join(", ", missingPk)}.");
-
-        var quotedTarget = $"{SqlIdentifier.Quote(target.Schema)}.{SqlIdentifier.Quote(target.Table)}";
-        var onClause = string.Join(" AND ", pkColumns.Select(pk => $"tgt.{SqlIdentifier.Quote(pk)} = src.{SqlIdentifier.Quote(pk)}"));
-        var nonPkColumns = mappedTargetColumns.Where(c => !pkColumns.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList();
-        var insertColumns = string.Join(", ", mappedTargetColumns.Select(SqlIdentifier.Quote));
-        var insertValues = string.Join(", ", mappedTargetColumns.Select(c => $"src.{SqlIdentifier.Quote(c)}"));
-
-        var updateClause = nonPkColumns.Count > 0
-            ? $"WHEN MATCHED AND src.__Operation <> 'D' THEN UPDATE SET {string.Join(", ", nonPkColumns.Select(c => $"tgt.{SqlIdentifier.Quote(c)} = src.{SqlIdentifier.Quote(c)}"))}"
-            : ""; // every mapped column is part of the PK — nothing to update, only insert/delete apply
+        var shape = await MsSqlTargetShape.LoadAsync(targetConnection, target, columnMappings, cancellationToken);
+        var onClause = shape.BuildMergeOnClause();
 
         using var cmd = targetConnection.CreateCommand();
         cmd.CommandText = $"""
-            MERGE INTO {quotedTarget} AS tgt
+            MERGE INTO {shape.QuotedTarget} AS tgt
             USING {staged.StagingLocation} AS src
             ON {onClause}
-            WHEN MATCHED AND src.__Operation = 'D' THEN DELETE
-            {updateClause}
-            WHEN NOT MATCHED BY TARGET AND src.__Operation <> 'D' THEN INSERT ({insertColumns}) VALUES ({insertValues});
+            WHEN MATCHED AND src.{MsSqlTargetShape.OperationColumn} = 'D' THEN DELETE
+            {shape.BuildUpdateClause()}
+            WHEN NOT MATCHED BY TARGET AND src.{MsSqlTargetShape.OperationColumn} <> 'D'
+                THEN INSERT ({shape.InsertColumnList}) VALUES ({shape.SourceValueList});
             """;
 
-        var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        var rowsAffected = await MsSqlIdentityInsert.RunAsync(
+            targetConnection, transaction: null, shape,
+            () => cmd.ExecuteNonQueryAsync(cancellationToken),
+            cancellationToken);
+
         return new WriteResult(rowsAffected);
     }
 }

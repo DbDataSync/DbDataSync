@@ -2,7 +2,9 @@
 
 **Status**: Planned, not started
 **Plan reference**: `architecture/implementation-plan.md` § Backlog ("Batch reload"); design history
-in `architecture/implementation/done/phase-008-work-queue-schema.md`'s "Design history." Corresponds to
+in `architecture/implementation/done/phase-008-work-queue-schema.md`'s "Design history"; the driver
+pieces this phase wires up are described in
+`architecture/implementation/done/phase-009-batch-reload-writers-segments.md`. Corresponds to
 what the design review's Build Order called **"Phase D — Standalone reload replications, SPA,
 polish,"** with one scope clarification made explicit here: the original Build Order described the
 Backfill HTTP trigger endpoint's *behavior* (in the "what changes" section) but never assigned it to a
@@ -102,12 +104,32 @@ the design review's "smallest reasonable v1 UI" guidance.
   Playwright golden path suite still green (extend it, or add a sibling spec, covering the Backfill
   trigger flow through the real browser).
 
+## Updates from Phase 9 (written after that phase landed, before this one starts)
+
+- The capabilities endpoint exists and its shape is settled:
+  `GET /api/connections/{name}/capabilities` returns
+  `{ driverType, readers: [{ kind, supportsSegmentation }], stagingProviders: [{ kind }],
+  writers: [{ kind, supportsReconciliation }] }`. The SPA's pickers can render options and
+  annotate/disable them from that one request, so no further API work is needed for them here.
+- `SegmentSerializer` (`DataSync.Drivers.Abstractions`) is the only place segments get serialized, and
+  owns the well-known option keys — `SegmentSerializer.SegmentOptionKey` (`"segment"`, the per-work-item
+  channel this phase must inject) and `SegmentSerializer.SegmentsOptionKey` (`"segments"`, the
+  standalone reload replication's persisted array). Use those constants and
+  `Serialize`/`DeserializeMany` rather than hand-rolling the JSON at either end; the base-typed
+  signatures are what keep the polymorphic discriminator being written.
+- `BatchReloadSegment.Describe()` produces the human-readable label to pass as `WorkQueueStore.Enqueue`'s
+  `segmentLabel`, so this phase doesn't need to invent a labelling scheme.
+- Segment column names are translated source→target through the mapping's `ColumnMapping`s inside the
+  writers themselves. The trigger endpoint and SPA deal only in *source* column names — no translation
+  belongs in either.
+
 ## Open questions to resolve during implementation
 
 - Exact `BackfillRequest` JSON shape for the `segments` array — one segment per request per the SPA
   scope above, but the DTO itself should probably accept an array from day one (matching
   `ReaderConfig.Options["segments"]`'s array shape) so the API doesn't need a breaking change once
-  multi-segment submission is built later.
+  multi-segment submission is built later. Whatever it is, it should deserialize through
+  `SegmentSerializer.Options` so the `"mode"` discriminator matches everywhere else.
 - Whether `EnsureWorkerRunning`'s existing exit-race grace period (Phase 8, 5 empty polls) is
   sufficient once Backfill triggers add a second, independent source of "new work might arrive any
   moment" beyond `SchedulerService`'s own ticks — worth a dedicated concurrency test rather than

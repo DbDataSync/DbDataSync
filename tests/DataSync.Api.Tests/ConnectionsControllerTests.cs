@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DataSync.Core.Config;
+using DataSync.Drivers.Abstractions;
 using LibGit2Sharp;
 using Xunit;
 
@@ -36,6 +37,45 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
         UserId = "svc_app",
         Password = "sup3r-s3cr3t",
     };
+
+    /// <summary>
+    /// The endpoint a UI builds its reader/cache/writer pickers from. What matters is that every entry
+    /// comes from the registered driver's own declarations — so this asserts the capability flags
+    /// track the writers' SupportsReconciliation and the readers' ISegmentExpandingReader
+    /// implementation, not that a particular hardcoded list came back.
+    /// </summary>
+    [Fact]
+    public async Task Capabilities_ReportsWhatTheRegisteredDriverActuallySupports()
+    {
+        var name = $"conn-{Guid.NewGuid():N}";
+        (await _client.PutAsJsonAsync($"/api/connections/{name}", MakeInput(name), JsonOptions)).EnsureSuccessStatusCode();
+
+        var response = await _client.GetAsync($"/api/connections/{name}/capabilities");
+        response.EnsureSuccessStatusCode();
+        var capabilities = await response.Content.ReadFromJsonAsync<DriverCapabilities>(JsonOptions);
+
+        Assert.NotNull(capabilities);
+        Assert.Equal(ConnectionDriverType.MsSql, capabilities!.DriverType);
+
+        // Only the batch-reload reader can expand an Auto segment into concrete ranges.
+        Assert.Equal("MsSqlBatchReload", Assert.Single(capabilities.Readers, r => r.SupportsSegmentation).Kind);
+
+        // The two reload writers reconcile; the incremental MERGE writer is upsert-only.
+        Assert.Equal(
+            ["MsSqlDeleteInsert", "MsSqlMergeReconcile"],
+            capabilities.Writers.Where(w => w.SupportsReconciliation).Select(w => w.Kind).Order());
+        Assert.False(capabilities.Writers.Single(w => w.Kind == "MsSqlMerge").SupportsReconciliation);
+
+        Assert.NotEmpty(capabilities.StagingProviders);
+    }
+
+    [Fact]
+    public async Task Capabilities_ForAnUnknownConnection_Is404()
+    {
+        var response = await _client.GetAsync($"/api/connections/does-not-exist-{Guid.NewGuid():N}/capabilities");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
 
     [Fact]
     public async Task Upsert_ThenGet_RoundTrips()

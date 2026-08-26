@@ -10,13 +10,13 @@ public sealed class MsSqlDriver : IDriver
     public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
 
     public IReadOnlyList<IChangeReader> Readers { get; } =
-        [new MsSqlChangeTrackingReader(), new MsSqlWatermarkReader()];
+        [new MsSqlChangeTrackingReader(), new MsSqlWatermarkReader(), new MsSqlBatchReloadReader()];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =
         [new MsSqlStagingTableProvider()];
 
     public IReadOnlyList<IChangeWriter> Writers { get; } =
-        [new MsSqlMergeWriter()];
+        [new MsSqlMergeWriter(), new MsSqlMergeReconcileWriter(), new MsSqlDeleteInsertWriter()];
 
     public DbConnection CreateConnection(ConnectionConfig connection, string? credential)
     {

@@ -17,7 +17,7 @@ internal static class MsSqlSchemaQueries
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             SELECT c.name, ty.name AS TypeName, c.max_length, c.precision, c.scale, c.is_nullable,
-                   CASE WHEN pk.column_id IS NOT NULL THEN 1 ELSE 0 END AS IsPrimaryKey
+                   CASE WHEN pk.column_id IS NOT NULL THEN 1 ELSE 0 END AS IsPrimaryKey, c.is_identity
             FROM sys.tables t
             JOIN sys.schemas s ON t.schema_id = s.schema_id
             JOIN sys.columns c ON c.object_id = t.object_id
@@ -44,12 +44,14 @@ internal static class MsSqlSchemaQueries
             var scale = reader.GetByte(4);
             var isNullable = reader.GetBoolean(5);
             var isPrimaryKey = reader.GetInt32(6) == 1;
+            var isIdentity = reader.GetBoolean(7);
 
             results.Add(new ColumnMetadata(
                 reader.GetString(0),
                 FormatSqlType(typeName, maxLength, precision, scale),
                 isNullable,
-                isPrimaryKey));
+                isPrimaryKey,
+                isIdentity));
         }
 
         if (results.Count == 0)
@@ -63,6 +65,14 @@ internal static class MsSqlSchemaQueries
     {
         var columns = await GetColumnsAsync(connection, schema, table, cancellationToken);
         return columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
+    }
+
+    /// <summary>The bare type name from a spec produced by <see cref="FormatSqlType"/> — "decimal" from
+    /// "decimal(18,2)", "int" from "int" — lowercased for switch matching.</summary>
+    public static string BaseTypeName(string nativeType)
+    {
+        var paren = nativeType.IndexOf('(');
+        return (paren < 0 ? nativeType : nativeType[..paren]).Trim().ToLowerInvariant();
     }
 
     /// <summary>Reconstructs a DDL-ready type spec (e.g. "nvarchar(50)", "decimal(18,2)") from the raw

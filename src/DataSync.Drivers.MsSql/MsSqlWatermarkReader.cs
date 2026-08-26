@@ -13,9 +13,9 @@ namespace DataSync.Drivers.MsSql;
 /// tagged <see cref="ChangeOperation.Insert"/>; downstream writers that upsert treat Insert/Update
 /// alike, so this only matters if a writer ever needs to distinguish them (none currently do).
 /// <para>
-/// Not to be confused with a future "batch reload" — a full or list/range-segmented backfill of a
-/// table, a distinct not-yet-built concept (see architecture/implementation-plan.md's backlog). This
-/// reader is the ongoing incremental-sync fallback for tables without change-tracking metadata.
+/// Not to be confused with <see cref="MsSqlBatchReloadReader"/>, which re-reads a whole table (or one
+/// segment of it) from scratch. This reader is the ongoing incremental-sync fallback for tables
+/// without change-tracking metadata; that one is the reload path.
 /// </para>
 /// </summary>
 public sealed class MsSqlWatermarkReader : IChangeReader

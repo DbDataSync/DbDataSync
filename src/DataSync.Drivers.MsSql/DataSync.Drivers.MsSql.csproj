@@ -9,6 +9,13 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Segment predicate rendering and bucket-boundary maths are internal (they're an implementation
+         detail of this driver's readers/writers, not part of the engine-neutral abstraction), but are
+         exactly the pure, table-free logic worth unit-testing without a live SQL Server. -->
+    <InternalsVisibleTo Include="DataSync.Drivers.MsSql.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

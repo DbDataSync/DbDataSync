@@ -1,12 +1,16 @@
 using DataSync.Core.Config;
 using DataSync.Core.Git;
+using DataSync.Drivers.Abstractions;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
 
 [ApiController]
 [Route("api/connections")]
-public sealed class ConnectionsController(ConfigRepository configRepository, GitAuthor author) : ControllerBase
+public sealed class ConnectionsController(
+    ConfigRepository configRepository,
+    DriverRegistry driverRegistry,
+    GitAuthor author) : ControllerBase
 {
     [HttpGet]
     public ActionResult<IReadOnlyList<ConnectionConfig>> List() =>
@@ -23,6 +27,31 @@ public sealed class ConnectionsController(ConfigRepository configRepository, Git
         {
             return NotFound();
         }
+    }
+
+    /// <summary>
+    /// The reader/cache/writer Kinds this connection's engine actually supports, and which of them
+    /// support segmentation or reconciliation. Everything here comes from the registered driver's own
+    /// declarative properties, so a UI can build its Kind pickers against whatever drivers are
+    /// registered rather than against a hardcoded list that goes stale the moment a second one exists.
+    /// </summary>
+    [HttpGet("{name}/capabilities")]
+    public ActionResult<DriverCapabilities> Capabilities(string name)
+    {
+        ConnectionConfig connection;
+        try
+        {
+            connection = configRepository.LoadConnection(name);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+
+        var capabilities = driverRegistry.Describe(connection.DriverType);
+        return capabilities is null
+            ? NotFound(new { error = $"No driver is registered for '{connection.DriverType}'." })
+            : Ok(capabilities);
     }
 
     [HttpPut("{name}")]

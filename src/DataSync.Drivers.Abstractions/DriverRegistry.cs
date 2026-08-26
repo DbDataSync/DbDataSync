@@ -28,4 +28,28 @@ public sealed class DriverRegistry
 
     public bool SupportsWriter(ConnectionDriverType driverType, string kind) =>
         TryGet(driverType, out var driver) && driver!.Writers.Any(w => w.Kind == kind);
+
+    /// <summary>Whether the named reader can expand an <see cref="AutoSegment"/> into concrete ranges
+    /// — an interface check, so a reader gains the capability by implementing it, not by being added
+    /// to a list here.</summary>
+    public bool SupportsSegmentation(ConnectionDriverType driverType, string readerKind) =>
+        TryGet(driverType, out var driver)
+        && driver!.Readers.FirstOrDefault(r => r.Kind == readerKind) is ISegmentExpandingReader;
+
+    /// <summary>Whether the named writer removes target rows absent from the change set within the
+    /// scope it was given (see <see cref="IChangeWriter.SupportsReconciliation"/>).</summary>
+    public bool SupportsReconciliation(ConnectionDriverType driverType, string writerKind) =>
+        TryGet(driverType, out var driver)
+        && driver!.Writers.FirstOrDefault(w => w.Kind == writerKind) is { SupportsReconciliation: true };
+
+    /// <summary>Everything a caller needs to offer valid reader/cache/writer choices for this engine,
+    /// or null when no driver is registered for it.</summary>
+    public DriverCapabilities? Describe(ConnectionDriverType driverType) =>
+        TryGet(driverType, out var driver)
+            ? new DriverCapabilities(
+                driverType,
+                driver!.Readers.Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader)).ToList(),
+                driver.StagingProviders.Select(p => new StagingCapability(p.Kind)).ToList(),
+                driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation)).ToList())
+            : null;
 }

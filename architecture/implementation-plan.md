@@ -163,8 +163,10 @@ implementation doc for this section. Recorded so scope stays deliberate:
   per-mapping `RunKind`/lock model and the durable work-queue-driven worker, needed so hundreds of
   queued mappings/backfills don't require one process per trigger — is built (Phase 8, the next
   numbered phase after this backlog list — this section was never itself a phase). The
-  feature-specific pieces (segment types, the two new writers, the Backfill trigger endpoint, SPA) are
-  not yet built.
+  Its driver-level pieces — the segment type hierarchy, the segment-scoped batch-reload reader with
+  Auto-segment expansion, the two reconciling writers, and capability discovery — are built (Phase 9).
+  The Backfill trigger endpoint, the worker's `"segment"` options injection, standalone reload
+  replications, and all SPA work are not yet built (Phase 10).
 - Additional source/target database engine drivers (Postgres, MySQL, Oracle, etc.).
 - Parquet (or other generic) staging provider.
 - Alternate `DataSync.State` backends beyond SQLite.

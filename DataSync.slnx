@@ -10,6 +10,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/DataSync.Api.Tests/DataSync.Api.Tests.csproj" />
     <Project Path="tests/DataSync.Core.Tests/DataSync.Core.Tests.csproj" />
+    <Project Path="tests/DataSync.Drivers.Abstractions.Tests/DataSync.Drivers.Abstractions.Tests.csproj" />
     <Project Path="tests/DataSync.Drivers.MsSql.Tests/DataSync.Drivers.MsSql.Tests.csproj" />
     <Project Path="tests/DataSync.State.Tests/DataSync.State.Tests.csproj" />
     <Project Path="tests/DataSync.TaskRunner.Tests/DataSync.TaskRunner.Tests.csproj" />
