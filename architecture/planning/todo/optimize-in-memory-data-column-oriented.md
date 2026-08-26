@@ -74,5 +74,46 @@ allocation via `GC.GetAllocatedBytesForCurrentThread`:
    option 2's trigger, not this one's.
 
 Not measured: whether GC pauses are visible in end-to-end run duration (the microbenchmark reports
-allocation, not pause time), and whether the dictionary's share grows on wider tables — 5 columns is
-narrow, and per-row dictionary cost scales with column count while the array's does not.
+allocation, not pause time).
+
+## Second pass — does table shape change the answer?
+
+Re-run across two shapes carrying the **same 5,000,000 cells**, so shape is isolated from volume.
+Normalised per cell, since that is the only way the two are comparable. Absolute figures shifted a
+little from the first pass because the read path is now a uniform loop rather than hand-unrolled for
+five columns; only within-run comparisons are meaningful.
+
+| representation | ns/cell (5×1M) | ns/cell (50×100k) | B/cell (5×1M) | B/cell (50×100k) |
+| --- | --- | --- | --- | --- |
+| `Dictionary`, no capacity | 33.7 | 31.1 | 108.8 | 108.5 |
+| `Dictionary`, pre-sized | 27.4 | 23.9 | 81.6 | 51.7 |
+| positional `object?[]` | 6.3 | 5.9 | 28.8 | 24.5 |
+| columnar `object?[]` | 8.4 | **11.7** | 24.0 | 24.0 |
+| columnar typed arrays | 5.0 | 5.0 | 8.8 | 8.8 |
+
+**The earlier guess that dictionary cost would grow with width was wrong on time.** Per-cell cost is
+essentially flat for both the dictionary and the array — 33.7 vs 31.1 and 6.3 vs 5.9 — so the ratio
+between them, roughly 4.5x on time and 3x on allocation, holds at either shape. Width does not change
+which option to pick.
+
+Three things width *does* change:
+
+- **Columnar gets worse, not better.** Untyped columnar degrades from 8.4 to 11.7 ns/cell — the only
+  representation measured that gets slower as the table widens. Row-wise traversal of 50 separate
+  column arrays touches 50 cache lines per row instead of one contiguous run. The argument against
+  columnar for this pipeline is therefore *stronger* on wide tables, which is where it would normally
+  be expected to pay.
+- **Pre-sizing the dictionary goes from a minor saving to a large one**: 544 → 408 B/row at 5 columns
+  (25%), but 5,424 → 2,584 B/row at 50 columns (52%). The un-pre-sized dictionary resizes
+  3 → 7 → 17 → 37 → 79 on the way to 50 entries, discarding every intermediate.
+- **Absolute per-row cost stops being negligible.** A 50-column table today allocates ~5.4 KB per row
+  through the incremental reader.
+
+### A defect this exposed, independent of everything above
+
+Only one of the four readers omits the capacity hint — and it is the incremental Change Tracking path
+(`MsSqlChangeTrackingReader.cs:200`, `new Dictionary<string, object?>()`), which is the hot path for
+ongoing replication. `MsSqlWatermarkReader`, `MsSqlBatchReloadReader` and Change Tracking's own
+full-load path all pass `reader.FieldCount`. Passing it in the one place it is missing halves that
+path's per-row allocation on a 50-column table, is a one-line change, and is worth doing whatever is
+decided about the representation.
