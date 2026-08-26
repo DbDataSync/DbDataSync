@@ -1,29 +1,17 @@
 #!/usr/bin/env sh
-# Thin launcher for tools/DataSync.DevHarness. See `scripts/dev-harness help`.
+# Launcher for tools/DataSync.DevHarness. See `scripts/dev-harness help`.
 #
-# Builds only if the tool is missing or older than its sources, so the common case (running a verb
-# repeatedly while the environment is up) doesn't pay a build on every invocation.
+# `dotnet run` handles the incremental build itself, including changes in referenced projects such as
+# DataSync.Core — which is why there's no staleness check here. It also forwards SIGINT/SIGTERM to the
+# app and propagates its exit code, both of which this tool depends on: `up` tears its child processes
+# down on a stop signal, and `verify` reports pass/fail through its exit code.
+#
+# (`dotnet run` spawns the app as a separate child process. That matters where the *parent* kills it
+# programmatically, since killing the wrapper doesn't reliably kill the app — which is why
+# AppProcesses starts the API with `dotnet exec` on the built DLL instead. It doesn't matter here: the
+# OS delivers the signal, and `dotnet run` passes it on.)
 set -e
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(dirname "$script_dir")
-project="$repo_root/tools/DataSync.DevHarness/DataSync.DevHarness.csproj"
-assembly="$repo_root/tools/DataSync.DevHarness/bin/Debug/net10.0/DataSync.DevHarness.dll"
 
-needs_build=0
-if [ ! -f "$assembly" ]; then
-  needs_build=1
-else
-  # -newer is POSIX-ish enough for the shells this runs under, and a false negative only costs a
-  # stale run the operator can fix with an explicit `dotnet build`.
-  for source in "$repo_root"/tools/DataSync.DevHarness/*.cs "$project"; do
-    [ "$source" -nt "$assembly" ] && needs_build=1 && break
-  done
-fi
-
-if [ "$needs_build" -eq 1 ]; then
-  echo "Building the dev harness..." >&2
-  dotnet build "$project" -v quiet --nologo >&2
-fi
-
-exec dotnet exec "$assembly" "$@"
+exec dotnet run --project "$script_dir/../tools/DataSync.DevHarness" -- "$@"

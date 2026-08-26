@@ -39,9 +39,9 @@ than taking a command-line-parser dependency.
 | `verify` | Merge-join source and target by key, naming every missing/extra/differing row. Exit code 0/1. |
 
 **`scripts/dev-harness`** and **`scripts/dev-harness.cmd`** — thin launchers so the common case is
-`scripts/dev-harness up`. The shell one rebuilds when a source file is newer than the built assembly;
-the batch one only builds when the assembly is missing, since batch has no clean timestamp comparison
-(documented in the script itself).
+`scripts/dev-harness up`. Both are a single `dotnet run --project … -- "$@"` line. See "A launcher
+that reimplemented MSBuild" below: they originally carried a hand-rolled staleness check, which was
+both unnecessary and wrong.
 
 **Scenario**: one `dev-sync` replication over `dbo.Orders`, whose columns are chosen so every segment
 mode has something to bite on — an `INT` key (range/auto), a low-cardinality `Region` string (list), a
@@ -96,6 +96,34 @@ function, one round trip), so any reload covering that range removes them. When 
 — a freshly seeded, contiguous table — it falls back to keys above the range and says so explicitly,
 naming the ids and explaining that only a Full segment will reach them.
 
+## A launcher that reimplemented MSBuild
+
+The launchers first shipped with hand-rolled change detection — compare each `*.cs` in the tool's own
+directory against the built assembly's timestamp, and shell out to `dotnet build` if any was newer —
+in order to use `dotnet exec` on the built DLL rather than `dotnet run`. The stated reason was the
+wrapper-process lesson recorded in `playwright.config.ts`.
+
+That reasoning was wrong on both halves, and the check had three defects:
+
+- It globbed only `tools/DataSync.DevHarness/*.cs`, so a change in **`DataSync.Core`** — a
+  `ProjectReference` — left the harness running a stale binary with no indication anything was out of
+  date. This is the failure the check existed to prevent.
+- `-nt` is not POSIX, despite the `#!/usr/bin/env sh` shebang.
+- The batch launcher had no equivalent and only built when the assembly was missing outright, so the
+  two launchers behaved differently on the same repository.
+
+The wrapper concern also does not apply here. It is real where a *parent* kills a child
+programmatically — `Process.Kill` on the `dotnet run` wrapper does not reliably reach the app, which
+is why `AppProcesses.StartApi` uses `dotnet exec` on the built DLL and must keep doing so. It is not
+real for a launcher, where the OS delivers the signal. Measured on .NET 10 rather than assumed:
+`dotnet run` forwards SIGTERM to the app (the harness logged its full shutdown path and both processes
+exited, leaving no orphans), propagates the app's exit code (`verify` returning 1 survives), writes no
+build noise to stdout even when it rebuilds, and reports build failures with a non-zero exit.
+
+Both launchers are now one `dotnet run --project … -- "$@"` line, and MSBuild does the incremental
+build it already does correctly — including referenced projects, confirmed by touching a
+`DataSync.Core` source file and watching the harness rebuild.
+
 ## How this was verified
 
 Every verb was exercised against the real containers, end to end:
@@ -112,6 +140,8 @@ Every verb was exercised against the real containers, end to end:
   to 25,312 identical rows, with all six segment runs succeeding and non-overlapping labels.
 - Stop-signal handling: SIGTERM to `workload` logged "shutting down", stopped early and printed its
   summary; SIGTERM to `up` took the API and Vite down with it, leaving **no orphaned processes**.
+- Launchers: exit codes propagate (`verify` returns 1 on differences), a `DataSync.Core` edit triggers
+  a rebuild, a compile error surfaces and exits non-zero, and stdout stays clean during a rebuild.
 - `dotnet build` clean; the full non-integration suite (140 tests) unaffected by the new project.
 
 One thing could not be verified here: SIGINT specifically. A non-interactive bash shell sets SIGINT to
