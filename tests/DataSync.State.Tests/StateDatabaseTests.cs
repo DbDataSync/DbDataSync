@@ -39,12 +39,14 @@ public sealed class StateDatabaseTests : IDisposable
     }
 
     [Fact]
-    public void OpenConnection_EnablesWalMode()
+    public void OpenConnection_SetsBusyTimeout()
     {
+        // Not WAL mode — see the XML doc on StateDatabase.OpenConnection for why: WAL's cross-process
+        // shared-memory coordination proved unreliable in this project's sandboxed dev environment.
         var database = new StateDatabase(Path.Combine(_tempDir, "state.db"));
         using var connection = database.OpenConnection();
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "PRAGMA journal_mode;";
-        Assert.Equal("wal", Convert.ToString(cmd.ExecuteScalar())?.ToLowerInvariant());
+        cmd.CommandText = "PRAGMA busy_timeout;";
+        Assert.Equal(5000L, Convert.ToInt64(cmd.ExecuteScalar()));
     }
 }

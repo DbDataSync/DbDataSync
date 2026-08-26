@@ -44,4 +44,8 @@ public sealed class ReplicationsController(ConfigRepository configRepository, Gi
         configRepository.DeleteReplicationTask(name, author);
         return NoContent();
     }
+
+    [HttpGet("{name}/history")]
+    public ActionResult<IReadOnlyList<CommitInfo>> History(string name, [FromQuery] int limit = 50) =>
+        Ok(configRepository.GetReplicationHistory(name, limit));
 }

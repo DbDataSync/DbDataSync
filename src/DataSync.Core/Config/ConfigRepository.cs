@@ -134,6 +134,12 @@ public sealed class ConfigRepository
             .ToList();
     }
 
+    /// <summary>Read-only git history for everything under this replication's config directory —
+    /// the SPA's Config History view. Relies on the fixed configRoot == &lt;repoRoot&gt;/config
+    /// convention used throughout (see ConfigPaths) to know the path relative to the repo root.</summary>
+    public IReadOnlyList<CommitInfo> GetReplicationHistory(string replicationName, int limit = 50) =>
+        _git.GetHistory($"config/replications/{replicationName}", limit);
+
     public void DeleteReplicationTask(string replicationName, GitAuthor author)
     {
         var dir = ConfigPaths.ReplicationDir(_configRoot, replicationName);

@@ -220,6 +220,38 @@ public sealed class ConfigRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void GetReplicationHistory_ReturnsCommitsThatTouchedTheReplicationNewestFirst()
+    {
+        var task = new ReplicationTaskConfig
+        {
+            Name = "crm-sync",
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 30 },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+            },
+        };
+        _repository.SaveReplicationTask(task, Author);
+        _repository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableRef { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
+            Targets = [new TableRef { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
+        }, Author);
+        // An unrelated connection save should not show up in this replication's history.
+        _repository.SaveConnection(SqlAuthInput("unrelated-conn"), Author);
+
+        var history = _repository.GetReplicationHistory("crm-sync");
+
+        Assert.Equal(2, history.Count);
+        Assert.Contains("table mapping", history[0].Message);
+        Assert.Contains("replication task", history[1].Message);
+        Assert.Equal(Author.Name, history[0].AuthorName);
+    }
+
+    [Fact]
     public void DeleteReplicationTask_RemovesTaskAndTableMappingsAndCommits()
     {
         var task = new ReplicationTaskConfig

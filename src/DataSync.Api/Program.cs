@@ -8,7 +8,6 @@ using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
 using DataSync.State;
-using LibGit2Sharp;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -57,10 +56,6 @@ builder.Services.AddHostedService<RunMonitorService>();
 
 var app = builder.Build();
 
-// Post-Build(): ApiOptions here is guaranteed to reflect every configuration source, test overrides
-// included — see the registration comment above.
-EnsureRepo(app.Services.GetRequiredService<ApiOptions>().RepoRoot);
-
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
@@ -70,13 +65,6 @@ app.MapControllers();
 app.MapHub<RunHub>("/hubs/run");
 
 app.Run();
-
-static void EnsureRepo(string repoRoot)
-{
-    Directory.CreateDirectory(repoRoot);
-    if (!Repository.IsValid(repoRoot))
-        Repository.Init(repoRoot);
-}
 
 // Exposes the implicit top-level-statements Program class for WebApplicationFactory<Program> in tests.
 public partial class Program;
