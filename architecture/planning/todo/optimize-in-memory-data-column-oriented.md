@@ -52,9 +52,9 @@ allocation via `GC.GetAllocatedBytesForCurrentThread`:
 - **Column-oriented is *slower* here, not faster** — 29 ms against the row array's 18 ms. The doc's own
   reservation was right: the batch is consumed row by row, so a columnar layout pays stride costs on
   every access and gets nothing back.
-- **The 9.3x allocation win of typed columns is real but currently unredeemable.** It comes from not
-  boxing — and `SqlBulkCopy` re-boxes at `GetValue(int)` regardless. That win is only collectable by a
-  sink that can consume typed columns; none exists today.
+- **The 9.3x allocation win of typed columns is real; the first pass called it "unredeemable", which
+  was wrong.** See the third pass below — it is unredeemable *through `SqlBulkCopy` specifically*, and
+  that is one driver's sink, not a property of the architecture.
 - **Context for the ~11x**: the reader's own measured throughput against a local SQL Server is roughly
   3.7 µs/row (150,000 rows in 560 ms, from the Phase 12 integration test). The dictionary work is about
   0.2 µs of that — so **~5% of reader time**, before counting GC. The allocation reduction is the more
@@ -65,10 +65,10 @@ allocation via `GC.GetAllocatedBytesForCurrentThread`:
 1. **Positional `object?[]` + a shared schema.** Replace `ChangeRow.Values` with an ordinal-indexed
    array and a `ChangeSchema` resolved once per run. Blast radius is small and entirely internal: the
    record, four readers, and `ChangeRowDataReader`. Captures nearly all the available win.
-2. **Column-oriented batches.** Measurably worse for this pipeline, and the part that would pay —
-   typed columns — cannot be collected through `SqlBulkCopy`. The honest trigger for revisiting is a
-   **columnar sink**, and one is already on the backlog: the Parquet staging provider. Caching,
-   multi-target fan-out and offline targets are the same trigger, and none of them exist yet either.
+2. **Column-oriented batches over pooled typed arrays.** Ties option 1 against `SqlBulkCopy` and costs
+   more peak heap there; against any sink that can take typed values it allocates **nothing at all**.
+   See the third pass. Whether this is worth building now turns on how soon a non-`SqlBulkCopy` target
+   exists, not on the numbers.
 3. **Take an Arrow / Parquet.NET / DataFrame dependency for the in-memory shape.** Nothing in these
    numbers justifies it. Those libraries earn their place on serialisation and interchange, which is
    option 2's trigger, not this one's.
@@ -117,3 +117,67 @@ ongoing replication. `MsSqlWatermarkReader`, `MsSqlBatchReloadReader` and Change
 full-load path all pass `reader.FieldCount`. Passing it in the one place it is missing halves that
 path's per-row allocation on a 50-column table, is a one-line change, and is worth doing whatever is
 decided about the representation.
+
+
+## Third pass — end to end through a real sink, measuring peak, not just totals
+
+The first two passes measured *cumulative allocated bytes* in isolation, which cannot distinguish
+"box every row up front and hold it" from "box one cell transiently at the sink boundary, where it
+dies in gen0 immediately". Those have very different GC behaviour, and the first pass's conclusion
+that the typed win was "unredeemable" generalised `SqlBulkCopy`'s object-per-cell contract to the
+whole architecture. `IStagingProvider` is engine-neutral; a Postgres binary COPY or a Parquet writer
+has no such constraint. **That claim was wrong and is withdrawn.**
+
+Re-measured properly: 200,000 rows × 50 columns (10M cells) into a real 50-column SQL Server table,
+each variant in **its own process** so peak working set belongs to it alone, with GC counts, GC pause
+time and a 2 ms-sampled peak managed heap. `columnar` is hand-rolled batches over `ArrayPool`-rented
+typed arrays, boxing only at `GetValue`, one cell at a time.
+
+**Through `SqlBulkCopy`** (median of three):
+
+| representation | ms | allocated | peak heap | peak WS | gen0 | gen1/2 | GC pause |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `Dictionary` per row | 2,850 | 1,288 MB | 16.9 MB | 94 MB | 81 | 0 | 15 ms |
+| positional `object?[]` | 2,618 | 335 MB | 16.7 MB | 92 MB | 21 | 0 | 6 ms |
+| columnar, pooled typed | 2,623 | 335 MB | 23.5 MB | 97 MB | 21 | 0 | 5 ms |
+
+**Through a typed sink** — same production code, consumer reads `GetInt32`/`GetDecimal`/`GetDateTime`
+/`GetString` instead of `GetValue`:
+
+| representation | ms | allocated | peak heap | peak WS | gen0 | GC pause |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Dictionary` per row | 1,000 | 1,130 MB | 16.5 MB | 94 MB | 70 | 8 ms |
+| positional `object?[]` | 245 | 153 MB | 16.4 MB | 91 MB | 9 | 1 ms |
+| columnar, pooled typed | **133** | **0.0 MB** | **7.3 MB** | **78 MB** | **0** | **0 ms** |
+
+### What this actually shows
+
+- **Against `SqlBulkCopy`, columnar buys nothing over a row array** — identical allocation to the byte,
+  identical GC, and *higher* peak heap because it buffers a batch. `SqlBulkCopy` asks for every cell as
+  `object`, so 10M cells means 10M boxes whichever way they were stored. The transient-versus-upfront
+  distinction does not reduce the box count when the sink demands one per cell.
+- **Against a typed sink, columnar allocates literally nothing** — zero bytes, zero collections, and
+  both the lowest peak heap (7.3 MB against 16.4) and the lowest working set. Pooled arrays are rented
+  once and reused; nothing boxes. This is the "reduce GC and stabilise memory" outcome, and it is real.
+- **The boxing floor is the whole difference.** `SqlBulkCopy` costs ~335 MB where the same
+  representation costs 0 MB against a typed consumer.
+- **Peak memory is a dial, not a consequence.** Batch size against a typed sink:
+
+  | batch | peak heap | peak WS | ms |
+  | --- | --- | --- | --- |
+  | 1,000 | 0.9 MB | 76 MB | 138 |
+  | 10,000 | 7.3 MB | 79 MB | 123 |
+  | 50,000 | 27.9 MB | 95 MB | 161 |
+  | 200,000 | 110.4 MB | 158 MB | 230 |
+
+  Small batches are both the cheapest *and* the fastest — 1,000 rows is 0.9 MB of steady-state heap
+  with zero allocation, against today's 1,288 MB of garbage. Larger batches cost memory and lose
+  throughput to cache pressure. So "standardised batch sizes + a typed column pool" is a memory
+  guarantee that can be stated as a number, which per-row allocation can never be.
+
+### Still not measured
+
+Offloading batches to disk; multi-target fan-out from one read; several mappings running concurrently
+(where per-slot buffering multiplies, and where the columnar peak-heap dial matters most); Server GC
+rather than workstation; and reading from a real source `DbDataReader` rather than generated values —
+a columnar reader must use typed getters (`GetInt32`) to stay unboxed, and no reader does that today.
