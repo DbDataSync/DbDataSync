@@ -10,7 +10,7 @@ namespace DataSync.Api.Services;
 /// mean one slow/behind mapping resets the clock for every other mapping's schedule. Periodic (cron)
 /// due-ness stays replication-scoped (one occurrence fires for the whole replication, anchored to the
 /// most recent of all its mappings' last Primary starts), then batch-enqueues every mapping at once —
-/// see architecture/implementation/done/phase-8-work-queue-schema.md.
+/// see architecture/implementation/done/phase-008-work-queue-schema.md.
 /// </summary>
 public sealed class SchedulerService(
     ConfigRepository configRepository,

@@ -52,7 +52,7 @@ internal static class Migrations
 
         -- No sentinel MappingName: RunKind.Primary is now scoped to one table mapping's own
         -- incremental pass, exactly like RunKind.Backfill is scoped to one mapping's reload — neither
-        -- kind is "the whole replication" anymore. See phase-8-work-queue-schema.md.
+        -- kind is "the whole replication" anymore. See phase-008-work-queue-schema.md.
         CREATE TABLE RunLocks (
             TaskName TEXT NOT NULL,
             RunKind TEXT NOT NULL,
@@ -66,7 +66,7 @@ internal static class Migrations
         -- scheduled due-ness) and the TaskRunner worker process(es) it spawns communicate exclusively
         -- through DataSync.State, so enqueueing has to be a table, not an in-memory structure. Claim
         -- logic (Pending -> Claimed -> Running -> Done/Failed/Cancelled) lands in a later phase; this
-        -- phase only creates the schema. See phase-8-work-queue-schema.md.
+        -- phase only creates the schema. See phase-008-work-queue-schema.md.
         -- SegmentLabel is NOT NULL (default '') here, unlike TaskRuns.SegmentLabel — it participates
         -- in UX_WorkQueue_InFlight below, and SQLite (like standard SQL) treats every NULL as
         -- distinct for uniqueness purposes, which would silently defeat "only one in-flight Primary

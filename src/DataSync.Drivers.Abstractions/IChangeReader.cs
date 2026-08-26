@@ -14,7 +14,7 @@ namespace DataSync.Drivers.Abstractions;
 /// provider that streams this reader's rows into e.g. SqlBulkCopy on the target connection will
 /// otherwise deadlock: SqlBulkCopy holds its connection exclusively for the duration of the copy, so
 /// the source query this reader's async enumerable lazily executes can't run on that same connection
-/// concurrently — MARS does not help here. See architecture/implementation/done/phase-3-mssql-driver.md.
+/// concurrently — MARS does not help here. See architecture/implementation/done/phase-003-mssql-driver.md.
 /// </para>
 /// </summary>
 public interface IChangeReader

@@ -154,12 +154,12 @@ delivered and documented real work, including pure design/architecture passes), 
 implementation doc for this section. Recorded so scope stays deliberate:
 
 - **CDC reader** for MSSQL — deferred during Phase 3 (Change Tracking + the watermark fallback were
-  enough to complete the v1 pipeline); see `architecture/implementation/done/phase-3-mssql-driver.md`'s
+  enough to complete the v1 pipeline); see `architecture/implementation/done/phase-003-mssql-driver.md`'s
   Notes section for the original deferral rationale.
 - **Batch reload** — a full or list/range-segmented reload/backfill of a table, distinct from the
   ongoing incremental `IChangeReader`s above (Change Tracking, the watermark fallback, and the
   deferred CDC reader all describe *incremental* sync). Fully designed (four review passes; see
-  `architecture/implementation/done/phase-8-work-queue-schema.md`'s "Design history"); its foundation — the
+  `architecture/implementation/done/phase-008-work-queue-schema.md`'s "Design history"); its foundation — the
   per-mapping `RunKind`/lock model and the durable work-queue-driven worker, needed so hundreds of
   queued mappings/backfills don't require one process per trigger — is built (Phase 8, the next
   numbered phase after this backlog list — this section was never itself a phase). The

@@ -2,7 +2,7 @@ namespace DataSync.State;
 
 /// <summary>
 /// Prevents overlapping runs of the same (task, run kind, table mapping) — architecture/detailed-design.md
-/// §3.1, §3.7, and architecture/implementation/done/phase-8-work-queue-schema.md for why this is scoped per
+/// §3.1, §3.7, and architecture/implementation/done/phase-008-work-queue-schema.md for why this is scoped per
 /// mapping rather than per replication: a Primary pass is now "this mapping's next incremental pass,"
 /// not "this replication's next incremental pass over every mapping," so one slow mapping no longer
 /// blocks every other mapping's schedule.

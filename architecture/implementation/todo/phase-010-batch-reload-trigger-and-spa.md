@@ -2,7 +2,7 @@
 
 **Status**: Planned, not started
 **Plan reference**: `architecture/implementation-plan.md` § Backlog ("Batch reload"); design history
-in `architecture/implementation/done/phase-8-work-queue-schema.md`'s "Design history." Corresponds to
+in `architecture/implementation/done/phase-008-work-queue-schema.md`'s "Design history." Corresponds to
 what the design review's Build Order called **"Phase D — Standalone reload replications, SPA,
 polish,"** with one scope clarification made explicit here: the original Build Order described the
 Backfill HTTP trigger endpoint's *behavior* (in the "what changes" section) but never assigned it to a

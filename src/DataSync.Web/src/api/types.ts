@@ -141,7 +141,7 @@ export interface CommitInfo {
 }
 
 // A trigger now enqueues one Primary pass per table mapping the replication has, not one run for the
-// whole replication — see architecture/implementation/done/phase-8-work-queue-schema.md.
+// whole replication — see architecture/implementation/done/phase-008-work-queue-schema.md.
 export interface TriggerResponse {
   runIds: string[]
 }

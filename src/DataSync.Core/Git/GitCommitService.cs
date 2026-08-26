@@ -17,7 +17,7 @@ public sealed class GitCommitService
     // GitCommitService is registered as a DI singleton (one instance for the whole API process), and
     // the only writer of this repo is this process (DataSync.TaskRunner only reads config) — so an
     // in-process lock around the write path is sufficient; no cross-process coordination is needed.
-    // Found via architecture/implementation/done/phase-7-e2e-validation.md's concurrent-run stress test.
+    // Found via architecture/implementation/done/phase-007-e2e-validation.md's concurrent-run stress test.
     private readonly object _writeLock = new();
 
     public GitCommitService(string repositoryRoot)

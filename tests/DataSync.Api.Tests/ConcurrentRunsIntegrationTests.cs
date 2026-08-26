@@ -10,7 +10,7 @@ namespace DataSync.Api.Tests;
 
 /// <summary>
 /// Answers detailed-design.md §8's open "central SQLite contention in practice" question with real
-/// data (architecture/implementation/done/phase-7-e2e-validation.md): triggers several *independent*
+/// data (architecture/implementation/done/phase-007-e2e-validation.md): triggers several *independent*
 /// replications at once, so several real DataSync.TaskRunner child processes are genuinely writing to
 /// the shared central state database concurrently — the actual scenario the WAL/busy_timeout/retry
 /// mitigations in StateDatabase/SqliteRetry exist for, not just one task's sequential runs.

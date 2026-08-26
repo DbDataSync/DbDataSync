@@ -18,7 +18,7 @@ namespace DataSync.TaskRunner.Tests;
 /// DataSync.TaskRunner executable would be. Needs the same Docker SQL Server container as
 /// DataSync.Drivers.MsSql.Tests — see that project's MsSqlTestDatabase for the connection string
 /// convention (duplicated here rather than shared: this is only the second consumer of that fixture
-/// shape, and it's ~30 lines — see architecture/implementation/done/phase-3-mssql-driver.md's notes on
+/// shape, and it's ~30 lines — see architecture/implementation/done/phase-003-mssql-driver.md's notes on
 /// when to extract a shared test-support project instead).
 /// </summary>
 [Trait("Category", "Integration")]

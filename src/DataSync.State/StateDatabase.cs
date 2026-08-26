@@ -45,7 +45,7 @@ public sealed class StateDatabase
     /// pooling and WAL mode (see OpenConnection's own note) did not fully resolve it either. Given
     /// the underlying cause sits below this application (most likely something about how this
     /// sandbox's process/filesystem isolation interacts with a Node-launched process tree spawning
-    /// further dotnet child processes — see architecture/implementation/done/phase-6-spa.md), re-checking
+    /// further dotnet child processes — see architecture/implementation/done/phase-006-spa.md), re-checking
     /// and re-applying the schema on every open is a pragmatic, low-cost way to make correctness not
     /// depend on fully understanding that cause.
     /// </summary>

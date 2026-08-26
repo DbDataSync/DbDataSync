@@ -28,8 +28,25 @@ numbered or labeled as one. `architecture/implementation-plan.md`'s "Backlog" se
 that list; it intentionally has no phase number and no corresponding file in this folder, because
 numbering it would create a numbered slot in this folder's sequence with nothing behind it. (This
 folder's numbering had exactly that problem once — a "Phase 8" label on the backlog section with no
-`phase-8-*.md` file to match, which was confusing and got fixed by dropping the number from the backlog
-and renumbering the next real phase into that slot instead of leaving a gap.)
+`phase-008-*.md` file to match, which was confusing and got fixed by dropping the number from the
+backlog and renumbering the next real phase into that slot instead of leaving a gap.)
+
+## File naming
+
+`phase-NNN-short-title.md`, zero-padded to **three digits** (`phase-000-...` through
+`phase-999-...`) so the sequence sorts correctly by filename indefinitely, regardless of how many
+phases the project eventually has. Headings and prose inside a doc, and casual references elsewhere
+(commit messages, code comments, conversation), can still say "Phase 8" naturally — the zero-padding
+is a filename/sorting convention, not how the phase is spoken or written about.
+
+**Add-on work — a small, discrete follow-up to a specific phase that doesn't warrant its own phase
+number — gets a lowercase letter suffix directly on that phase's number**: `phase-007a-...`,
+`phase-007b-...`, and so on, in the order the add-on work happened. Use this when the work is clearly
+*of* a specific already-numbered phase (a rename, a small correction, a follow-up requested by the
+user shortly after that phase landed) rather than new, independent scope — independent scope,
+however small, gets the next full phase number instead. When unsure which it is, ask: "does this
+depend on / only make sense in the context of one specific prior phase, or could it stand alone?" —
+the former is a lettered add-on, the latter is its own numbered phase.
 
 ## Workflow
 

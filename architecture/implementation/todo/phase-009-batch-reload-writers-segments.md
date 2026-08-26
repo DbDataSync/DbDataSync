@@ -2,7 +2,7 @@
 
 **Status**: Planned, not started
 **Plan reference**: `architecture/implementation-plan.md` § Backlog ("Batch reload"); design history
-in `architecture/implementation/done/phase-8-work-queue-schema.md`'s "Design history" (four review
+in `architecture/implementation/done/phase-008-work-queue-schema.md`'s "Design history" (four review
 passes, three user-driven architectural corrections against the batch-reload design as a whole).
 Corresponds to what the design review's Build Order called **"Phase B — Segment machinery and the two
 new writers, still one process per trigger."**

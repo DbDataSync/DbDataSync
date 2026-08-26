@@ -1,7 +1,9 @@
-# Watermark Terminology Rename
+# Phase 7a — Watermark Terminology Rename
 
 **Status**: Complete
-**Not a numbered phase** — a post-v1 maintenance change requested directly by the user, after Phase 7.
+**Add-on to Phase 7** (see `architecture/implementation/README.md`'s "File naming" convention) — a
+small, discrete maintenance change requested directly by the user shortly after Phase 7 landed, not
+independent enough in scope to warrant its own phase number.
 
 ## What prompted this
 
@@ -49,15 +51,15 @@ name that concept needs.
 as a distinct, explicitly not-yet-designed concept — a full or list/range-segmented
 reload/backfill of a table, separate from the three *incremental* readers (Change Tracking, the
 renamed Watermark fallback, and the still-deferred CDC reader). While there, also added CDC's
-deferral to that same backlog list — it had only ever been noted in `phase-3-mssql-driver.md`'s Notes
+deferral to that same backlog list — it had only ever been noted in `phase-003-mssql-driver.md`'s Notes
 section and was never carried forward, a gap noticed during this rename's investigation.
 
 `architecture/detailed-design.md` §3.5, §3.7, and the end-to-end data-flow section (§4) updated to
 use "watermark" consistently and to flag the batch-reload/watermark-reader distinction explicitly, so
 a future reader doesn't rediscover the same ambiguity.
 
-**Historical phase docs left untouched**: `phase-2-state-store.md`, `phase-3-mssql-driver.md`, and
-`phase-4-task-runner.md` still say "cursor" and "Batch reader" in places — they're accurate records of
+**Historical phase docs left untouched**: `phase-002-state-store.md`, `phase-003-mssql-driver.md`, and
+`phase-004-task-runner.md` still say "cursor" and "Batch reader" in places — they're accurate records of
 what those phases actually built and named at the time, per this project's established convention of
 not rewriting completed phase summaries. This document is the place that explains the rename for
 anyone who reads those older docs and wonders why current code doesn't match.

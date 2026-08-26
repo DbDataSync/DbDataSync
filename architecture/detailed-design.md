@@ -229,7 +229,7 @@ A single SQLite database file, shared by `DataSync.Api` and every `DataSync.Task
 | `RunLocks` | One row per `(task, run kind, table mapping)` while that mapping's unit of work is in flight — a Primary pass and a Backfill both scoped to the same mapping serialize against each other; different mappings of the same replication (even under the same run kind) don't. |
 | `WorkQueue` | Durable, SQLite-backed cross-process work queue: the API enqueues Primary passes (scheduled or manually triggered) and Backfill segments here; a spawned TaskRunner worker process claims and drains them. See "Per-mapping run model" below. |
 
-**Per-mapping run model** (architecture/implementation/done/phase-8-work-queue-schema.md) — a "run" is
+**Per-mapping run model** (architecture/implementation/done/phase-008-work-queue-schema.md) — a "run" is
 scoped to one table mapping's one unit of work, not a whole replication. This matters at scale: a
 replication can have hundreds of table mappings, and treating "trigger a replication" as one shared
 run/lock would mean one slow or already-in-flight mapping blocks every other mapping's schedule. A
@@ -252,7 +252,7 @@ concurrently while one mapping's own units of work serialize.
 per-task files:
 
 - **Not WAL mode** — WAL's cross-process shared-memory coordination proved unreliable in this
-  project's sandboxed dev environment (see `architecture/implementation/done/phase-6-spa.md`); the default
+  project's sandboxed dev environment (see `architecture/implementation/done/phase-006-spa.md`); the default
   rollback-journal mode is used instead, backed by the next two mitigations.
 - **`busy_timeout`** set on every connection, plus **retry-on-`SQLITE_BUSY`** wrapping every write, so
   transient writer contention is absorbed instead of surfacing as errors.
@@ -262,7 +262,7 @@ per-task files:
   upserts, minimizing the time any writer holds the write lock.
 - All of the above lives in **one shared library** (`DataSync.State`) used identically by the API
   process and every Task Runner process, so the concurrency pattern can't silently drift between
-  callers. A dedicated concurrency stress test (`architecture/implementation/done/phase-7-e2e-validation.md`)
+  callers. A dedicated concurrency stress test (`architecture/implementation/done/phase-007-e2e-validation.md`)
   found no contention failures at 8 concurrently-processed mappings — a realistic v1 scale. If
   contention proves problematic at larger scale in practice, the per-task-SQLite-files fallback behind
   this same `DataSync.State` interface remains available.
@@ -334,7 +334,7 @@ the implementation phases that depend on them (see `implementation-plan.md`):
 - **Auth/authz** — no login/permission model is specified yet; v1 may need to assume a
   trusted-network single-user deployment unless this is scoped in.
 - **Multi-user concurrent config editing** — **investigated in Phase 7**
-  (`architecture/implementation/done/phase-7-e2e-validation.md`) with a stress test that triggers 8
+  (`architecture/implementation/done/phase-007-e2e-validation.md`) with a stress test that triggers 8
   independent replications' config writes concurrently. This surfaced a real bug, not just a policy
   gap: `GitCommitService.CommitChanges` reliably threw `LibGit2Sharp.LockedFileException` ("the index
   is locked") under genuine concurrent writes from the same process — libgit2's index-write lock is
@@ -349,7 +349,7 @@ the implementation phases that depend on them (see `implementation-plan.md`):
   writing `TaskRuns`/`Logs`/`RunLocks`/`ChangeWatermarks` rows to the same central SQLite file at
   once), run repeatedly with no failures. The existing mitigations (`busy_timeout`, `SqliteRetry`,
   and the self-healing schema re-check added in Phase 6 — see
-  `architecture/implementation/done/phase-6-spa.md`) held up fine at this scale; no `SQLITE_BUSY` or
+  `architecture/implementation/done/phase-006-spa.md`) held up fine at this scale; no `SQLITE_BUSY` or
   contention-related failures were observed. Not exhaustively load-tested at much higher concurrency
   (dozens+ of simultaneous runs), so the per-task-SQLite-files fallback in §3.7 remains available if
   a real deployment ever needs it, but 8 concurrent runs — a realistic v1 scale — shows no problem.
