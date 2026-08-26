@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
-import { StatusBadge } from '../../components/StatusBadge'
+import { RunKindBadge, StatusBadge } from '../../components/StatusBadge'
+import { BackfillForm } from './BackfillForm'
 import { useCancelRun, useInvalidateRunHistory, useRunHistory, useTriggerRun } from '../../api/hooks'
 import { useRunHub } from '../../api/useRunHub'
 
 export function RunsPanel({ replicationName }: { replicationName: string }) {
   const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined)
+  const [showBackfill, setShowBackfill] = useState(false)
   const isWatching = !!activeRunId
   const { data: runs, error: historyError } = useRunHistory(replicationName, isWatching ? 1500 : undefined)
   const trigger = useTriggerRun(replicationName)
@@ -33,14 +35,38 @@ export function RunsPanel({ replicationName }: { replicationName: string }) {
     setActiveRunId(result.runIds[0])
   }
 
+  const onBackfillQueued = (runIds: string[]) => {
+    setShowBackfill(false)
+    // An Auto segment expands server-side, so one submission can queue many runs. Same as "Run Now",
+    // this panel live-watches the first; the history table below shows all of them.
+    setActiveRunId(runIds[0])
+  }
+
   return (
     <div className="card">
       <div className="row-between">
         <h2>Runs</h2>
-        <button className="btn btn-primary" onClick={onTrigger} disabled={trigger.isPending || isWatching} data-testid="trigger-run-button">
-          {trigger.isPending ? 'Starting…' : 'Run Now'}
-        </button>
+        <div className="row">
+          <button
+            className="btn"
+            onClick={() => setShowBackfill((open) => !open)}
+            data-testid="backfill-button"
+          >
+            Backfill…
+          </button>
+          <button className="btn btn-primary" onClick={onTrigger} disabled={trigger.isPending || isWatching} data-testid="trigger-run-button">
+            {trigger.isPending ? 'Starting…' : 'Run Now'}
+          </button>
+        </div>
       </div>
+
+      {showBackfill && (
+        <BackfillForm
+          replicationName={replicationName}
+          onQueued={onBackfillQueued}
+          onClose={() => setShowBackfill(false)}
+        />
+      )}
 
       <ErrorBanner error={historyError ?? trigger.error ?? cancel.error} />
 
@@ -80,6 +106,9 @@ export function RunsPanel({ replicationName }: { replicationName: string }) {
           <thead>
             <tr>
               <th>Started</th>
+              <th>Kind</th>
+              <th>Mapping</th>
+              <th>Segment</th>
               <th>Status</th>
               <th>Rows Read</th>
               <th>Rows Written</th>
@@ -90,6 +119,11 @@ export function RunsPanel({ replicationName }: { replicationName: string }) {
             {runs.map((r) => (
               <tr key={r.runId}>
                 <td>{new Date(r.startedAtUtc).toLocaleString()}</td>
+                <td>
+                  <RunKindBadge kind={r.runKind} />
+                </td>
+                <td>{r.mappingName}</td>
+                <td className="segment-label">{r.segmentLabel ?? '—'}</td>
                 <td>
                   <StatusBadge status={r.status} />
                 </td>

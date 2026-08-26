@@ -20,7 +20,21 @@ public sealed record WorkItem(
     string SegmentLabel,
     string? SegmentJson,
     Guid RunId,
-    WorkItemStatus Status);
+    WorkItemStatus Status,
+    WorkItemKinds Kinds);
+
+/// <summary>
+/// Which reader/cache/writer this unit of work should use, when that isn't simply the replication's
+/// configured pipeline. Every component is null for a Primary pass — an incremental replication runs
+/// the pipeline it was configured with. A Backfill sets them, because reloading a segment needs a
+/// reload reader and (usually) a reconciling writer regardless of what the replication does for its
+/// ongoing sync.
+/// </summary>
+public sealed record WorkItemKinds(string? ReaderKind = null, string? CacheKind = null, string? WriterKind = null)
+{
+    /// <summary>Use the replication's own configured pipeline.</summary>
+    public static WorkItemKinds FromConfig { get; } = new();
+}
 
 /// <summary>
 /// Durable, SQLite-backed cross-process work queue (architecture/implementation/done/phase-008-work-queue-schema.md).
@@ -42,7 +56,13 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// Pending/Claimed/Running for this (task, kind, mapping, segment) — relies on the same
     /// ON CONFLICT DO NOTHING idiom RunLockStore.TryAcquire already uses.
     /// </summary>
-    public Guid Enqueue(string taskName, RunKind runKind, string mappingName, string segmentLabel = NoSegment, string? segmentJson = null) =>
+    public Guid Enqueue(
+        string taskName,
+        RunKind runKind,
+        string mappingName,
+        string segmentLabel = NoSegment,
+        string? segmentJson = null,
+        WorkItemKinds? kinds = null) =>
         SqliteRetry.Execute(() =>
         {
             using var connection = database.OpenConnection();
@@ -53,8 +73,10 @@ public sealed class WorkQueueStore(StateDatabase database)
             {
                 cmd.Transaction = transaction;
                 cmd.CommandText = """
-                    INSERT INTO WorkQueue (TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status, EnqueuedAtUtc, AvailableAtUtc)
-                    VALUES ($task, $kind, $mapping, $segment, $segmentJson, $runId, $status, $now, $now)
+                    INSERT INTO WorkQueue (TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status,
+                                           EnqueuedAtUtc, AvailableAtUtc, ReaderKind, CacheKind, WriterKind)
+                    VALUES ($task, $kind, $mapping, $segment, $segmentJson, $runId, $status, $now, $now,
+                            $readerKind, $cacheKind, $writerKind)
                     ON CONFLICT DO NOTHING;
                     """;
                 // Bare ON CONFLICT DO NOTHING (no explicit target) — UX_WorkQueue_InFlight is the only
@@ -67,6 +89,9 @@ public sealed class WorkQueueStore(StateDatabase database)
                 cmd.Parameters.AddWithValue("$runId", runId.ToString());
                 cmd.Parameters.AddWithValue("$status", WorkItemStatus.Pending.ToString());
                 cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.Parameters.AddWithValue("$readerKind", (object?)kinds?.ReaderKind ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$cacheKind", (object?)kinds?.CacheKind ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$writerKind", (object?)kinds?.WriterKind ?? DBNull.Value);
                 var inserted = cmd.ExecuteNonQuery() == 1;
 
                 if (!inserted)
@@ -128,7 +153,8 @@ public sealed class WorkQueueStore(StateDatabase database)
                 using var connection = database.OpenConnection();
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = """
-                    SELECT Id, TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status
+                    SELECT Id, TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status,
+                           ReaderKind, CacheKind, WriterKind
                     FROM WorkQueue w
                     WHERE TaskName = $task AND Status = 'Pending' AND AvailableAtUtc <= $now
                       AND NOT EXISTS (
@@ -224,5 +250,9 @@ public sealed class WorkQueueStore(StateDatabase database)
         reader.GetString(4),
         reader.IsDBNull(5) ? null : reader.GetString(5),
         Guid.Parse(reader.GetString(6)),
-        Enum.Parse<WorkItemStatus>(reader.GetString(7)));
+        Enum.Parse<WorkItemStatus>(reader.GetString(7)),
+        new WorkItemKinds(
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            reader.IsDBNull(9) ? null : reader.GetString(9),
+            reader.IsDBNull(10) ? null : reader.GetString(10)));
 }

@@ -208,6 +208,33 @@ input, select, textarea {
   margin-top: 16px;
 }
 
+textarea.mono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.82rem;
+  resize: vertical;
+}
+
+.field-error {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+/* A subform opened from a panel's own header (the backfill trigger), set apart from the panel's
+   primary content without being a modal — it is a secondary action, not an interruption. */
+.subform {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 16px;
+  background: var(--surface-muted, #fafbfc);
+}
+
+.segment-label {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.78rem;
+}
+
 .badge {
   display: inline-block;
   padding: 2px 9px;
@@ -220,6 +247,7 @@ input, select, textarea {
 .badge-danger { background: #fdecec; color: var(--danger); }
 .badge-warning { background: #fdf3de; color: var(--warning); }
 .badge-neutral { background: #eceef1; color: var(--text-muted); }
+.badge-info { background: #e7eefc; color: #2b57b5; }
 
 .empty-state {
   color: var(--text-muted);

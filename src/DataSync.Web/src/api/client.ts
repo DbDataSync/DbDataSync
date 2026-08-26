@@ -1,8 +1,10 @@
 import type {
+  BackfillRequest,
   ColumnMetadata,
   CommitInfo,
   ConnectionConfig,
   ConnectionInput,
+  DriverCapabilities,
   LogEntryRecord,
   ReplicationTaskConfig,
   TableMappingConfig,
@@ -53,6 +55,8 @@ export const api = {
     upsert: (name: string, input: ConnectionInput) =>
       put<ConnectionConfig>(`/api/connections/${encodeURIComponent(name)}`, input),
     delete: (name: string) => request<void>(`/api/connections/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    capabilities: (name: string) =>
+      request<DriverCapabilities>(`/api/connections/${encodeURIComponent(name)}/capabilities`),
   },
   metadata: {
     databases: (connectionName: string) =>
@@ -104,5 +108,10 @@ export const api = {
     logs: (runId: string, sinceId?: number) =>
       request<LogEntryRecord[]>(`/api/runs/${runId}/logs${sinceId ? `?sinceId=${sinceId}` : ''}`),
     cancel: (runId: string) => request<void>(`/api/runs/${runId}/cancel`, { method: 'POST' }),
+    backfill: (replicationName: string, mappingName: string, body: BackfillRequest) =>
+      request<TriggerResponse>(
+        `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}/backfill`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
   },
 }

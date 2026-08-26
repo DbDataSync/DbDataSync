@@ -175,6 +175,52 @@ public sealed class WorkQueueStoreTests : IDisposable
         Assert.False(_queue.TryCancelPending(runId));
     }
 
+    /// <summary>
+    /// A backfill has to run a different pipeline from the replication it belongs to — a reload
+    /// reader and usually a reconciling writer — so which Kinds to use is carried per work item and
+    /// has to survive the round trip through the queue intact.
+    /// </summary>
+    [Fact]
+    public void Enqueue_WithKindOverrides_MakesThemAvailableToWhicheverWorkerClaimsTheItem()
+    {
+        var kinds = new WorkItemKinds("SomeBatchReload", "SomeStaging", "SomeReconcilingWriter");
+
+        _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", "Region in (EU)", "{\"mode\":\"full\"}", kinds);
+
+        var claimed = _queue.TryClaimNext("crm-sync", "worker-1")!;
+        Assert.Equal(kinds, claimed.Kinds);
+        Assert.Equal("Region in (EU)", claimed.SegmentLabel);
+        Assert.Equal("{\"mode\":\"full\"}", claimed.SegmentJson);
+    }
+
+    /// <summary>A Primary pass overrides nothing — it runs the replication's own configured
+    /// pipeline, which is what null means all the way down.</summary>
+    [Fact]
+    public void Enqueue_WithoutKindOverrides_ClaimsBackAsUseTheConfiguredPipeline()
+    {
+        _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+
+        var claimed = _queue.TryClaimNext("crm-sync", "worker-1")!;
+        Assert.Equal(WorkItemKinds.FromConfig, claimed.Kinds);
+    }
+
+    /// <summary>
+    /// Two segments of the same mapping are distinct units of work, unlike two enqueues of the same
+    /// segment — the in-flight uniqueness constraint is per segment, not per mapping, or a segmented
+    /// backfill could never queue more than one of its own segments.
+    /// </summary>
+    [Fact]
+    public void Enqueue_DifferentSegmentsOfOneMapping_AreSeparateItems()
+    {
+        var first = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", "Id [1, 100)", "{}");
+        var second = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", "Id [100, 200)", "{}");
+        var duplicate = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", "Id [1, 100)", "{}");
+
+        Assert.NotEqual(first, second);
+        Assert.Equal(first, duplicate);
+        Assert.Equal(2, _taskRunStore.GetRunHistory("crm-sync").Count);
+    }
+
     [Fact]
     public void HasOutstandingWork_ReflectsPendingClaimedAndRunning_NotTerminal()
     {

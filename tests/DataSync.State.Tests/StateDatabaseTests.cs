@@ -27,15 +27,24 @@ public sealed class StateDatabaseTests : IDisposable
     public void ReopeningExistingDatabase_DoesNotRerunMigrations()
     {
         var dbPath = Path.Combine(_tempDir, "state.db");
-        _ = new StateDatabase(dbPath);
+        var first = new StateDatabase(dbPath);
+        var versionAfterFirstOpen = UserVersion(first);
 
         // A second StateDatabase against the same file must not fail by trying to CREATE TABLE again.
         var reopened = new StateDatabase(dbPath);
 
-        using var connection = reopened.OpenConnection();
+        // Asserted against the first open's own version rather than a hardcoded number, so that
+        // adding a migration doesn't require editing this test to keep testing the same thing.
+        Assert.True(versionAfterFirstOpen > 0, "Migrations should have been applied on first open.");
+        Assert.Equal(versionAfterFirstOpen, UserVersion(reopened));
+    }
+
+    private static long UserVersion(StateDatabase database)
+    {
+        using var connection = database.OpenConnection();
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "PRAGMA user_version;";
-        Assert.Equal(1L, Convert.ToInt64(cmd.ExecuteScalar()));
+        return Convert.ToInt64(cmd.ExecuteScalar());
     }
 
     [Fact]

@@ -33,11 +33,13 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     private readonly string _repoRoot = Directory.CreateTempSubdirectory("datasync-taskrunner-e2e-").FullName;
     private readonly string _sourceTable = $"Src_{Guid.NewGuid():N}";
     private readonly string _targetTable = $"Tgt_{Guid.NewGuid():N}";
+    private readonly string _reloadTargetTable = $"ReloadTgt_{Guid.NewGuid():N}";
 
     private ConfigRepository _configRepository = null!;
     private RunExecutor _executor = null!;
     private WorkQueueStore _workQueueStore = null!;
     private TaskRunStore _taskRunStore = null!;
+    private ChangeWatermarkStore _watermarkStore = null!;
     private SqlConnection _adminConnection = null!;
 
     public async Task InitializeAsync()
@@ -63,6 +65,9 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await ExecuteAsync(_adminConnection, $"""
             CREATE TABLE dbo.[{_targetTable}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);
             """);
+        await ExecuteAsync(_adminConnection, $"""
+            CREATE TABLE dbo.[{_reloadTargetTable}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);
+            """);
 
         var secretStore = SecretStore.ForProviders([new InMemorySecretProvider()]);
         var stateDatabase = new StateDatabase(Path.Combine(_repoRoot, "state.db"));
@@ -72,9 +77,10 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _configRepository = new ConfigRepository(Path.Combine(_repoRoot, "config"), new GitCommitService(_repoRoot), secretStore);
         _taskRunStore = new TaskRunStore(stateDatabase);
         _workQueueStore = new WorkQueueStore(stateDatabase);
+        _watermarkStore = new ChangeWatermarkStore(stateDatabase);
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore, _taskRunStore,
-            new ChangeWatermarkStore(stateDatabase), new RunLockStore(stateDatabase), _workQueueStore, new LogWriter(stateDatabase));
+            _watermarkStore, new RunLockStore(stateDatabase), _workQueueStore, new LogWriter(stateDatabase));
 
         SetUpConfig();
     }
@@ -177,5 +183,136 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
 
         Assert.Equal(RunStatus.Succeeded, secondRun.Status);
         Assert.Equal(new Dictionary<int, string> { [2] = "Robert", [3] = "Carol" }, await GetTargetRowsAsync());
+    }
+
+    private async Task<Dictionary<int, string>> GetRowsAsync(string table)
+    {
+        await using var cmd = _adminConnection.CreateCommand();
+        cmd.CommandText = $"SELECT Id, Name FROM dbo.[{table}];";
+        var results = new Dictionary<int, string>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            results[reader.GetInt32(0)] = reader.GetString(1);
+        return results;
+    }
+
+    private string WatermarkFor(string table) =>
+        _watermarkStore.GetWatermark("e2e-sync", WatermarkKey.Build(
+            new SourceTableRef { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = table }))!;
+
+    /// <summary>
+    /// The guarantee the whole per-mapping run model exists for: a backfill re-reads and re-applies
+    /// data the incremental sync has already processed, using a completely different reader and
+    /// writer, and the incremental sync's watermark comes out of it untouched. If it didn't, running
+    /// a backfill would silently make the replication re-process (or skip) changes afterwards.
+    /// </summary>
+    [Fact]
+    public async Task Backfill_UsesItsOwnPipelineOverSegment_AndLeavesTheIncrementalWatermarkAlone()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (7, 'Seven');");
+        await EnqueueAndDrainAsync();
+        var watermarkAfterIncremental = WatermarkFor(_sourceTable);
+
+        // Diverge the target from the source *behind* the incremental sync's back, the way a
+        // mis-applied change or an out-of-band edit would.
+        await ExecuteAsync(_adminConnection, $"UPDATE dbo.[{_targetTable}] SET Name = 'corrupted' WHERE Id = 1;");
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_targetTable}] (Id, Name) VALUES (3, 'never-existed');");
+
+        // Reload Ids [1, 5) only, with a reload reader and a reconciling writer — neither of which is
+        // what this replication is configured to use for its ongoing sync.
+        var segment = new RangeSegment("Id", "1", "5");
+        var backfillRunId = _workQueueStore.Enqueue(
+            "e2e-sync", RunKind.Backfill, "main", segment.Describe(), SegmentSerializer.Serialize(segment),
+            new WorkItemKinds(MsSqlDriverKinds.BatchReload, MsSqlDriverKinds.StagingTable, MsSqlDriverKinds.MergeReconcile));
+        await _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(backfillRunId)!.Status);
+
+        var rows = await GetRowsAsync(_targetTable);
+        Assert.Equal("One", rows[1]);                 // repaired
+        Assert.False(rows.ContainsKey(3));            // in the segment, absent from the source — removed
+        Assert.Equal("Seven", rows[7]);               // outside the segment — untouched
+
+        Assert.Equal(watermarkAfterIncremental, WatermarkFor(_sourceTable));
+    }
+
+    /// <summary>
+    /// A standalone reload replication has no watermark and no change feed — it re-reads its source
+    /// every pass, divided into the segments configured on its reader. Those are iterated within one
+    /// Primary pass, so the mapping still has exactly one run per pass rather than one per segment.
+    /// </summary>
+    [Fact]
+    public async Task StandaloneReloadReplication_IteratesEverySegmentConfiguredOnItsReader()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (5, 'Five'), (9, 'Nine'), (40, 'Forty');");
+
+        SetUpReloadReplication(SegmentSerializer.SerializeMany(
+            [new RangeSegment("Id", "1", "6"), new RangeSegment("Id", "6", "11")]));
+
+        var runId = _workQueueStore.Enqueue("reload-only", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("reload-only", degreeOfParallelism: 1, CancellationToken.None);
+
+        var run = _taskRunStore.GetRun(runId)!;
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        // Both segments contributed to the one run's totals; Id 40 is outside both and never read.
+        Assert.Equal(3, run.RowsRead);
+
+        var rows = await GetRowsAsync(_reloadTargetTable);
+        Assert.Equal(["One", "Five", "Nine"], rows.OrderBy(r => r.Key).Select(r => r.Value));
+    }
+
+    /// <summary>An Auto segment in a standalone reload's configured list is resolved against the
+    /// source's live value range at run time, not at config-save time — the range moves as the table
+    /// does, so pinning it when the config was written would go stale immediately.</summary>
+    [Fact]
+    public async Task StandaloneReloadReplication_ExpandsAnAutoSegmentAgainstTheLiveSource()
+    {
+        await ExecuteAsync(_adminConnection, $"""
+            INSERT INTO dbo.[{_sourceTable}] (Id, Name)
+            SELECT n, CONCAT('Row', n) FROM (VALUES (1),(2),(3),(4),(5),(6),(7),(8)) v(n);
+            """);
+
+        SetUpReloadReplication(SegmentSerializer.SerializeMany([new AutoSegment("Id", 3)]));
+
+        var runId = _workQueueStore.Enqueue("reload-only", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("reload-only", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
+        // Every row lands exactly once — the buckets have to tile the range and cover MAX for this
+        // count to come out right.
+        Assert.Equal(8, (await GetRowsAsync(_reloadTargetTable)).Count);
+    }
+
+    private void SetUpReloadReplication(string segmentsJson)
+    {
+        _configRepository.SaveReplicationTask(new ReplicationTaskConfig
+        {
+            Name = "reload-only",
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig
+                {
+                    Kind = MsSqlDriverKinds.BatchReload,
+                    Options = { [SegmentSerializer.SegmentsOptionKey] = segmentsJson },
+                },
+                Cache = new CacheConfig { Kind = MsSqlDriverKinds.StagingTable },
+                Writer = new WriterConfig { Kind = MsSqlDriverKinds.MergeReconcile },
+            },
+        }, Author);
+
+        _configRepository.SaveTableMapping("reload-only", new TableMappingConfig
+        {
+            Name = "main",
+            Sources = [new SourceTableRef { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableRef { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = _reloadTargetTable }],
+            ColumnMappings =
+            [
+                new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
+            ],
+        }, Author);
     }
 }

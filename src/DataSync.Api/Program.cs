@@ -50,8 +50,10 @@ builder.Services.AddSingleton(_ =>
     return registry;
 });
 
+builder.Services.AddSingleton<DriverConnectionFactory>();
 builder.Services.AddSingleton<MetadataService>();
 builder.Services.AddSingleton<ProcessSupervisor>();
+builder.Services.AddSingleton<BackfillService>();
 builder.Services.AddHostedService<SchedulerService>();
 builder.Services.AddHostedService<RunMonitorService>();
 

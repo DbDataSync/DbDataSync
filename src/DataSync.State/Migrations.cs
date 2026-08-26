@@ -92,5 +92,19 @@ internal static class Migrations
             ON WorkQueue(TaskName, RunKind, MappingName, SegmentLabel)
             WHERE Status IN ('Pending','Claimed','Running');
         """,
+
+        """
+        -- Per-item reader/cache/writer Kind overrides. A Backfill is not merely "the replication's
+        -- own pipeline, run again over a segment": a replication configured for incremental sync
+        -- reads with MsSqlChangeTracking and writes with the upsert-only MsSqlMerge, and reloading a
+        -- segment through those would be meaningless (the reader would report the segment's *changes
+        -- since a watermark* rather than its rows). A backfill has to select a reload reader and a
+        -- reconciling writer for itself, so which Kinds to use is a property of the unit of work, not
+        -- of the replication. NULL means "use whatever the replication's ChangeProcessing config
+        -- says", which is every Primary item. See phase-010-batch-reload-trigger-and-spa.md.
+        ALTER TABLE WorkQueue ADD COLUMN ReaderKind TEXT NULL;
+        ALTER TABLE WorkQueue ADD COLUMN CacheKind TEXT NULL;
+        ALTER TABLE WorkQueue ADD COLUMN WriterKind TEXT NULL;
+        """,
     ];
 }

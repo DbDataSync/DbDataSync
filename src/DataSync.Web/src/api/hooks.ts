@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { api } from './client'
-import type { ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
+import type { BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
   connections: ['connections'] as const,
   connection: (name: string) => ['connections', name] as const,
+  capabilities: (name: string) => ['connections', name, 'capabilities'] as const,
   databases: (connectionName: string) => ['metadata', connectionName, 'databases'] as const,
   tables: (connectionName: string, database: string) => ['metadata', connectionName, database, 'tables'] as const,
   columns: (connectionName: string, database: string, schema: string, table: string) =>
@@ -47,6 +48,58 @@ export function useDeleteConnection() {
     mutationFn: (name: string) => api.connections.delete(name),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.connections }),
   })
+}
+
+/**
+ * What the driver behind one connection supports. Cached hard: capabilities are fixed for the
+ * lifetime of the API process (they're derived from which drivers are registered in it), so
+ * refetching them on window focus would be pure noise.
+ */
+export function useCapabilities(connectionName: string | undefined) {
+  return useQuery({
+    queryKey: keys.capabilities(connectionName ?? ''),
+    queryFn: () => api.connections.capabilities(connectionName!),
+    enabled: !!connectionName,
+    staleTime: Infinity,
+  })
+}
+
+/**
+ * The reader/staging/writer Kinds available to one replication. Readers are resolved against its
+ * source connection's driver and staging/writers against its target's, since that is where each
+ * actually runs — taken from the replication's first table mapping.
+ *
+ * A replication with no mappings yet has no connections to ask, so it falls back to the first
+ * configured connection: with a single registered driver that is the same answer, and it keeps a
+ * brand-new replication's settings editable instead of showing empty pickers until a mapping exists.
+ */
+export function useReplicationCapabilities(replicationName: string | undefined) {
+  const { data: mappingNames } = useTableMappings(replicationName)
+  const { data: mapping } = useTableMapping(replicationName, mappingNames?.[0])
+  const { data: connections } = useConnections()
+
+  const fallbackConnection = connections?.[0]?.name
+  const source = useCapabilities(mapping?.sources[0]?.connectionName ?? fallbackConnection)
+  const target = useCapabilities(mapping?.targets[0]?.connectionName ?? fallbackConnection)
+
+  return {
+    readers: source.data?.readers ?? [],
+    stagingProviders: target.data?.stagingProviders ?? [],
+    writers: target.data?.writers ?? [],
+    isLoading: source.isLoading || target.isLoading,
+    error: source.error ?? target.error,
+  }
+}
+
+/**
+ * Capabilities to offer before a replication exists to resolve them against — creating one, where
+ * there are no table mappings and so no connections of its own yet. Uses the first configured
+ * connection: with one registered driver that is the same answer, and it is a far better default than
+ * a list of Kind strings compiled into this app, which would be a guess about the server's drivers.
+ */
+export function useDefaultCapabilities() {
+  const { data: connections } = useConnections()
+  return useCapabilities(connections?.[0]?.name)
 }
 
 export function useDatabases(connectionName: string | undefined) {
@@ -183,6 +236,19 @@ export function useTriggerRun(replicationName: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => api.runs.trigger(replicationName),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.runHistory(replicationName) }),
+  })
+}
+
+/**
+ * Queues a reload of one table mapping. Returns one RunId per segment — an Auto segment is expanded
+ * server-side, so a single submission can produce many independently-scheduled runs.
+ */
+export function useBackfill(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ mappingName, request }: { mappingName: string; request: BackfillRequest }) =>
+      api.runs.backfill(replicationName, mappingName, request),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.runHistory(replicationName) }),
   })
 }

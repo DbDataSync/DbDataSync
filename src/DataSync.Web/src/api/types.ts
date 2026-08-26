@@ -102,6 +102,55 @@ export interface ColumnMetadata {
   nativeType: string
   isNullable: boolean
   isPrimaryKey: boolean
+  isIdentity: boolean
+}
+
+// What the registered driver behind a connection actually supports. Queried live rather than
+// hardcoded per engine — see GET /api/connections/{name}/capabilities. Readers come from the
+// *source* connection's driver, staging providers and writers from the *target*'s.
+export interface ReaderCapability {
+  kind: string
+  supportsSegmentation: boolean
+}
+
+export interface StagingCapability {
+  kind: string
+}
+
+export interface WriterCapability {
+  kind: string
+  /** Removes target rows that are absent from the change set, within the scope it was given. False
+   * for upsert-only writers, which can add and update but never notice an absence. */
+  supportsReconciliation: boolean
+}
+
+export interface DriverCapabilities {
+  driverType: DriverType
+  readers: ReaderCapability[]
+  stagingProviders: StagingCapability[]
+  writers: WriterCapability[]
+}
+
+// Which slice of a source table one reload covers. The discriminator property is "mode", matching
+// DataSync.Drivers.Abstractions.BatchReloadSegment's JsonPolymorphic configuration exactly.
+export type SegmentMode = 'full' | 'list' | 'range' | 'auto'
+
+export type BatchReloadSegment =
+  | { mode: 'full' }
+  | { mode: 'list'; column: string; values: string[] }
+  /** Half-open: rangeMin inclusive, rangeMax exclusive. */
+  | { mode: 'range'; column: string; rangeMin: string; rangeMax: string }
+  /** Expanded server-side into bucketCount concrete range segments before anything is enqueued. */
+  | { mode: 'auto'; column: string; bucketCount: number }
+
+// A backfill is a run, not a config change — it produces no git commit, unlike every other write in
+// this API. Kinds are null to mean "use the replication's own configured pipeline"; a backfill of an
+// incrementally-synced replication has to override at least the reader.
+export interface BackfillRequest {
+  readerKind?: string | null
+  cacheKind?: string | null
+  writerKind?: string | null
+  segments: BatchReloadSegment[]
 }
 
 export type RunStatus = 'Queued' | 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'

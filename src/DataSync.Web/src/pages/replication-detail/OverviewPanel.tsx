@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
-import { useReplication, useUpsertReplication } from '../../api/hooks'
+import { KindSelect } from '../../components/KindSelect'
+import { readerOptions, stagingOptions, writerOptions } from '../../components/kindOptions'
+import { JsonOptionsEditor } from '../../components/JsonOptionsEditor'
+import { useReplication, useReplicationCapabilities, useUpsertReplication } from '../../api/hooks'
 import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
-import { READER_KINDS, CACHE_KINDS, WRITER_KINDS } from '../../driverKinds'
+
+type Role = 'reader' | 'cache' | 'writer'
 
 export function OverviewPanel({ replicationName }: { replicationName: string }) {
   const { data: task, error } = useReplication(replicationName)
+  const capabilities = useReplicationCapabilities(replicationName)
   const upsert = useUpsertReplication()
   const [draft, setDraft] = useState<ReplicationTaskConfig | null>(null)
+  // Roles whose Options textarea currently holds unparseable JSON. Save is blocked while any is
+  // invalid rather than saving a stale value the editor is no longer showing.
+  const [invalidOptions, setInvalidOptions] = useState<Role[]>([])
 
   useEffect(() => {
     if (task && !draft) setDraft(task)
@@ -22,6 +30,17 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
     )
   }
 
+  const setRole = (role: Role, patch: object) =>
+    setDraft({
+      ...draft,
+      changeProcessing: { ...draft.changeProcessing, [role]: { ...draft.changeProcessing[role], ...patch } },
+    })
+
+  const setOptions = (role: Role) => (options: Record<string, string> | null) => {
+    setInvalidOptions((prev) => (options === null ? [...new Set([...prev, role])] : prev.filter((r) => r !== role)))
+    if (options !== null) setRole(role, { options })
+  }
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     await upsert.mutateAsync({ name: replicationName, task: draft })
@@ -30,7 +49,7 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
   return (
     <div className="card">
       <h2>Settings</h2>
-      <ErrorBanner error={upsert.error} />
+      <ErrorBanner error={upsert.error ?? capabilities.error} />
       <form onSubmit={save} className="stack">
         <label className="row">
           <input
@@ -79,69 +98,61 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
             </div>
           )}
 
-          <div className="form-field">
-            <label>Reader</label>
-            <select
-              value={draft.changeProcessing.reader.kind}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  changeProcessing: {
-                    ...draft.changeProcessing,
-                    reader: { ...draft.changeProcessing.reader, kind: e.target.value },
-                  },
-                })
-              }
-            >
-              {READER_KINDS.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-field">
-            <label>Staging</label>
-            <select
-              value={draft.changeProcessing.cache.kind}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  changeProcessing: { ...draft.changeProcessing, cache: { ...draft.changeProcessing.cache, kind: e.target.value } },
-                })
-              }
-            >
-              {CACHE_KINDS.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-field">
-            <label>Writer</label>
-            <select
-              value={draft.changeProcessing.writer.kind}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  changeProcessing: { ...draft.changeProcessing, writer: { ...draft.changeProcessing.writer, kind: e.target.value } },
-                })
-              }
-            >
-              {WRITER_KINDS.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </div>
+          <KindSelect
+            label="Reader"
+            value={draft.changeProcessing.reader.kind}
+            options={readerOptions(capabilities.readers)}
+            onChange={(kind) => setRole('reader', { kind })}
+            testId="reader-kind-select"
+          />
+          <JsonOptionsEditor
+            label="Reader Options"
+            value={draft.changeProcessing.reader.options}
+            onChange={setOptions('reader')}
+            testId="reader-options-editor"
+          />
+
+          <KindSelect
+            label="Staging"
+            value={draft.changeProcessing.cache.kind}
+            options={stagingOptions(capabilities.stagingProviders)}
+            onChange={(kind) => setRole('cache', { kind })}
+            testId="cache-kind-select"
+          />
+          <JsonOptionsEditor
+            label="Staging Options"
+            value={draft.changeProcessing.cache.options}
+            onChange={setOptions('cache')}
+            testId="cache-options-editor"
+          />
+
+          <KindSelect
+            label="Writer"
+            value={draft.changeProcessing.writer.kind}
+            options={writerOptions(capabilities.writers)}
+            onChange={(kind) => setRole('writer', { kind })}
+            testId="writer-kind-select"
+          />
+          <JsonOptionsEditor
+            label="Writer Options"
+            value={draft.changeProcessing.writer.options}
+            onChange={setOptions('writer')}
+            testId="writer-options-editor"
+          />
         </div>
 
         <div className="form-actions">
-          <button type="submit" className="btn btn-primary" disabled={upsert.isPending} data-testid="save-settings-button">
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={upsert.isPending || invalidOptions.length > 0}
+            data-testid="save-settings-button"
+          >
             {upsert.isPending ? 'Saving…' : 'Save Settings'}
           </button>
+          {invalidOptions.length > 0 && (
+            <p className="field-error">Fix the invalid JSON in {invalidOptions.join(', ')} options before saving.</p>
+          )}
         </div>
       </form>
     </div>

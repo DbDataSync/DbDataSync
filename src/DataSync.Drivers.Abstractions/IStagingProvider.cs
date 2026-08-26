@@ -20,4 +20,19 @@ public interface IStagingProvider
         IReadOnlyList<ColumnMapping> columnMappings,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Discards a staged change set once it has been applied (or once applying it has failed).
+    /// <para>
+    /// Needed because one unit of work can stage more than once — a standalone reload replication
+    /// iterates its configured segments within a single pass — so staging can no longer rely on
+    /// connection teardown to clean up after it. It's also the prerequisite for reusing one
+    /// long-lived connection per consumer slot across many work items, flagged as a future
+    /// optimization in phase-008-work-queue-schema.md.
+    /// </para>
+    /// </summary>
+    Task CleanupAsync(
+        DbConnection targetConnection,
+        StagedChangeSet staged,
+        CancellationToken cancellationToken);
 }

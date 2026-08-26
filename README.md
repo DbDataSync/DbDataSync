@@ -84,6 +84,26 @@ Entirely through the UI:
 4. **Runs → Run Now** — watch the live log tail and status update in real time.
 5. **History** tab shows the git log of every config change DataSync auto-committed along the way.
 
+## Backfilling a table
+
+Incremental sync only ever applies what changed at the *source*. When a target has drifted for some
+other reason — a bad deploy, an out-of-band edit, a mapping that was wrong for a while — the fix is a
+backfill: **Runs → Backfill…**, which re-reads the source and makes the target match it.
+
+A backfill is scoped to one table mapping and, optionally, to one segment of it — a list of values, a
+range, or "split this column's range into N buckets," where each bucket becomes its own independently
+queued run. It never advances the incremental watermark, so it can be run against a live, scheduled
+replication without disturbing the ongoing sync.
+
+The reader/staging/writer pickers (here and in **Overview → Settings**) are populated from
+`GET /api/connections/{name}/capabilities`, which reports what the connection's registered driver
+actually supports — including which readers can be segmented and which writers *reconcile* (remove
+target rows the source no longer has) rather than only insert and update.
+
+A replication can also be a standalone reload rather than an incremental sync: set its reader to
+`MsSqlBatchReload` and give it a `segments` reader option (a JSON array of segment descriptors, edited
+in **Overview → Settings**) to re-read those segments on its normal schedule.
+
 ## Running the tests
 
 ```sh

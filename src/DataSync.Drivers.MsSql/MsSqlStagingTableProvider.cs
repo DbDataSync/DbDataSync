@@ -60,6 +60,16 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider
         return new StagedChangeSet(stagingTable, rowCount);
     }
 
+    public async Task CleanupAsync(
+        DbConnection targetConnection, StagedChangeSet staged, CancellationToken cancellationToken)
+    {
+        using var cmd = targetConnection.CreateCommand();
+        // The staging location is a name this provider generated itself (#Staging_{guid:N}), never
+        // anything caller-supplied, so interpolating it is safe here in a way it wouldn't be generally.
+        cmd.CommandText = $"DROP TABLE IF EXISTS {staged.StagingLocation};";
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task<long> BulkCopyAsync(
         DbConnection targetConnection,
         string stagingTable,

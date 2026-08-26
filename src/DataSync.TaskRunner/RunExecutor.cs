@@ -143,7 +143,8 @@ public sealed class RunExecutor(
 
         workQueueStore.MarkRunning(item.Id);
         taskRunStore.BeginRun(item.RunId, Environment.ProcessId);
-        Log(item.RunId, LogSeverity.Info, $"Run started for mapping '{item.MappingName}' ({item.RunKind}).");
+        var scope = item.SegmentLabel == WorkQueueStore.NoSegment ? "" : $", segment {item.SegmentLabel}";
+        Log(item.RunId, LogSeverity.Info, $"Run started for mapping '{item.MappingName}' ({item.RunKind}{scope}).");
 
         try
         {
@@ -199,6 +200,7 @@ public sealed class RunExecutor(
     {
         var source = mapping.Sources[0];
         var target = mapping.Targets[0];
+        var processing = task.ChangeProcessing;
 
         DbConnection? sourceConnection = null;
         DbConnection? targetConnection = null;
@@ -207,15 +209,24 @@ public sealed class RunExecutor(
             (sourceConnection, var sourceDriver) = await OpenConnectionAsync(source.ConnectionName, cancellationToken);
             (targetConnection, var targetDriver) = await OpenConnectionAsync(target.ConnectionName, cancellationToken);
 
-            var reader = sourceDriver.Readers.FirstOrDefault(r => r.Kind == task.ChangeProcessing.Reader.Kind)
-                ?? throw new InvalidOperationException(
-                    $"Source driver does not support reader kind '{task.ChangeProcessing.Reader.Kind}'.");
-            var stagingProvider = targetDriver.StagingProviders.FirstOrDefault(p => p.Kind == task.ChangeProcessing.Cache.Kind)
-                ?? throw new InvalidOperationException(
-                    $"Target driver does not support staging kind '{task.ChangeProcessing.Cache.Kind}'.");
-            var writer = targetDriver.Writers.FirstOrDefault(w => w.Kind == task.ChangeProcessing.Writer.Kind)
-                ?? throw new InvalidOperationException(
-                    $"Target driver does not support writer kind '{task.ChangeProcessing.Writer.Kind}'.");
+            // A unit of work may override the replication's configured pipeline. It's how a Backfill
+            // of an incrementally-synced replication reloads a segment at all: the replication's own
+            // reader reports changes since a watermark, which is not what reloading a segment means.
+            var readerKind = item.Kinds.ReaderKind ?? processing.Reader.Kind;
+            var cacheKind = item.Kinds.CacheKind ?? processing.Cache.Kind;
+            var writerKind = item.Kinds.WriterKind ?? processing.Writer.Kind;
+
+            var reader = sourceDriver.Readers.FirstOrDefault(r => r.Kind == readerKind)
+                ?? throw new InvalidOperationException($"Source driver does not support reader kind '{readerKind}'.");
+            var stagingProvider = targetDriver.StagingProviders.FirstOrDefault(p => p.Kind == cacheKind)
+                ?? throw new InvalidOperationException($"Target driver does not support staging kind '{cacheKind}'.");
+            var writer = targetDriver.Writers.FirstOrDefault(w => w.Kind == writerKind)
+                ?? throw new InvalidOperationException($"Target driver does not support writer kind '{writerKind}'.");
+
+            if (item.Kinds != WorkItemKinds.FromConfig)
+                Log(item.RunId, LogSeverity.Info,
+                    $"Using reader '{readerKind}', cache '{cacheKind}', writer '{writerKind}' for this {item.RunKind} " +
+                    $"(the replication itself is configured for '{processing.Reader.Kind}'/'{processing.Cache.Kind}'/'{processing.Writer.Kind}').");
 
             // Only a Primary pass ever advances the incremental watermark — a Backfill must never be
             // able to disturb the cursor a replication's ongoing incremental sync depends on,
@@ -223,22 +234,55 @@ public sealed class RunExecutor(
             var watermarkKey = WatermarkKey.Build(source);
             var previousWatermark = item.RunKind == RunKind.Primary ? watermarkStore.GetWatermark(task.Name, watermarkKey) : null;
 
-            Log(item.RunId, LogSeverity.Info, $"Reading changes for '{mapping.Name}' (watermark: {previousWatermark ?? "<none>"}).");
-            var read = await reader.ReadChangesAsync(
-                sourceConnection, source, previousWatermark, task.ChangeProcessing.Reader.Options, cancellationToken);
+            var segments = await ResolveSegmentsAsync(reader, sourceConnection, source, item, processing.Reader.Options, cancellationToken);
+            if (segments.Count > 1)
+                Log(item.RunId, LogSeverity.Info, $"Processing {segments.Count} configured segment(s) in this pass.");
 
-            var staged = await stagingProvider.StageAsync(
-                targetConnection, target, read.Rows, mapping.ColumnMappings, task.ChangeProcessing.Cache.Options, cancellationToken);
+            long totalRead = 0;
+            long totalWritten = 0;
+            string? newWatermark = null;
 
-            var written = await writer.ApplyAsync(
-                targetConnection, target, staged, mapping.ColumnMappings, task.ChangeProcessing.Writer.Options, cancellationToken);
+            foreach (var segment in segments)
+            {
+                var readerOptions = WithSegment(processing.Reader.Options, segment);
+                var cacheOptions = WithSegment(processing.Cache.Options, segment);
+                var writerOptions = WithSegment(processing.Writer.Options, segment);
 
-            if (item.RunKind == RunKind.Primary)
-                watermarkStore.SetWatermark(task.Name, watermarkKey, read.NewWatermark);
+                var scope = segment?.Describe() ?? "whole table";
+                Log(item.RunId, LogSeverity.Info,
+                    $"Reading changes for '{mapping.Name}' ({scope}, watermark: {previousWatermark ?? "<none>"}).");
 
-            Log(item.RunId, LogSeverity.Info,
-                $"'{mapping.Name}': {staged.RowCount} row(s) read, {written.RowsWritten} row(s) written.");
-            return (staged.RowCount, written.RowsWritten);
+                var read = await reader.ReadChangesAsync(sourceConnection, source, previousWatermark, readerOptions, cancellationToken);
+                var staged = await stagingProvider.StageAsync(
+                    targetConnection, target, read.Rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
+
+                try
+                {
+                    var written = await writer.ApplyAsync(
+                        targetConnection, target, staged, mapping.ColumnMappings, writerOptions, cancellationToken);
+
+                    totalRead += staged.RowCount;
+                    totalWritten += written.RowsWritten;
+                    Log(item.RunId, LogSeverity.Info,
+                        $"'{mapping.Name}' ({scope}): {staged.RowCount} row(s) read, {written.RowsWritten} row(s) written.");
+                }
+                finally
+                {
+                    // One pass can stage several times, so the staged set has to be discarded as it
+                    // goes rather than left for connection teardown to deal with.
+                    await stagingProvider.CleanupAsync(targetConnection, staged, CancellationToken.None);
+                }
+
+                newWatermark = read.NewWatermark;
+            }
+
+            // Segmented passes only ever happen with a reload reader, which has no watermark of its
+            // own and echoes back whatever it was given — so taking the last segment's value is the
+            // same as taking any of them. An ordinary incremental pass has exactly one segment (none).
+            if (item.RunKind == RunKind.Primary && newWatermark is not null)
+                watermarkStore.SetWatermark(task.Name, watermarkKey, newWatermark);
+
+            return (totalRead, totalWritten);
         }
         finally
         {
@@ -246,6 +290,51 @@ public sealed class RunExecutor(
             targetConnection?.Dispose();
         }
     }
+
+    /// <summary>
+    /// What this unit of work should read, in order. Either exactly one segment carried on the work
+    /// item itself (a Backfill — the API expanded and enqueued one item per segment), or the static
+    /// segment list a standalone reload replication configures on its reader (iterated within this
+    /// one pass), or a single null meaning "no segment, read the whole thing" — every ordinary
+    /// incremental pass.
+    /// </summary>
+    private static async Task<IReadOnlyList<BatchReloadSegment?>> ResolveSegmentsAsync(
+        IChangeReader reader,
+        DbConnection sourceConnection,
+        SourceTableRef source,
+        WorkItem item,
+        IReadOnlyDictionary<string, string> readerOptions,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(item.SegmentJson))
+            return [SegmentSerializer.Deserialize(item.SegmentJson)];
+
+        if (!readerOptions.TryGetValue(SegmentSerializer.SegmentsOptionKey, out var configured) || string.IsNullOrWhiteSpace(configured))
+            return [null];
+
+        var segments = SegmentSerializer.DeserializeMany(configured);
+
+        // Auto segments are resolved against the source's actual value range, so they're expanded
+        // here rather than at config-save time — the range moves as the table does.
+        if (reader is ISegmentExpandingReader expanding)
+            segments = await expanding.ExpandAutoSegmentsAsync(sourceConnection, source, segments, cancellationToken);
+
+        return [.. segments];
+    }
+
+    /// <summary>Injects the work item's segment into a per-iteration copy of one role's options under
+    /// the well-known key. All three roles get it: the reader needs it to scope what it reads, and a
+    /// reconciling writer needs the same scope to know which target rows the reload is accountable
+    /// for. The configured options dictionary is never mutated — it's shared across every item this
+    /// worker processes.</summary>
+    private static IReadOnlyDictionary<string, string> WithSegment(
+        IReadOnlyDictionary<string, string> options, BatchReloadSegment? segment) =>
+        segment is null
+            ? options
+            : new Dictionary<string, string>(options, StringComparer.Ordinal)
+            {
+                [SegmentSerializer.SegmentOptionKey] = SegmentSerializer.Serialize(segment),
+            };
 
     private async Task<(DbConnection Connection, IDriver Driver)> OpenConnectionAsync(
         string connectionName, CancellationToken cancellationToken)

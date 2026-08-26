@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ErrorBanner } from '../components/ErrorBanner'
-import { useReplication, useReplications, useUpsertReplication } from '../api/hooks'
+import { useDefaultCapabilities, useReplication, useReplications, useUpsertReplication } from '../api/hooks'
 import type { ReplicationTaskConfig, ScheduleMode } from '../api/types'
-import { READER_KINDS, CACHE_KINDS, WRITER_KINDS } from '../driverKinds'
 
 function ReplicationRow({ name }: { name: string }) {
   const { data } = useReplication(name)
@@ -26,6 +25,7 @@ function ReplicationRow({ name }: { name: string }) {
 
 export function ReplicationsPage() {
   const { data: names, isLoading, error } = useReplications()
+  const { data: capabilities } = useDefaultCapabilities()
   const upsert = useUpsertReplication()
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
@@ -34,8 +34,19 @@ export function ReplicationsPage() {
   const [frequencySeconds, setFrequencySeconds] = useState(60)
   const [cronExpression, setCronExpression] = useState('0 * * * *')
 
+  // The pipeline a new replication starts with comes from the driver's own advertised Kinds, in the
+  // order it advertises them, rather than from defaults hardcoded here — the same reason every Kind
+  // picker is fed from the capabilities endpoint. Until a connection exists there is no driver to ask.
+  const defaults = capabilities && {
+    reader: capabilities.readers[0]?.kind,
+    cache: capabilities.stagingProviders[0]?.kind,
+    writer: capabilities.writers[0]?.kind,
+  }
+  const canCreate = !!defaults?.reader && !!defaults.cache && !!defaults.writer
+
   const create = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canCreate) return
     const task: ReplicationTaskConfig = {
       name,
       enabled: true,
@@ -44,9 +55,9 @@ export function ReplicationsPage() {
           ? { mode, frequencySeconds, cronExpression: null }
           : { mode, frequencySeconds: null, cronExpression },
       changeProcessing: {
-        reader: { kind: READER_KINDS[0], parallelism: 1, options: {} },
-        cache: { kind: CACHE_KINDS[0], options: {} },
-        writer: { kind: WRITER_KINDS[0], parallelism: 1, options: {} },
+        reader: { kind: defaults!.reader!, parallelism: 1, options: {} },
+        cache: { kind: defaults!.cache!, options: {} },
+        writer: { kind: defaults!.writer!, parallelism: 1, options: {} },
       },
     }
     await upsert.mutateAsync({ name, task })
@@ -127,12 +138,24 @@ export function ReplicationsPage() {
                 </div>
               )}
             </div>
-            <p className="muted">
-              Reader/cache/writer default to Change Tracking + staging table + MERGE — adjustable from the
-              replication's detail page.
-            </p>
+            {canCreate ? (
+              <p className="muted">
+                Reader/cache/writer default to <code>{defaults!.reader}</code> + <code>{defaults!.cache}</code> +{' '}
+                <code>{defaults!.writer}</code> — adjustable from the replication's detail page.
+              </p>
+            ) : (
+              <p className="field-error" data-testid="no-capabilities-warning">
+                Add a connection first — which readers, staging providers and writers are available comes
+                from its driver.
+              </p>
+            )}
             <div className="form-actions">
-              <button type="submit" className="btn btn-primary" disabled={upsert.isPending} data-testid="create-replication-button">
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={upsert.isPending || !canCreate}
+                data-testid="create-replication-button"
+              >
                 {upsert.isPending ? 'Creating…' : 'Create'}
               </button>
               <button type="button" className="btn" onClick={() => setCreating(false)}>
