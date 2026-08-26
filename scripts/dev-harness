@@ -1,0 +1,29 @@
+#!/usr/bin/env sh
+# Thin launcher for tools/DataSync.DevHarness. See `scripts/dev-harness help`.
+#
+# Builds only if the tool is missing or older than its sources, so the common case (running a verb
+# repeatedly while the environment is up) doesn't pay a build on every invocation.
+set -e
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(dirname "$script_dir")
+project="$repo_root/tools/DataSync.DevHarness/DataSync.DevHarness.csproj"
+assembly="$repo_root/tools/DataSync.DevHarness/bin/Debug/net10.0/DataSync.DevHarness.dll"
+
+needs_build=0
+if [ ! -f "$assembly" ]; then
+  needs_build=1
+else
+  # -newer is POSIX-ish enough for the shells this runs under, and a false negative only costs a
+  # stale run the operator can fix with an explicit `dotnet build`.
+  for source in "$repo_root"/tools/DataSync.DevHarness/*.cs "$project"; do
+    [ "$source" -nt "$assembly" ] && needs_build=1 && break
+  done
+fi
+
+if [ "$needs_build" -eq 1 ]; then
+  echo "Building the dev harness..." >&2
+  dotnet build "$project" -v quiet --nologo >&2
+fi
+
+exec dotnet exec "$assembly" "$@"

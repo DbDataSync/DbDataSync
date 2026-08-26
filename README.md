@@ -8,6 +8,34 @@ demand.
 v1 supports MSSQL → MSSQL. See `architecture/planning/overview.md` for the broader ambition and
 `architecture/detailed-design.md` for the full system design.
 
+## Quick start: the dev harness
+
+To get a working environment without following the manual steps below, one command does the lot —
+containers, databases, seed data, the API, the SPA, and a configured replication:
+
+```sh
+scripts/dev-harness up          # scripts\dev-harness up on Windows
+```
+
+Open `http://localhost:5173` and pick the `dev-sync` replication. Ctrl+C stops the API and SPA
+(the containers keep running; `scripts/dev-harness down` stops those).
+
+In another terminal, put real traffic through it:
+
+```sh
+scripts/dev-harness seed --rows 25000            # bulk-load the source
+scripts/dev-harness workload --rate 20 --duration 2m   # live inserts/updates/deletes
+scripts/dev-harness verify                       # compare source and target row by row
+scripts/dev-harness drift                        # corrupt the target behind the replication's back
+```
+
+`drift` is the quickest way to see why batch reload exists: it changes the *target* only, so Change
+Tracking has nothing to report and no incremental run will ever repair it — `verify` keeps failing
+until you trigger a backfill with a reconciling writer.
+
+`scripts/dev-harness help` lists every verb and option. The tool itself is
+`tools/DataSync.DevHarness`; see `architecture/implementation/done/phase-011-dev-harness.md`.
+
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
@@ -134,5 +162,7 @@ Screenshots of each screen land in `tests/DataSync.Web.Tests/screenshots/`.
 - `src/DataSync.Drivers.Abstractions` / `src/DataSync.Drivers.MsSql` — the driver interfaces and the
   v1 MSSQL implementation (Change Tracking reader, staging-table cache, merge writer).
 - `src/DataSync.TaskRunner` — the console process actually spawned per replication run.
+- `tools/DataSync.DevHarness` — the dev harness above (environment setup, workload generation,
+  drift injection, source/target verification). Not part of the shipped product.
 - `architecture/` — design docs; `architecture/implementation/` has a written summary of each build
   phase, including real bugs found and how they were fixed.
