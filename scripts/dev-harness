@@ -1,17 +1,26 @@
 #!/usr/bin/env sh
 # Launcher for tools/DataSync.DevHarness. See `scripts/dev-harness help`.
 #
-# `dotnet run` handles the incremental build itself, including changes in referenced projects such as
-# DataSync.Core — which is why there's no staleness check here. It also forwards SIGINT/SIGTERM to the
-# app and propagates its exit code, both of which this tool depends on: `up` tears its child processes
-# down on a stop signal, and `verify` reports pass/fail through its exit code.
+# `dotnet build` unconditionally, then `exec` into the built assembly. Two deliberate choices:
 #
-# (`dotnet run` spawns the app as a separate child process. That matters where the *parent* kills it
-# programmatically, since killing the wrapper doesn't reliably kill the app — which is why
-# AppProcesses starts the API with `dotnet exec` on the built DLL instead. It doesn't matter here: the
-# OS delivers the signal, and `dotnet run` passes it on.)
+#   * Build every time, with no staleness check of our own. MSBuild already decides correctly what
+#     needs rebuilding, including changes in referenced projects such as DataSync.Core — which a
+#     hand-rolled check here got wrong, silently running a stale binary.
+#
+#   * `dotnet exec` on the DLL rather than `dotnet run`, and `exec` so this script's own shell is
+#     replaced. Both exist to make the harness exactly ONE process. `dotnet run` forks the app as a
+#     child of a wrapper, so the pid a developer finds with `pgrep` (or an IDE's stop button targets)
+#     is the wrapper, not the harness: SIGKILL it and the harness survives, reparented, still holding
+#     ports 5183/5173 and the scratch state database. That's the same wrapper hazard
+#     AppProcesses.StartApi and playwright.config.ts already avoid, for the same reason.
+#
+# Build output goes to stderr so a verb's own stdout stays clean for piping (`verify` in particular).
 set -e
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(dirname "$script_dir")
+project="$repo_root/tools/DataSync.DevHarness/DataSync.DevHarness.csproj"
 
-exec dotnet run --project "$script_dir/../tools/DataSync.DevHarness" -- "$@"
+dotnet build "$project" -v quiet --nologo >&2
+
+exec dotnet exec "$repo_root/tools/DataSync.DevHarness/bin/Debug/net10.0/DataSync.DevHarness.dll" "$@"
