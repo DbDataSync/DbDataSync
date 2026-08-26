@@ -19,7 +19,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
-        string? previousCursor,
+        string? previousWatermark,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -27,21 +27,21 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
 
         var targetVersion = await GetCurrentVersionAsync(sourceConnection, cancellationToken);
 
-        if (previousCursor is not null)
+        if (previousWatermark is not null)
         {
             var minValidVersion = await GetMinValidVersionAsync(sourceConnection, source, cancellationToken);
-            if (long.Parse(previousCursor) < minValidVersion)
+            if (long.Parse(previousWatermark) < minValidVersion)
             {
                 throw new InvalidOperationException(
                     $"Change Tracking history for '{source.Schema}.{source.Table}' no longer covers " +
-                    $"cursor '{previousCursor}' (minimum valid version is {minValidVersion}). " +
+                    $"watermark '{previousWatermark}' (minimum valid version is {minValidVersion}). " +
                     "A full resync is required — clear the stored watermark for this table.");
             }
         }
 
-        var rows = previousCursor is null
+        var rows = previousWatermark is null
             ? ReadFullLoadAsync(sourceConnection, source, cancellationToken)
-            : ReadIncrementalAsync(sourceConnection, source, long.Parse(previousCursor), targetVersion, cancellationToken);
+            : ReadIncrementalAsync(sourceConnection, source, long.Parse(previousWatermark), targetVersion, cancellationToken);
 
         return new ReadResult(rows, targetVersion.ToString());
     }

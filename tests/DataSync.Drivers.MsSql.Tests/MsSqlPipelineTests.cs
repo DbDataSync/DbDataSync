@@ -63,12 +63,12 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
     private SourceTableRef Source() => new() { ConnectionName = "src", Database = db.DatabaseName, Schema = "dbo", Table = _sourceTable };
     private TableRef Target() => new() { ConnectionName = "tgt", Database = db.DatabaseName, Schema = "dbo", Table = _targetTable };
 
-    private async Task<(long RowsWritten, string Cursor)> RunOnceAsync(string? previousCursor)
+    private async Task<(long RowsWritten, string Watermark)> RunOnceAsync(string? previousWatermark)
     {
-        var read = await _reader.ReadChangesAsync(_sourceConnection, Source(), previousCursor, new Dictionary<string, string>(), CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_sourceConnection, Source(), previousWatermark, new Dictionary<string, string>(), CancellationToken.None);
         var staged = await _staging.StageAsync(_targetConnection, Target(), read.Rows, Mappings, new Dictionary<string, string>(), CancellationToken.None);
         var written = await _writer.ApplyAsync(_targetConnection, Target(), staged, Mappings, new Dictionary<string, string>(), CancellationToken.None);
-        return (written.RowsWritten, read.NewCursor);
+        return (written.RowsWritten, read.NewWatermark);
     }
 
     private async Task<Dictionary<int, string>> GetTargetRowsAsync()
@@ -87,7 +87,7 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
     {
         await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name, Amount) VALUES (1, 'Alice', 10.50), (2, 'Bob', 20.00);");
 
-        var (written1, cursor1) = await RunOnceAsync(null);
+        var (written1, watermark1) = await RunOnceAsync(null);
         Assert.Equal(2, written1);
 
         var afterFullLoad = await GetTargetRowsAsync();
@@ -99,7 +99,7 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
         await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'Robert', Amount = 25.00 WHERE Id = 2;");
         await ExecuteAsync(_sourceConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 1;");
 
-        var (written2, _) = await RunOnceAsync(cursor1);
+        var (written2, _) = await RunOnceAsync(watermark1);
         Assert.Equal(3, written2); // 1 insert + 1 update + 1 delete = 3 MERGE-affected rows
 
         var finalRows = await GetTargetRowsAsync();
@@ -113,9 +113,9 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
     public async Task Incremental_WithNoSourceChanges_WritesNothing()
     {
         await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name, Amount) VALUES (1, 'Alice', 10.50);");
-        var (_, cursor) = await RunOnceAsync(null);
+        var (_, watermark) = await RunOnceAsync(null);
 
-        var (written, _) = await RunOnceAsync(cursor);
+        var (written, _) = await RunOnceAsync(watermark);
 
         Assert.Equal(0, written);
     }

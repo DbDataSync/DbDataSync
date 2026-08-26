@@ -8,33 +8,38 @@ namespace DataSync.Drivers.MsSql;
 
 /// <summary>
 /// Generic fallback reader for tables without Change Tracking/CDC enabled: reads rows where a
-/// configured watermark column exceeds the previous cursor. Cannot detect deletes — a row removed
+/// configured watermark column exceeds the previous watermark. Cannot detect deletes — a row removed
 /// from the source is simply never seen again, it does not surface as a Delete change. All rows are
 /// tagged <see cref="ChangeOperation.Insert"/>; downstream writers that upsert treat Insert/Update
 /// alike, so this only matters if a writer ever needs to distinguish them (none currently do).
+/// <para>
+/// Not to be confused with a future "batch reload" — a full or list/range-segmented backfill of a
+/// table, a distinct not-yet-built concept (see architecture/implementation-plan.md's backlog). This
+/// reader is the ongoing incremental-sync fallback for tables without change-tracking metadata.
+/// </para>
 /// </summary>
-public sealed class MsSqlBatchReader : IChangeReader
+public sealed class MsSqlWatermarkReader : IChangeReader
 {
-    public string Kind => MsSqlDriverKinds.Batch;
+    public string Kind => MsSqlDriverKinds.Watermark;
 
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
-        string? previousCursor,
+        string? previousWatermark,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
         if (!options.TryGetValue("watermarkColumn", out var watermarkColumn) || string.IsNullOrWhiteSpace(watermarkColumn))
-            throw new InvalidOperationException("The 'watermarkColumn' option is required for the Batch reader.");
+            throw new InvalidOperationException("The 'watermarkColumn' option is required for the Watermark reader.");
 
         sourceConnection.ChangeDatabase(source.Database);
 
-        var newCursor = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken)
-            ?? previousCursor
+        var newWatermark = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken)
+            ?? previousWatermark
             ?? "0";
 
-        var rows = ReadRowsAsync(sourceConnection, source, watermarkColumn, previousCursor, cancellationToken);
-        return new ReadResult(rows, newCursor);
+        var rows = ReadRowsAsync(sourceConnection, source, watermarkColumn, previousWatermark, cancellationToken);
+        return new ReadResult(rows, newWatermark);
     }
 
     private static async Task<string?> GetMaxWatermarkAsync(
@@ -54,11 +59,11 @@ public sealed class MsSqlBatchReader : IChangeReader
         DbConnection connection,
         SourceTableRef source,
         string watermarkColumn,
-        string? previousCursor,
+        string? previousWatermark,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var quotedColumn = SqlIdentifier.Quote(watermarkColumn);
-        var predicate = previousCursor is null ? "1 = 1" : $"{quotedColumn} > @previousCursor";
+        var predicate = previousWatermark is null ? "1 = 1" : $"{quotedColumn} > @previousWatermark";
         var userFilter = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" AND ({source.Filter})";
 
         using var cmd = connection.CreateCommand();
@@ -67,8 +72,8 @@ public sealed class MsSqlBatchReader : IChangeReader
             WHERE {predicate}{userFilter}
             ORDER BY {quotedColumn};
             """;
-        if (previousCursor is not null)
-            cmd.AddParameter("@previousCursor", previousCursor);
+        if (previousWatermark is not null)
+            cmd.AddParameter("@previousWatermark", previousWatermark);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))

@@ -25,7 +25,7 @@ public interface IChangeReader
     Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
-        string? previousCursor,
+        string? previousWatermark,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken);
 }

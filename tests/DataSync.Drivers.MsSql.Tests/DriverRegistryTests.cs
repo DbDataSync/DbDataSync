@@ -34,7 +34,7 @@ public sealed class DriverRegistryTests
 
     [Theory]
     [InlineData(MsSqlDriverKinds.ChangeTracking, true)]
-    [InlineData(MsSqlDriverKinds.Batch, true)]
+    [InlineData(MsSqlDriverKinds.Watermark, true)]
     [InlineData("NotARealKind", false)]
     public void SupportsReader_ReflectsRegisteredDriverCapabilities(string kind, bool expected)
     {

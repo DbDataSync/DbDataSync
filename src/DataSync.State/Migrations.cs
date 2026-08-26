@@ -32,7 +32,7 @@ internal static class Migrations
         CREATE TABLE ChangeWatermarks (
             TaskName TEXT NOT NULL,
             SourceTable TEXT NOT NULL,
-            Cursor TEXT NOT NULL,
+            Watermark TEXT NOT NULL,
             UpdatedAtUtc TEXT NOT NULL,
             PRIMARY KEY (TaskName, SourceTable)
         );

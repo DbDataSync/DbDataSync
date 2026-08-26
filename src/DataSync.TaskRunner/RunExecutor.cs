@@ -119,11 +119,11 @@ public sealed class RunExecutor(
                         $"Target driver does not support writer kind '{task.ChangeProcessing.Writer.Kind}'.");
 
                 var watermarkKey = WatermarkKey.Build(source);
-                var previousCursor = watermarkStore.GetWatermark(task.Name, watermarkKey);
+                var previousWatermark = watermarkStore.GetWatermark(task.Name, watermarkKey);
 
-                Log(runId, LogSeverity.Info, $"Reading changes for '{mapping.Name}' (cursor: {previousCursor ?? "<none>"}).");
+                Log(runId, LogSeverity.Info, $"Reading changes for '{mapping.Name}' (watermark: {previousWatermark ?? "<none>"}).");
                 var read = await reader.ReadChangesAsync(
-                    sourceConnection, source, previousCursor, task.ChangeProcessing.Reader.Options, cancellationToken);
+                    sourceConnection, source, previousWatermark, task.ChangeProcessing.Reader.Options, cancellationToken);
 
                 var staged = await stagingProvider.StageAsync(
                     targetConnection, target, read.Rows, mapping.ColumnMappings, task.ChangeProcessing.Cache.Options, cancellationToken);
@@ -131,7 +131,7 @@ public sealed class RunExecutor(
                 var written = await writer.ApplyAsync(
                     targetConnection, target, staged, mapping.ColumnMappings, task.ChangeProcessing.Writer.Options, cancellationToken);
 
-                watermarkStore.SetWatermark(task.Name, watermarkKey, read.NewCursor);
+                watermarkStore.SetWatermark(task.Name, watermarkKey, read.NewWatermark);
 
                 totalRowsRead += staged.RowCount;
                 totalRowsWritten += written.RowsWritten;

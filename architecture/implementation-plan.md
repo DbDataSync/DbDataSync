@@ -73,7 +73,8 @@ persistence used by both the API and every Task Runner process.
 - `DataSync.Drivers.MsSql`:
   - Metadata introspection (databases/tables/columns/types).
   - Change Tracking reader (build first — see `detailed-design.md` §3.5 for rationale).
-  - Generic batch reader (`WHERE x > y`) as the no-CT/CDC fallback.
+  - Generic watermark reader (`WHERE x > y` against a configured watermark column) as the no-CT/CDC
+    fallback.
   - CDC reader (added once Change Tracking path is proven).
   - Staging table writer via `SqlBulkCopy`.
   - `MERGE`-based writer from staging table to target; ordered insert/update/delete as fallback path.
@@ -150,6 +151,12 @@ for someone else to stand up.
 
 Not scheduled; recorded so scope stays deliberate:
 
+- **CDC reader** for MSSQL — deferred during Phase 3 (Change Tracking + the watermark fallback were
+  enough to complete the v1 pipeline); see `architecture/implementation/phase-3-mssql-driver.md`'s
+  Notes section for the original deferral rationale.
+- **Batch reload** — a full or list/range-segmented reload/backfill of a table, distinct from the
+  ongoing incremental `IChangeReader`s above (Change Tracking, the watermark fallback, and the
+  deferred CDC reader all describe *incremental* sync). Not yet designed or built.
 - Additional source/target database engine drivers (Postgres, MySQL, Oracle, etc.).
 - Parquet (or other generic) staging provider.
 - Alternate `DataSync.State` backends beyond SQLite.

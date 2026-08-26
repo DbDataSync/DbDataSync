@@ -126,9 +126,11 @@ Pipeline, all stages driven by the driver abstraction (§3.4):
 3. **Change Cache / Staging** — persist the change set using whichever staging method the task
    config selects (v1: target-specific staging tables; parquet/generic staging deferred, §5).
 4. **Change Writer** — apply the staged changes to the target (merge statement, or ordered
-   insert/update/delete, or batch delete+reload, depending on what the writer/config selects).
-5. **Watermark update** — record the new change-tracking cursor/LSN/version per source table in the
-   central SQLite `ChangeWatermarks` table, so the next run resumes from the right point.
+   insert/update/delete, or a batch reload — full delete+reload — depending on what the writer/config
+   selects).
+5. **Watermark update** — record the new watermark (change-tracking version/LSN, or a plain
+   watermark-column value for the fallback reader) per source table in the central SQLite
+   `ChangeWatermarks` table, so the next run resumes from the right point.
 6. **Run completion** — write final status, row counts, and any error to `TaskRuns`; exit with a
    status code reflecting success/failure so the Supervisor doesn't need to parse output to know the
    outcome.
@@ -166,8 +168,11 @@ The only driver implemented in v1, built against the abstractions above:
      capture job/log reader involved).
   2. **CDC** (higher fidelity — captures intermediate updates/deletes CT can miss — added once CT
      path is proven).
-  3. **Generic batch** (`WHERE x > y` against a watermark column) as a fallback for tables without
-     CT/CDC enabled.
+  3. **Watermark** (`WHERE x > y` against a configured watermark column) as a fallback for tables
+     without CT/CDC enabled. Not to be confused with a **batch reload** — a distinct, not-yet-built
+     concept for a full or list/range-segmented backfill of a table (see Phase 8 backlog in
+     `implementation-plan.md`); this reader is the ongoing incremental-sync fallback, not a reload
+     mechanism.
 - **Staging**: target-specific staging table populated via `SqlBulkCopy`, created/truncated per run.
 - **Writer**: `MERGE` statement from the staging table into the target as the primary path; ordered
   insert/update/delete statements as a fallback for targets/scenarios where `MERGE` is unsuitable.
@@ -219,7 +224,7 @@ A single SQLite database file, shared by `DataSync.Api` and every `DataSync.Task
 |---|---|
 | `Tasks` | One row per configured replication task (mirrors config, for fast joins/reporting — config file remains source of truth). |
 | `TaskRuns` | One row per run: run id, task id, PID, start/end time, status (`Pending`/`Running`/`Succeeded`/`Failed`/`Cancelled`), rows read/written, error summary. |
-| `ChangeWatermarks` | Per task + source table: last-processed change-tracking cursor/LSN/version, updated at end of a successful reader stage. |
+| `ChangeWatermarks` | Per task + source table: last-processed watermark (change-tracking version/LSN, or a plain column value for the fallback reader), updated at end of a successful reader stage. |
 | `Logs` | Structured log lines: run id, timestamp, level, message. |
 | `RunLocks` | One row per task while a run is in flight, used to prevent overlapping scheduled/manual runs of the same task. |
 

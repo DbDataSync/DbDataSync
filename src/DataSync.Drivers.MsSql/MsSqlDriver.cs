@@ -10,7 +10,7 @@ public sealed class MsSqlDriver : IDriver
     public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
 
     public IReadOnlyList<IChangeReader> Readers { get; } =
-        [new MsSqlChangeTrackingReader(), new MsSqlBatchReader()];
+        [new MsSqlChangeTrackingReader(), new MsSqlWatermarkReader()];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =
         [new MsSqlStagingTableProvider()];

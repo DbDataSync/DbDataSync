@@ -6,16 +6,16 @@ using Xunit;
 namespace DataSync.Drivers.MsSql.Tests;
 
 [Trait("Category", "Integration")]
-public sealed class MsSqlBatchReaderTests(MsSqlTestDatabase db) : IClassFixture<MsSqlTestDatabase>, IAsyncLifetime
+public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixture<MsSqlTestDatabase>, IAsyncLifetime
 {
-    private readonly MsSqlBatchReader _reader = new();
+    private readonly MsSqlWatermarkReader _reader = new();
     private SqlConnection _connection = null!;
     private string _tableName = null!;
 
     public async Task InitializeAsync()
     {
         _connection = db.OpenConnection();
-        _tableName = $"BatchProbe_{Guid.NewGuid():N}";
+        _tableName = $"WatermarkProbe_{Guid.NewGuid():N}";
 
         await ExecuteAsync($"""
             CREATE TABLE dbo.[{_tableName}] (
@@ -72,7 +72,7 @@ public sealed class MsSqlBatchReaderTests(MsSqlTestDatabase db) : IClassFixture<
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal("1", result.NewCursor);
+        Assert.Equal("1", result.NewWatermark);
     }
 
     [Fact]
@@ -87,12 +87,12 @@ public sealed class MsSqlBatchReaderTests(MsSqlTestDatabase db) : IClassFixture<
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name, Version) VALUES (3, 'Carol', 2);");
         await ExecuteAsync($"UPDATE dbo.[{_tableName}] SET Name = 'Robert', Version = 2 WHERE Id = 2;");
 
-        var result = await _reader.ReadChangesAsync(_connection, Source(), baseline.NewCursor, options, CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), baseline.NewWatermark, options, CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(2, rows.Count);
         Assert.Contains(rows, r => (int)r.Values["Id"]! == 3 && (string)r.Values["Name"]! == "Carol");
         Assert.Contains(rows, r => (int)r.Values["Id"]! == 2 && (string)r.Values["Name"]! == "Robert");
-        Assert.Equal("2", result.NewCursor);
+        Assert.Equal("2", result.NewWatermark);
     }
 }
