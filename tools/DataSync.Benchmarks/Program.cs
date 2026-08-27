@@ -18,7 +18,7 @@ if (Flag("--help") || Flag("-h"))
     Console.WriteLine("""
         DataSync benchmarks — measures the cost of how a batch of changes is held in memory.
 
-        Usage: scripts/benchmarks [options]
+        Usage: tools/benchmarks [options]
 
           --rows N        rows to write            (default 200000)
           --columns N     columns per row          (default 50)

@@ -161,9 +161,9 @@ async Task UpAsync(HarnessArgs options, string root, CancellationToken cancellat
     Log.Ok($"Ready — open http://127.0.0.1:{spaPort} and pick the '{Scenario.ReplicationName}' replication.");
     Log.Info($"Config repo and state database: {AppProcesses.ScratchRepoRoot}");
     Log.Info("In another terminal, try:");
-    Log.Info("  scripts/dev-harness workload --rate 20 --duration 2m   # live inserts/updates/deletes");
-    Log.Info("  scripts/dev-harness verify                             # source vs target, row by row");
-    Log.Info("  scripts/dev-harness drift                              # corrupt the target, then backfill in the UI");
+    Log.Info("  tools/dev-harness workload --rate 20 --duration 2m   # live inserts/updates/deletes");
+    Log.Info("  tools/dev-harness verify                             # source vs target, row by row");
+    Log.Info("  tools/dev-harness drift                              # corrupt the target, then backfill in the UI");
     Log.Info("Ctrl+C stops the API and SPA (the containers keep running — `down` stops those).");
     Console.WriteLine();
 
@@ -189,7 +189,7 @@ static void PrintUsage()
     Console.WriteLine("""
         DataSync dev harness — stand up a working environment and put real traffic through it.
 
-        Usage: scripts/dev-harness <verb> [options]
+        Usage: tools/dev-harness <verb> [options]
 
           up          Start containers, create and seed the databases, start the API and SPA, and
                       configure the replication. Blocks until Ctrl+C.

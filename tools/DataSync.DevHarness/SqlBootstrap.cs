@@ -134,7 +134,7 @@ public static class SqlBootstrap
         {
             await connection.DisposeAsync();
             throw new HarnessException(
-                $"Could not connect to SQL Server: {ex.Message}\nHave you run `scripts/dev-harness up`?");
+                $"Could not connect to SQL Server: {ex.Message}\nHave you run `tools/dev-harness up`?");
         }
 
         return connection;

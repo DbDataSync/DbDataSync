@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Launcher for tools/DataSync.DevHarness. See `scripts/dev-harness help`.
+# Launcher for tools/DataSync.DevHarness. See `tools/dev-harness help`.
 #
 # `dotnet build` unconditionally, then `exec` into the built assembly. Two deliberate choices:
 #

@@ -1,5 +1,5 @@
 @echo off
-REM Launcher for tools\DataSync.Benchmarks. See `scripts\benchmarks --help`.
+REM Launcher for tools\DataSync.Benchmarks. See `tools\benchmarks --help`.
 REM Release build: measurements from a Debug build would be meaningless.
 setlocal
 

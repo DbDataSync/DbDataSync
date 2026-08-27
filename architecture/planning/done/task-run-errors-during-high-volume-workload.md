@@ -7,7 +7,7 @@ during a single task run. This would cause the join from the change tracking to 
 null, which would cause the process to fail for an insert/update operation that requires non-null columns.
 
 This theory may be incorrect, because I haven't found an explanation for how it would recover in that
-scenario, and the `scripts/dev-harness verify` command reported that all rows were identical.
+scenario, and the `tools/dev-harness verify` command reported that all rows were identical.
 ---
 
 ## Investigation (Claude, 2026-08-26) — cause confirmed, not yet fixed

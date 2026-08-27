@@ -10,7 +10,7 @@ from.
 
 ## What was built
 
-**`tools/DataSync.Benchmarks`** plus `scripts/benchmarks` / `scripts/benchmarks.cmd`, matching the
+**`tools/DataSync.Benchmarks`** plus `tools/benchmarks` / `tools/benchmarks.cmd`, matching the
 dev harness's launcher shape. One command compares three candidate in-memory shapes for a batch of
 changes:
 

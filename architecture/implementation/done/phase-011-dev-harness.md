@@ -38,8 +38,8 @@ than taking a command-line-parser dependency.
 | `drift --rows N` | Corrupt the **target** directly: delete rows, alter values, insert rows the source never had. |
 | `verify` | Merge-join source and target by key, naming every missing/extra/differing row. Exit code 0/1. |
 
-**`scripts/dev-harness`** and **`scripts/dev-harness.cmd`** — thin launchers so the common case is
-`scripts/dev-harness up`. Each runs `dotnet build` unconditionally and then `exec`s the built
+**`tools/dev-harness`** and **`tools/dev-harness.cmd`** — thin launchers so the common case is
+`tools/dev-harness up`. Each runs `dotnet build` unconditionally and then `exec`s the built
 assembly. See "A launcher that reimplemented MSBuild" below: they originally carried a hand-rolled
 staleness check, which was both unnecessary and wrong.
 

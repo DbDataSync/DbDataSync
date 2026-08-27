@@ -1,5 +1,5 @@
 @echo off
-REM Launcher for tools\DataSync.DevHarness. See `scripts\dev-harness help`.
+REM Launcher for tools\DataSync.DevHarness. See `tools\dev-harness help`.
 REM See the sh launcher for why this builds every time and runs the DLL directly rather than
 REM using `dotnet run`.
 REM

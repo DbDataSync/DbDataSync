@@ -14,26 +14,26 @@ To get a working environment without following the manual steps below, one comma
 containers, databases, seed data, the API, the SPA, and a configured replication:
 
 ```sh
-scripts/dev-harness up          # scripts\dev-harness up on Windows
+tools/dev-harness up          # tools\dev-harness up on Windows
 ```
 
 Open `http://localhost:5173` and pick the `dev-sync` replication. Ctrl+C stops the API and SPA
-(the containers keep running; `scripts/dev-harness down` stops those).
+(the containers keep running; `tools/dev-harness down` stops those).
 
 In another terminal, put real traffic through it:
 
 ```sh
-scripts/dev-harness seed --rows 25000            # bulk-load the source
-scripts/dev-harness workload --rate 20 --duration 2m   # live inserts/updates/deletes
-scripts/dev-harness verify                       # compare source and target row by row
-scripts/dev-harness drift                        # corrupt the target behind the replication's back
+tools/dev-harness seed --rows 25000            # bulk-load the source
+tools/dev-harness workload --rate 20 --duration 2m   # live inserts/updates/deletes
+tools/dev-harness verify                       # compare source and target row by row
+tools/dev-harness drift                        # corrupt the target behind the replication's back
 ```
 
 `drift` is the quickest way to see why batch reload exists: it changes the *target* only, so Change
 Tracking has nothing to report and no incremental run will ever repair it — `verify` keeps failing
 until you trigger a backfill with a reconciling writer.
 
-`scripts/dev-harness help` lists every verb and option. The tool itself is
+`tools/dev-harness help` lists every verb and option. The tool itself is
 `tools/DataSync.DevHarness`; see `architecture/implementation/done/phase-011-dev-harness.md`.
 
 ## Prerequisites
@@ -164,7 +164,7 @@ Screenshots of each screen land in `tests/DataSync.Web.Tests/screenshots/`.
 - `src/DataSync.TaskRunner` — the console process actually spawned per replication run.
 - `tools/DataSync.DevHarness` — the dev harness above (environment setup, workload generation,
   drift injection, source/target verification). Not part of the shipped product.
-- `tools/DataSync.Benchmarks` — `scripts/benchmarks`, which measures how much the in-memory shape of a
+- `tools/DataSync.Benchmarks` — `tools/benchmarks`, which measures how much the in-memory shape of a
   change batch costs, through a real `SqlBulkCopy` and through a typed sink. Also not shipped.
 - `architecture/` — design docs; `architecture/implementation/` has a written summary of each build
   phase, including real bugs found and how they were fixed.
