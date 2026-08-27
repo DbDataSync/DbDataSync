@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Threading.Channels;
@@ -279,6 +280,27 @@ public sealed class RunExecutor(
             var targetTableQuoted = targetDialect.QuoteIdentifier(target.Table);
             var sourceQualified = sourceDialect.QualifyTable(source.Schema, source.Table);
 
+            // Phase 27's C#-generated hooks: one slot, bound at whatever level ScriptResolution finds
+            // it (the same "connection" level as HookResolution's — the target's). Declared once per
+            // pass, before the first read, so the host never even builds a LifecycleHookContext — let
+            // alone calls the script — for a mapping with nothing bound.
+            var targetScriptDialect = new RunnerScriptDialect(targetDriver.DriverType);
+            var lifecycleHookBinding = scriptHost.ResolveBinding<ILifecycleHook>(
+                ScriptSlots.LifecycleHook, targetConnectionConfig, task, mapping);
+            IReadOnlySet<string> declaredHookPoints = ImmutableHashSet<string>.Empty;
+            if (lifecycleHookBinding is { } binding)
+            {
+                var declareFacts = new HookRunFacts(
+                    item.RunId, task.Name, mapping.Name, item.RunKind.ToString(),
+                    Segment: null, SegmentIndex: 0, SegmentCount: segments.Count, IsLastSegment: false,
+                    RowsStaged: null, RowsWritten: null, StagingLocation: null, previousWatermark);
+                var declareContext = await BuildLifecycleHookContextAsync(
+                    "(declare)", sourceDriver, sourceConnection, source, targetDriver, targetConnection, target,
+                    columnMappings, sourceScriptDialect, targetScriptDialect, declareFacts, binding.Parameters,
+                    item.RunId, mapping.Name, cancellationToken);
+                declaredHookPoints = binding.Script.DeclarePoints(declareContext).ToImmutableHashSet(StringComparer.Ordinal);
+            }
+
             for (var segmentIndex = 0; segmentIndex < segments.Count; segmentIndex++)
             {
                 var segment = segments[segmentIndex];
@@ -291,6 +313,24 @@ public sealed class RunExecutor(
                     targetQualified, targetSchemaQuoted, targetTableQuoted, sourceQualified, stagingQualified,
                     task.Name, mapping.Name, item.RunId, item.RunKind.ToString(), segment?.Describe(),
                     segmentIndex, segments.Count, isLastSegment, rowsStaged, rowsWritten, previousWatermark);
+
+                // The escape hatch runs last: only reached for a point the script itself declared, and
+                // only after the configured list above has already run.
+                async Task RunGeneratedAsync(string point, string? stagingLocation, long? rowsStaged, long? rowsWritten)
+                {
+                    if (lifecycleHookBinding is not { } b || !declaredHookPoints.Contains(point))
+                        return;
+
+                    var facts = new HookRunFacts(
+                        item.RunId, task.Name, mapping.Name, item.RunKind.ToString(), segment?.Describe(),
+                        segmentIndex, segments.Count, isLastSegment, rowsStaged, rowsWritten, stagingLocation, previousWatermark);
+                    var context = await BuildLifecycleHookContextAsync(
+                        point, sourceDriver, sourceConnection, source, targetDriver, targetConnection, target,
+                        columnMappings, sourceScriptDialect, targetScriptDialect, facts, b.Parameters,
+                        item.RunId, mapping.Name, cancellationToken);
+                    await RunLifecycleHookStatementsAsync(
+                        point, b.Script, context, targetConnection, targetDialect, mapping.Name, item.RunId, cancellationToken);
+                }
 
                 var scope = segment?.Describe() ?? "whole table";
                 Log(item.RunId, LogSeverity.Info,
@@ -309,6 +349,7 @@ public sealed class RunExecutor(
                 await RunHooksAsync(
                     HookPoints.BeforeStage, hooksByPoint[HookPoints.BeforeStage], Context(null, null, null),
                     targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
+                await RunGeneratedAsync(HookPoints.BeforeStage, null, null, null);
 
                 var staged = await stagingProvider.StageAsync(
                     targetConnection, target, rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
@@ -316,6 +357,7 @@ public sealed class RunExecutor(
                 await RunHooksAsync(
                     HookPoints.AfterStage, hooksByPoint[HookPoints.AfterStage], Context(staged.StagingLocation, staged.RowCount, null),
                     targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
+                await RunGeneratedAsync(HookPoints.AfterStage, staged.StagingLocation, staged.RowCount, null);
 
                 // Only meaningful now that staging has drained the reader's stream. A run that skipped
                 // rows is a run whose source was changing under it — worth surfacing next to a mapping
@@ -330,6 +372,7 @@ public sealed class RunExecutor(
                     await RunHooksAsync(
                         HookPoints.BeforeLoad, hooksByPoint[HookPoints.BeforeLoad], Context(staged.StagingLocation, staged.RowCount, null),
                         targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
+                    await RunGeneratedAsync(HookPoints.BeforeLoad, staged.StagingLocation, staged.RowCount, null);
 
                     var written = await writer.ApplyAsync(
                         targetConnection, target, staged, mapping.ColumnMappings, writerOptions, cancellationToken);
@@ -345,6 +388,7 @@ public sealed class RunExecutor(
                         HookPoints.AfterLoad, hooksByPoint[HookPoints.AfterLoad],
                         Context(staged.StagingLocation, staged.RowCount, written.RowsWritten),
                         targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
+                    await RunGeneratedAsync(HookPoints.AfterLoad, staged.StagingLocation, staged.RowCount, written.RowsWritten);
                 }
                 finally
                 {
@@ -503,28 +547,9 @@ public sealed class RunExecutor(
 
                 var statement = HookRenderer.Render(dialect, sql, declaredParameterValues, context);
                 var label = hook.Name ?? hook.Hook ?? "inline";
-                var started = Stopwatch.GetTimestamp();
-
-                try
-                {
-                    using var cmd = connection.CreateCommand();
-                    cmd.CommandText = statement.CommandText;
-                    foreach (var parameter in statement.Parameters)
-                        cmd.AddParameter(dialect.ParameterName(parameter.Name), parameter.Value);
-
-                    var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
-                    Log(runId, LogSeverity.Info,
-                        $"'{mappingName}' hook '{label}' ({point}, {hook.Connection}): {rowsAffected} row(s) affected, " +
-                        $"{Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0}ms. {statement.CommandText}");
-                }
-                catch (DbException ex)
-                {
-                    var message = $"'{mappingName}' hook '{label}' ({point}) failed: {ex.Message}";
-                    if (hook.OnError == HookErrorMode.Warn)
-                        Log(runId, LogSeverity.Warning, message);
-                    else
-                        throw new InvalidOperationException(message, ex);
-                }
+                await ExecuteHookStatementAsync(
+                    connection, dialect, statement, label, point, hook.Connection.ToString(), hook.OnError,
+                    mappingName, runId, cancellationToken);
             }
         }
         finally
@@ -540,6 +565,92 @@ public sealed class RunExecutor(
         hook.Sql is { } inline
             ? (inline, new Dictionary<string, string>())
             : (configRepository.LoadScript(hook.Hook!).Code, hook.Parameters);
+
+    /// <summary>
+    /// Runs one already-rendered statement and logs it, at Info, every time — a generated hook logs the
+    /// statement text as well as the count/elapsed every config-driven hook logs, because a script
+    /// emitting DDL nobody can read after the fact is precisely the failure this exists to prevent.
+    /// <paramref name="onError"/> is always <see cref="HookErrorMode.Fail"/> for a phase 27 generated
+    /// statement — there is no config knob for a script's own statements to opt into Warn.
+    /// </summary>
+    private async Task ExecuteHookStatementAsync(
+        DbConnection connection, SqlDialect dialect, HookStatement statement, string label, string point,
+        string side, HookErrorMode onError, string mappingName, Guid runId, CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = statement.CommandText;
+            foreach (var parameter in statement.Parameters)
+                cmd.AddParameter(dialect.ParameterName(parameter.Name), parameter.Value);
+
+            var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            Log(runId, LogSeverity.Info,
+                $"'{mappingName}' hook '{label}' ({point}, {side}): {rowsAffected} row(s) affected, " +
+                $"{Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0}ms. {statement.CommandText}");
+        }
+        catch (DbException ex)
+        {
+            var message = $"'{mappingName}' hook '{label}' ({point}) failed: {ex.Message}";
+            if (onError == HookErrorMode.Warn)
+                Log(runId, LogSeverity.Warning, message);
+            else
+                throw new InvalidOperationException(message, ex);
+        }
+    }
+
+    /// <summary>
+    /// Fetches both sides' columns fresh on every call, deliberately not cached across a pass: a
+    /// schema-evolution hook's whole point is to react to the source having gained a column, and
+    /// caching this lookup would be exactly the thing that silently breaks it later.
+    /// </summary>
+    private async Task<LifecycleHookContext> BuildLifecycleHookContextAsync(
+        string point,
+        IDriver sourceDriver, DbConnection sourceConnection, SourceTableRef source,
+        IDriver targetDriver, DbConnection targetConnection, TableRef target,
+        IReadOnlyList<ColumnMapping> columnMappings,
+        IScriptDialect sourceScriptDialect, IScriptDialect targetScriptDialect,
+        HookRunFacts facts, ScriptParameters parameters,
+        Guid runId, string mappingName, CancellationToken cancellationToken)
+    {
+        var sourceColumns = await sourceDriver.ListColumnsAsync(
+            sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
+        var targetColumns = await targetDriver.ListColumnsAsync(
+            targetConnection, target.Database, target.Schema, target.Table, cancellationToken);
+
+        return new LifecycleHookContext(
+            point, source, target, columnMappings, sourceColumns, targetColumns,
+            sourceScriptDialect, targetScriptDialect, facts, parameters,
+            message => Log(runId, LogSeverity.Info, $"[{mappingName}] {message}"));
+    }
+
+    /// <summary>
+    /// The escape hatch runs last: at a point with both a configured list and a bound
+    /// <see cref="ILifecycleHook"/>, the configured statements already ran (visible in the config diff
+    /// and git log) before this is called. Only invoked for a point the script actually
+    /// <see cref="ILifecycleHook.DeclarePoints"/>d, so a mapping with no bound script — the overwhelming
+    /// majority — never builds a <see cref="LifecycleHookContext"/> at all.
+    /// </summary>
+    private async Task RunLifecycleHookStatementsAsync(
+        string point, ILifecycleHook hook, LifecycleHookContext context,
+        DbConnection targetConnection, SqlDialect targetDialect, string mappingName, Guid runId, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<HookStatement> statements;
+        try
+        {
+            statements = hook.BuildStatements(point, context);
+        }
+        catch (Exception ex) when (ex is not ScriptExecutionException)
+        {
+            throw new ScriptExecutionException($"The lifecycle-hook script threw building statements for '{point}': {ex.Message}", ex);
+        }
+
+        foreach (var statement in statements)
+            await ExecuteHookStatementAsync(
+                targetConnection, targetDialect, statement, "generated", point, "Target", HookErrorMode.Fail,
+                mappingName, runId, cancellationToken);
+    }
 
     /// <summary>The one place TaskRunner needs a concrete <see cref="SqlDialect"/> for an engine it
     /// isn't otherwise driving — to translate the *source's* native column types into the canonical
@@ -637,4 +748,15 @@ internal sealed class RunnerScriptDialect(ConnectionDriverType driverType) : ISc
     };
 
     public string ParameterReference(string name) => $"@{name}";
+
+    public CanonicalType ToCanonicalType(string nativeType) => Dialect().ToCanonicalType(nativeType);
+
+    public RenderedColumnType RenderColumnType(CanonicalType type) => Dialect().RenderColumnType(type);
+
+    private SqlDialect Dialect() => driverType switch
+    {
+        ConnectionDriverType.MsSql => MsSqlDialect.Instance,
+        ConnectionDriverType.Postgres => PostgresDialect.Instance,
+        _ => throw new InvalidOperationException($"No SqlDialect is registered for driver type '{driverType}'."),
+    };
 }

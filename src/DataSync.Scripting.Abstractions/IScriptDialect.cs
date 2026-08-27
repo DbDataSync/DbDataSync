@@ -1,3 +1,5 @@
+using DataSync.Drivers.Abstractions;
+
 namespace DataSync.Scripting.Abstractions;
 
 /// <summary>
@@ -19,4 +21,13 @@ public interface IScriptDialect
 
     /// <summary>How a parameter is written in statement text — <c>@p</c>, <c>:p</c>.</summary>
     string ParameterReference(string name);
+
+    /// <summary>Translates one of this engine's native type specs into the canonical intermediate —
+    /// see phase 25. Added for phase 27's <see cref="ILifecycleHook"/>: a schema-evolution hook has to
+    /// reason about a column's type across engines, and hand-writing a type map inside a hook is the
+    /// worst possible place for one.</summary>
+    CanonicalType ToCanonicalType(string nativeType);
+
+    /// <summary>The reverse direction — DDL for a canonical type, in this dialect.</summary>
+    RenderedColumnType RenderColumnType(CanonicalType type);
 }

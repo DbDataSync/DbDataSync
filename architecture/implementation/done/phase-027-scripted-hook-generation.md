@@ -1,6 +1,22 @@
 # Phase 27 — C# that generates hook SQL
 
-**Status**: Planned, not started
+**Status**: Built, with one deliberate deviation from the doc's sketch: `LifecycleHookContext` carries
+**two** `IScriptDialect`s (`SourceDialect`/`TargetDialect`), not the single `Dialect` field sketched here.
+The motivating case — translate a source column's type and render it for the target — needs
+`ToCanonicalType` on the *source's* engine and `RenderColumnType` on the *target's*; a single dialect
+field can only ever be one of those for a cross-engine mapping. `IScriptDialect` itself gained both
+methods rather than only `RenderColumnType`, for the same reason. `HookRunFacts.RunKind` is `string`
+(not the `RunKind` enum) — `DataSync.Scripting.Abstractions` doesn't otherwise depend on
+`DataSync.TaskRunner`'s run-kind type, and phase 26's own `HookRenderContext` made the same call.
+`ScriptSlots.Hook` (phase 26) is deliberately *not* in `ScriptSlots.All`/the SPA's script-slots list — it
+has no binding hierarchy of its own, unlike `ScriptSlots.LifecycleHook`, which does and is bound exactly
+like `sqlColumnExpression` and friends. Verified with a unit test that runs the doc's own motivating
+example (add-missing-columns schema evolution) against both real dialects, MsSql→Postgres and
+same-engine. Not built: the integration/E2E coverage in "How it will be verified" (needs Docker,
+unavailable in this environment, and a live run through `RunExecutor`) — the wiring itself (binding
+resolution, `DeclarePoints` called once per pass, ordering after the configured list, execution reusing
+phase 26's statement runner) is code-reviewable in `RunExecutor.RunMappingAsync` but not exercised by an
+automated test here.
 **Plan reference**: `architecture/planning/done/database-provisioning-and-lifecycle-scripts.md`, the
 "literal SQL, with a script as the generator" tier. Depends on phase 26 for the hook points and
 execution path, and on phase 25 for the type system this uses to reason about schema.

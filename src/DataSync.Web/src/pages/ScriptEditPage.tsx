@@ -75,11 +75,17 @@ export function ScriptEditPage() {
 
   const isSql = draft.manifest.language === 'Sql'
 
+  // A SQL hook's Kind is always 'hook' — it has no binding hierarchy of its own to pick a slot for
+  // (see ScriptSlots.Hook's own doc), so there is nothing for the operator to choose here.
   const setLanguage = (language: 'CSharp' | 'Sql') => {
     if (!isNew) return setManifest({ language }) // Changing language on a saved script is unusual but not forbidden.
     setDraft({
       ...draft,
-      manifest: { ...draft.manifest, language, entryType: language === 'Sql' ? null : 'MyExpression' },
+      manifest: {
+        ...draft.manifest, language,
+        kind: language === 'Sql' ? 'hook' : (slots?.[0] ?? draft.manifest.kind),
+        entryType: language === 'Sql' ? null : 'MyExpression',
+      },
       code: language === 'Sql' ? SQL_STARTER : STARTER,
     })
   }
@@ -152,16 +158,18 @@ export function ScriptEditPage() {
                     data-testid="script-name-input"
                   />
                 </Field>
-                <Field label="Kind">
-                  <select
-                    className="select"
-                    value={draft.manifest.kind}
-                    onChange={(e) => setManifest({ kind: e.target.value })}
-                    data-testid="script-kind-select"
-                  >
-                    {(slots ?? [draft.manifest.kind]).map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </Field>
+                {!isSql && (
+                  <Field label="Kind">
+                    <select
+                      className="select"
+                      value={draft.manifest.kind}
+                      onChange={(e) => setManifest({ kind: e.target.value })}
+                      data-testid="script-kind-select"
+                    >
+                      {(slots ?? [draft.manifest.kind]).map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </Field>
+                )}
               </div>
               <div className="form-grid">
                 <Field label="Language">

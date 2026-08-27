@@ -21,6 +21,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataSync.Scripting\DataSync.Scripting.csproj" />
     <ProjectReference Include="..\..\src\DataSync.Drivers.Abstractions\DataSync.Drivers.Abstractions.csproj" />
+    <!-- Test-only: proving phase 27's ILifecycleHook contract against both real dialects (the
+         cross-engine schema-evolution case it exists for), without pulling either driver into
+         DataSync.Scripting itself. -->
+    <ProjectReference Include="..\..\src\DataSync.Drivers.MsSql\DataSync.Drivers.MsSql.csproj" />
+    <ProjectReference Include="..\..\src\DataSync.Drivers.Postgres\DataSync.Drivers.Postgres.csproj" />
   </ItemGroup>
 
 </Project>

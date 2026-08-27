@@ -21,16 +21,24 @@ public static class ScriptSlots
     /// three and the most expensive.</summary>
     public const string RowTransform = "rowTransform";
 
-    /// <summary>A reusable SQL hook body — <c>Language = Sql</c>, no <c>EntryType</c>, bound by name
-    /// from a hook point's list (<c>HookPoints</c> in <c>DataSync.Core.Config</c>) rather than from a
-    /// single fixed slot the way the three above are. Listed here anyway so <see cref="IsKnown"/>
-    /// accepts it as a script <c>Kind</c> at save time — see phase 26.</summary>
+    /// <summary>A reusable SQL hook body's <c>Kind</c> — <c>Language = Sql</c>, no <c>EntryType</c>,
+    /// bound by *name* from a hook point's list (<c>HookPoints</c> in <c>DataSync.Core.Config</c>),
+    /// never from the hierarchy below. Deliberately **not** in <see cref="All"/>: that list also drives
+    /// the SPA's generic per-slot <c>ScriptBindingsCard</c>, and a hook has no binding hierarchy of its
+    /// own to show there — see phase 26. <c>ScriptsController</c> checks this one separately.</summary>
     public const string Hook = "hook";
+
+    /// <summary>C# that generates the SQL a lifecycle hook point runs — see phase 27. One slot for all
+    /// four points: <see cref="ILifecycleHook.DeclarePoints"/> is how a binding says which ones it
+    /// wants, not four separate bindings.</summary>
+    public const string LifecycleHook = "lifecycleHook";
 
     /// <summary>In the order they run: the source evaluates its SQL first, then values, then the whole
     /// row. Forced by where each one lives, and worth stating because a mapping using two of them on
-    /// one column is otherwise guessing.</summary>
-    public static IReadOnlyList<string> All { get; } = [SqlColumnExpression, ValueColumnExpression, RowTransform, Hook];
+    /// one column is otherwise guessing. <see cref="Hook"/> is deliberately absent — see its own doc.</summary>
+    public static IReadOnlyList<string> All { get; } = [SqlColumnExpression, ValueColumnExpression, RowTransform, LifecycleHook];
 
-    public static bool IsKnown(string slot) => All.Contains(slot, StringComparer.Ordinal);
+    /// <summary>Every <c>Kind</c> a script's manifest may declare — the four bindable slots in
+    /// <see cref="All"/> plus <see cref="Hook"/>, which is known but not one of them.</summary>
+    public static bool IsKnown(string slot) => slot == Hook || All.Contains(slot, StringComparer.Ordinal);
 }

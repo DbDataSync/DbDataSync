@@ -56,7 +56,7 @@ public sealed class ScriptsController(
             return BadRequest(new
             {
                 error = $"'{script.Manifest.Kind}' is not a script kind this build knows about.",
-                known = ScriptSlots.All,
+                known = ScriptSlots.All.Append(ScriptSlots.Hook),
             });
 
         var diagnostics = ValidateScript(script);

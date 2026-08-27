@@ -186,5 +186,7 @@ public sealed class ScriptedColumnTransformTests : IDisposable
         public string EngineName => "MsSql";
         public string QuoteIdentifier(string identifier) => $"[{identifier}]";
         public string ParameterReference(string name) => $"@{name}";
+        public DataSync.Drivers.Abstractions.CanonicalType ToCanonicalType(string nativeType) => throw new NotSupportedException();
+        public DataSync.Drivers.Abstractions.RenderedColumnType RenderColumnType(DataSync.Drivers.Abstractions.CanonicalType type) => throw new NotSupportedException();
     }
 }
