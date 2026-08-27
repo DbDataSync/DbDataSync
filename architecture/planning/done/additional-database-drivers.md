@@ -47,45 +47,46 @@ nothing row-by-row — it expresses identically on every engine listed. The MERG
 Oracle has `MERGE`, Postgres has `MERGE` only from 15 (and `INSERT … ON CONFLICT` before it), MySQL
 has `INSERT … ON DUPLICATE KEY UPDATE`, and ODBC/JDBC have whatever the underlying engine has.
 
-## The consequence of watermark-only that needs to be said out loud
+## Watermark mode and deletes — say it, don't police it
 
-`MsSqlWatermarkReader`'s own documentation already says it: a watermark reader **cannot detect
-deletes**. A row removed at the source is simply never seen again; it is not reported as a change.
+A watermark reader cannot detect deletes: a row removed at the source is simply never seen again. That
+is a real property operators need to know, and the UI should say so plainly wherever watermark mode is
+selected.
 
-So for all five engines, initial support means **the target accumulates rows the source has deleted**,
-indefinitely, until something reconciles it. The only thing that reconciles it is a batch reload with
-a *reconciling* writer (phase 9). That inverts the emphasis these engines get relative to MSSQL:
-where Change Tracking makes reload an occasional repair, watermark mode makes a scheduled reconciling
-reload part of normal operation.
+It is **not** a reason to require a reconciling reload. Append-only and append/update-only tables are
+common and entirely well served by watermark mode with nothing else attached — event logs, ledgers,
+audit trails, immutable fact tables. Making a periodic reload mandatory would tax every one of those
+to protect against a misuse that the operator is better placed to judge than we are.
 
-Worth deciding deliberately rather than discovering: whether a watermark-mode replication should be
-*able* to be configured without a periodic reconciling reload at all.
+So: state the limitation at the point of choice, and leave the choice alone.
 
 ## Cross-cutting questions to settle before the first driver
 
-- **Are Kinds engine-scoped or shared?** Note the existing oddity: every MSSQL Kind is prefixed
-  (`MsSqlMerge`, `MsSqlBatchReload`) except the watermark reader, whose Kind is the bare string
-  `"Watermark"` — engine-neutral in name, T-SQL in implementation. With six engines this has to be
-  decided: does each advertise `"Watermark"` (so a table mapping is portable across engines) or
-  `"PgWatermark"`/`"OraWatermark"` (so a Kind names one implementation)? The capability endpoint works
-  either way; config portability does not.
-- **Where does SQL-dialect knowledge live?** Six copies of quoting, placeholder and predicate
-  rendering is the obvious smell, but a premature shared dialect abstraction is the other failure
-  mode. Suggest: build Postgres second, entirely standalone, and extract only what is *demonstrably*
-  identical — the same discipline `MsSqlTargetShape` came from.
+**Settled — Kind naming.** Keep the engine prefix on anything engine-specific (`MsSqlMerge`,
+`PgCopyStaging`). Anything genuinely generic keeps a bare, unprefixed Kind — which makes the existing
+`"Watermark"` correct rather than an oversight, and means a table mapping using a generic Kind is
+portable across engines unchanged.
+
+**Settled — where dialect knowledge lives.** Generic implementations live in their own namespace and
+take a **dialect handler** covering the small variations: identifier quoting, parameter placeholders,
+and similar. It is deliberately not an attempt to abstract over major engine differences — those get
+an engine-specific implementation with a prefixed Kind. A generic implementation plus a dialect is the
+default; a bespoke one is what you write when the generic one genuinely cannot express the thing.
+
 - **`ConnectionConfig` does not fit ODBC or JDBC.** It models Host/Port/Database. ODBC wants a DSN or
   a full connection string; JDBC wants a URL. `Properties` (which gained a UI in phase 15) may be
   enough, or the shape may need a genuine alternative.
 - **`AuthMode` is `SqlAuth | IntegratedAuth`.** Oracle wallets, Postgres certificate/SSL modes, MySQL
   auth plugins and JDBC's URL-embedded credentials do not fit. Needs extending, or the per-engine
   detail pushed into `Properties` + `SecretStore`.
-- **JDBC brings a JVM.** `ClrKernel.Database.Provider.Jdbc` presumably bridges ADO.NET to a JDBC
-  driver, which means a Java runtime and a jar on the deployment host, and a second failure surface
-  in the connection path. That is a deployment decision, not just a dependency.
 - **Metadata browsing is per-engine and user-visible.** The SPA's cascading connection → database →
   table pickers assume `ListDatabases` means something. Oracle's "database" is a service/schema;
   Postgres separates database from schema; MySQL conflates schema and database. The picker may need
   to be told what an engine's levels are called.
+
+**Settled — JDBC needs no JVM on the host.** `ClrKernel.Database.Provider.Jdbc` runs the JDBC driver
+through IKVM, a .NET-embedded translator, so there is no Java runtime to install and no separate
+process. Already exercised enough to be relied on.
 
 ## This is the trigger the columnar item is waiting on
 
@@ -97,17 +98,21 @@ should read that item first: the decision about how it consumes rows is the deci
 waiting for, and its unmeasured question — whether a reader can supply typed values without boxing
 them on the way out of the source — is answerable there for the first time.
 
-## Likely shape of the work
+## Outcome — resolved 2026-08-26
 
-Probably splits into a cross-cutting phase and one phase per engine, but that is a guess until the
-first driver is built. Suggested order, and the reasoning:
+Broken into phases. The generic layer comes first and is proven against MSSQL before any new engine
+exists, so the first real driver is a thin thing on top of tested foundations rather than a rewrite of
+everything at once.
 
-1. **Postgres first.** Best-documented ADO.NET provider (Npgsql), a genuinely different staging path
-   (`COPY`), and the columnar question rides on it.
-2. **MySQL or Oracle second** — whichever has a real user waiting. Oracle exercises the most
-   divergence (quoting, placeholders, identity, catalog, wallets), so it is the better test of any
-   abstraction extracted after Postgres.
-3. **ODBC and JDBC last.** Both are *meta*-drivers: they reach an arbitrary engine, so neither can
-   assume a dialect, and both will want the batched-parameterised-INSERT staging path and the
-   delete+insert writer rather than anything engine-specific. Building them after two real engines
-   means the generic path already exists.
+| phase | what | doc |
+| --- | --- | --- |
+| 16 | `SqlDialect` + generic namespace; the watermark reader moves there and becomes dialect-driven | `implementation/todo/phase-016-sql-dialect-and-generic-watermark.md` |
+| 17 | Generic batch-reload reader, staging provider, delete+insert writer, `information_schema` metadata | `implementation/todo/phase-017-generic-batch-pipeline.md` |
+| 18 | **PostgreSQL driver** — the first cross-engine replication | `implementation/todo/phase-018-postgres-driver.md` |
+| 19 | Postgres binary `COPY` staging — and with it, the answer `columnar-change-batches` is waiting for | not yet written |
+| 20 | Connection model for DSN/URL engines, and `AuthMode` beyond SqlAuth/IntegratedAuth | not yet written |
+| 21–22 | MySQL, then Oracle — Oracle exercises the most divergence, so it is the better test of what 16–17 extracted | not yet written |
+| 23–24 | ODBC, then JDBC via `ClrKernel.Database.Provider.Jdbc`. Both are *meta*-drivers reaching an arbitrary engine, so neither can assume a dialect; both want the generic paths that 17 establishes | not yet written |
+
+Phases 19 onward are deliberately not written yet — each should be designed once the phase before it
+has landed and changed what we know.
