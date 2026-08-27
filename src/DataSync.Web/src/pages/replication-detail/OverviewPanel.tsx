@@ -1,21 +1,32 @@
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
-import { KindSelect } from '../../components/KindSelect'
-import { readerOptions, stagingOptions, writerOptions } from '../../components/kindOptions'
-import { JsonOptionsEditor } from '../../components/JsonOptionsEditor'
-import { useReplication, useReplicationCapabilities, useUpsertReplication } from '../../api/hooks'
+import { Field } from '../../components/Field'
+import { KeyValueTable } from '../../components/KeyValueTable'
+import { useReplication, useReplicationCapabilities, useTableMappings, useUpsertReplication } from '../../api/hooks'
 import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
 
-type Role = 'reader' | 'cache' | 'writer'
+type Stage = 'reader' | 'cache' | 'writer'
 
+const STAGES: { id: Stage; label: string }[] = [
+  { id: 'reader', label: 'Reader' },
+  { id: 'cache', label: 'Staging' },
+  { id: 'writer', label: 'Writer' },
+]
+
+/**
+ * The design turns the pipeline into three selectable stages — Reader → Staging → Writer — with the
+ * selected stage's implementation and its settings below. That is a better fit for the data than the
+ * three stacked Kind pickers plus raw-JSON textareas it replaces: a stage's Kind and its options
+ * belong together, and the options are a string dictionary, which a two-column table states plainly.
+ */
 export function OverviewPanel({ replicationName }: { replicationName: string }) {
   const { data: task, error } = useReplication(replicationName)
+  const { data: mappings } = useTableMappings(replicationName)
   const capabilities = useReplicationCapabilities(replicationName)
   const upsert = useUpsertReplication()
+
   const [draft, setDraft] = useState<ReplicationTaskConfig | null>(null)
-  // Roles whose Options textarea currently holds unparseable JSON. Save is blocked while any is
-  // invalid rather than saving a stale value the editor is no longer showing.
-  const [invalidOptions, setInvalidOptions] = useState<Role[]>([])
+  const [stage, setStage] = useState<Stage>('reader')
 
   useEffect(() => {
     if (task && !draft) setDraft(task)
@@ -23,23 +34,25 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
 
   if (!draft) {
     return (
-      <div className="card">
+      <div className="pane">
         <ErrorBanner error={error} />
-        <p className="muted">Loading…</p>
+        <span className="hint">Loading…</span>
       </div>
     )
   }
 
-  const setRole = (role: Role, patch: object) =>
-    setDraft({
-      ...draft,
-      changeProcessing: { ...draft.changeProcessing, [role]: { ...draft.changeProcessing[role], ...patch } },
-    })
+  const setStageValue = (id: Stage, patch: object) =>
+    setDraft({ ...draft, changeProcessing: { ...draft.changeProcessing, [id]: { ...draft.changeProcessing[id], ...patch } } })
 
-  const setOptions = (role: Role) => (options: Record<string, string> | null) => {
-    setInvalidOptions((prev) => (options === null ? [...new Set([...prev, role])] : prev.filter((r) => r !== role)))
-    if (options !== null) setRole(role, { options })
-  }
+  const kindsFor = (id: Stage) =>
+    id === 'reader' ? capabilities.readers.map((r) => ({ kind: r.kind, note: r.supportsSegmentation ? 'segmentable' : undefined }))
+    : id === 'writer' ? capabilities.writers.map((w) => ({ kind: w.kind, note: w.supportsReconciliation ? 'reconciling' : 'upsert-only' }))
+    : capabilities.stagingProviders.map((p) => ({ kind: p.kind, note: undefined }))
+
+  const current = draft.changeProcessing[stage]
+  const options = kindsFor(stage)
+  const known = options.some((o) => o.kind === current.kind)
+  const stageLabel = STAGES.find((s) => s.id === stage)!.label
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -47,112 +60,127 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
   }
 
   return (
-    <div className="card">
-      <h2>Settings</h2>
+    <div className="pane">
       <ErrorBanner error={upsert.error ?? capabilities.error} />
-      <form onSubmit={save} className="stack">
-        <label className="row">
-          <input
-            type="checkbox"
-            checked={draft.enabled}
-            onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
-          />
-          Enabled
-        </label>
 
-        <div className="form-grid">
-          <div className="form-field">
-            <label>Schedule Mode</label>
-            <select
-              value={draft.scheduling.mode}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  scheduling: { ...draft.scheduling, mode: e.target.value as ScheduleMode },
-                })
-              }
-            >
-              <option value="Continuous">Continuous</option>
-              <option value="Periodic">Periodic (cron)</option>
-            </select>
+      <form onSubmit={save} style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="card">
+            <div className="card-head" style={{ alignItems: 'flex-start', paddingTop: 11 }}>
+              <span className="card-title" style={{ width: 64, flex: 'none', paddingTop: 10 }}>Pipeline</span>
+              <div className="stages">
+                {STAGES.map((s, i) => (
+                  <span key={s.id} style={{ display: 'contents' }}>
+                    {i > 0 && <span className="arrow">→</span>}
+                    <button
+                      type="button"
+                      className={`stage ${stage === s.id ? 'active' : ''}`}
+                      onClick={() => setStage(s.id)}
+                      data-testid={`stage-${s.id}`}
+                    >
+                      <span className="stage-name">{s.label}</span>
+                      <span className="stage-impl">{draft.changeProcessing[s.id].kind}</span>
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <span style={{ width: 64, flex: 'none' }} />
+            </div>
+
+            <div className="card-body" style={{ padding: 14, gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16 }}>
+                <Field label={`${stageLabel} implementation`}>
+                  <select
+                    className="select"
+                    value={current.kind}
+                    onChange={(e) => setStageValue(stage, { kind: e.target.value })}
+                    data-testid={`${stage}-kind-select`}
+                  >
+                    {!known && current.kind && <option value={current.kind}>{current.kind} — not offered by this driver</option>}
+                    {options.map((o) => (
+                      <option key={o.kind} value={o.kind}>{o.note ? `${o.kind} — ${o.note}` : o.kind}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Applies to">
+                  <span className="input" style={{ display: 'flex', alignItems: 'center', background: 'var(--sunken)', borderColor: 'var(--chrome-edge)', color: 'var(--ink-4)', fontFamily: 'var(--ui)', fontSize: 12 }}>
+                    {!mappings ? '…'
+                      : mappings.length === 1 ? 'The 1 table mapping'
+                      : `All ${mappings.length} table mappings`}
+                  </span>
+                </Field>
+              </div>
+
+              <KeyValueTable
+                value={current.options}
+                onChange={(next) => setStageValue(stage, { options: next })}
+                addLabel="Setting name"
+                testId={`${stage}-options`}
+              />
+
+              <div className="row">
+                <button type="submit" className="btn btn-primary" disabled={upsert.isPending} data-testid="save-settings-button">
+                  {upsert.isPending ? 'Saving…' : 'Save settings'}
+                </button>
+                <span className="hint">Saving commits to config history.</span>
+              </div>
+            </div>
           </div>
-          {draft.scheduling.mode === 'Continuous' ? (
-            <div className="form-field">
-              <label>Frequency (seconds)</label>
-              <input
-                type="number"
-                min={1}
-                value={draft.scheduling.frequencySeconds ?? 60}
-                onChange={(e) =>
-                  setDraft({ ...draft, scheduling: { ...draft.scheduling, frequencySeconds: Number(e.target.value) } })
-                }
-              />
-            </div>
-          ) : (
-            <div className="form-field">
-              <label>Cron Expression</label>
-              <input
-                value={draft.scheduling.cronExpression ?? ''}
-                onChange={(e) => setDraft({ ...draft, scheduling: { ...draft.scheduling, cronExpression: e.target.value } })}
-              />
-            </div>
-          )}
-
-          <KindSelect
-            label="Reader"
-            value={draft.changeProcessing.reader.kind}
-            options={readerOptions(capabilities.readers)}
-            onChange={(kind) => setRole('reader', { kind })}
-            testId="reader-kind-select"
-          />
-          <JsonOptionsEditor
-            label="Reader Options"
-            value={draft.changeProcessing.reader.options}
-            onChange={setOptions('reader')}
-            testId="reader-options-editor"
-          />
-
-          <KindSelect
-            label="Staging"
-            value={draft.changeProcessing.cache.kind}
-            options={stagingOptions(capabilities.stagingProviders)}
-            onChange={(kind) => setRole('cache', { kind })}
-            testId="cache-kind-select"
-          />
-          <JsonOptionsEditor
-            label="Staging Options"
-            value={draft.changeProcessing.cache.options}
-            onChange={setOptions('cache')}
-            testId="cache-options-editor"
-          />
-
-          <KindSelect
-            label="Writer"
-            value={draft.changeProcessing.writer.kind}
-            options={writerOptions(capabilities.writers)}
-            onChange={(kind) => setRole('writer', { kind })}
-            testId="writer-kind-select"
-          />
-          <JsonOptionsEditor
-            label="Writer Options"
-            value={draft.changeProcessing.writer.options}
-            onChange={setOptions('writer')}
-            testId="writer-options-editor"
-          />
         </div>
 
-        <div className="form-actions">
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={upsert.isPending || invalidOptions.length > 0}
-            data-testid="save-settings-button"
-          >
-            {upsert.isPending ? 'Saving…' : 'Save Settings'}
-          </button>
-          {invalidOptions.length > 0 && (
-            <p className="field-error">Fix the invalid JSON in {invalidOptions.join(', ')} options before saving.</p>
-          )}
+        <div style={{ width: 288, flex: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="card">
+            <div className="card-head"><span className="card-title">Schedule</span></div>
+            <div className="card-body">
+              <div className="row">
+                <button
+                  type="button"
+                  className={`toggle ${draft.enabled ? 'on' : ''}`}
+                  onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
+                  aria-pressed={draft.enabled}
+                  data-testid="enabled-toggle"
+                />
+                <span style={{ font: '500 12px var(--ui)', color: 'var(--ink)' }}>
+                  {draft.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              <div className="divider" />
+              <Field label="Schedule mode">
+                <select
+                  className="select"
+                  value={draft.scheduling.mode}
+                  onChange={(e) => setDraft({ ...draft, scheduling: { ...draft.scheduling, mode: e.target.value as ScheduleMode } })}
+                >
+                  <option value="Continuous">Continuous</option>
+                  <option value="Periodic">Periodic (cron)</option>
+                </select>
+              </Field>
+              {draft.scheduling.mode === 'Continuous' ? (
+                <Field label="Frequency (seconds)">
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={draft.scheduling.frequencySeconds ?? 60}
+                    onChange={(e) => setDraft({ ...draft, scheduling: { ...draft.scheduling, frequencySeconds: Number(e.target.value) } })}
+                  />
+                </Field>
+              ) : (
+                <Field label="Cron expression">
+                  <input
+                    className="input"
+                    value={draft.scheduling.cronExpression ?? ''}
+                    onChange={(e) => setDraft({ ...draft, scheduling: { ...draft.scheduling, cronExpression: e.target.value } })}
+                  />
+                </Field>
+              )}
+              <span className="hint">
+                {draft.scheduling.mode === 'Continuous'
+                  ? 'Continuous mode re-reads changes on every interval.'
+                  : 'Periodic mode runs on the cron expression above.'}
+              </span>
+            </div>
+          </div>
         </div>
       </form>
     </div>

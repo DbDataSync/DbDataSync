@@ -1,24 +1,14 @@
 import { useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
-import { KindSelect } from '../../components/KindSelect'
-import { readerOptions, stagingOptions, writerOptions } from '../../components/kindOptions'
+import { Field } from '../../components/Field'
 import { useBackfill, useReplicationCapabilities, useTableMappings } from '../../api/hooks'
 import type { BatchReloadSegment, SegmentMode } from '../../api/types'
 
 /**
- * Queues an ad-hoc reload of one table mapping. Separate from "Run Now" because it is a different
- * thing: it targets one mapping rather than the replication, it re-reads data an incremental pass has
- * already seen, and it never advances the incremental watermark — so it can be run against a live,
- * scheduled replication without disturbing it.
- *
- * One segment per submission in this first pass. The API accepts an array, so multi-segment
- * submission is additive here later, not a contract change.
+ * Queues an ad-hoc reload of one table mapping. Sits beside the live-run panel in the design, as a
+ * 288px column rather than a band across the top.
  */
-export function BackfillForm({
-  replicationName,
-  onQueued,
-  onClose,
-}: {
+export function BackfillForm({ replicationName, onQueued, onClose }: {
   replicationName: string
   onQueued: (runIds: string[]) => void
   onClose: () => void
@@ -27,9 +17,6 @@ export function BackfillForm({
   const capabilities = useReplicationCapabilities(replicationName)
   const backfill = useBackfill(replicationName)
 
-  // Selections are null until the operator makes one, with the effective value derived during render
-  // from what the driver offers. Seeding state from an effect instead would render one frame of empty
-  // pickers and re-render on arrival, and would quietly keep a stale choice if the options changed.
   const [mappingName, setMappingName] = useState<string | null>(null)
   const [mode, setMode] = useState<SegmentMode>('full')
   const [column, setColumn] = useState('')
@@ -41,27 +28,21 @@ export function BackfillForm({
   const [cacheKind, setCacheKind] = useState<string | null>(null)
   const [writerKind, setWriterKind] = useState<string | null>(null)
 
-  // Defaults are picked by *capability*, not by name: a reload needs a reader that can be scoped to a
-  // segment and a writer that removes rows the source no longer has, and which Kinds those happen to
-  // be is the driver's business. Falls back to whatever exists if the driver offers neither.
+  // Defaults are picked by capability, not by name: a reload needs a reader that can be scoped to a
+  // segment and a writer that removes rows the source no longer has.
   const selectedMapping = mappingName ?? mappingNames?.[0] ?? ''
   const selectedReader =
     readerKind ?? (capabilities.readers.find((r) => r.supportsSegmentation) ?? capabilities.readers[0])?.kind ?? ''
   const selectedCache = cacheKind ?? capabilities.stagingProviders[0]?.kind ?? ''
-  const selectedWriterKind =
+  const selectedWriter =
     writerKind ?? (capabilities.writers.find((w) => w.supportsReconciliation) ?? capabilities.writers[0])?.kind ?? ''
+
+  const writer = capabilities.writers.find((w) => w.kind === selectedWriter)
 
   const buildSegment = (): BatchReloadSegment => {
     switch (mode) {
       case 'list':
-        return {
-          mode,
-          column,
-          values: values
-            .split(',')
-            .map((v) => v.trim())
-            .filter((v) => v !== ''),
-        }
+        return { mode, column, values: values.split(',').map((v) => v.trim()).filter(Boolean) }
       case 'range':
         return { mode, column, rangeMin, rangeMax }
       case 'auto':
@@ -75,139 +56,100 @@ export function BackfillForm({
     e.preventDefault()
     const result = await backfill.mutateAsync({
       mappingName: selectedMapping,
-      request: {
-        readerKind: selectedReader,
-        cacheKind: selectedCache,
-        writerKind: selectedWriterKind,
-        segments: [buildSegment()],
-      },
+      request: { readerKind: selectedReader, cacheKind: selectedCache, writerKind: selectedWriter, segments: [buildSegment()] },
     })
     onQueued(result.runIds)
   }
 
-  const selectedWriter = capabilities.writers.find((w) => w.kind === selectedWriterKind)
-
   return (
-    <form className="subform stack" onSubmit={submit} data-testid="backfill-form">
-      <div className="row-between">
-        <strong>Backfill</strong>
-        <button type="button" className="btn btn-sm" onClick={onClose}>
-          Close
-        </button>
+    <form className="card" style={{ width: 288, flex: 'none' }} onSubmit={submit} data-testid="backfill-form">
+      <div className="card-head tight">
+        <span className="card-title sm">Backfill</span>
+        <button type="button" className="btn-link quiet spacer" onClick={onClose}>Close</button>
       </div>
+      <div className="card-body" style={{ gap: 10 }}>
+        <ErrorBanner error={backfill.error ?? capabilities.error} />
 
-      <ErrorBanner error={backfill.error ?? capabilities.error} />
-
-      <div className="form-grid">
-        <div className="form-field">
-          <label>Table Mapping</label>
-          <select value={selectedMapping} onChange={(e) => setMappingName(e.target.value)} data-testid="backfill-mapping-select">
-            {(mappingNames ?? []).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
+        <Field label="Table mapping">
+          <select className="select" value={selectedMapping} onChange={(e) => setMappingName(e.target.value)} data-testid="backfill-mapping-select">
+            {(mappingNames ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
-        </div>
+        </Field>
 
-        <div className="form-field">
-          <label>Segment</label>
-          <select value={mode} onChange={(e) => setMode(e.target.value as SegmentMode)} data-testid="backfill-mode-select">
-            <option value="full">Full — the whole table</option>
+        <Field label="Segment">
+          <select className="select" value={mode} onChange={(e) => setMode(e.target.value as SegmentMode)} data-testid="backfill-mode-select">
+            <option value="full">Full — whole table</option>
             <option value="list">List — specific values</option>
-            <option value="range">Range — between two bounds</option>
+            <option value="range">Range — between bounds</option>
             <option value="auto">Auto — split into buckets</option>
           </select>
-        </div>
+        </Field>
 
         {mode !== 'full' && (
-          <div className="form-field">
-            <label>Source Column</label>
-            <input
-              required
-              value={column}
-              onChange={(e) => setColumn(e.target.value)}
-              data-testid="backfill-column-input"
-            />
-          </div>
+          <Field label="Source column">
+            <input className="input" required value={column} onChange={(e) => setColumn(e.target.value)} data-testid="backfill-column-input" />
+          </Field>
         )}
-
         {mode === 'list' && (
-          <div className="form-field">
-            <label>Values (comma-separated)</label>
-            <input required value={values} onChange={(e) => setValues(e.target.value)} data-testid="backfill-values-input" />
-          </div>
+          <Field label="Values (comma-separated)">
+            <input className="input" required value={values} onChange={(e) => setValues(e.target.value)} data-testid="backfill-values-input" />
+          </Field>
         )}
-
         {mode === 'range' && (
           <>
-            <div className="form-field">
-              <label>From (inclusive)</label>
-              <input required value={rangeMin} onChange={(e) => setRangeMin(e.target.value)} data-testid="backfill-min-input" />
-            </div>
-            <div className="form-field">
-              <label>To (exclusive)</label>
-              <input required value={rangeMax} onChange={(e) => setRangeMax(e.target.value)} data-testid="backfill-max-input" />
-            </div>
+            <Field label="From (inclusive)">
+              <input className="input" required value={rangeMin} onChange={(e) => setRangeMin(e.target.value)} data-testid="backfill-min-input" />
+            </Field>
+            <Field label="To (exclusive)">
+              <input className="input" required value={rangeMax} onChange={(e) => setRangeMax(e.target.value)} data-testid="backfill-max-input" />
+            </Field>
           </>
         )}
-
         {mode === 'auto' && (
-          <div className="form-field">
-            <label>Buckets</label>
+          <Field label="Buckets">
             <input
-              type="number"
-              min={1}
-              value={bucketCount}
+              className="input" type="number" min={1} value={bucketCount}
               onChange={(e) => setBucketCount(Number(e.target.value))}
               data-testid="backfill-buckets-input"
             />
-          </div>
+          </Field>
         )}
 
-        <KindSelect
-          label="Reader"
-          value={selectedReader}
-          options={readerOptions(capabilities.readers)}
-          onChange={setReaderKind}
-          testId="backfill-reader-select"
-        />
-        <KindSelect
-          label="Staging"
-          value={selectedCache}
-          options={stagingOptions(capabilities.stagingProviders)}
-          onChange={setCacheKind}
-          testId="backfill-cache-select"
-        />
-        <KindSelect
-          label="Writer"
-          value={selectedWriterKind}
-          options={writerOptions(capabilities.writers)}
-          onChange={setWriterKind}
-          testId="backfill-writer-select"
-        />
-      </div>
+        <Field label="Reader">
+          <select className="select" value={selectedReader} onChange={(e) => setReaderKind(e.target.value)} data-testid="backfill-reader-select">
+            {capabilities.readers.map((r) => (
+              <option key={r.kind} value={r.kind}>{r.supportsSegmentation ? `${r.kind} — segmentable` : r.kind}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Staging">
+          <select className="select" value={selectedCache} onChange={(e) => setCacheKind(e.target.value)} data-testid="backfill-cache-select">
+            {capabilities.stagingProviders.map((p) => <option key={p.kind} value={p.kind}>{p.kind}</option>)}
+          </select>
+        </Field>
+        <Field label="Writer">
+          <select className="select" value={selectedWriter} onChange={(e) => setWriterKind(e.target.value)} data-testid="backfill-writer-select">
+            {capabilities.writers.map((w) => (
+              <option key={w.kind} value={w.kind}>{w.supportsReconciliation ? `${w.kind} — reconciling` : `${w.kind} — upsert-only`}</option>
+            ))}
+          </select>
+        </Field>
 
-      {selectedWriter && !selectedWriter.supportsReconciliation && (
-        <p className="muted" data-testid="backfill-upsert-note">
-          <code>{selectedWriter.kind}</code> only adds and updates rows. Rows deleted at the source since
-          the last sync will stay in the target — pick a reconciling writer if the reload should remove them.
-        </p>
-      )}
-      {mode === 'auto' && (
-        <p className="muted">
-          The column's range is measured now and split into {bucketCount} segment(s), each queued as its own run.
-        </p>
-      )}
+        {writer && !writer.supportsReconciliation && (
+          <span className="hint" data-testid="backfill-upsert-note">
+            <span className="mono">{writer.kind}</span> only adds and updates rows — rows deleted at the source
+            will stay in the target.
+          </span>
+        )}
 
-      <div className="form-actions">
         <button
           type="submit"
           className="btn btn-primary"
+          style={{ alignSelf: 'flex-start' }}
           disabled={backfill.isPending || !selectedMapping}
           data-testid="backfill-submit-button"
         >
-          {backfill.isPending ? 'Queueing…' : 'Queue Backfill'}
+          {backfill.isPending ? 'Queueing…' : 'Queue backfill'}
         </button>
       </div>
     </form>
