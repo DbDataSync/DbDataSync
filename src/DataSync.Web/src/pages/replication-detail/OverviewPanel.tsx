@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
+import { EndpointsCard } from './EndpointsCard'
 import { useReplication, useReplicationCapabilities, useTableMappings, useUpsertReplication } from '../../api/hooks'
 import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
 
@@ -65,6 +66,12 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
 
       <form onSubmit={save} style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <EndpointsCard
+            endpoints={draft.endpoints ?? { source: null, target: null }}
+            mappingCount={mappings?.length}
+            onChange={(endpoints) => setDraft({ ...draft, endpoints })}
+          />
+
           <div className="card">
             <div className="card-head" style={{ alignItems: 'flex-start', paddingTop: 11 }}>
               <span className="card-title" style={{ width: 64, flex: 'none', paddingTop: 10 }}>Pipeline</span>

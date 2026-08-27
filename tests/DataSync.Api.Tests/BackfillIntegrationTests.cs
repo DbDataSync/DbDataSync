@@ -319,8 +319,8 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
         (await _client.PutAsJsonAsync($"/api/replications/{_replicationName}/table-mappings/map-{index}", new TableMappingConfig
         {
             Name = $"map-{index}",
-            Sources = [new SourceTableRef { ConnectionName = _connectionName, Database = _databaseName, Schema = "dbo", Table = $"Src_{index}" }],
-            Targets = [new TableRef { ConnectionName = _connectionName, Database = _databaseName, Schema = "dbo", Table = $"Tgt_{index}" }],
+            Sources = [new SourceTableSpec { ConnectionName = _connectionName, Database = _databaseName, Schema = "dbo", Table = $"Src_{index}" }],
+            Targets = [new TableSpec { ConnectionName = _connectionName, Database = _databaseName, Schema = "dbo", Table = $"Tgt_{index}" }],
             ColumnMappings =
             [
                 new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },

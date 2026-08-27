@@ -72,6 +72,9 @@ export function ReplicationsPage() {
         cache: { kind: defaults!.cache!, options: {} },
         writer: { kind: defaults!.writer!, parallelism: 1, options: {} },
       },
+      // Set on the replication's Overview; a mapping created before they are inherits nothing and
+      // has to state its own, which the editor's override toggle covers.
+      endpoints: { source: null, target: null },
     }
     await upsert.mutateAsync({ name, task })
     navigate(`/replications/${encodeURIComponent(name)}`)

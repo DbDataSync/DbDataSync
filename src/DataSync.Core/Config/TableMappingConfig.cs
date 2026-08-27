@@ -1,5 +1,56 @@
 namespace DataSync.Core.Config;
 
+/// <summary>
+/// Where a replication reads from or writes to: a connection and a database. Owned by the replication
+/// and inherited by every one of its table mappings (see <see cref="TableSpec"/>).
+/// </summary>
+public sealed class EndpointRef
+{
+    public string? ConnectionName { get; set; }
+    public string? Database { get; set; }
+}
+
+/// <summary>The source and target endpoints every table mapping in a replication inherits.</summary>
+public sealed class TaskEndpoints
+{
+    public EndpointRef? Source { get; set; }
+    public EndpointRef? Target { get; set; }
+}
+
+/// <summary>
+/// One side of a table mapping, as configured. <see cref="ConnectionName"/> and
+/// <see cref="Database"/> are null to inherit the replication's endpoint, and set to override it —
+/// each independently, so a mapping can point at a different database on the same connection without
+/// restating the connection.
+/// <para>
+/// Nullable-flat rather than a nested optional endpoint object because it makes every config written
+/// before endpoints existed read back correctly with no migration: those carry both fields on every
+/// mapping, which is exactly what "this mapping overrides" means.
+/// </para>
+/// <para>
+/// This is the *configured* shape. Drivers receive <see cref="TableRef"/>, which is the resolved one —
+/// see <see cref="EndpointResolution"/>.
+/// </para>
+/// </summary>
+public class TableSpec
+{
+    public string? ConnectionName { get; set; }
+    public string? Database { get; set; }
+    public string Schema { get; set; } = "dbo";
+    public required string Table { get; set; }
+}
+
+public sealed class SourceTableSpec : TableSpec
+{
+    /// <summary>Raw SQL predicate narrowing which rows this reader considers. Never string-concatenated
+    /// into generated statements without going through the driver's identifier/parameter validation.</summary>
+    public string? Filter { get; set; }
+}
+
+/// <summary>
+/// A fully-resolved table reference — every field known. This is what drivers consume; it deliberately
+/// has no notion of inheritance, so no reader or writer has to think about where a value came from.
+/// </summary>
 public class TableRef
 {
     public required string ConnectionName { get; set; }
@@ -10,8 +61,6 @@ public class TableRef
 
 public sealed class SourceTableRef : TableRef
 {
-    /// <summary>Raw SQL predicate narrowing which rows this reader considers. Never string-concatenated
-    /// into generated statements without going through the driver's identifier/parameter validation.</summary>
     public string? Filter { get; set; }
 }
 
@@ -30,7 +79,7 @@ public sealed class ColumnMapping
 public sealed class TableMappingConfig
 {
     public required string Name { get; set; }
-    public required List<SourceTableRef> Sources { get; set; }
-    public required List<TableRef> Targets { get; set; }
+    public required List<SourceTableSpec> Sources { get; set; }
+    public required List<TableSpec> Targets { get; set; }
     public List<ColumnMapping> ColumnMappings { get; set; } = new();
 }

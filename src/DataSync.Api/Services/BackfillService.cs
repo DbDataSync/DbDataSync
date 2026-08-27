@@ -81,7 +81,7 @@ public sealed class BackfillService(
         if (!request.Segments.OfType<AutoSegment>().Any())
             return request.Segments;
 
-        var source = mapping.Sources[0];
+        var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
         var readerKind = request.ReaderKind ?? task.ChangeProcessing.Reader.Kind;
 
         var (connection, driver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);

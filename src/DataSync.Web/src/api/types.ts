@@ -61,22 +61,45 @@ export interface ChangeProcessingConfig {
   writer: WriterConfig
 }
 
+// Where a replication reads from and writes to. Every table mapping inherits these unless it sets
+// its own — see TableSpec.
+export interface EndpointRef {
+  connectionName: string | null
+  database: string | null
+}
+
+export interface TaskEndpoints {
+  source: EndpointRef | null
+  target: EndpointRef | null
+}
+
 export interface ReplicationTaskConfig {
   name: string
   enabled: boolean
   scheduling: SchedulingConfig
   changeProcessing: ChangeProcessingConfig
+  endpoints: TaskEndpoints
 }
 
-export interface TableRef {
-  connectionName: string
-  database: string
+/** One side of a table mapping as configured: null connection/database inherit the replication's
+ * endpoint, set values override it. Each falls back independently. */
+export interface TableSpec {
+  connectionName: string | null
+  database: string | null
   schema: string
   table: string
 }
 
-export interface SourceTableRef extends TableRef {
+export interface SourceTableSpec extends TableSpec {
   filter: string | null
+}
+
+/** A mapping side with its endpoint resolved — what the metadata pickers and the drivers work from. */
+export interface ResolvedRef {
+  connectionName: string
+  database: string
+  schema: string
+  table: string
 }
 
 export interface ColumnMapping {
@@ -87,8 +110,8 @@ export interface ColumnMapping {
 
 export interface TableMappingConfig {
   name: string
-  sources: SourceTableRef[]
-  targets: TableRef[]
+  sources: SourceTableSpec[]
+  targets: TableSpec[]
   columnMappings: ColumnMapping[]
 }
 

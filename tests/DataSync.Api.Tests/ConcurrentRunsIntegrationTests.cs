@@ -215,8 +215,8 @@ public sealed class ConcurrentRunsIntegrationTests : IClassFixture<TestApiFactor
         await EnsureSuccessWithBodyAsync(await _client.PutAsJsonAsync($"/api/replications/{name}/table-mappings/main", new TableMappingConfig
         {
             Name = "main",
-            Sources = [new SourceTableRef { ConnectionName = _srcConnectionName, Database = _databaseName, Schema = "dbo", Table = $"Src_{index}" }],
-            Targets = [new TableRef { ConnectionName = _tgtConnectionName, Database = _databaseName, Schema = "dbo", Table = $"Tgt_{index}" }],
+            Sources = [new SourceTableSpec { ConnectionName = _srcConnectionName, Database = _databaseName, Schema = "dbo", Table = $"Src_{index}" }],
+            Targets = [new TableSpec { ConnectionName = _tgtConnectionName, Database = _databaseName, Schema = "dbo", Table = $"Tgt_{index}" }],
             ColumnMappings =
             [
                 new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },

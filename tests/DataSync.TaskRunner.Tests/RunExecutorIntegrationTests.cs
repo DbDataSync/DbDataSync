@@ -135,8 +135,8 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _configRepository.SaveTableMapping("e2e-sync", new TableMappingConfig
         {
             Name = "main",
-            Sources = [new SourceTableRef { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
-            Targets = [new TableRef { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = _targetTable }],
+            Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableSpec { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = _targetTable }],
             ColumnMappings =
             [
                 new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
@@ -306,8 +306,8 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _configRepository.SaveTableMapping("reload-only", new TableMappingConfig
         {
             Name = "main",
-            Sources = [new SourceTableRef { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
-            Targets = [new TableRef { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = _reloadTargetTable }],
+            Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableSpec { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = _reloadTargetTable }],
             ColumnMappings =
             [
                 new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },

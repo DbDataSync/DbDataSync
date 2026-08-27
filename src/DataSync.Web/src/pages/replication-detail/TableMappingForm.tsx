@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
-import { useDeleteTableMapping, useUpsertTableMapping } from '../../api/hooks'
-import type { ColumnMapping, SourceTableRef, TableMappingConfig, TableRef } from '../../api/types'
-import { TableSidePicker } from './TableSidePicker'
+import { useDeleteTableMapping, useReplication, useUpsertTableMapping } from '../../api/hooks'
+import type { ColumnMapping, SourceTableSpec, TableMappingConfig, TableSpec } from '../../api/types'
+import { MappingSide } from './MappingSide'
+import { resolveSide } from '../../api/resolveEndpoint'
 import { ColumnMappingEditor } from './ColumnMappingEditor'
 
-const emptyRef: TableRef = { connectionName: '', database: '', schema: '', table: '' }
+/** A new mapping inherits both endpoints — null connection and database — and states only its table. */
+const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
 
 interface Props {
   replicationName: string
@@ -18,12 +20,20 @@ interface Props {
 export function TableMappingForm({ replicationName, existing, onDone, onCancel }: Props) {
   const upsert = useUpsertTableMapping(replicationName)
   const del = useDeleteTableMapping(replicationName)
+  const { data: task } = useReplication(replicationName)
   const [name, setName] = useState(existing?.name ?? '')
-  const [source, setSource] = useState<SourceTableRef>(existing?.sources[0] ?? { ...emptyRef, filter: null })
-  const [target, setTarget] = useState<TableRef>(existing?.targets[0] ?? { ...emptyRef })
+  const [source, setSource] = useState<SourceTableSpec>(existing?.sources[0] ?? { ...emptySpec, filter: null })
+  const [target, setTarget] = useState<TableSpec>(existing?.targets[0] ?? { ...emptySpec })
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(existing?.columnMappings ?? [])
 
-  const canSave = name && source.connectionName && source.table && target.connectionName && target.table && columnMappings.length > 0
+  // What each side actually points at once the replication's endpoints are applied.
+  const resolvedSource = resolveSide(task?.endpoints?.source ?? null, source)
+  const resolvedTarget = resolveSide(task?.endpoints?.target ?? null, target)
+
+  const canSave = name
+    && resolvedSource.connectionName && resolvedSource.database && source.table
+    && resolvedTarget.connectionName && resolvedTarget.database && target.table
+    && columnMappings.length > 0
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -71,36 +81,43 @@ export function TableMappingForm({ replicationName, existing, onDone, onCancel }
       )}
 
       <div className="form-grid">
-        <div className="card">
-          <div className="card-head tight">
-            <span className="card-title sm">Source</span>
-            {source.connectionName && <span className="mono" style={{ font: '400 11px var(--mono)', color: 'var(--ink-10)' }}>{source.connectionName}</span>}
-          </div>
-          <div className="card-body">
-            <TableSidePicker value={source} onChange={(v) => setSource({ ...v, filter: source.filter })} testIdPrefix="source" />
-            <Field label="Source filter — optional SQL predicate">
-              <input
-                className="input"
-                placeholder="e.g. Status = 'Active'"
-                value={source.filter ?? ''}
-                onChange={(e) => setSource({ ...source, filter: e.target.value || null })}
-              />
-            </Field>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <MappingSide
+            label="Source"
+            inherited={task?.endpoints?.source ?? null}
+            spec={source}
+            onChange={(v) => setSource({ ...v, filter: source.filter })}
+            testIdPrefix="source"
+          />
+          <div className="card">
+            <div className="card-body">
+              <Field label="Source filter — optional SQL predicate">
+                <input
+                  className="input"
+                  placeholder="e.g. Status = 'Active'"
+                  value={source.filter ?? ''}
+                  onChange={(e) => setSource({ ...source, filter: e.target.value || null })}
+                />
+              </Field>
+            </div>
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-head tight">
-            <span className="card-title sm">Target</span>
-            {target.connectionName && <span className="mono" style={{ font: '400 11px var(--mono)', color: 'var(--ink-10)' }}>{target.connectionName}</span>}
-          </div>
-          <div className="card-body">
-            <TableSidePicker value={target} onChange={setTarget} testIdPrefix="target" />
-          </div>
-        </div>
+        <MappingSide
+          label="Target"
+          inherited={task?.endpoints?.target ?? null}
+          spec={target}
+          onChange={setTarget}
+          testIdPrefix="target"
+        />
       </div>
 
-      <ColumnMappingEditor source={source} target={target} mappings={columnMappings} onChange={setColumnMappings} />
+      <ColumnMappingEditor
+        source={resolvedSource}
+        target={resolvedTarget}
+        mappings={columnMappings}
+        onChange={setColumnMappings}
+      />
     </form>
   )
 }

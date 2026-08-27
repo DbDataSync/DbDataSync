@@ -158,6 +158,10 @@ public sealed class ConfigRepository
         ConfigValidation.ValidateName(replicationName, nameof(replicationName));
         ConfigValidation.ValidateName(mapping.Name, nameof(mapping.Name));
 
+        // A mapping that resolves to no connection or database cannot run. Catch it here rather than
+        // at the first run, where it surfaces as a failed run instead of a rejected edit.
+        EndpointResolution.Validate(LoadReplicationTask(replicationName), mapping);
+
         var path = ConfigPaths.TableMappingFile(_configRoot, replicationName, mapping.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, YamlConfigSerializer.Serialize(mapping));

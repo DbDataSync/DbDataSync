@@ -198,8 +198,8 @@ public sealed class RunExecutor(
     private async Task<(long RowsRead, long RowsWritten)> RunMappingAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, WorkItem item, CancellationToken cancellationToken)
     {
-        var source = mapping.Sources[0];
-        var target = mapping.Targets[0];
+        var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
+        var target = EndpointResolution.ResolveTarget(task, mapping.Targets[0]);
         var processing = task.ChangeProcessing;
 
         DbConnection? sourceConnection = null;

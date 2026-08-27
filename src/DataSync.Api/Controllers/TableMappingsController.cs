@@ -33,6 +33,12 @@ public sealed class TableMappingsController(ConfigRepository configRepository, G
         {
             return Ok(configRepository.SaveTableMapping(replicationName, mapping, author));
         }
+        catch (FileNotFoundException)
+        {
+            // Saving a mapping resolves its endpoints against the replication, so the replication has
+            // to exist. It always had to for the mapping to mean anything; now it is enforced.
+            return NotFound(new { error = $"Replication '{replicationName}' was not found." });
+        }
         catch (ConfigValidationException ex)
         {
             return BadRequest(new { error = ex.Message });

@@ -106,10 +106,10 @@ public sealed class RunExecutorTests : IDisposable
             Name = "orders",
             Sources =
             [
-                new SourceTableRef { ConnectionName = "src1", Database = "App", Table = "Orders" },
-                new SourceTableRef { ConnectionName = "src2", Database = "App", Table = "Orders" },
+                new SourceTableSpec { ConnectionName = "src1", Database = "App", Table = "Orders" },
+                new SourceTableSpec { ConnectionName = "src2", Database = "App", Table = "Orders" },
             ],
-            Targets = [new TableRef { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
         }, Author);
 
         var runId = await EnqueueAndDrainAsync("crm-sync", "orders");
@@ -129,8 +129,8 @@ public sealed class RunExecutorTests : IDisposable
         _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
         {
             Name = "orders",
-            Sources = [new SourceTableRef { ConnectionName = "src", Database = "App", Table = "Orders" }],
-            Targets = [new TableRef { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
         }, Author);
 
         // Nothing listens on 127.0.0.1:1 — SqlClient should fail fast (Connect Timeout=1s).
@@ -163,8 +163,8 @@ public sealed class RunExecutorTests : IDisposable
             _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
             {
                 Name = name,
-                Sources = [new SourceTableRef { ConnectionName = "src", Database = "App", Table = name }],
-                Targets = [new TableRef { ConnectionName = "tgt", Database = "DW", Table = name }],
+                Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = name }],
+                Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = name }],
             }, Author);
         }
         _configRepository.SaveConnection(new ConnectionInput

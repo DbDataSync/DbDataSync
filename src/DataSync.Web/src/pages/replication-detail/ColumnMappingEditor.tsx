@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useColumns } from '../../api/hooks'
-import type { ColumnMapping, TableRef } from '../../api/types'
+import type { ColumnMapping, ResolvedRef } from '../../api/types'
 
 interface Props {
-  source: TableRef
-  target: TableRef
+  source: ResolvedRef
+  target: ResolvedRef
   mappings: ColumnMapping[]
   onChange: (mappings: ColumnMapping[]) => void
 }

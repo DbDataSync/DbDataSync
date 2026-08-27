@@ -77,23 +77,25 @@ public sealed class ApiClient(string baseUrl) : IDisposable
                 Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
                 Writer = new WriterConfig { Kind = "MsSqlMerge" },
             },
+            // Endpoints on the replication; the mapping below inherits both and states only its table.
+            Endpoints = new TaskEndpoints
+            {
+                Source = new EndpointRef { ConnectionName = Scenario.SourceConnectionName, Database = Scenario.DatabaseName },
+                Target = new EndpointRef { ConnectionName = Scenario.TargetConnectionName, Database = Scenario.DatabaseName },
+            },
         }, cancellationToken);
 
         await PutAsync($"/api/replications/{Scenario.ReplicationName}/table-mappings/{Scenario.MappingName}",
             new TableMappingConfig
             {
                 Name = Scenario.MappingName,
-                Sources = [new SourceTableRef
+                Sources = [new SourceTableSpec
                 {
-                    ConnectionName = Scenario.SourceConnectionName,
-                    Database = Scenario.DatabaseName,
                     Schema = Scenario.Schema,
                     Table = Scenario.Table,
                 }],
-                Targets = [new TableRef
+                Targets = [new TableSpec
                 {
-                    ConnectionName = Scenario.TargetConnectionName,
-                    Database = Scenario.DatabaseName,
                     Schema = Scenario.Schema,
                     Table = Scenario.Table,
                 }],

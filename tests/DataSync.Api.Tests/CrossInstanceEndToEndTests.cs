@@ -243,8 +243,8 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
         (await _client.PutAsJsonAsync($"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
         {
             Name = "main",
-            Sources = [new SourceTableRef { ConnectionName = _srcConnectionName, Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
-            Targets = [new TableRef { ConnectionName = _tgtConnectionName, Database = _databaseName, Schema = "dbo", Table = _targetTable }],
+            Sources = [new SourceTableSpec { ConnectionName = _srcConnectionName, Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableSpec { ConnectionName = _tgtConnectionName, Database = _databaseName, Schema = "dbo", Table = _targetTable }],
             ColumnMappings =
             [
                 new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },

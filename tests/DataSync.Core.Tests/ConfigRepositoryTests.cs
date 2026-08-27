@@ -151,6 +151,22 @@ public sealed class ConfigRepositoryTests : IDisposable
         Assert.Throws<ConfigValidationException>(() => _repository.SaveConnection(input, Author));
     }
 
+    /// <summary>A minimal replication for mapping tests to hang off — a mapping resolves its
+    /// endpoints against its replication, so one has to exist.</summary>
+    private void SaveTask(string name, EndpointRef? source = null, EndpointRef? target = null) =>
+        _repository.SaveReplicationTask(new ReplicationTaskConfig
+        {
+            Name = name,
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 30 },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+            },
+            Endpoints = new TaskEndpoints { Source = source, Target = target },
+        }, Author);
+
     [Fact]
     public void SaveReplicationTask_WritesYamlAndCommits()
     {
@@ -183,11 +199,13 @@ public sealed class ConfigRepositoryTests : IDisposable
     [Fact]
     public void SaveTableMapping_WritesYamlUnderReplicationAndCommits()
     {
+        // A mapping resolves its endpoints against its replication, so the replication must exist.
+        SaveTask("crm-sync");
         var mapping = new TableMappingConfig
         {
             Name = "orders",
-            Sources = [new SourceTableRef { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
-            Targets = [new TableRef { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
+            Sources = [new SourceTableSpec { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
             ColumnMappings = [new ColumnMapping { SourceColumn = "Id", TargetColumn = "OrderId" }],
         };
 
@@ -205,11 +223,13 @@ public sealed class ConfigRepositoryTests : IDisposable
     [Fact]
     public void DeleteTableMapping_RemovesFileAndCommits()
     {
+        // A mapping resolves its endpoints against its replication, so the replication must exist.
+        SaveTask("crm-sync");
         _repository.SaveTableMapping("crm-sync", new TableMappingConfig
         {
             Name = "orders",
-            Sources = [new SourceTableRef { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
-            Targets = [new TableRef { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
+            Sources = [new SourceTableSpec { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
         }, Author);
 
         _repository.DeleteTableMapping("crm-sync", "orders", Author);
@@ -237,8 +257,8 @@ public sealed class ConfigRepositoryTests : IDisposable
         _repository.SaveTableMapping("crm-sync", new TableMappingConfig
         {
             Name = "orders",
-            Sources = [new SourceTableRef { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
-            Targets = [new TableRef { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
+            Sources = [new SourceTableSpec { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
         }, Author);
         // An unrelated connection save should not show up in this replication's history.
         _repository.SaveConnection(SqlAuthInput("unrelated-conn"), Author);
@@ -269,8 +289,8 @@ public sealed class ConfigRepositoryTests : IDisposable
         _repository.SaveTableMapping("crm-sync", new TableMappingConfig
         {
             Name = "orders",
-            Sources = [new SourceTableRef { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
-            Targets = [new TableRef { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
+            Sources = [new SourceTableSpec { ConnectionName = "orders-db", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "warehouse-db", Database = "DW", Table = "Orders" }],
         }, Author);
 
         _repository.DeleteReplicationTask("crm-sync", Author);
