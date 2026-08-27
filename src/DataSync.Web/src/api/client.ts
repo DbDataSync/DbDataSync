@@ -1,4 +1,5 @@
 import type {
+  ApplyResult,
   BackfillRequest,
   ColumnMetadata,
   CommitInfo,
@@ -7,6 +8,7 @@ import type {
   ConnectionTestReport,
   CredentialSource,
   DriverCapabilities,
+  ProvisioningPlanReport,
   ScriptCompileResult,
   ScriptConfig,
   ScriptDefinition,
@@ -119,6 +121,18 @@ export const api = {
       request<void>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}`,
         { method: 'DELETE' },
+      ),
+  },
+  provisioning: {
+    get: (replicationName: string, mappingName: string) =>
+      request<ProvisioningPlanReport>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/provisioning`,
+      ),
+    apply: (replicationName: string, mappingName: string, action: string) =>
+      request<ApplyResult>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}` +
+          `/provisioning/${encodeURIComponent(action)}/apply`,
+        { method: 'POST' },
       ),
   },
   runs: {

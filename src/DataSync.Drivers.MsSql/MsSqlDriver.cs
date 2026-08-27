@@ -7,7 +7,7 @@ using Microsoft.Data.SqlClient;
 
 namespace DataSync.Drivers.MsSql;
 
-public sealed class MsSqlDriver : IDriver, IConnectionTester
+public sealed class MsSqlDriver : IDriver, IConnectionTester, IProvisioner
 {
     public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
 
@@ -140,4 +140,9 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester
             return new ConnectionTestResult(false, Stopwatch.GetElapsedTime(started), ServerVersion: null, ex.Message);
         }
     }
+
+    public IReadOnlyList<string> SupportedActions => MsSqlProvisioner.SupportedActions;
+
+    public Task<ProvisioningPlan> PlanAsync(DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken) =>
+        MsSqlProvisioner.PlanAsync(connection, request, cancellationToken);
 }

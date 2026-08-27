@@ -1,4 +1,5 @@
 using System.Data.Common;
+using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.Generic;
 
 namespace DataSync.Drivers.Postgres;
@@ -76,4 +77,102 @@ public sealed class PostgresDialect : SqlDialect
         "timestamptz" => BucketableKind.DateTimeOffset,
         _ => base.ClassifyForBucketing(baseTypeName),
     };
+
+    /// <summary>See the type-mapping table in phase 25 §2. Postgres has one string type family and no
+    /// notion of "narrow" vs "wide" characters, so <see cref="CanonicalType.IsUnicode"/> is always true
+    /// here — a round trip through Postgres never narrows a string. Array and user-defined types fall
+    /// through to <see cref="CanonicalTypeKind.Unmappable"/>, per the doc's "array types → Unmappable".</summary>
+    public override CanonicalType ToCanonicalType(string nativeType)
+    {
+        var (baseName, args) = CanonicalTypeSpec.Parse(nativeType);
+        return baseName switch
+        {
+            "boolean" or "bool" => Simple(CanonicalTypeKind.Boolean),
+            "smallint" or "int2" or "smallserial" => Simple(CanonicalTypeKind.Int16),
+            "integer" or "int4" or "serial" => Simple(CanonicalTypeKind.Int32),
+            "bigint" or "int8" or "bigserial" => Simple(CanonicalTypeKind.Int64),
+
+            "numeric" or "decimal" => new CanonicalType(
+                CanonicalTypeKind.Decimal, null, CanonicalTypeSpec.IntAt(args, 0, 18), CanonicalTypeSpec.IntAt(args, 1, 0), false, false),
+
+            "money" => new CanonicalType(CanonicalTypeKind.Decimal, null, 19, 4, false, false,
+                SourceNote: "PostgreSQL 'money' carries currency semantics that a generic decimal does not; only its scale survives."),
+
+            "real" or "float4" => Simple(CanonicalTypeKind.Float),
+            "double precision" or "float8" => Simple(CanonicalTypeKind.Double),
+
+            "character varying" or "varchar" =>
+                new CanonicalType(CanonicalTypeKind.String, CanonicalTypeSpec.IntAt(args, 0, null), null, null, true, false),
+            "character" or "char" or "bpchar" =>
+                new CanonicalType(CanonicalTypeKind.String, CanonicalTypeSpec.IntAt(args, 0, 1), null, null, true, false),
+            "text" => new CanonicalType(CanonicalTypeKind.String, null, null, null, true, true),
+
+            "bytea" => new CanonicalType(CanonicalTypeKind.Binary, null, null, null, false, true),
+
+            "date" => Simple(CanonicalTypeKind.Date),
+            "time without time zone" or "time" => new CanonicalType(CanonicalTypeKind.Time, null, null, CanonicalTypeSpec.IntAt(args, 0, 6), false, false),
+            "timestamp without time zone" or "timestamp" =>
+                new CanonicalType(CanonicalTypeKind.Timestamp, null, null, CanonicalTypeSpec.IntAt(args, 0, 6), false, false),
+            "timestamp with time zone" or "timestamptz" =>
+                new CanonicalType(CanonicalTypeKind.TimestampTz, null, null, CanonicalTypeSpec.IntAt(args, 0, 6), false, false),
+
+            "uuid" => Simple(CanonicalTypeKind.Guid),
+            "json" => Simple(CanonicalTypeKind.Json),
+            "jsonb" => Simple(CanonicalTypeKind.Json),
+            "xml" => Simple(CanonicalTypeKind.Xml),
+
+            // "time with time zone" is a Postgres-only oddity with no faithful cross-engine target;
+            // arrays and user-defined (enum) types are the doc's "array types → Unmappable" — none of
+            // these get a guessed rendering.
+            _ => Simple(CanonicalTypeKind.Unmappable),
+        };
+
+        static CanonicalType Simple(CanonicalTypeKind kind) => new(kind, null, null, null, false, false);
+    }
+
+    public override RenderedColumnType RenderColumnType(CanonicalType type) => type.Kind switch
+    {
+        CanonicalTypeKind.Boolean => Faithful("boolean", type),
+        // Postgres has no 1-byte integer type — the documented widening.
+        CanonicalTypeKind.Int8 => new RenderedColumnType(
+            "smallint", Combine(type, "Widened; PostgreSQL has no 1-byte integer type.")),
+        CanonicalTypeKind.Int16 => Faithful("smallint", type),
+        CanonicalTypeKind.Int32 => Faithful("integer", type),
+        CanonicalTypeKind.Int64 => Faithful("bigint", type),
+        CanonicalTypeKind.Decimal => Faithful($"numeric({type.Precision ?? 18},{type.Scale ?? 0})", type),
+        CanonicalTypeKind.Float => Faithful("real", type),
+        CanonicalTypeKind.Double => Faithful("double precision", type),
+
+        CanonicalTypeKind.String when type.IsMax =>
+            new RenderedColumnType("text", Combine(type, "No length bound at the target.")),
+        CanonicalTypeKind.String => Faithful($"varchar({type.Length ?? 255})", type),
+
+        CanonicalTypeKind.Binary => Faithful("bytea", type.IsMax || type.Length is null
+            ? type
+            : type with { SourceNote = Combine(type, "PostgreSQL bytea has no length constraint; it is not enforced at the target.") }),
+
+        CanonicalTypeKind.Date => Faithful("date", type),
+        CanonicalTypeKind.Time => Faithful($"time({Math.Min(type.Scale ?? 6, 6)})", type),
+
+        CanonicalTypeKind.Timestamp => (type.Scale ?? 6) > 6
+            ? new RenderedColumnType("timestamp(6)", Combine(type,
+                "One digit of sub-second precision lost (SQL Server datetime2 supports 7 digits; PostgreSQL timestamp supports 6)."))
+            : Faithful($"timestamp({type.Scale ?? 6})", type),
+
+        CanonicalTypeKind.TimestampTz => Faithful("timestamptz", type),
+        CanonicalTypeKind.Guid => Faithful("uuid", type),
+        CanonicalTypeKind.Xml => Faithful("xml", type),
+        CanonicalTypeKind.Json => Faithful("jsonb", type),
+
+        CanonicalTypeKind.Unmappable => throw new InvalidOperationException(
+            "RenderColumnType must never be called for Unmappable — the caller checks CanonicalType.Kind " +
+            "first and reports the plan as Unsupported instead."),
+
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type.Kind, "Unknown canonical type kind."),
+    };
+
+    private static RenderedColumnType Faithful(string sql, CanonicalType type) => new(sql, type.SourceNote);
+
+    private static string Combine(CanonicalType type, string renderNote) =>
+        type.SourceNote is null ? renderNote : $"{type.SourceNote} {renderNote}";
 }

@@ -1,6 +1,13 @@
 # Phase 25 — Database provisioning
 
-**Status**: Planned, not started
+**Status**: Built. `CanonicalType`/`RenderColumnType` live in `DataSync.Drivers.Abstractions` rather than
+`DataSync.Drivers.Generic` (so `IProvisioner` can reference the canonical type without a circular project
+reference); `MsSqlProvisioner`/`PostgresProvisioner` are static classes with their DB-touching orchestration
+split from pure, unit-tested decision logic (`MsSqlProvisioner.BuildEnableChangeCaptureSteps`). Not done:
+`tools/dev-harness`'s `SqlBootstrap.cs` still has its own hand-written Change Tracking setup rather than
+calling `MsSqlProvisioner`, and this phase's E2E Playwright coverage was not added (the existing E2E suite
+needs Docker, unavailable in this environment, and the plan/apply flow is covered by unit tests instead).
+Both are worth picking up as follow-ups.
 **Plan reference**: `architecture/planning/done/database-provisioning-and-lifecycle-scripts.md`. Answers
 the open product question carried by `architecture/planning/todo/change-tracking-odbc-jdbc.md`
 ("Should DataSync create triggers on a source at all?") for the whole class of DDL, not just triggers.

@@ -25,6 +25,8 @@ const keys = {
     ['replications', replicationName, 'table-mappings', mappingName] as const,
   runHistory: (replicationName: string) => ['replications', replicationName, 'runs'] as const,
   run: (runId: string) => ['runs', runId] as const,
+  provisioning: (replicationName: string, mappingName: string) =>
+    ['replications', replicationName, 'table-mappings', mappingName, 'provisioning'] as const,
 }
 
 export function useConnections() {
@@ -330,5 +332,25 @@ export function useDeleteScript() {
   return useMutation({
     mutationFn: (name: string) => api.scripts.delete(name),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.scripts }),
+  })
+}
+
+/** Both sides' provisioning plans for one table mapping — the Setup card's state badges and preview SQL. */
+export function useProvisioning(replicationName: string | undefined, mappingName: string | undefined) {
+  return useQuery({
+    queryKey: keys.provisioning(replicationName ?? '', mappingName ?? ''),
+    queryFn: () => api.provisioning.get(replicationName!, mappingName!),
+    enabled: !!replicationName && !!mappingName,
+  })
+}
+
+/** Re-plans and applies one provisioning action. A mutation, not folded into the query above: Apply
+ * is a deliberate, confirmed action against a live database, not something that should ever happen as
+ * a side effect of a refetch. */
+export function useApplyProvisioning(replicationName: string, mappingName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (action: string) => api.provisioning.apply(replicationName, mappingName, action),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.provisioning(replicationName, mappingName) }),
   })
 }

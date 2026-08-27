@@ -3,6 +3,9 @@ using System.Threading.Channels;
 using ClrKernel.Core.Secrets;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.Generic;
+using DataSync.Drivers.MsSql;
+using DataSync.Drivers.Postgres;
 using DataSync.Scripting;
 using DataSync.Scripting.Abstractions;
 using DataSync.State;
@@ -252,6 +255,9 @@ public sealed class RunExecutor(
                 scriptHost, sourceConnectionConfig, task, mapping, columnMappings, sourceScriptDialect,
                 message => Log(item.RunId, LogSeverity.Info, $"[{mapping.Name}] {message}"));
 
+            await EnsureTargetTableProvisionedAsync(
+                sourceDriver, sourceConnection, source, targetDriver, targetConnection, target, mapping, item.RunId, cancellationToken);
+
             var segments = await ResolveSegmentsAsync(reader, sourceConnection, source, item, processing.Reader.Options, cancellationToken);
             if (segments.Count > 1)
                 Log(item.RunId, LogSeverity.Info, $"Processing {segments.Count} configured segment(s) in this pass.");
@@ -367,6 +373,64 @@ public sealed class RunExecutor(
 
         return result;
     }
+
+    /// <summary>
+    /// The one provisioning action DataSync ever runs unattended (phase 25 §5): additive-only, and only
+    /// when the target table does not exist at all. Off by default (<see cref="ProvisioningConfig.CreateTargetTableIfMissing"/>);
+    /// when the table already exists this is a no-op — no ALTER, no column reconciliation, and a
+    /// mapped column missing from an existing table still fails with the ordinary staging error.
+    /// </summary>
+    private async Task EnsureTargetTableProvisionedAsync(
+        IDriver sourceDriver, DbConnection sourceConnection, SourceTableRef source,
+        IDriver targetDriver, DbConnection targetConnection, TableRef target,
+        TableMappingConfig mapping, Guid runId, CancellationToken cancellationToken)
+    {
+        if (!mapping.Provisioning.CreateTargetTableIfMissing || targetDriver is not IProvisioner provisioner)
+            return;
+
+        var sourceColumns = await sourceDriver.ListColumnsAsync(
+            sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
+        var (columns, identityWarnings) = ProvisioningColumnBuilder.Build(
+            ResolveDialect(sourceDriver.DriverType), sourceColumns, mapping.ColumnMappings);
+
+        var request = new ProvisioningRequest(
+            ProvisioningActions.CreateTargetTable, target, ReaderKind: null,
+            ReaderOptions: new Dictionary<string, string>(), columns);
+        var plan = await provisioner.PlanAsync(targetConnection, request, cancellationToken);
+
+        if (plan.State == ProvisioningState.Unsupported)
+        {
+            foreach (var warning in plan.Warnings)
+                Log(runId, LogSeverity.Warning, $"'{mapping.Name}': target table cannot be auto-created — {warning}");
+            return;
+        }
+
+        if (plan.State != ProvisioningState.Missing)
+            return;
+
+        foreach (var warning in identityWarnings.Concat(plan.Warnings))
+            Log(runId, LogSeverity.Warning, $"'{mapping.Name}': {warning}");
+
+        foreach (var step in plan.Steps)
+        {
+            using var cmd = targetConnection.CreateCommand();
+            cmd.CommandText = step.CommandText;
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+            Log(runId, LogSeverity.Info, $"'{mapping.Name}': target table created — {step.CommandText}");
+        }
+    }
+
+    /// <summary>The one place TaskRunner needs a concrete <see cref="SqlDialect"/> for an engine it
+    /// isn't otherwise driving — to translate the *source's* native column types into the canonical
+    /// form <see cref="ProvisioningColumnBuilder"/> needs. Same shape as <see cref="RunnerScriptDialect"/>
+    /// just below: a per-engine switch at the one call site that needs it, rather than widening
+    /// <see cref="IDriver"/> to expose a dialect no other caller needs.</summary>
+    private static SqlDialect ResolveDialect(ConnectionDriverType driverType) => driverType switch
+    {
+        ConnectionDriverType.MsSql => MsSqlDialect.Instance,
+        ConnectionDriverType.Postgres => PostgresDialect.Instance,
+        _ => throw new InvalidOperationException($"No SqlDialect is registered for driver type '{driverType}'."),
+    };
 
     private static async Task<IReadOnlyList<BatchReloadSegment?>> ResolveSegmentsAsync(
         IChangeReader reader,

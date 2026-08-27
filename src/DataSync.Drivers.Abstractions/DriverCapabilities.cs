@@ -16,7 +16,10 @@ public sealed record DriverCapabilities(
     /// (<see cref="IConnectionTester"/>). False is not a defect — a driver reaching an arbitrary
     /// engine may have no probe it can name — so a UI hides the affordance rather than offering one
     /// that could never work.</summary>
-    bool SupportsConnectionTest);
+    bool SupportsConnectionTest,
+    /// <summary>Which provisioning actions (<see cref="ProvisioningActions"/>) this driver can plan
+    /// (<see cref="IProvisioner"/>). Empty for a driver that implements no provisioning at all.</summary>
+    IReadOnlyList<string> SupportedProvisioningActions);
 
 public sealed record ReaderCapability(string Kind, bool SupportsSegmentation, bool DetectsDeletes);
 

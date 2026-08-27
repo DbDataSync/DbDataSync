@@ -17,7 +17,7 @@ namespace DataSync.Drivers.Postgres;
 /// later phase; nothing here is waiting on it.
 /// </para>
 /// </summary>
-public sealed class PostgresDriver : IDriver, IConnectionTester
+public sealed class PostgresDriver : IDriver, IConnectionTester, IProvisioner
 {
     public ConnectionDriverType DriverType => ConnectionDriverType.Postgres;
 
@@ -113,4 +113,9 @@ public sealed class PostgresDriver : IDriver, IConnectionTester
             return new ConnectionTestResult(false, Stopwatch.GetElapsedTime(started), null, ex.Message);
         }
     }
+
+    public IReadOnlyList<string> SupportedActions => PostgresProvisioner.SupportedActions;
+
+    public Task<ProvisioningPlan> PlanAsync(DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken) =>
+        PostgresProvisioner.PlanAsync(connection, request, cancellationToken);
 }

@@ -1,0 +1,169 @@
+using System.Data.Common;
+using System.Diagnostics;
+using DataSync.Core.Config;
+using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.Generic;
+using DataSync.Drivers.MsSql;
+using DataSync.Drivers.Postgres;
+
+namespace DataSync.Api.Services;
+
+/// <summary>
+/// Plans (and, once an operator confirms, applies) the DDL a table mapping's Setup card previews —
+/// see architecture/implementation/todo/phase-025-database-provisioning.md. Follows
+/// <see cref="MetadataService"/>/<see cref="DriverConnectionFactory"/> for connection and credential
+/// handling: opens what it needs, closes it, no data movement.
+/// <para>
+/// Both plans come from the same code path <see cref="DataSync.TaskRunner.RunExecutor"/>'s automatic
+/// <c>CreateTargetTableIfMissing</c> uses (<see cref="ProvisioningColumnBuilder"/>,
+/// <see cref="CreateTargetTablePlanner"/>), so the DDL an operator previews here is the same DDL a run
+/// would generate unattended — never a second implementation that could quietly disagree.
+/// </para>
+/// </summary>
+public sealed class ProvisioningService(ConfigRepository configRepository, DriverConnectionFactory connections)
+{
+    public async Task<ProvisioningPlanReport> GetPlansAsync(
+        string replicationName, string mappingName, CancellationToken cancellationToken)
+    {
+        var (task, mapping, source, target) = LoadMapping(replicationName, mappingName);
+
+        var (sourceConnection, sourcePlan) = await PlanEnableSourceChangeCaptureAsync(task, source, cancellationToken);
+        if (sourceConnection is not null)
+            await sourceConnection.DisposeAsync();
+
+        var (targetConnection, targetPlan) = await PlanCreateTargetTableAsync(mapping, source, target, cancellationToken);
+        if (targetConnection is not null)
+            await targetConnection.DisposeAsync();
+
+        return new ProvisioningPlanReport(sourcePlan, targetPlan);
+    }
+
+    public async Task<ApplyResult> ApplyAsync(
+        string replicationName, string mappingName, string action, CancellationToken cancellationToken)
+    {
+        var (task, mapping, source, target) = LoadMapping(replicationName, mappingName);
+
+        var (connection, plan) = action switch
+        {
+            ProvisioningActions.EnableSourceChangeCapture => await PlanEnableSourceChangeCaptureAsync(task, source, cancellationToken),
+            ProvisioningActions.CreateTargetTable => await PlanCreateTargetTableAsync(mapping, source, target, cancellationToken),
+            _ => throw new ConfigValidationException($"Unknown provisioning action '{action}'."),
+        };
+
+        if (connection is null)
+            return new ApplyResult([], plan.State);
+
+        try
+        {
+            var results = new List<ApplyStepResult>();
+            foreach (var step in plan.Steps)
+            {
+                var started = Stopwatch.GetTimestamp();
+                try
+                {
+                    using var cmd = connection.CreateCommand();
+                    cmd.CommandText = step.CommandText;
+                    await cmd.ExecuteNonQueryAsync(cancellationToken);
+                    results.Add(new ApplyStepResult(step.Title, true, null, Stopwatch.GetElapsedTime(started).TotalMilliseconds));
+                }
+                catch (DbException ex)
+                {
+                    // The enterprise-normal path: a least-privileged connection cannot run ALTER
+                    // DATABASE, and that permission error is the expected outcome, not a defect — it's
+                    // surfaced intact rather than swallowed, and Copy exists for exactly this case.
+                    results.Add(new ApplyStepResult(step.Title, false, ex.Message, Stopwatch.GetElapsedTime(started).TotalMilliseconds));
+                    break;
+                }
+            }
+
+            var finalState = results.Count > 0 && results.All(r => r.Succeeded) ? ProvisioningState.Satisfied : plan.State;
+            return new ApplyResult(results, finalState);
+        }
+        finally
+        {
+            await connection.DisposeAsync();
+        }
+    }
+
+    private (ReplicationTaskConfig Task, TableMappingConfig Mapping, SourceTableRef Source, TableRef Target) LoadMapping(
+        string replicationName, string mappingName)
+    {
+        var task = configRepository.LoadReplicationTask(replicationName);
+        var mapping = configRepository.LoadTableMapping(replicationName, mappingName);
+        if (mapping.Sources.Count != 1 || mapping.Targets.Count != 1)
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' has {mapping.Sources.Count} source(s) and " +
+                $"{mapping.Targets.Count} target(s) — provisioning only plans 1:1 mappings.");
+
+        var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
+        var target = EndpointResolution.ResolveTarget(task, mapping.Targets[0]);
+        return (task, mapping, source, target);
+    }
+
+    private async Task<(DbConnection? Connection, ProvisioningPlan Plan)> PlanEnableSourceChangeCaptureAsync(
+        ReplicationTaskConfig task, SourceTableRef source, CancellationToken cancellationToken)
+    {
+        var (connection, driver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);
+        if (driver is not IProvisioner provisioner)
+        {
+            await connection.DisposeAsync();
+            return (null, Unsupported(ProvisioningActions.EnableSourceChangeCapture, driver.DriverType));
+        }
+
+        var request = new ProvisioningRequest(
+            ProvisioningActions.EnableSourceChangeCapture, source, task.ChangeProcessing.Reader.Kind,
+            task.ChangeProcessing.Reader.Options, []);
+        var plan = await provisioner.PlanAsync(connection, request, cancellationToken);
+        return (connection, plan);
+    }
+
+    private async Task<(DbConnection? Connection, ProvisioningPlan Plan)> PlanCreateTargetTableAsync(
+        TableMappingConfig mapping, SourceTableRef source, TableRef target, CancellationToken cancellationToken)
+    {
+        var (sourceConnection, sourceDriver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);
+        IReadOnlyList<ColumnMetadata> sourceColumns;
+        try
+        {
+            sourceColumns = await sourceDriver.ListColumnsAsync(
+                sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
+        }
+        finally
+        {
+            await sourceConnection.DisposeAsync();
+        }
+
+        var (targetConnection, targetDriver) = await connections.OpenAsync(target.ConnectionName, cancellationToken);
+        if (targetDriver is not IProvisioner provisioner)
+        {
+            await targetConnection.DisposeAsync();
+            return (null, Unsupported(ProvisioningActions.CreateTargetTable, targetDriver.DriverType));
+        }
+
+        var (columns, identityWarnings) = ProvisioningColumnBuilder.Build(
+            ResolveDialect(sourceDriver.DriverType), sourceColumns, mapping.ColumnMappings);
+
+        var request = new ProvisioningRequest(
+            ProvisioningActions.CreateTargetTable, target, ReaderKind: null, ReaderOptions: new Dictionary<string, string>(), columns);
+        var plan = await provisioner.PlanAsync(targetConnection, request, cancellationToken);
+        return (targetConnection, plan with { Warnings = [.. identityWarnings, .. plan.Warnings] });
+    }
+
+    private static ProvisioningPlan Unsupported(string action, ConnectionDriverType driverType) =>
+        new(action, ProvisioningState.Unknown, [], [$"The '{driverType}' driver does not support provisioning."]);
+
+    /// <summary>Same shape as <c>DataSync.TaskRunner.RunExecutor.ResolveDialect</c> — the one place
+    /// this layer needs a concrete <see cref="SqlDialect"/> for an engine it isn't otherwise driving,
+    /// to translate the *source's* native column types into canonical form.</summary>
+    private static SqlDialect ResolveDialect(ConnectionDriverType driverType) => driverType switch
+    {
+        ConnectionDriverType.MsSql => MsSqlDialect.Instance,
+        ConnectionDriverType.Postgres => PostgresDialect.Instance,
+        _ => throw new InvalidOperationException($"No SqlDialect is registered for driver type '{driverType}'."),
+    };
+}
+
+public sealed record ProvisioningPlanReport(ProvisioningPlan Source, ProvisioningPlan Target);
+
+public sealed record ApplyStepResult(string Title, bool Succeeded, string? Error, double ElapsedMs);
+
+public sealed record ApplyResult(IReadOnlyList<ApplyStepResult> Steps, ProvisioningState State);

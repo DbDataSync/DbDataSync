@@ -7,6 +7,7 @@ import { MappingSide } from './MappingSide'
 import { resolveSide } from '../../api/resolveEndpoint'
 import { ColumnMappingEditor } from './ColumnMappingEditor'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
+import { ProvisioningCard } from './ProvisioningCard'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
 const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
@@ -30,6 +31,9 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
   const [target, setTarget] = useState<TableSpec>(existing?.targets[0] ?? { ...emptySpec })
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(existing?.columnMappings ?? [])
   const [scripts, setScripts] = useState<ScriptBindings>(structuredClone(existing?.scripts ?? {}))
+  const [provisioning, setProvisioning] = useState(
+    existing?.provisioning ?? { createTargetTableIfMissing: false },
+  )
 
   // What each side actually points at once the replication's endpoints are applied.
   const resolvedSource = resolveSide(task?.endpoints?.source ?? null, source)
@@ -45,7 +49,7 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
     e.preventDefault()
     await upsert.mutateAsync({
       mappingName: name,
-      mapping: { name, sources: [source], targets: [target], columnMappings, scripts },
+      mapping: { name, sources: [source], targets: [target], columnMappings, scripts, provisioning },
     })
     onSaved(name)
   }
@@ -133,6 +137,16 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
         level="mapping"
         onChange={setScripts}
       />
+
+      {/* Only a saved mapping has a name the provisioning API can plan against. */}
+      {existing && (
+        <ProvisioningCard
+          replicationName={replicationName}
+          mappingName={existing.name}
+          provisioning={provisioning}
+          onChangeProvisioning={setProvisioning}
+        />
+      )}
     </form>
   )
 }

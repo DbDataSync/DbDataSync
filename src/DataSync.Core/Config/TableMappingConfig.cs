@@ -110,4 +110,18 @@ public sealed class TableMappingConfig
     /// inherits from a broader level; a key present with a null value is "explicitly none" and
     /// overrides an inherited binding. See <see cref="ScriptResolution"/>.</summary>
     public Dictionary<string, ScriptBinding?> Scripts { get; set; } = new();
+
+    public ProvisioningConfig Provisioning { get; set; } = new();
+}
+
+/// <summary>See phase 25 §5 — the one provisioning action DataSync ever runs unattended, and why it is
+/// safe to: additive-only, and only when the table is absent entirely.</summary>
+public sealed class ProvisioningConfig
+{
+    /// <summary>Target-side, additive only, never ALTER, never source DDL. Off by default. Checked once
+    /// per pass, before the segment loop: if set and the target table is absent, the mapping's
+    /// <c>createTargetTable</c> plan is applied and every statement it ran is logged at Info. If the
+    /// table exists, nothing happens — no ALTER, no column reconciliation; a missing mapped column still
+    /// fails with the existing staging error.</summary>
+    public bool CreateTargetTableIfMissing { get; set; }
 }

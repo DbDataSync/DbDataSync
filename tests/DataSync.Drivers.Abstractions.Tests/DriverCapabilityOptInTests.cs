@@ -43,6 +43,26 @@ public sealed class DriverCapabilityOptInTests
         Assert.False(Assert.Single(registry.Describe(ConnectionDriverType.MsSql)!.Readers).DetectsDeletes);
     }
 
+    [Fact]
+    public void ADriverThatCannotProvision_ReportsNoSupportedActions()
+    {
+        var registry = new DriverRegistry();
+        registry.Register(new UntestableDriver());
+
+        Assert.Empty(registry.Describe(ConnectionDriverType.MsSql)!.SupportedProvisioningActions);
+    }
+
+    [Fact]
+    public void ADriverThatCanProvision_ReportsExactlyItsDeclaredActions()
+    {
+        var registry = new DriverRegistry();
+        registry.Register(new ProvisioningDriver());
+
+        Assert.Equal(
+            [ProvisioningActions.CreateTargetTable],
+            registry.Describe(ConnectionDriverType.MsSql)!.SupportedProvisioningActions);
+    }
+
     private class UntestableDriver : IDriver
     {
         public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
@@ -68,6 +88,15 @@ public sealed class DriverCapabilityOptInTests
     {
         public Task<ConnectionTestResult> TestAsync(DbConnection connection, CancellationToken cancellationToken) =>
             Task.FromResult(new ConnectionTestResult(true, TimeSpan.Zero, "fake", null));
+    }
+
+    private sealed class ProvisioningDriver : UntestableDriver, IProvisioner
+    {
+        public IReadOnlyList<string> SupportedActions { get; } = [ProvisioningActions.CreateTargetTable];
+
+        public Task<ProvisioningPlan> PlanAsync(
+            DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class SilentReader : IChangeReader

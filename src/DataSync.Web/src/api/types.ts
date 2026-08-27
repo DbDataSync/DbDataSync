@@ -111,12 +111,18 @@ export interface ColumnMapping {
   transform: string | null
 }
 
+export interface ProvisioningConfig {
+  /** Target-side, additive only, never ALTER, never source DDL. Off by default. */
+  createTargetTableIfMissing: boolean
+}
+
 export interface TableMappingConfig {
   name: string
   sources: SourceTableSpec[]
   targets: TableSpec[]
   columnMappings: ColumnMapping[]
   scripts?: ScriptBindings
+  provisioning?: ProvisioningConfig
 }
 
 export interface TableMetadata {
@@ -227,6 +233,44 @@ export interface DriverCapabilities {
    * driver reaching an arbitrary engine may have no probe it can name — so the UI hides the Test
    * affordance rather than offering one that could never work. */
   supportsConnectionTest: boolean
+  /** Which provisioning actions (see ProvisioningPlan) this driver can plan. Empty for a driver that
+   * implements no provisioning at all. */
+  supportedProvisioningActions: string[]
+}
+
+// The Setup card — see architecture/implementation/todo/phase-025-database-provisioning.md.
+export type ProvisioningState = 'Satisfied' | 'Missing' | 'Unsupported' | 'Unknown'
+export type ProvisioningStepScope = 'Database' | 'Table'
+
+export interface ProvisioningStep {
+  title: string
+  commandText: string
+  rationale: string | null
+  scope: ProvisioningStepScope
+}
+
+export interface ProvisioningPlan {
+  action: string
+  state: ProvisioningState
+  steps: ProvisioningStep[]
+  warnings: string[]
+}
+
+export interface ProvisioningPlanReport {
+  source: ProvisioningPlan
+  target: ProvisioningPlan
+}
+
+export interface ApplyStepResult {
+  title: string
+  succeeded: boolean
+  error: string | null
+  elapsedMs: number
+}
+
+export interface ApplyResult {
+  steps: ApplyStepResult[]
+  state: ProvisioningState
 }
 
 // Which slice of a source table one reload covers. The discriminator property is "mode", matching

@@ -1,4 +1,5 @@
 using System.Data.Common;
+using DataSync.Drivers.Abstractions;
 
 namespace DataSync.Drivers.Generic;
 
@@ -106,6 +107,22 @@ public abstract class SqlDialect
         bool overrideRequired,
         Func<Task<T>> write,
         CancellationToken cancellationToken) => write();
+
+    /// <summary>
+    /// Translates one of this engine's native type specs (e.g. <c>"nvarchar(50)"</c>, the exact string
+    /// <see cref="Abstractions.ColumnMetadata.NativeType"/> carries) into the canonical intermediate a
+    /// provisioning plan uses to create a matching column on a *different* engine. See phase 25 —
+    /// <c>architecture/implementation/todo/phase-025-database-provisioning.md</c>.
+    /// </summary>
+    public abstract CanonicalType ToCanonicalType(string nativeType);
+
+    /// <summary>
+    /// The reverse direction: renders this engine's DDL for a canonical type produced by (usually)
+    /// another engine's <see cref="ToCanonicalType"/>. Must not be called with
+    /// <see cref="CanonicalTypeKind.Unmappable"/> — a caller checks <see cref="CanonicalType.Kind"/>
+    /// and reports <c>Unsupported</c> before ever reaching a renderer.
+    /// </summary>
+    public abstract RenderedColumnType RenderColumnType(CanonicalType type);
 }
 
 /// <summary>How auto-segmentation may divide a column's value space. Not a type system — only the four
