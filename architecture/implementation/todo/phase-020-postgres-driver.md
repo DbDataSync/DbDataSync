@@ -1,17 +1,17 @@
-# Phase 18 — PostgreSQL Driver (planned)
+# Phase 20 — PostgreSQL Driver (planned)
 
 **Status**: Planned, not started
-**Plan reference**: `architecture/planning/done/additional-database-drivers.md`; depends on phases 16
-and 17.
+**Plan reference**: `architecture/planning/done/additional-database-drivers.md`; depends on phases 17
+and 18.
 
 ## Why Postgres first
 
 Best-documented ADO.NET provider of the five (Npgsql), a genuinely different bulk path to exercise
 later (`COPY`), and it is the first engine that makes cross-engine replication real. It is also the
 sink `planning/todo/columnar-change-batches.md` has been waiting on — though that question belongs to
-phase 19, not this one.
+phase 21, not this one.
 
-If phases 16 and 17 did their job, this phase is small: a dialect, a connection factory, catalog
+If phases 17 and 18 did their job, this phase is small: a dialect, a connection factory, catalog
 queries, and registration. Anything here that turns out *not* to be small is a finding about the
 generic layer, and should be recorded as one.
 
@@ -20,9 +20,9 @@ generic layer, and should be recorded as one.
 **`DataSync.Drivers.Postgres`** on Npgsql:
 
 - **`PostgresDialect`** — `"identifier"` quoting, Npgsql parameter placeholders, and the identity hook
-  (`OVERRIDING SYSTEM VALUE`) phase 17 defines.
+  (`OVERRIDING SYSTEM VALUE`) phase 18 defines.
 - **`PostgresDriver : IDriver`** — connection creation from `ConnectionConfig` + resolved credential,
-  registering phase 16/17's generic `Watermark`, `BatchReload`, `StagingTable` and `DeleteInsert`
+  registering phase 17/18's generic `Watermark`, `BatchReload`, `StagingTable` and `DeleteInsert`
   Kinds with its dialect. No engine-specific reader or writer in this phase.
 - **Catalog metadata** — `ListDatabases` over `pg_database`, tables and columns via
   `Generic.InformationSchemaQueries`. Postgres separates database from schema cleanly, so the SPA's
@@ -41,7 +41,7 @@ to `MsSql` and disabled. Capability discovery needs no change: the picker is alr
 
 ## What this phase does not build
 
-`COPY` staging — phase 19, along with the columnar decision. Any CDC/logical-replication reader:
+`COPY` staging — phase 21, along with the columnar decision. Any CDC/logical-replication reader:
 watermark and batch only, per the plan. Oracle, MySQL, ODBC, JDBC.
 
 ## How to verify when built

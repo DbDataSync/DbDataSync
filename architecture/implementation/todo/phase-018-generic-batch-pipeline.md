@@ -1,14 +1,14 @@
-# Phase 17 — Generic Batch Pipeline (planned)
+# Phase 18 — Generic Batch Pipeline (planned)
 
 **Status**: Planned, not started
 **Plan reference**: `architecture/planning/done/additional-database-drivers.md`; builds directly on
-phase 16's `SqlDialect` and `DataSync.Drivers.Generic`.
+phase 17's `SqlDialect` and `DataSync.Drivers.Generic`.
 
 ## Why this phase
 
-Phase 16 establishes the pattern with one reader. This one completes the set, so that a new engine's
+Phase 17 establishes the pattern with one reader. This one completes the set, so that a new engine's
 driver is a dialect, a connection factory and a catalog query — and nothing else — before it can run a
-batch replication end to end. It is still proven against MSSQL; no new engine appears until phase 18.
+batch replication end to end. It is still proven against MSSQL; no new engine appears until phase 20.
 
 ## What this phase will build
 
@@ -24,7 +24,7 @@ arithmetic is pure and already engine-neutral, so it moves rather than being rei
 parameterised multi-row `INSERT`. Deliberately the lowest common denominator: no temp-table syntax, no
 bulk-load API, no provider-specific loader. Every engine in the plan can run it, including ODBC and
 JDBC which have no bulk path at all. Engines with something faster get their own prefixed provider
-later — Postgres `COPY` is phase 19.
+later — Postgres `COPY` is phase 21.
 
 Two things this has to get right that `MsSqlStagingTableProvider` gets for free from `SqlBulkCopy`:
 - **Parameter count limits.** SQL Server caps a request at 2100 parameters; other engines have their

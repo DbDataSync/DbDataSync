@@ -1,4 +1,4 @@
-# Phase 16 — SQL Dialect & Generic Watermark Reader (planned)
+# Phase 17 — SQL Dialect & Generic Watermark Reader (planned)
 
 **Status**: Planned, not started
 **Plan reference**: `architecture/planning/done/additional-database-drivers.md`.
@@ -60,7 +60,7 @@ a reconciling reload would tax all of them to prevent a misuse the operator is b
 ## What this phase does not build
 
 Any new driver or `ConnectionDriverType` member. The generic batch-reload reader, staging provider and
-writer — phase 17. Any change to the MSSQL-specific readers, writers or staging, which keep their
+writer — phase 18. Any change to the MSSQL-specific readers, writers or staging, which keep their
 prefixed Kinds and their bespoke implementations.
 
 ## How to verify when built

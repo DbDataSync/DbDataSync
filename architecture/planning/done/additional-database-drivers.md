@@ -106,13 +106,17 @@ everything at once.
 
 | phase | what | doc |
 | --- | --- | --- |
-| 16 | `SqlDialect` + generic namespace; the watermark reader moves there and becomes dialect-driven | `implementation/todo/phase-016-sql-dialect-and-generic-watermark.md` |
-| 17 | Generic batch-reload reader, staging provider, delete+insert writer, `information_schema` metadata | `implementation/todo/phase-017-generic-batch-pipeline.md` |
-| 18 | **PostgreSQL driver** — the first cross-engine replication | `implementation/todo/phase-018-postgres-driver.md` |
-| 19 | Postgres binary `COPY` staging — and with it, the answer `columnar-change-batches` is waiting for | not yet written |
-| 20 | Connection model for DSN/URL engines, and `AuthMode` beyond SqlAuth/IntegratedAuth | not yet written |
-| 21–22 | MySQL, then Oracle — Oracle exercises the most divergence, so it is the better test of what 16–17 extracted | not yet written |
-| 23–24 | ODBC, then JDBC via `ClrKernel.Database.Provider.Jdbc`. Both are *meta*-drivers reaching an arbitrary engine, so neither can assume a dialect; both want the generic paths that 17 establishes | not yet written |
+| 17 | `SqlDialect` + generic namespace; the watermark reader moves there and becomes dialect-driven | `implementation/todo/phase-017-sql-dialect-and-generic-watermark.md` |
+| 18 | Generic batch-reload reader, staging provider, delete+insert writer, `information_schema` metadata | `implementation/todo/phase-018-generic-batch-pipeline.md` |
+| 19 | Connection testing as an opt-in driver capability — placed here so a new driver arrives to an interface that already has it | `implementation/todo/phase-019-connection-testing.md` |
+| 20 | **PostgreSQL driver** — the first cross-engine replication | `implementation/todo/phase-020-postgres-driver.md` |
+| 21 | Postgres binary `COPY` staging — and with it, the answer `columnar-change-batches` is waiting for | not yet written |
+| 22 | Connection model for DSN/URL engines, and `AuthMode` beyond SqlAuth/IntegratedAuth | not yet written |
+| 23–24 | MySQL, then Oracle — Oracle exercises the most divergence, so it is the better test of what 17–18 extracted | not yet written |
+| 25–26 | ODBC, then JDBC via `ClrKernel.Database.Provider.Jdbc`. Both are *meta*-drivers reaching an arbitrary engine, so neither can assume a dialect; both want the generic paths that 18 establishes | not yet written |
 
-Phases 19 onward are deliberately not written yet — each should be designed once the phase before it
+Phase 16 (replication endpoints) sits ahead of all of this — it is a redesign follow-up with no driver
+dependency, and it changes the config model, so it is better done before five drivers are reading it.
+
+Phases 21 onward are deliberately not written yet — each should be designed once the phase before it
 has landed and changed what we know.
