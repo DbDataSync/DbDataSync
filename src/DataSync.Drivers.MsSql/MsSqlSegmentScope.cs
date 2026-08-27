@@ -3,112 +3,40 @@ using System.Data.Common;
 using System.Globalization;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.Generic;
 using Microsoft.Data.SqlClient;
 
 namespace DataSync.Drivers.MsSql;
 
 /// <summary>
-/// A rendered <see cref="BatchReloadSegment"/>: the SQL predicate limiting a statement to that
-/// segment's rows, plus the parameters it references. Columns are bracket-quoted and every bound value
-/// is a typed parameter — never spliced into the text.
+/// This driver's binding of the engine-neutral <see cref="SegmentScope"/>: its dialect for quoting and
+/// placeholders, its value binder for typed bounds. Predicate rendering itself lives in
+/// <see cref="SegmentScope"/> — there is nothing SQL Server-specific about <c>IN (…)</c> or a
+/// half-open range, and duplicating it per engine is what this layer exists to avoid.
 /// </summary>
-internal sealed record MsSqlSegmentScope(string Predicate, IReadOnlyList<SqlParameter> Parameters)
+internal static class MsSqlSegmentScope
 {
-    /// <summary>Matches every row. Used for <see cref="FullSegment"/> and for an unsegmented unit of
-    /// work, so callers can always interpolate a predicate rather than conditionally emitting the
-    /// whole WHERE clause.</summary>
-    public static MsSqlSegmentScope All { get; } = new("1 = 1", []);
-
-    public void AddTo(DbCommand command)
-    {
-        foreach (var parameter in Parameters)
-            command.Parameters.Add(parameter);
-    }
-
-    /// <summary>
-    /// Renders <paramref name="segment"/> against the table described by <paramref name="columns"/>
-    /// (the source table for a reader, the target table for a writer — the segment column must exist
-    /// on whichever side is being scoped).
-    /// <para>
-    /// Bound values arrive as strings from a web form or from system-computed bucket boundaries, so
-    /// they're converted to the segment column's actual CLR/SQL type and bound as parameters. This is
-    /// deliberately stricter than <c>SourceTableRef.Filter</c>, which is a raw predicate an
-    /// administrator hand-authors in config; segment bounds are ordinary user input.
-    /// </para>
-    /// </summary>
-    /// <param name="columnMappings">
-    /// Supplied by writers, omitted by readers. A segment names a column on the *source* table, but a
-    /// writer scopes the *target* — and a mapping is free to rename a column across the two. Passing
-    /// the mappings translates the segment's column name to its target-side counterpart, so a reload
-    /// segmented on a renamed column scopes the same rows on both sides instead of failing to find the
-    /// column (or, worse, finding an unrelated target column that happens to share the source name).
-    /// </param>
-    public static MsSqlSegmentScope Build(
+    public static SegmentScope Build(
         BatchReloadSegment? segment,
         IReadOnlyList<ColumnMetadata> columns,
         IReadOnlyList<ColumnMapping>? columnMappings = null) =>
-        segment switch
-        {
-            null or FullSegment => All,
-            ListSegment list => BuildList(list, ResolveColumn(list.Column, columns, columnMappings)),
-            RangeSegment range => BuildRange(range, ResolveColumn(range.Column, columns, columnMappings)),
-            AutoSegment auto => throw new InvalidOperationException(
-                $"Auto segment on '{auto.Column}' reached execution unexpanded. Auto segments must be " +
-                "expanded into concrete ranges (ISegmentExpandingReader.ExpandAutoSegmentsAsync) when " +
-                "the work is enqueued, never carried through as a runtime segment."),
-            _ => throw new ArgumentOutOfRangeException(nameof(segment), segment, "Unknown segment mode."),
-        };
-
-    private static MsSqlSegmentScope BuildList(ListSegment list, ColumnMetadata column)
-    {
-        if (list.Values.Count == 0)
-            throw new InvalidOperationException(
-                $"List segment on '{list.Column}' has no values. An empty list matches nothing, which " +
-                "for a reconciling writer would delete the target's entire scope — reject it rather " +
-                "than render 'IN ()' (which isn't valid SQL anyway).");
-
-        var parameters = list.Values
-            .Select((value, i) => MsSqlValueBinding.CreateParameter($"@__seg{i}", value, column))
-            .ToList();
-
-        var placeholders = string.Join(", ", parameters.Select(p => p.ParameterName));
-        return new MsSqlSegmentScope($"{SqlIdentifier.Quote(column.Name)} IN ({placeholders})", parameters);
-    }
-
-    private static MsSqlSegmentScope BuildRange(RangeSegment range, ColumnMetadata column)
-    {
-        var quoted = SqlIdentifier.Quote(column.Name);
-        // Half-open: consecutive ranges tile a value space with no gap and no row processed twice.
-        return new MsSqlSegmentScope(
-            $"{quoted} >= @__segMin AND {quoted} < @__segMax",
-            [
-                MsSqlValueBinding.CreateParameter("@__segMin", range.RangeMin, column),
-                MsSqlValueBinding.CreateParameter("@__segMax", range.RangeMax, column),
-            ]);
-    }
-
-    private static ColumnMetadata ResolveColumn(
-        string columnName, IReadOnlyList<ColumnMetadata> columns, IReadOnlyList<ColumnMapping>? columnMappings)
-    {
-        var resolvedName = columnMappings?
-            .FirstOrDefault(m => string.Equals(m.SourceColumn, columnName, StringComparison.OrdinalIgnoreCase))?
-            .TargetColumn ?? columnName;
-
-        return columns.FirstOrDefault(c => string.Equals(c.Name, resolvedName, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException(
-                $"Segment column '{resolvedName}' was not found (available: {string.Join(", ", columns.Select(c => c.Name))}).");
-    }
+        SegmentScope.Build(MsSqlDialect.Instance, MsSqlValueBinding.Instance, segment, columns, columnMappings);
 }
 
 /// <summary>
-/// Converts a segment's string bound into a parameter typed to match the column it's compared against.
+/// Converts a segment's string bound into a SQL Server parameter typed to match the column it's
+/// compared against.
 /// Binding a bound as an untyped string would make SQL Server convert on the *column* side of the
 /// comparison for anything non-textual, which both changes the comparison's semantics and prevents an
 /// index seek — the opposite of what segment scoping exists to achieve.
 /// </summary>
-internal static class MsSqlValueBinding
+internal sealed class MsSqlValueBinding : ISegmentValueBinder
 {
-    public static SqlParameter CreateParameter(string name, string rawValue, ColumnMetadata column)
+    public static MsSqlValueBinding Instance { get; } = new();
+
+    private MsSqlValueBinding() { }
+
+    public DbParameter CreateParameter(string name, string rawValue, ColumnMetadata column)
     {
         var baseType = MsSqlSchemaQueries.BaseTypeName(column.NativeType);
         try

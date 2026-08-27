@@ -13,7 +13,7 @@ public sealed record DriverCapabilities(
     IReadOnlyList<StagingCapability> StagingProviders,
     IReadOnlyList<WriterCapability> Writers);
 
-public sealed record ReaderCapability(string Kind, bool SupportsSegmentation);
+public sealed record ReaderCapability(string Kind, bool SupportsSegmentation, bool DetectsDeletes);
 
 public sealed record StagingCapability(string Kind);
 

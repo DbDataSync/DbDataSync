@@ -22,6 +22,18 @@ public interface IChangeReader
     /// <summary>Identifier matched against <see cref="ReaderConfig.Kind"/>, e.g. "MsSqlChangeTracking".</summary>
     string Kind { get; }
 
+    /// <summary>
+    /// Whether a row deleted at the source surfaces as a <see cref="ChangeOperation.Delete"/> change.
+    /// False for readers that can only observe rows that still exist — a watermark scan, or a batch
+    /// reload whose deletes are reconciled by the writer rather than reported by the reader.
+    /// <para>
+    /// Declared rather than inferred, so a UI can warn about it without string-matching Kind values.
+    /// It defaults to false because that is the safe answer for a reader that has not thought about
+    /// it: overstating the guarantee is what loses data.
+    /// </para>
+    /// </summary>
+    bool DetectsDeletes => false;
+
     Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,

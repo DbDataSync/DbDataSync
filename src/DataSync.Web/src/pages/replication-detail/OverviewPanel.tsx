@@ -3,6 +3,7 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
 import { EndpointsCard } from './EndpointsCard'
+import { readerNotes } from '../../api/readerNotes'
 import { useReplication, useReplicationCapabilities, useTableMappings, useUpsertReplication } from '../../api/hooks'
 import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
 
@@ -46,7 +47,7 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
     setDraft({ ...draft, changeProcessing: { ...draft.changeProcessing, [id]: { ...draft.changeProcessing[id], ...patch } } })
 
   const kindsFor = (id: Stage) =>
-    id === 'reader' ? capabilities.readers.map((r) => ({ kind: r.kind, note: r.supportsSegmentation ? 'segmentable' : undefined }))
+    id === 'reader' ? capabilities.readers.map((r) => ({ kind: r.kind, note: readerNotes(r).join(' · ') || undefined }))
     : id === 'writer' ? capabilities.writers.map((w) => ({ kind: w.kind, note: w.supportsReconciliation ? 'reconciling' : 'upsert-only' }))
     : capabilities.stagingProviders.map((p) => ({ kind: p.kind, note: undefined }))
 

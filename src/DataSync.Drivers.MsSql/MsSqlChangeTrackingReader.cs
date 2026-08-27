@@ -5,6 +5,8 @@ using Microsoft.Data.SqlClient;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
 
+using DataSync.Drivers.Generic;
+
 namespace DataSync.Drivers.MsSql;
 
 /// <summary>
@@ -31,6 +33,10 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
     private const int SnapshotIsolationNotAllowedError = 3952;
 
     public string Kind => MsSqlDriverKinds.ChangeTracking;
+
+    /// <summary>Change Tracking records a deleted row's key in CHANGETABLE, so a delete at the source
+    /// reaches the writer as one — the whole reason to prefer this reader over a watermark scan.</summary>
+    public bool DetectsDeletes => true;
 
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,

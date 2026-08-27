@@ -3,6 +3,7 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import { useBackfill, useReplicationCapabilities, useTableMappings } from '../../api/hooks'
 import type { BatchReloadSegment, SegmentMode } from '../../api/types'
+import { readerNotes } from '../../api/readerNotes'
 
 /**
  * Queues an ad-hoc reload of one table mapping. Sits beside the live-run panel in the design, as a
@@ -118,7 +119,7 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
         <Field label="Reader">
           <select className="select" value={selectedReader} onChange={(e) => setReaderKind(e.target.value)} data-testid="backfill-reader-select">
             {capabilities.readers.map((r) => (
-              <option key={r.kind} value={r.kind}>{r.supportsSegmentation ? `${r.kind} — segmentable` : r.kind}</option>
+              <option key={r.kind} value={r.kind}>{[r.kind, ...readerNotes(r)].join(' — ')}</option>
             ))}
           </select>
         </Field>

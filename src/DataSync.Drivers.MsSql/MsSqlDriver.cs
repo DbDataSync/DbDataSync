@@ -1,6 +1,7 @@
 using System.Data.Common;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.Generic;
 using Microsoft.Data.SqlClient;
 
 namespace DataSync.Drivers.MsSql;
@@ -10,7 +11,7 @@ public sealed class MsSqlDriver : IDriver
     public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
 
     public IReadOnlyList<IChangeReader> Readers { get; } =
-        [new MsSqlChangeTrackingReader(), new MsSqlWatermarkReader(), new MsSqlBatchReloadReader()];
+        [new MsSqlChangeTrackingReader(), new WatermarkReader(MsSqlDialect.Instance), new MsSqlBatchReloadReader()];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =
         [new MsSqlStagingTableProvider()];

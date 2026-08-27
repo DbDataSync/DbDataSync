@@ -48,7 +48,7 @@ public sealed class DriverRegistry
         TryGet(driverType, out var driver)
             ? new DriverCapabilities(
                 driverType,
-                driver!.Readers.Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader)).ToList(),
+                driver!.Readers.Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader, r.DetectsDeletes)).ToList(),
                 driver.StagingProviders.Select(p => new StagingCapability(p.Kind)).ToList(),
                 driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation)).ToList())
             : null;

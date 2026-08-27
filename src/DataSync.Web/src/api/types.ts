@@ -134,6 +134,10 @@ export interface ColumnMetadata {
 export interface ReaderCapability {
   kind: string
   supportsSegmentation: boolean
+  /** Whether a row deleted at the source reaches the target as a delete. False for a watermark scan,
+   * which can only see rows that still exist, and for a batch reload, whose deletes are the
+   * reconciling writer's job rather than the reader's. */
+  detectsDeletes: boolean
 }
 
 export interface StagingCapability {

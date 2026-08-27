@@ -1,6 +1,8 @@
 using System.Data;
+using System.Data.Common;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
+using Microsoft.Data.SqlClient;
 using Xunit;
 
 namespace DataSync.Drivers.MsSql.Tests;
@@ -11,6 +13,10 @@ namespace DataSync.Drivers.MsSql.Tests;
 /// </summary>
 public sealed class MsSqlSegmentScopeTests
 {
+    /// <summary>The scope holds provider-neutral <see cref="DbParameter"/>s now; the typed binding
+    /// these tests exist to pin is still SQL Server's, so they reach through to it explicitly.</summary>
+    private static SqlDbType TypeOf(DbParameter parameter) => ((SqlParameter)parameter).SqlDbType;
+
     private static readonly List<ColumnMetadata> Columns =
     [
         new("OrderId", "int", IsNullable: false, IsPrimaryKey: true, IsIdentity: false),
@@ -41,7 +47,7 @@ public sealed class MsSqlSegmentScopeTests
 
         Assert.Equal("[Region] IN (@__seg0, @__seg1, @__seg2)", scope.Predicate);
         Assert.Equal(["EU", "US", "APAC"], scope.Parameters.Select(p => p.Value));
-        Assert.All(scope.Parameters, p => Assert.Equal(SqlDbType.NVarChar, p.SqlDbType));
+        Assert.All(scope.Parameters, p => Assert.Equal(SqlDbType.NVarChar, TypeOf(p)));
     }
 
     [Fact]
@@ -51,7 +57,7 @@ public sealed class MsSqlSegmentScopeTests
 
         Assert.Equal("[OrderId] >= @__segMin AND [OrderId] < @__segMax", scope.Predicate);
         Assert.Equal([1, 1000], scope.Parameters.Select(p => p.Value));
-        Assert.All(scope.Parameters, p => Assert.Equal(SqlDbType.Int, p.SqlDbType));
+        Assert.All(scope.Parameters, p => Assert.Equal(SqlDbType.Int, TypeOf(p)));
     }
 
     [Fact]
@@ -60,7 +66,7 @@ public sealed class MsSqlSegmentScopeTests
         var dates = MsSqlSegmentScope.Build(
             new RangeSegment("OrderDate", "2024-01-01T00:00:00.0000000", "2024-02-01T00:00:00.0000000"), Columns);
 
-        Assert.All(dates.Parameters, p => Assert.Equal(SqlDbType.DateTime2, p.SqlDbType));
+        Assert.All(dates.Parameters, p => Assert.Equal(SqlDbType.DateTime2, TypeOf(p)));
         Assert.Equal(new DateTime(2024, 1, 1), dates.Parameters[0].Value);
         Assert.Equal(new DateTime(2024, 2, 1), dates.Parameters[1].Value);
     }

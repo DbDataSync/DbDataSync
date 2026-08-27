@@ -195,6 +195,11 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await expect(readerSelect.locator('option[value="MsSqlBatchReload"]')).toBeAttached({ timeout: 15_000 })
     await expect(readerSelect.locator('option[value="MsSqlBatchReload"]')).toContainText('segmentable')
 
+    // Watermark mode is offered, not withheld — append-only tables are exactly what it is for — but
+    // it says what it cannot do rather than letting an operator assume deletes are covered.
+    await expect(readerSelect.locator('option[value="Watermark"]')).toContainText('does not detect deletes')
+    await expect(readerSelect.locator('option[value="MsSqlChangeTracking"]')).not.toContainText('does not detect deletes')
+
     // The pipeline is three selectable stages; picking one swaps both the Kind picker and its options.
     await page.getByTestId('stage-writer').click()
     await expect(page.getByTestId('writer-kind-select').locator('option[value="MsSqlMerge"]')).toContainText('upsert-only')

@@ -3,6 +3,8 @@ using System.Runtime.CompilerServices;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
 
+using DataSync.Drivers.Generic;
+
 namespace DataSync.Drivers.MsSql;
 
 /// <summary>
@@ -108,7 +110,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
     private static async IAsyncEnumerable<ChangeRow> ReadRowsAsync(
         DbConnection connection,
         SourceTableRef source,
-        MsSqlSegmentScope scope,
+        SegmentScope scope,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         // The segment predicate and the mapping's own static Filter compose — a segment narrows a

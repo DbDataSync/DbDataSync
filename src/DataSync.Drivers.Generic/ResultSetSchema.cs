@@ -1,11 +1,11 @@
 using System.Data.Common;
 using DataSync.Drivers.Abstractions;
 
-namespace DataSync.Drivers.MsSql;
+namespace DataSync.Drivers.Generic;
 
 /// <summary>Builds a <see cref="ChangeSchema"/> from a result set's own column names, and reads a row
 /// straight into a positional array. Used by every reader whose result set *is* the source row.</summary>
-internal static class ResultSetSchema
+public static class ResultSetSchema
 {
     public static ChangeSchema From(DbDataReader reader)
     {

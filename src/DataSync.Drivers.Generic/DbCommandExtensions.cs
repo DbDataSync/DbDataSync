@@ -1,8 +1,8 @@
 using System.Data.Common;
 
-namespace DataSync.Drivers.MsSql;
+namespace DataSync.Drivers.Generic;
 
-internal static class DbCommandExtensions
+public static class DbCommandExtensions
 {
     public static void AddParameter(this DbCommand command, string name, object? value)
     {

@@ -1,5 +1,6 @@
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.Generic;
 using Microsoft.Data.SqlClient;
 using Xunit;
 
@@ -8,7 +9,9 @@ namespace DataSync.Drivers.MsSql.Tests;
 [Trait("Category", "Integration")]
 public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixture<MsSqlTestDatabase>, IAsyncLifetime
 {
-    private readonly MsSqlWatermarkReader _reader = new();
+    // The reader is engine-neutral now; only the dialect makes it SQL Server's. These tests are
+    // deliberately left otherwise untouched — they are the proof the move changed no behaviour.
+    private readonly WatermarkReader _reader = new(MsSqlDialect.Instance);
     private SqlConnection _connection = null!;
     private string _tableName = null!;
 

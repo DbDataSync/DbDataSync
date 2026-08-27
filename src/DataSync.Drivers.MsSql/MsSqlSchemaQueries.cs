@@ -1,6 +1,8 @@
 using System.Data.Common;
 using DataSync.Drivers.Abstractions;
 
+using DataSync.Drivers.Generic;
+
 namespace DataSync.Drivers.MsSql;
 
 /// <summary>
