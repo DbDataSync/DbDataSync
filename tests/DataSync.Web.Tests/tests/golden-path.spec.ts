@@ -342,4 +342,74 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.goto('/replications/does-not-exist-anywhere/nonsense')
     await expect(page).toHaveURL(/\/replications$/)
   })
+
+  test('15 - a C# script generates a source transform, bound on the table mapping', async ({ page }) => {
+    // The whole scripting loop through the UI: write C#, have the server compile it, bind it to a
+    // mapping, and see the source engine evaluate what the script generated.
+    const SCRIPT = 'reverse-name'
+
+    await page.goto('/scripts')
+    await page.getByTestId('new-script-button').click()
+    await page.getByTestId('script-name-input').fill(SCRIPT)
+    await page.getByTestId('script-entry-type-input').fill('ReverseName')
+    await page.getByTestId('script-code-input').fill(`using DataSync.Scripting.Abstractions;
+
+public sealed class ReverseName : ISqlColumnExpression
+{
+    public string? RenderSql(SqlColumnExpressionContext c) =>
+        c.SourceColumn == c.Parameters.Require("column")
+            ? $"REVERSE({c.ColumnReference})"
+            : null;
+}
+`)
+
+    // Compile before saving — the operator finds out here rather than at the first run.
+    await page.getByTestId('check-script-button').click()
+    await expect(page.getByTestId('script-code-input')).toBeVisible()
+    await page.getByTestId('save-script-button').click()
+    await expect(page.getByTestId('scripts-table')).toContainText(SCRIPT, { timeout: 15_000 })
+    await shot(page, '18-scripts-list.png')
+
+    // A script that does not compile is refused, with the compiler's own diagnostics.
+    await page.getByTestId('new-script-button').click()
+    await page.getByTestId('script-name-input').fill('broken-script')
+    await page.getByTestId('script-code-input').fill('this is not C#')
+    await page.getByTestId('check-script-button').click()
+    await expect(page.getByTestId('script-diagnostics')).toBeVisible({ timeout: 15_000 })
+    await shot(page, '19-script-diagnostics.png')
+
+    // Bind it on the mapping — the most specific level, which is what the hierarchy exists for.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await expect(page.getByTestId('script-bindings-card')).toBeVisible({ timeout: 15_000 })
+    await page.getByTestId('script-binding-sqlColumnExpression').selectOption(SCRIPT)
+
+    const parameters = page.getByTestId('script-parameters-sqlColumnExpression')
+    await parameters.getByPlaceholder('Parameter name').fill('column')
+    await parameters.getByRole('button', { name: '+ Add' }).click()
+    await parameters.getByLabel('column value').fill(SOURCE_NAME_COLUMN)
+    await shot(page, '20-script-binding.png')
+
+    await page.getByTestId('save-mapping-button').click()
+
+    // The mapping already carries a literal UPPER({{column}}) on Name from test 05, and a literal
+    // transform beats a script — so the script's REVERSE has to lose. Clearing the literal is what
+    // lets it win, and proves the precedence rule rather than assuming it.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}`).fill('')
+    await page.getByTestId('save-mapping-button').click()
+
+    // Touch the source so Change Tracking has something to report. Without this the next pass reads
+    // zero rows and the target keeps whatever the previous pass left — which is correct behaviour and
+    // would make this assertion measure nothing.
+    runSql(`UPDATE dbo.[${SOURCE_TABLE}] SET Name = Name;`, DB_NAME)
+
+    await page.goto(`/replications/${REPLICATION_NAME}/runs`)
+    await page.getByTestId('trigger-run-button').click()
+    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
+
+    // 'Widget' reversed is 'tegdiW' — and the source still holds 'Widget', so the only thing that
+    // could have reversed it is the source engine evaluating SQL a C# script generated.
+    const rows = querySql(`SET NOCOUNT ON; SELECT Name FROM dbo.[${TARGET_TABLE}];`, DB_NAME)
+    expect(rows).toContain('tegdiW')
+  })
 })

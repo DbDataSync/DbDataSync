@@ -16,6 +16,7 @@ export interface ConnectionConfig {
   userId: string | null
   credentialSecretRef: string | null
   properties: Record<string, string>
+  scripts?: ScriptBindings
 }
 
 export interface ConnectionInput {
@@ -28,6 +29,7 @@ export interface ConnectionInput {
   userId?: string | null
   password?: string | null
   properties?: Record<string, string>
+  scripts?: ScriptBindings
 }
 
 export type ScheduleMode = 'Continuous' | 'Periodic'
@@ -79,6 +81,7 @@ export interface ReplicationTaskConfig {
   scheduling: SchedulingConfig
   changeProcessing: ChangeProcessingConfig
   endpoints: TaskEndpoints
+  scripts?: ScriptBindings
 }
 
 /** One side of a table mapping as configured: null connection/database inherit the replication's
@@ -113,6 +116,7 @@ export interface TableMappingConfig {
   sources: SourceTableSpec[]
   targets: TableSpec[]
   columnMappings: ColumnMapping[]
+  scripts?: ScriptBindings
 }
 
 export interface TableMetadata {
@@ -126,6 +130,51 @@ export interface ColumnMetadata {
   isNullable: boolean
   isPrimaryKey: boolean
   isIdentity: boolean
+}
+
+/** A script bound to a slot. Name and parameters are replaced together by the most specific level
+ * that sets them — never merged, so reading one level tells you what runs. */
+export interface ScriptBinding {
+  scriptName: string
+  parameters: Record<string, string>
+}
+
+/** Keyed by slot. An absent key inherits from a broader level; a key present with a null value is
+ * "explicitly none" and overrides an inherited binding. */
+export type ScriptBindings = Record<string, ScriptBinding | null>
+
+export interface ScriptParameterDeclaration {
+  name: string
+  required: boolean
+  description: string | null
+}
+
+export interface ScriptConfig {
+  name: string
+  /** Which extension point this implements — see GET /api/scripts/slots. */
+  kind: string
+  /** The type in the code implementing the slot's contract. */
+  entryType: string
+  description: string | null
+  parameters: ScriptParameterDeclaration[]
+  enabled: boolean
+}
+
+export interface ScriptDefinition {
+  manifest: ScriptConfig
+  code: string
+}
+
+export interface ScriptDiagnostic {
+  line: number
+  column: number
+  message: string
+}
+
+export interface ScriptCompileResult {
+  manifest: ScriptConfig
+  diagnostics: ScriptDiagnostic[]
+  compiles: boolean
 }
 
 // What the registered driver behind a connection actually supports. Queried live rather than

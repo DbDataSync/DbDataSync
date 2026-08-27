@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
-import { useDeleteTableMapping, useReplication, useUpsertTableMapping } from '../../api/hooks'
-import type { ColumnMapping, SourceTableSpec, TableMappingConfig, TableSpec } from '../../api/types'
+import { useConnections, useDeleteTableMapping, useReplication, useUpsertTableMapping } from '../../api/hooks'
+import type { ColumnMapping, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec } from '../../api/types'
 import { MappingSide } from './MappingSide'
 import { resolveSide } from '../../api/resolveEndpoint'
 import { ColumnMappingEditor } from './ColumnMappingEditor'
+import { ScriptBindingsCard } from '../../components/ScriptBindings'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
 const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
@@ -23,14 +24,17 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
   const upsert = useUpsertTableMapping(replicationName)
   const del = useDeleteTableMapping(replicationName)
   const { data: task } = useReplication(replicationName)
+  const { data: connections } = useConnections()
   const [name, setName] = useState(existing?.name ?? '')
   const [source, setSource] = useState<SourceTableSpec>(existing?.sources[0] ?? { ...emptySpec, filter: null })
   const [target, setTarget] = useState<TableSpec>(existing?.targets[0] ?? { ...emptySpec })
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(existing?.columnMappings ?? [])
+  const [scripts, setScripts] = useState<ScriptBindings>(structuredClone(existing?.scripts ?? {}))
 
   // What each side actually points at once the replication's endpoints are applied.
   const resolvedSource = resolveSide(task?.endpoints?.source ?? null, source)
   const resolvedTarget = resolveSide(task?.endpoints?.target ?? null, target)
+  const sourceConnection = connections?.find((c) => c.name === resolvedSource.connectionName)
 
   const canSave = name
     && resolvedSource.connectionName && resolvedSource.database && source.table
@@ -41,7 +45,7 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
     e.preventDefault()
     await upsert.mutateAsync({
       mappingName: name,
-      mapping: { name, sources: [source], targets: [target], columnMappings },
+      mapping: { name, sources: [source], targets: [target], columnMappings, scripts },
     })
     onSaved(name)
   }
@@ -119,6 +123,15 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
         target={resolvedTarget}
         mappings={columnMappings}
         onChange={setColumnMappings}
+      />
+
+      <ScriptBindingsCard
+        bindings={scripts}
+        // The mapping is the most specific level, so what it inherits is the replication's binding if
+        // it has one and the source connection's otherwise — the same order the server resolves in.
+        inherited={{ ...(sourceConnection?.scripts ?? {}), ...(task?.scripts ?? {}) }}
+        level="mapping"
+        onChange={setScripts}
       />
     </form>
   )

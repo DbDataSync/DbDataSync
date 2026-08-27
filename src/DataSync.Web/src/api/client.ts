@@ -7,6 +7,9 @@ import type {
   ConnectionTestReport,
   CredentialSource,
   DriverCapabilities,
+  ScriptCompileResult,
+  ScriptConfig,
+  ScriptDefinition,
   LogEntryRecord,
   ReplicationTaskConfig,
   TableMappingConfig,
@@ -63,6 +66,21 @@ export const api = {
       request<ConnectionTestReport>(`/api/connections/${encodeURIComponent(name)}/test`, { method: 'POST' }),
     credentialSource: (name: string) =>
       request<CredentialSource>(`/api/connections/${encodeURIComponent(name)}/credential-source`),
+  },
+  scripts: {
+    list: () => request<ScriptConfig[]>('/api/scripts'),
+    slots: () => request<string[]>('/api/scripts/slots'),
+    get: (name: string) => request<ScriptDefinition>(`/api/scripts/${encodeURIComponent(name)}`),
+    upsert: (name: string, script: ScriptDefinition) =>
+      put<ScriptCompileResult>(`/api/scripts/${encodeURIComponent(name)}`, script),
+    /** Checks without saving, so an operator finds out before committing. */
+    compile: (name: string, script: ScriptDefinition) =>
+      request<ScriptCompileResult>(`/api/scripts/${encodeURIComponent(name)}/compile`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(script),
+      }),
+    delete: (name: string) => request<void>(`/api/scripts/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   },
   metadata: {
     databases: (connectionName: string) =>

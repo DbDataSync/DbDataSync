@@ -3,8 +3,9 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
 import { EndpointsCard } from './EndpointsCard'
+import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { readerNotes } from '../../api/readerNotes'
-import { useReplication, useReplicationCapabilities, useTableMappings, useUpsertReplication } from '../../api/hooks'
+import { useConnections, useReplication, useReplicationCapabilities, useTableMappings, useUpsertReplication } from '../../api/hooks'
 import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
 
 type Stage = 'reader' | 'cache' | 'writer'
@@ -26,6 +27,11 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
   const { data: mappings } = useTableMappings(replicationName)
   const capabilities = useReplicationCapabilities(replicationName)
   const upsert = useUpsertReplication()
+  // These slots are source-side, so what a replication inherits is whatever its *source* connection
+  // binds. Read from the saved task rather than the draft: changing the endpoint mid-edit should not
+  // silently repoint what the INHERITED badge is describing.
+  const { data: connections } = useConnections()
+  const sourceConnection = connections?.find((c) => c.name === task?.endpoints?.source?.connectionName)
 
   const [draft, setDraft] = useState<ReplicationTaskConfig | null>(null)
   const [stage, setStage] = useState<Stage>('reader')
@@ -67,6 +73,15 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
 
       <form onSubmit={save} style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <ScriptBindingsCard
+            bindings={draft.scripts ?? {}}
+            // What a mapping under this replication would inherit if the replication said nothing:
+            // whatever the *source* connection binds, since these slots are source-side.
+            inherited={sourceConnection?.scripts ?? {}}
+            level="replication"
+            onChange={(scripts) => setDraft({ ...draft, scripts })}
+          />
+
           <EndpointsCard
             endpoints={draft.endpoints ?? { source: null, target: null }}
             mappingCount={mappings?.length}

@@ -54,4 +54,7 @@ public sealed class ConnectionInput
     public string? Password { get; set; }
 
     public Dictionary<string, string> Properties { get; set; } = new();
+
+    /// <inheritdoc cref="ConnectionConfig.Scripts"/>
+    public Dictionary<string, ScriptBinding?> Scripts { get; set; } = new();
 }

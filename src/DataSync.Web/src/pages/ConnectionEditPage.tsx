@@ -6,6 +6,7 @@ import { Field } from '../components/Field'
 import { KeyValueTable } from '../components/KeyValueTable'
 import { useCapabilities, useConnections, useDeleteConnection, useTestConnection, useUpsertConnection } from '../api/hooks'
 import { ConnectionTestCard } from './connection-edit/ConnectionTestCard'
+import { ScriptBindingsCard } from '../components/ScriptBindings'
 import type { AuthMode, ConnectionInput, DriverType } from '../api/types'
 
 /** Each engine's default listening port, so switching the driver does not leave the other's behind. */
@@ -56,6 +57,7 @@ export function ConnectionEditPage() {
       userId: existing.userId ?? '',
       password: '', // never pre-filled — blank keeps the stored credential
       properties: { ...existing.properties },
+      scripts: structuredClone(existing.scripts ?? {}),
     })
   }, [isNew, draft, existing])
 
@@ -227,6 +229,15 @@ export function ConnectionEditPage() {
                 )}
               </div>
             </div>
+
+            {!isNew && (
+              <ScriptBindingsCard
+                bindings={draft.scripts ?? {}}
+                inherited={{}}
+                level="connection"
+                onChange={(scripts) => setDraft({ ...draft, scripts })}
+              />
+            )}
 
             {canTest && (
               <ConnectionTestCard

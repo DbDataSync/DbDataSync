@@ -1,13 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { api } from './client'
-import type { BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
+import type {
+  ScriptDefinition, BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
   connections: ['connections'] as const,
   connection: (name: string) => ['connections', name] as const,
   capabilities: (name: string) => ['connections', name, 'capabilities'] as const,
+  scripts: ['scripts'] as const,
+  script: (name: string) => ['scripts', name] as const,
+  scriptSlots: ['scripts', 'slots'] as const,
   credentialSource: (name: string) => ['connections', name, 'credential-source'] as const,
   databases: (connectionName: string) => ['metadata', connectionName, 'databases'] as const,
   tables: (connectionName: string, database: string) => ['metadata', connectionName, database, 'tables'] as const,
@@ -280,5 +284,51 @@ export function useCredentialSource(connectionName: string | undefined) {
     queryFn: () => api.connections.credentialSource(connectionName!),
     enabled: !!connectionName,
     staleTime: Infinity,
+  })
+}
+
+/** The global script registry. */
+export function useScripts() {
+  return useQuery({ queryKey: keys.scripts, queryFn: () => api.scripts.list() })
+}
+
+/** Which slots this build supports — from the API, not hardcoded here, the same way driver
+ * capabilities are. A slot added server-side appears without an SPA change. */
+export function useScriptSlots() {
+  return useQuery({ queryKey: keys.scriptSlots, queryFn: () => api.scripts.slots(), staleTime: Infinity })
+}
+
+export function useScript(name: string | undefined) {
+  return useQuery({
+    queryKey: keys.script(name ?? ''),
+    queryFn: () => api.scripts.get(name!),
+    enabled: !!name,
+  })
+}
+
+export function useUpsertScript() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, script }: { name: string; script: ScriptDefinition }) => api.scripts.upsert(name, script),
+    onSuccess: (_, { name }) => {
+      queryClient.invalidateQueries({ queryKey: keys.scripts })
+      queryClient.invalidateQueries({ queryKey: keys.script(name) })
+    },
+  })
+}
+
+/** Compiles without saving. A mutation because it is an action, and deliberately not cached — the
+ * answer is about the code in the editor right now. */
+export function useCompileScript() {
+  return useMutation({
+    mutationFn: ({ name, script }: { name: string; script: ScriptDefinition }) => api.scripts.compile(name, script),
+  })
+}
+
+export function useDeleteScript() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => api.scripts.delete(name),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.scripts }),
   })
 }

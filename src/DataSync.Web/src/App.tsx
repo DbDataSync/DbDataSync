@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { ConnectionEditPage } from './pages/ConnectionEditPage'
 import { ConnectionsPage } from './pages/ConnectionsPage'
 import { ReplicationsPage } from './pages/ReplicationsPage'
+import { ScriptEditPage } from './pages/ScriptEditPage'
+import { ScriptsPage } from './pages/ScriptsPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
@@ -43,6 +45,9 @@ export default function App() {
 
       <Route path="/connections" element={<ConnectionsPage />} />
       <Route path="/connections/:name" element={<ConnectionEditPage />} />
+
+      <Route path="/scripts" element={<ScriptsPage />} />
+      <Route path="/scripts/:name" element={<ScriptEditPage />} />
 
       {/* A mistyped or stale URL lands somewhere real rather than on an empty frame with chrome. */}
       <Route path="*" element={<Navigate to="/replications" replace />} />

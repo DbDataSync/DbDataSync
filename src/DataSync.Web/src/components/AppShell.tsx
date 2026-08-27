@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { tabClass } from './tabClass'
-import { DatabaseIcon, FlowIcon, GridIcon, LogoIcon } from './icons'
+import { CodeIcon, DatabaseIcon, FlowIcon, GridIcon, LogoIcon } from './icons'
 
 /**
  * The chrome every screen sits in: a 46px icon rail, a 42px breadcrumb bar and a 46px tab bar.
@@ -38,6 +38,14 @@ export function AppShell({ crumbs, tabs, actions, children }: {
           data-testid="rail-connections"
         >
           <DatabaseIcon />
+        </NavLink>
+        <NavLink
+          to="/scripts"
+          className={({ isActive }) => `rail-item ${isActive ? 'active' : ''}`}
+          title="Scripts"
+          data-testid="rail-scripts"
+        >
+          <CodeIcon />
         </NavLink>
         <span className="rail-item" style={{ color: 'var(--ink-faint)', cursor: 'default' }} title="Overview">
           <GridIcon />
@@ -92,6 +100,7 @@ export function SectionTabs() {
     <>
       <NavLink to="/replications" className={tabClass} data-testid="tab-replications">Replications</NavLink>
       <NavLink to="/connections" className={tabClass} data-testid="tab-connections">Connections</NavLink>
+      <NavLink to="/scripts" className={tabClass} data-testid="tab-scripts">Scripts</NavLink>
     </>
   )
 }

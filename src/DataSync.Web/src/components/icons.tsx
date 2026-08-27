@@ -52,3 +52,14 @@ export function DatabaseIcon() {
     </svg>
   )
 }
+
+/** Scripts — angle brackets around a slash, the universal shorthand for code. */
+export function CodeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" {...stroke}>
+      <path d="M5.5 4.5 2 8l3.5 3.5" />
+      <path d="M10.5 4.5 14 8l-3.5 3.5" />
+      <path d="M9.2 3.2 6.8 12.8" />
+    </svg>
+  )
+}

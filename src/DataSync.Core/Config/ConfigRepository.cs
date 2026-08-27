@@ -61,6 +61,7 @@ public sealed class ConfigRepository
             UserId = input.UserId,
             CredentialSecretRef = secretRef,
             Properties = input.Properties,
+            Scripts = input.Scripts,
         };
 
         var path = ConfigPaths.ConnectionFile(_configRoot, input.Name);
