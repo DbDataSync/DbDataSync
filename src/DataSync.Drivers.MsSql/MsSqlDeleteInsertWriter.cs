@@ -46,7 +46,7 @@ public sealed class MsSqlDeleteInsertWriter : IChangeWriter
             }
 
             var rowsInserted = await MsSqlIdentityInsert.RunAsync(
-                targetConnection, transaction, shape,
+                targetConnection, transaction, shape.QuotedTarget, shape.RequiresIdentityInsert,
                 async () =>
                 {
                     using var insertCmd = targetConnection.CreateCommand();

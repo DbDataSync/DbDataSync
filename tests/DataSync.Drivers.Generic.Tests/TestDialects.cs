@@ -55,3 +55,13 @@ internal sealed class FakeDbParameter : DbParameter
     public override object? Value { get; set; }
     public override void ResetDbType() { }
 }
+
+/// <summary>A dialect whose parameter cap is Postgres-sized, to prove batching follows the dialect
+/// rather than a constant.</summary>
+internal sealed class GenerousDialect : SqlDialect
+{
+    public static GenerousDialect Instance { get; } = new();
+    public override string QuoteIdentifier(string identifier) => $"\"{identifier}\"";
+    public override string ParameterReference(string name) => $"${name}";
+    public override int MaxParametersPerStatement => 65535;
+}

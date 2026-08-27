@@ -10,14 +10,31 @@ public sealed class MsSqlDriver : IDriver
 {
     public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
 
+    // The generic implementations are registered alongside this driver's own, not instead of them.
+    // SQL Server's prefixed ones are faster (SqlBulkCopy, MERGE) and stay the default; the portable
+    // ones are what proves the generic pipeline against a working engine, and are a real fallback on
+    // an instance where bulk insert is not permitted.
     public IReadOnlyList<IChangeReader> Readers { get; } =
-        [new MsSqlChangeTrackingReader(), new WatermarkReader(MsSqlDialect.Instance), new MsSqlBatchReloadReader()];
+    [
+        new MsSqlChangeTrackingReader(),
+        new WatermarkReader(MsSqlDialect.Instance),
+        new MsSqlBatchReloadReader(),
+        new BatchReloadReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
+    ];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =
-        [new MsSqlStagingTableProvider()];
+    [
+        new MsSqlStagingTableProvider(),
+        new BatchInsertStagingProvider(MsSqlDialect.Instance, MsSqlCatalog.Instance),
+    ];
 
     public IReadOnlyList<IChangeWriter> Writers { get; } =
-        [new MsSqlMergeWriter(), new MsSqlMergeReconcileWriter(), new MsSqlDeleteInsertWriter()];
+    [
+        new MsSqlMergeWriter(),
+        new MsSqlMergeReconcileWriter(),
+        new MsSqlDeleteInsertWriter(),
+        new DeleteInsertWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
+    ];
 
     public DbConnection CreateConnection(ConnectionConfig connection, string? credential)
     {

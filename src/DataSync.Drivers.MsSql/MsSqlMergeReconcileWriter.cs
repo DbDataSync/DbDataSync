@@ -57,7 +57,7 @@ public sealed class MsSqlMergeReconcileWriter : IChangeWriter
         scope.AddTo(cmd);
 
         var rowsAffected = await MsSqlIdentityInsert.RunAsync(
-            targetConnection, transaction: null, shape,
+            targetConnection, transaction: null, shape.QuotedTarget, shape.RequiresIdentityInsert,
             () => cmd.ExecuteNonQueryAsync(cancellationToken),
             cancellationToken);
 

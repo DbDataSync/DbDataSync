@@ -3,29 +3,29 @@ using System.Runtime.CompilerServices;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
 
-using DataSync.Drivers.Generic;
-
-namespace DataSync.Drivers.MsSql;
+namespace DataSync.Drivers.Generic;
 
 /// <summary>
-/// Reads a whole source table, or one <see cref="BatchReloadSegment"/> of it, for a batch reload —
-/// the "reload this data from scratch" counterpart to the incremental readers.
+/// Reads a whole source table, or one <see cref="BatchReloadSegment"/> of it, for a batch reload.
+/// Engine-neutral: an ordinary <c>SELECT</c> with a predicate, which is why it needs nothing from the
+/// engine but quoting, placeholders and a catalog.
 /// <para>
 /// Deliberately not incremental: <c>previousWatermark</c> is ignored outright, because a reload's
 /// entire purpose is to re-read rows an incremental pass has already seen. Every row is yielded as
 /// <see cref="ChangeOperation.Insert"/> — a full scan can only observe rows that exist, never ones
-/// that were removed. Deletion is the *writer's* job on a reload: a reconciling writer
-/// (<see cref="IChangeWriter.SupportsReconciliation"/>) removes target rows within the segment's scope
-/// that this scan didn't produce, which is what makes a reload converge rather than only ever add.
-/// </para>
-/// <para>
-/// Not to be confused with <see cref="MsSqlWatermarkReader"/>, which is the ongoing incremental
-/// fallback for tables without Change Tracking metadata.
+/// that were removed. Deletion is the *writer's* job on a reload: a reconciling writer removes target
+/// rows within the segment's scope that this scan didn't produce, which is what makes a reload
+/// converge rather than only ever add.
 /// </para>
 /// </summary>
-public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingReader
+public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
+    : IChangeReader, ISegmentExpandingReader
 {
-    public string Kind => MsSqlDriverKinds.BatchReload;
+    public string Kind => GenericDriverKinds.BatchReload;
+
+    /// <summary>A reload reports what exists, not what was removed; the reconciling writer covers the
+    /// rest. Stated so the UI can say so rather than infer it.</summary>
+    public bool DetectsDeletes => false;
 
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
@@ -34,11 +34,11 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
-        sourceConnection.ChangeDatabase(source.Database);
+        await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
 
         var segment = SegmentSerializer.ReadOptional(options);
-        var columns = await MsSqlSchemaQueries.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
-        var scope = MsSqlSegmentScope.Build(segment, columns);
+        var columns = await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
+        var scope = SegmentScope.Build(dialect, binder, segment, columns);
 
         var rows = ReadRowsAsync(sourceConnection, source, scope, cancellationToken);
 
@@ -58,8 +58,8 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         if (!segments.OfType<AutoSegment>().Any())
             return segments;
 
-        sourceConnection.ChangeDatabase(source.Database);
-        var columns = await MsSqlSchemaQueries.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
+        await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
+        var columns = await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
 
         var expanded = new List<BatchReloadSegment>(segments.Count);
         foreach (var segment in segments)
@@ -83,22 +83,17 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
                 continue;
             }
 
-            expanded.AddRange(SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, column.Name, column.NativeType, min, max, auto.BucketCount));
+            expanded.AddRange(SegmentExpansion.BuildBuckets(dialect, column.Name, column.NativeType, min, max, auto.BucketCount));
         }
 
         return expanded;
     }
 
-    private static async Task<(object? Min, object? Max)> GetRangeAsync(
+    private async Task<(object? Min, object? Max)> GetRangeAsync(
         DbConnection connection, SourceTableRef source, ColumnMetadata column, CancellationToken cancellationToken)
     {
-        var quoted = SqlIdentifier.Quote(column.Name);
-        var filterClause = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" WHERE {source.Filter}";
-
         using var cmd = connection.CreateCommand();
-        cmd.CommandText =
-            $"SELECT MIN({quoted}), MAX({quoted}) FROM " +
-            $"{SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}{filterClause};";
+        cmd.CommandText = BatchReloadStatement.BuildRange(dialect, source.Schema, source.Table, column.Name, source.Filter);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -107,27 +102,45 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         return (reader.IsDBNull(0) ? null : reader.GetValue(0), reader.IsDBNull(1) ? null : reader.GetValue(1));
     }
 
-    private static async IAsyncEnumerable<ChangeRow> ReadRowsAsync(
+    private async IAsyncEnumerable<ChangeRow> ReadRowsAsync(
         DbConnection connection,
         SourceTableRef source,
         SegmentScope scope,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // The segment predicate and the mapping's own static Filter compose — a segment narrows a
-        // reload within whatever subset of the table the mapping was always scoped to, it doesn't
-        // replace it.
-        var userFilter = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" AND ({source.Filter})";
-
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"""
-            SELECT * FROM {SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}
-            WHERE {scope.Predicate}{userFilter};
-            """;
+        cmd.CommandText = BatchReloadStatement.BuildRead(dialect, source.Schema, source.Table, scope.Predicate, source.Filter);
         scope.AddTo(cmd);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         var schema = ResultSetSchema.From(reader);
         while (await reader.ReadAsync(cancellationToken))
             yield return new ChangeRow(ChangeOperation.Insert, schema, ResultSetSchema.ReadValues(reader, schema.Count));
+    }
+}
+
+/// <summary>Statement text for <see cref="BatchReloadReader"/>, separated so it can be asserted
+/// without a live server.</summary>
+public static class BatchReloadStatement
+{
+    /// <summary>
+    /// The segment predicate and the mapping's own static Filter compose — a segment narrows a reload
+    /// within whatever subset of the table the mapping was always scoped to, it doesn't replace it.
+    /// </summary>
+    public static string BuildRead(SqlDialect dialect, string schema, string table, string scopePredicate, string? filter)
+    {
+        var userFilter = string.IsNullOrWhiteSpace(filter) ? "" : $" AND ({filter})";
+        return $"""
+            SELECT * FROM {dialect.QualifyTable(schema, table)}
+            WHERE {scopePredicate}{userFilter};
+            """;
+    }
+
+    /// <summary>The observed extent of the column an auto segment divides up.</summary>
+    public static string BuildRange(SqlDialect dialect, string schema, string table, string column, string? filter)
+    {
+        var quoted = dialect.QuoteIdentifier(column);
+        var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
+        return $"SELECT MIN({quoted}), MAX({quoted}) FROM {dialect.QualifyTable(schema, table)}{filterClause};";
     }
 }

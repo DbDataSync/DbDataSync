@@ -1,14 +1,18 @@
 using System.Globalization;
 using DataSync.Drivers.Abstractions;
 
-namespace DataSync.Drivers.MsSql;
+namespace DataSync.Drivers.Generic;
 
 /// <summary>
 /// Turns a column's observed MIN/MAX into evenly-sized half-open <see cref="RangeSegment"/> buckets.
 /// Kept separate from the reader that calls it so the boundary arithmetic — the part that's easy to get
-/// subtly wrong — is pure and unit-testable without a live SQL Server.
+/// subtly wrong — is pure and unit-testable without a live server.
+/// <para>
+/// The arithmetic is engine-neutral; only deciding *which* arithmetic a column's type calls for is
+/// not, and that comes from <see cref="SqlDialect.ClassifyForBucketing"/>.
+/// </para>
 /// </summary>
-internal static class MsSqlSegmentExpansion
+public static class SegmentExpansion
 {
     /// <summary>
     /// Builds <paramref name="bucketCount"/> contiguous buckets covering <paramref name="minValue"/>
@@ -28,28 +32,27 @@ internal static class MsSqlSegmentExpansion
     /// </para>
     /// </summary>
     public static IReadOnlyList<RangeSegment> BuildBuckets(
-        string column, string nativeType, object minValue, object maxValue, int bucketCount)
+        SqlDialect dialect, string column, string nativeType, object minValue, object maxValue, int bucketCount)
     {
         if (bucketCount < 1)
             throw new InvalidOperationException($"Auto segment on '{column}' needs a bucket count of at least 1.");
 
-        var baseType = MsSqlSchemaQueries.BaseTypeName(nativeType);
-        return baseType switch
+        return dialect.ClassifyForBucketing(SqlTypeName.BaseOf(nativeType)) switch
         {
             // Integral columns get integral boundaries: a fractional bound rendered against an INT
             // column can't be bound as one (the parameter is typed to the column), so dividing an
             // integer range into buckets has to floor, not carry a remainder.
-            "tinyint" or "smallint" or "int" or "bigint" =>
+            BucketableKind.Integral =>
                 IntegralBuckets(column, Convert.ToInt64(minValue, CultureInfo.InvariantCulture),
                     Convert.ToInt64(maxValue, CultureInfo.InvariantCulture), bucketCount),
 
-            "decimal" or "numeric" or "money" or "smallmoney" or "float" or "real" =>
+            BucketableKind.Numeric =>
                 NumericBuckets(column, ToDecimal(column, nativeType, minValue), ToDecimal(column, nativeType, maxValue), bucketCount),
 
-            "date" or "datetime" or "smalldatetime" or "datetime2" =>
+            BucketableKind.DateTime =>
                 TemporalBuckets(column, (DateTime)minValue, (DateTime)maxValue, bucketCount),
 
-            "datetimeoffset" =>
+            BucketableKind.DateTimeOffset =>
                 OffsetBuckets(column, (DateTimeOffset)minValue, (DateTimeOffset)maxValue, bucketCount),
 
             _ => throw new InvalidOperationException(

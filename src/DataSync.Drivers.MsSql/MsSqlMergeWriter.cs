@@ -48,7 +48,7 @@ public sealed class MsSqlMergeWriter : IChangeWriter
             """;
 
         var rowsAffected = await MsSqlIdentityInsert.RunAsync(
-            targetConnection, transaction: null, shape,
+            targetConnection, transaction: null, shape.QuotedTarget, shape.RequiresIdentityInsert,
             () => cmd.ExecuteNonQueryAsync(cancellationToken),
             cancellationToken);
 

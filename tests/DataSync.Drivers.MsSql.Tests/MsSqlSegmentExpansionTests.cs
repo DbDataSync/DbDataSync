@@ -1,4 +1,5 @@
 using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.Generic;
 using Xunit;
 
 namespace DataSync.Drivers.MsSql.Tests;
@@ -16,7 +17,7 @@ public sealed class MsSqlSegmentExpansionTests
     [Fact]
     public void IntegerRange_DividesEvenlyAndCoversMax()
     {
-        var segments = MsSqlSegmentExpansion.BuildBuckets("OrderId", "int", 1, 10, 3);
+        var segments = SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "OrderId", "int", 1, 10, 3);
 
         Assert.Equal([("1", "4"), ("4", "7"), ("7", "11")], Bounds(segments));
     }
@@ -26,7 +27,7 @@ public sealed class MsSqlSegmentExpansionTests
     [Fact]
     public void IntegerRange_ThatDoesNotDivideEvenly_StillProducesIntegerBounds()
     {
-        var segments = MsSqlSegmentExpansion.BuildBuckets("OrderId", "int", 1, 10, 4);
+        var segments = SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "OrderId", "int", 1, 10, 4);
 
         Assert.Equal([("1", "3"), ("3", "5"), ("5", "7"), ("7", "11")], Bounds(segments));
         Assert.All(segments, s => Assert.DoesNotContain(".", s.RangeMin));
@@ -35,7 +36,7 @@ public sealed class MsSqlSegmentExpansionTests
     [Fact]
     public void Buckets_TileWithoutGapOrOverlap()
     {
-        var segments = MsSqlSegmentExpansion.BuildBuckets("OrderId", "bigint", 100L, 1000L, 7);
+        var segments = SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "OrderId", "bigint", 100L, 1000L, 7);
 
         for (var i = 0; i < segments.Count - 1; i++)
             Assert.Equal(segments[i].RangeMax, segments[i + 1].RangeMin);
@@ -44,7 +45,7 @@ public sealed class MsSqlSegmentExpansionTests
     [Fact]
     public void DecimalRange_KeepsFractionalBoundaries()
     {
-        var segments = MsSqlSegmentExpansion.BuildBuckets("Amount", "decimal(18,2)", 0m, 10m, 4);
+        var segments = SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "Amount", "decimal(18,2)", 0m, 10m, 4);
 
         Assert.Equal([("0", "2.5"), ("2.5", "5"), ("5", "7.5"), ("7.5", "11")], Bounds(segments));
     }
@@ -55,7 +56,7 @@ public sealed class MsSqlSegmentExpansionTests
         var min = new DateTime(2024, 1, 1);
         var max = new DateTime(2024, 1, 11);
 
-        var segments = MsSqlSegmentExpansion.BuildBuckets("OrderDate", "datetime2(7)", min, max, 2);
+        var segments = SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "OrderDate", "datetime2(7)", min, max, 2);
 
         Assert.Equal(2, segments.Count);
         Assert.Equal(min.ToString("O"), segments[0].RangeMin);
@@ -71,7 +72,7 @@ public sealed class MsSqlSegmentExpansionTests
     {
         var max = new DateTime(2024, 6, 30, 12, 0, 0);
 
-        var segments = MsSqlSegmentExpansion.BuildBuckets("OrderDate", "datetime", new DateTime(2024, 1, 1), max, 3);
+        var segments = SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "OrderDate", "datetime", new DateTime(2024, 1, 1), max, 3);
 
         Assert.True(DateTime.Parse(segments[^1].RangeMax) > max);
     }
@@ -79,7 +80,7 @@ public sealed class MsSqlSegmentExpansionTests
     [Fact]
     public void SingleBucket_CoversTheWholeRange()
     {
-        var segments = MsSqlSegmentExpansion.BuildBuckets("OrderId", "int", 5, 42, 1);
+        var segments = SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "OrderId", "int", 5, 42, 1);
 
         Assert.Equal([("5", "43")], Bounds(segments));
     }
@@ -89,7 +90,7 @@ public sealed class MsSqlSegmentExpansionTests
     [Fact]
     public void MoreBucketsThanValues_DropsTheEmptyOnes()
     {
-        var segments = MsSqlSegmentExpansion.BuildBuckets("OrderId", "int", 7, 7, 5);
+        var segments = SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "OrderId", "int", 7, 7, 5);
 
         Assert.Equal([("7", "8")], Bounds(segments));
     }
@@ -98,7 +99,7 @@ public sealed class MsSqlSegmentExpansionTests
     public void ZeroBuckets_IsRejected()
     {
         var ex = Assert.Throws<InvalidOperationException>(
-            () => MsSqlSegmentExpansion.BuildBuckets("OrderId", "int", 1, 10, 0));
+            () => SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "OrderId", "int", 1, 10, 0));
 
         Assert.Contains("at least 1", ex.Message);
     }
@@ -107,7 +108,7 @@ public sealed class MsSqlSegmentExpansionTests
     public void UndividableColumnType_IsRejectedWithAnActionableMessage()
     {
         var ex = Assert.Throws<InvalidOperationException>(
-            () => MsSqlSegmentExpansion.BuildBuckets("Id", "uniqueidentifier", Guid.NewGuid(), Guid.NewGuid(), 4));
+            () => SegmentExpansion.BuildBuckets(MsSqlDialect.Instance, "Id", "uniqueidentifier", Guid.NewGuid(), Guid.NewGuid(), 4));
 
         Assert.Contains("list or range segment", ex.Message);
     }

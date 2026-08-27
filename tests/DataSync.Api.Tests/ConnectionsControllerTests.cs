@@ -57,12 +57,18 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
         Assert.NotNull(capabilities);
         Assert.Equal(ConnectionDriverType.MsSql, capabilities!.DriverType);
 
-        // Only the batch-reload reader can expand an Auto segment into concrete ranges.
-        Assert.Equal("MsSqlBatchReload", Assert.Single(capabilities.Readers, r => r.SupportsSegmentation).Kind);
-
-        // The two reload writers reconcile; the incremental MERGE writer is upsert-only.
+        // Only the reload readers can expand an Auto segment into concrete ranges — this driver's own
+        // and the portable one it registers alongside it.
         Assert.Equal(
-            ["MsSqlDeleteInsert", "MsSqlMergeReconcile"],
+            ["BatchReload", "MsSqlBatchReload"],
+            capabilities.Readers.Where(r => r.SupportsSegmentation).Select(r => r.Kind).Order());
+
+        // Change Tracking is the only reader that can report a source delete as one.
+        Assert.Equal("MsSqlChangeTracking", Assert.Single(capabilities.Readers, r => r.DetectsDeletes).Kind);
+
+        // The reload writers reconcile; the incremental MERGE writer is upsert-only.
+        Assert.Equal(
+            ["DeleteInsert", "MsSqlDeleteInsert", "MsSqlMergeReconcile"],
             capabilities.Writers.Where(w => w.SupportsReconciliation).Select(w => w.Kind).Order());
         Assert.False(capabilities.Writers.Single(w => w.Kind == "MsSqlMerge").SupportsReconciliation);
 

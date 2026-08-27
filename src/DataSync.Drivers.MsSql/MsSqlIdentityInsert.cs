@@ -12,14 +12,15 @@ internal static class MsSqlIdentityInsert
     public static async Task<T> RunAsync<T>(
         DbConnection connection,
         DbTransaction? transaction,
-        MsSqlTargetShape shape,
+        string quotedTarget,
+        bool requiresIdentityInsert,
         Func<Task<T>> write,
         CancellationToken cancellationToken)
     {
-        if (!shape.RequiresIdentityInsert)
+        if (!requiresIdentityInsert)
             return await write();
 
-        await SetAsync(connection, transaction, shape.QuotedTarget, on: true, cancellationToken);
+        await SetAsync(connection, transaction, quotedTarget, on: true, cancellationToken);
         try
         {
             return await write();
@@ -30,7 +31,7 @@ internal static class MsSqlIdentityInsert
             // that failure replace the real one would hide why the write failed.
             try
             {
-                await SetAsync(connection, transaction, shape.QuotedTarget, on: false, CancellationToken.None);
+                await SetAsync(connection, transaction, quotedTarget, on: false, CancellationToken.None);
             }
             catch (DbException)
             {

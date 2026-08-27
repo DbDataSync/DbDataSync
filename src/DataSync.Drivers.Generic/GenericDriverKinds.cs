@@ -8,4 +8,7 @@ namespace DataSync.Drivers.Generic;
 public static class GenericDriverKinds
 {
     public const string Watermark = "Watermark";
+    public const string BatchReload = "BatchReload";
+    public const string StagingTable = "StagingTable";
+    public const string DeleteInsert = "DeleteInsert";
 }

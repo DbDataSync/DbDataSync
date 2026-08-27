@@ -43,4 +43,68 @@ public abstract class SqlDialect
         connection.ChangeDatabase(database);
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// The most parameters one statement may carry. SQL Server caps a request at 2100; Postgres and
+    /// MySQL allow 65535. The default is deliberately the *lowest* of the engines in scope, because a
+    /// dialect that forgets to state its own limit should batch too conservatively rather than emit a
+    /// statement the server rejects.
+    /// </summary>
+    public virtual int MaxParametersPerStatement => 2100;
+
+    /// <summary>Column type for the staging table's operation marker. One character on every engine in
+    /// scope, but spelled as a type name, which is the part that varies.</summary>
+    public virtual string OperationMarkerColumnType => "CHAR(1)";
+
+    /// <summary>Renders a multi-row insert. The <c>VALUES (…), (…)</c> form works on SQL Server 2008+,
+    /// Postgres and MySQL; Oracle's <c>INSERT ALL</c> is a different statement entirely, which is why
+    /// this is a hook rather than a format string.</summary>
+    /// <param name="rowValueTuples">Each already rendered as <c>(@p0_0, @p0_1, …)</c>.</param>
+    public virtual string RenderMultiRowInsert(string qualifiedTable, string columnList, IReadOnlyList<string> rowValueTuples) =>
+        $"INSERT INTO {qualifiedTable} ({columnList}) VALUES {string.Join(", ", rowValueTuples)};";
+
+    /// <summary>Drops a table if it is there. <c>IF EXISTS</c> is not universal (Oracle needs a PL/SQL
+    /// block around the drop), so the whole statement is the hook.</summary>
+    public virtual string RenderDropTableIfExists(string qualifiedTable) =>
+        $"DROP TABLE IF EXISTS {qualifiedTable};";
+
+    /// <summary>
+    /// How a column's type divides into buckets for auto-segmentation. The default covers the type
+    /// names the ISO SQL types share; a dialect adds its own spellings on top (SQL Server's
+    /// <c>datetime2</c> and <c>money</c>, Postgres's <c>timestamptz</c>) and should call
+    /// <c>base</c> for anything it does not recognise.
+    /// </summary>
+    public virtual BucketableKind ClassifyForBucketing(string baseTypeName) => baseTypeName switch
+    {
+        "tinyint" or "smallint" or "int" or "integer" or "bigint" => BucketableKind.Integral,
+        "decimal" or "numeric" or "float" or "real" or "double" or "double precision" => BucketableKind.Numeric,
+        "date" or "datetime" or "timestamp" => BucketableKind.DateTime,
+        _ => BucketableKind.NotBucketable,
+    };
+
+    /// <summary>
+    /// Runs <paramref name="write"/> with whatever the engine needs in order to accept explicit values
+    /// for generated columns. SQL Server brackets it with <c>SET IDENTITY_INSERT</c>, Postgres uses
+    /// <c>OVERRIDING SYSTEM VALUE</c> on the statement itself, MySQL needs nothing — the three have
+    /// their purpose in common and nothing else, so the hook is "run this write" rather than "give me
+    /// a clause".
+    /// </summary>
+    public virtual Task<T> WriteWithGeneratedColumnOverrideAsync<T>(
+        DbConnection connection,
+        DbTransaction? transaction,
+        string qualifiedTable,
+        bool overrideRequired,
+        Func<Task<T>> write,
+        CancellationToken cancellationToken) => write();
+}
+
+/// <summary>How auto-segmentation may divide a column's value space. Not a type system — only the four
+/// arithmetics <see cref="SegmentExpansion"/> knows how to bucket.</summary>
+public enum BucketableKind
+{
+    NotBucketable,
+    Integral,
+    Numeric,
+    DateTime,
+    DateTimeOffset,
 }
