@@ -93,7 +93,7 @@ export function ReplicationsPage() {
 
       <div className="pane">
         <div className="page-head">
-          <span className="page-title">Replications</span>
+          <h1 className="page-title">Replications</h1>
           <span className="page-note">
             {names ? `${names.length} task${names.length === 1 ? '' : 's'}` : '…'}
           </span>

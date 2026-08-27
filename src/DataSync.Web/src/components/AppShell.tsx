@@ -52,6 +52,8 @@ export function AppShell({ crumbs, tabs, actions, children }: {
               <span className="sep">/</span>
               {crumb.to ? (
                 <NavLink to={crumb.to} className={`crumb ${crumb.mono ? 'mono' : ''}`}>{crumb.label}</NavLink>
+              ) : crumb.heading ? (
+                <h1 className={`crumb here ${crumb.mono ? 'mono' : ''}`}>{crumb.label}</h1>
               ) : (
                 <span className={`crumb here ${crumb.mono ? 'mono' : ''}`}>{crumb.label}</span>
               )}
@@ -74,6 +76,13 @@ export interface Crumb {
   to?: string
   /** Identifiers are set in the monospace face throughout the design. */
   mono?: boolean
+  /**
+   * Render this crumb as the page's `<h1>`. Set it only where the pane has no title of its own — the
+   * replication detail screens, whose subject is named in the breadcrumb and nowhere else. A list
+   * screen already has a heading in its pane, and two `<h1>`s reading the same word is worse than
+   * none for anyone navigating by headings.
+   */
+  heading?: boolean
 }
 
 /** The two top-level sections, shown on the list screens. */

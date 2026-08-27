@@ -11,7 +11,7 @@ export function HistoryPanel({ replicationName }: { replicationName: string }) {
   return (
     <div className="pane">
       <div className="page-head">
-        <span className="page-title">Config history</span>
+        <h2 className="page-title">Config history</h2>
         <span className="page-note">Every config change is an auto-commit. This is the replication's git log.</span>
       </div>
 

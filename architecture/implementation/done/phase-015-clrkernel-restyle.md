@@ -1,6 +1,6 @@
 # Phase 15 — ClrKernel Restyle
 
-**Status**: Complete (SPA); Playwright suite repaired separately
+**Status**: Complete
 **Plan reference**: `DataSync Mockups.dc.html` in the Claude Design project
 `57cdea73-ae62-4e21-9db3-688c906ceaeb` ("Data sync webapp mockups"), read via `DesignSync`. Seven
 frames covering all thirteen states of the existing SPA.
@@ -112,8 +112,29 @@ seed-a-draft-from-the-server pattern the codebase already used.
 
 **The .NET side is untouched** — this phase changed no API, contract or type.
 
+## Repairing the Playwright suite
+
+Done in its own commit, after the restyle, so the large visual diff stayed reviewable. Ten tests, all
+green. What it took is worth recording, because most of it was the suite finding real gaps rather
+than merely needing to be told about new markup:
+
+- **The design has no heading elements.** Every page title was a `<span>`, so `getByRole('heading')`
+  found nothing — and a screen reader would have found nothing either. Fixed in the markup rather
+  than by weakening the assertion: pane titles became `<h1>`/`<h2>`, and on the replication detail
+  screens — whose subject is named only in the breadcrumb — the final crumb renders as the `<h1>`.
+- **That first fix then produced two `<h1>`s reading "Replications"** on the list screen, one in the
+  breadcrumb and one in the pane. The crumb-as-heading is now opt-in per screen (`heading: true`),
+  set only where the pane has no title of its own. Two headings reading the same word is worse than
+  none for anyone navigating by headings, so the test catching it was doing its job.
+- Assertions updated where the UI genuinely changed: run status reads as the design's lowercase word,
+  the run-kind chip is uppercase, the live panel separates counts with `·`, column mappings are
+  CSS-grid rows rather than `<table>` rows, the mappings list is a sidebar, and connections open
+  their own screen.
+- **Test 10 was rewritten rather than patched.** It checked that invalid JSON in the options textarea
+  disabled Save; that textarea no longer exists. It now exercises what replaced it — the stage picker
+  swapping both Kind picker and options, and a stage option surviving a save and reload, which is the
+  only proof it reached the config repo.
+
 ## What's explicitly not built
 
-Everything in "what the design shows that the system cannot back" above, and the Playwright suite,
-which is repaired in its own commit: the rewrite moves both the markup it queries and the text it
-asserts on, and repairing it alongside the restyle would have made a large diff impossible to review.
+Everything in "what the design shows that the system cannot back" above.

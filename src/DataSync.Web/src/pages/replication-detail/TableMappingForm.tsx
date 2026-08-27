@@ -37,7 +37,7 @@ export function TableMappingForm({ replicationName, existing, onDone, onCancel }
   return (
     <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div className="page-head">
-        <span className="page-title mono">{existing ? existing.name : 'New table mapping'}</span>
+        <h2 className="page-title mono">{existing ? existing.name : 'New table mapping'}</h2>
         {existing && <span className="badge badge-accent">MAPPED</span>}
         <div className="right">
           <button type="button" className="btn" onClick={onCancel}>Cancel</button>

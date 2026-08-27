@@ -36,6 +36,7 @@ test.describe.serial('golden path: define, configure, and run a replication end-
 
     for (const name of [SRC_CONNECTION_NAME, TGT_CONNECTION_NAME]) {
       await page.getByTestId('new-connection-button').click()
+      await expect(page).toHaveURL(/\/connections\/new$/)
       await page.getByTestId('connection-name-input').fill(name)
       await page.getByTestId('connection-host-input').fill('localhost')
       await page.locator('#conn-port').fill('14330')
@@ -76,11 +77,13 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await selectWhenReady(page, 'target-table-select', `dbo.${TARGET_TABLE}`)
 
     // Column mappings auto-suggest once both tables' columns load (same-name match: Id, Name).
-    await expect(page.getByTestId('column-mappings-table').locator('tbody tr')).toHaveCount(2, { timeout: 15_000 })
+    // The design renders rows as CSS-grid divs rather than a <table>, so count the row class.
+    await expect(page.getByTestId('column-mappings-table').locator('.grid-row')).toHaveCount(2, { timeout: 15_000 })
     await shot(page, '04-table-mapping-form.png')
 
     await page.getByTestId('save-mapping-button').click()
-    await expect(page.getByTestId('table-mappings-table')).toContainText(MAPPING_NAME)
+    // The mappings list is the sidebar now, not a table below the form.
+    await expect(page.getByTestId(`mapping-item-${MAPPING_NAME}`)).toBeVisible({ timeout: 15_000 })
     await shot(page, '05-table-mappings-list.png')
   })
 
@@ -93,12 +96,12 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await expect(page.getByTestId('live-log-viewer')).toContainText('Run started', { timeout: 15_000 })
     await shot(page, '06-live-run-in-progress.png')
 
-    await expect(page.getByTestId('live-run-panel')).toContainText('Succeeded', { timeout: 30_000 })
-    await expect(page.getByTestId('live-run-panel')).toContainText('2 row(s) read, 2 row(s) written')
+    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
+    await expect(page.getByTestId('live-run-panel')).toContainText('2 row(s) read · 2 row(s) written')
     await shot(page, '07-live-run-completed.png')
 
     // The live panel auto-clears a few seconds after completion, leaving the persisted history row.
-    await expect(page.getByTestId('run-history-table')).toContainText('Succeeded', { timeout: 10_000 })
+    await expect(page.getByTestId('run-history-table')).toContainText('succeeded', { timeout: 10_000 })
     await shot(page, '08-run-history.png')
   })
 
@@ -126,7 +129,6 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     expect(querySql(`SET NOCOUNT ON; SELECT Name FROM dbo.[${TARGET_TABLE}];`, DB_NAME)).not.toContain('Widget')
 
     await page.goto(`/replications/${REPLICATION_NAME}`)
-    await page.getByTestId('tab-runs').click()
     await page.getByTestId('backfill-button').click()
     await expect(page.getByTestId('backfill-form')).toBeVisible()
 
@@ -140,11 +142,11 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('backfill-submit-button').click()
 
     await expect(page.getByTestId('live-run-panel')).toBeVisible()
-    await expect(page.getByTestId('live-run-panel')).toContainText('Succeeded', { timeout: 30_000 })
+    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
     await shot(page, '11-backfill-completed.png')
 
     // Distinguishable from the replication's own incremental passes in history.
-    await expect(page.getByTestId('run-history-table')).toContainText('Backfill', { timeout: 10_000 })
+    await expect(page.getByTestId('run-history-table')).toContainText('BACKFILL', { timeout: 10_000 })
     await expect(page.getByTestId('run-history-table')).toContainText('full')
     await shot(page, '12-run-history-with-backfill.png')
 
@@ -161,11 +163,11 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('tab-runs').click()
     await page.getByTestId('trigger-run-button').click()
 
-    await expect(page.getByTestId('live-run-panel')).toContainText('Succeeded', { timeout: 30_000 })
-    await expect(page.getByTestId('live-run-panel')).toContainText('0 row(s) read, 0 row(s) written')
+    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
+    await expect(page.getByTestId('live-run-panel')).toContainText('0 row(s) read · 0 row(s) written')
   })
 
-  test('10 - settings offer live driver capabilities and reject invalid options JSON', async ({ page }) => {
+  test('10 - settings expose live driver capabilities and per-stage options', async ({ page }) => {
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('tab-overview').click()
 
@@ -174,15 +176,24 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     const readerSelect = page.getByTestId('reader-kind-select')
     await expect(readerSelect.locator('option[value="MsSqlBatchReload"]')).toBeAttached({ timeout: 15_000 })
     await expect(readerSelect.locator('option[value="MsSqlBatchReload"]')).toContainText('segmentable')
+
+    // The pipeline is three selectable stages; picking one swaps both the Kind picker and its options.
+    await page.getByTestId('stage-writer').click()
     await expect(page.getByTestId('writer-kind-select').locator('option[value="MsSqlMerge"]')).toContainText('upsert-only')
 
-    const options = page.getByTestId('reader-options-editor')
-    await options.fill('{ not json')
-    await expect(page.getByTestId('save-settings-button')).toBeDisabled()
-    await shot(page, '13-invalid-options-json.png')
+    // A stage option is a key/value pair now, not a line of JSON in a textarea.
+    await page.getByTestId('stage-reader').click()
+    const options = page.getByTestId('reader-options')
+    await options.getByPlaceholder('Setting name').fill('snapshotIsolation')
+    await options.getByRole('button', { name: '+ Add' }).click()
+    await options.getByLabel('snapshotIsolation value').fill('false')
 
-    // A standalone reload replication's static segment list is authored right here.
-    await options.fill('{"segments": "[{\\"mode\\":\\"full\\"}]"}')
-    await expect(page.getByTestId('save-settings-button')).toBeEnabled()
+    await page.getByTestId('save-settings-button').click()
+    await shot(page, '13-pipeline-settings.png')
+
+    // Survives a reload, which is the only proof it reached the config repo.
+    await page.reload()
+    await page.getByTestId('tab-overview').click()
+    await expect(page.getByTestId('reader-options').getByLabel('snapshotIsolation value')).toHaveValue('false', { timeout: 15_000 })
   })
 })

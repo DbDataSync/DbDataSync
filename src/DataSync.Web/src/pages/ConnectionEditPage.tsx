@@ -99,7 +99,7 @@ export function ConnectionEditPage() {
     >
       <div className="pane">
         <div className="page-head">
-          <span className="page-title mono">{isNew ? 'New connection' : draft.name}</span>
+          <h1 className="page-title mono">{isNew ? 'New connection' : draft.name}</h1>
           <span className="badge">{draft.driverType.toUpperCase()}</span>
         </div>
 

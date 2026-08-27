@@ -39,7 +39,7 @@ export function ReplicationDetailPage() {
 
   return (
     <AppShell
-      crumbs={[{ label: 'Replications', to: '/replications' }, { label: name, mono: true }]}
+      crumbs={[{ label: 'Replications', to: '/replications' }, { label: name, mono: true, heading: true }]}
       tabs={
         <>
           {TABS.map((t) => (

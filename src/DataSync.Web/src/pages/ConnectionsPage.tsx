@@ -18,7 +18,7 @@ export function ConnectionsPage() {
     <AppShell crumbs={[{ label: 'Connections' }]} tabs={<SectionTabs active="connections" />}>
       <div className="pane">
         <div className="page-head">
-          <span className="page-title">Connections</span>
+          <h1 className="page-title">Connections</h1>
           <span className="page-note">
             {connections ? `${connections.length} configured` : '…'}
           </span>
