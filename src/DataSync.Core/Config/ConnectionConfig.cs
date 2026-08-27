@@ -4,6 +4,7 @@ namespace DataSync.Core.Config;
 public enum ConnectionDriverType
 {
     MsSql,
+    Postgres,
 }
 
 public enum AuthMode

@@ -1,5 +1,4 @@
 using System.Data.Common;
-using System.Globalization;
 using System.Runtime.CompilerServices;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
@@ -24,7 +23,7 @@ namespace DataSync.Drivers.Generic;
 /// from scratch. This reader is the ongoing incremental-sync fallback; that one is the reload path.
 /// </para>
 /// </summary>
-public sealed class WatermarkReader(SqlDialect dialect) : IChangeReader
+public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder) : IChangeReader
 {
     public string Kind => GenericDriverKinds.Watermark;
 
@@ -44,7 +43,16 @@ public sealed class WatermarkReader(SqlDialect dialect) : IChangeReader
             ?? previousWatermark
             ?? "0";
 
-        var rows = ReadRowsAsync(sourceConnection, source, watermarkColumn, previousWatermark, cancellationToken);
+        // Resolved only when there is a bound to bind — a first pass has no predicate, so it needs no
+        // column type and should not pay for a catalog round trip to learn one.
+        var column = previousWatermark is null
+            ? null
+            : (await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken))
+                .FirstOrDefault(c => string.Equals(c.Name, watermarkColumn, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException(
+                    $"Watermark column '{watermarkColumn}' was not found on '{source.Schema}.{source.Table}'.");
+
+        var rows = ReadRowsAsync(sourceConnection, source, watermarkColumn, previousWatermark, column, cancellationToken);
         return new ReadResult(rows, newWatermark);
     }
 
@@ -56,7 +64,7 @@ public sealed class WatermarkReader(SqlDialect dialect) : IChangeReader
             dialect, source.Schema, source.Table, watermarkColumn, source.Filter);
 
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
-        return result is null or DBNull ? null : Convert.ToString(result, CultureInfo.InvariantCulture);
+        return result is null or DBNull ? null : WatermarkValue.Format(result);
     }
 
     private async IAsyncEnumerable<ChangeRow> ReadRowsAsync(
@@ -64,13 +72,21 @@ public sealed class WatermarkReader(SqlDialect dialect) : IChangeReader
         SourceTableRef source,
         string watermarkColumn,
         string? previousWatermark,
+        ColumnMetadata? column,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = WatermarkStatement.BuildRead(
             dialect, source.Schema, source.Table, watermarkColumn, previousWatermark is not null, source.Filter);
         if (previousWatermark is not null)
-            cmd.AddParameter(dialect.ParameterName(WatermarkStatement.PreviousWatermarkParameter), previousWatermark);
+        {
+            // Bound as the watermark column's own type, not as text. SQL Server would convert
+            // implicitly and Postgres refuses outright ("operator does not exist: timestamp > text"),
+            // but even where it works the conversion happens on the *column* side of the comparison,
+            // which prevents the index seek the whole watermark strategy depends on.
+            cmd.Parameters.Add(binder.CreateParameter(
+                dialect.ParameterName(WatermarkStatement.PreviousWatermarkParameter), previousWatermark, column!));
+        }
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         var schema = ResultSetSchema.From(reader);

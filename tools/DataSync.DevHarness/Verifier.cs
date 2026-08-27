@@ -1,5 +1,5 @@
 using System.Globalization;
-using Microsoft.Data.SqlClient;
+using System.Data.Common;
 
 namespace DataSync.DevHarness;
 
@@ -16,15 +16,17 @@ public static class Verifier
 {
     private const int MaxReportedDifferences = 20;
 
-    public static async Task<bool> VerifyAsync(CancellationToken cancellationToken)
+    public static async Task<bool> VerifyAsync(TargetEngine engine, CancellationToken cancellationToken)
     {
-        Log.Step("Comparing source and target");
+        Log.Step($"Comparing the source with the {engine.Name} target");
 
         await using var source = await SqlBootstrap.OpenAsync(Scenario.SourceConnectionString(Scenario.DatabaseName), cancellationToken);
-        await using var target = await SqlBootstrap.OpenAsync(Scenario.TargetConnectionString(Scenario.DatabaseName), cancellationToken);
+        await using var target = await engine.OpenAsync(Scenario.DatabaseName, cancellationToken);
 
-        await using var sourceReader = await OpenOrderedReaderAsync(source, cancellationToken);
-        await using var targetReader = await OpenOrderedReaderAsync(target, cancellationToken);
+        await using var sourceReader = await OpenOrderedReaderAsync(
+            source, Scenario.QualifiedTable, TargetEngine.MsSql.Quote, cancellationToken);
+        await using var targetReader = await OpenOrderedReaderAsync(
+            target, engine.QualifiedTable, engine.Quote, cancellationToken);
 
         var missing = new List<int>();      // in the source, absent from the target
         var extra = new List<int>();        // in the target, absent from the source
@@ -63,28 +65,55 @@ public static class Verifier
         return Report(matched, missing, extra, different);
     }
 
-    private static async Task<SqlDataReader> OpenOrderedReaderAsync(SqlConnection connection, CancellationToken cancellationToken)
+    /// <summary>Each side quotes and qualifies in its own dialect: the merge-join itself is the same
+    /// on either engine, which is what makes cross-engine verification the same code path.</summary>
+    private static async Task<DbDataReader> OpenOrderedReaderAsync(
+        DbConnection connection, string qualifiedTable, Func<string, string> quote, CancellationToken cancellationToken)
     {
         var cmd = connection.CreateCommand();
         cmd.CommandText =
-            $"SELECT {string.Join(", ", Scenario.Columns.Select(c => $"[{c}]"))} FROM {Scenario.QualifiedTable} ORDER BY Id;";
+            $"SELECT {string.Join(", ", Scenario.Columns.Select(quote))} FROM {qualifiedTable} ORDER BY {quote("Id")};";
         return await cmd.ExecuteReaderAsync(cancellationToken);
     }
 
     /// <summary>Returns a description of the first column that disagrees, or null if the rows match.</summary>
-    private static string? Compare(SqlDataReader source, SqlDataReader target)
+    private static string? Compare(DbDataReader source, DbDataReader target)
     {
         for (var i = 1; i < Scenario.Columns.Length; i++)
         {
             var sourceValue = source.IsDBNull(i) ? null : source.GetValue(i);
             var targetValue = target.IsDBNull(i) ? null : target.GetValue(i);
 
-            if (!Equals(sourceValue, targetValue))
+            if (!ValuesMatch(sourceValue, targetValue))
                 return $"Id {source.GetInt32(0)}: {Scenario.Columns[i]} is " +
                        $"{Format(targetValue)} at the target, {Format(sourceValue)} at the source";
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Cross-engine comparison cannot use <see cref="object.Equals(object?)"/> alone: the same stored
+    /// value comes back as a different CLR type from each provider — a SQL Server <c>datetime2</c>
+    /// arrives as <see cref="DateTime"/> and a Postgres <c>timestamp</c> may arrive with a different
+    /// <see cref="DateTimeKind"/>, and a <c>decimal</c>'s trailing zeros differ by declared scale.
+    /// Comparing the *values* rather than the boxes is the only thing that means what it says here.
+    /// </summary>
+    private static bool ValuesMatch(object? source, object? target)
+    {
+        if (source is null || target is null)
+            return source is null && target is null;
+
+        if (source is DateTime a && target is DateTime b)
+            return a.Ticks == b.Ticks;
+
+        if (source is decimal x && target is decimal y)
+            return x == y;
+
+        if (source is IConvertible && target is IConvertible && source.GetType() != target.GetType())
+            return Format(source) == Format(target);
+
+        return Equals(source, target);
     }
 
     private static string Format(object? value) => value switch

@@ -63,7 +63,7 @@ try
             return 0;
 
         case "reset":
-            await SqlBootstrap.CreateAsync(cancellation.Token);
+            await SqlBootstrap.CreateAsync(TargetEngine.Resolve(harness), cancellation.Token);
             AppProcesses.ResetScratchRepo();
             Log.Ok("databases recreated and the scratch config repo cleared");
             Log.Info("Run `up` again to reconfigure the replication.");
@@ -81,11 +81,11 @@ try
             return 0;
 
         case "drift":
-            await Drift.InjectAsync(harness.Int("rows", 30), cancellation.Token);
+            await Drift.InjectAsync(TargetEngine.Resolve(harness), harness.Int("rows", 30), cancellation.Token);
             return 0;
 
         case "verify":
-            return await Verifier.VerifyAsync(cancellation.Token) ? 0 : 1;
+            return await Verifier.VerifyAsync(TargetEngine.Resolve(harness), cancellation.Token) ? 0 : 1;
 
         default:
             Log.Error($"Unknown verb '{harness.Verb}'.");
@@ -128,8 +128,10 @@ async Task UpAsync(HarnessArgs options, string root, CancellationToken cancellat
         await DockerCompose.WaitForServersAsync(TimeSpan.FromMinutes(3), cancellationToken);
     }
 
+    var targetEngine = TargetEngine.Resolve(options);
+
     if (!options.Has("keep-data"))
-        await SqlBootstrap.CreateAsync(cancellationToken);
+        await SqlBootstrap.CreateAsync(targetEngine, cancellationToken);
 
     var seedRows = options.Int("rows", 200);
     if (seedRows > 0 && !options.Has("keep-data"))
@@ -149,7 +151,7 @@ async Task UpAsync(HarnessArgs options, string root, CancellationToken cancellat
 
     using var api = new ApiClient(apiUrl);
     await api.WaitUntilHealthyAsync(TimeSpan.FromMinutes(1), cancellationToken);
-    await api.ConfigureScenarioAsync(cancellationToken);
+    await api.ConfigureScenarioAsync(targetEngine, cancellationToken);
 
     if (!startApp)
     {
@@ -200,11 +202,13 @@ static void PrintUsage()
                       --api-url URL     where that API is   (default http://127.0.0.1:<api-port>)
                       --no-containers   assume the containers are already up
                       --keep-data       don't recreate or reseed the databases
+                      --target-engine E replicate into mssql (default) or postgres
 
           down        Stop the containers.
                       --volumes         also discard their data volumes
 
           reset       Recreate the databases and clear the scratch config repo, leaving containers up.
+                      --target-engine E as for `up`
 
           seed        Bulk-load rows into the source.
                       --rows N          (default 1000)
@@ -216,10 +220,22 @@ static void PrintUsage()
           drift       Corrupt the target directly, behind the replication's back — the situation only
                       a reconciling backfill can repair.
                       --rows N          rows to affect, split across delete/alter/phantom (default 30)
+                      --target-engine E as for `up`
 
           verify      Compare source and target row by row. Exit code 0 if identical, 1 if not.
+                      Works across engines: a SQL Server source against a PostgreSQL target.
+                      --target-engine E as for `up`
+
+        Cross-engine:
+          The source is always SQL Server — Change Tracking is what makes the incremental story
+          demonstrable. With --target-engine postgres the replication runs BatchReload/StagingTable/
+          DeleteInsert instead, because a non-SQL-Server target has no upsert writer yet, so it
+          reloads rather than applying changes. Set DATASYNC_HARNESS_TARGET_ENGINE once instead of
+          passing the flag to every verb — `verify` and `drift` must agree with what `up` configured.
 
         Environment:
-          DATASYNC_MSSQL_SA_PASSWORD   SA password for both instances (default DataSync_Test_Pw1)
+          DATASYNC_MSSQL_SA_PASSWORD      SA password for both SQL Server instances (default DataSync_Test_Pw1)
+          DATASYNC_POSTGRES_PASSWORD      PostgreSQL password (default DataSync_Test_Pw1)
+          DATASYNC_HARNESS_TARGET_ENGINE  mssql (default) or postgres
         """);
 }

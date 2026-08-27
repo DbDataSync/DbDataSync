@@ -83,6 +83,16 @@ public abstract class SqlDialect
     };
 
     /// <summary>
+    /// Renders the <c>INSERT INTO … (columns)</c> head, given whether the statement supplies explicit
+    /// values for a generated column. Postgres needs <c>OVERRIDING SYSTEM VALUE</c> *inside* the
+    /// statement; SQL Server needs a session flag around it, and so ignores the flag here and uses
+    /// <see cref="WriteWithGeneratedColumnOverrideAsync"/> instead. Both hooks exist because the two
+    /// engines put the same intent in different places.
+    /// </summary>
+    public virtual string RenderInsertInto(string qualifiedTable, string columnList, bool overrideGenerated) =>
+        $"INSERT INTO {qualifiedTable} ({columnList})";
+
+    /// <summary>
     /// Runs <paramref name="write"/> with whatever the engine needs in order to accept explicit values
     /// for generated columns. SQL Server brackets it with <c>SET IDENTITY_INSERT</c>, Postgres uses
     /// <c>OVERRIDING SYSTEM VALUE</c> on the statement itself, MySQL needs nothing — the three have

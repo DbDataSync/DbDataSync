@@ -61,7 +61,8 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
                     using var insertCmd = targetConnection.CreateCommand();
                     insertCmd.Transaction = transaction;
                     insertCmd.CommandText = DeleteInsertStatement.BuildInsert(
-                        dialect, shape.QuotedTarget, shape.InsertColumnList, staged.StagingLocation);
+                        dialect, shape.QuotedTarget, shape.InsertColumnList, staged.StagingLocation,
+                        shape.RequiresGeneratedColumnOverride);
                     return await insertCmd.ExecuteNonQueryAsync(cancellationToken);
                 },
                 cancellationToken);
@@ -91,9 +92,10 @@ public static class DeleteInsertStatement
     /// Deletes in the change set are dropped rather than applied: the delete has already removed
     /// everything in scope, so a 'D' row would only be re-adding a row in order to say it isn't there.
     /// </summary>
-    public static string BuildInsert(SqlDialect dialect, string quotedTarget, string insertColumnList, string stagingLocation) =>
+    public static string BuildInsert(
+        SqlDialect dialect, string quotedTarget, string insertColumnList, string stagingLocation, bool overrideGenerated = false) =>
         $"""
-        INSERT INTO {quotedTarget} ({insertColumnList})
+        {dialect.RenderInsertInto(quotedTarget, insertColumnList, overrideGenerated)}
         SELECT {insertColumnList} FROM {stagingLocation}
         WHERE {dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} <> 'D';
         """;

@@ -35,6 +35,25 @@ services:
       retries: 10
       start_period: 30s
 
+  postgres:
+    image: postgres:17-alpine
+    container_name: datasync-postgres
+    environment:
+      POSTGRES_PASSWORD: ${DATASYNC_POSTGRES_PASSWORD:-DataSync_Test_Pw1}
+      POSTGRES_USER: datasync
+      POSTGRES_DB: datasync
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datasync"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   mssql-source-data:
   mssql-target-data:
+  postgres-data:

@@ -15,6 +15,7 @@
     <ProjectReference Include="..\DataSync.Core\DataSync.Core.csproj" />
     <ProjectReference Include="..\DataSync.Drivers.Abstractions\DataSync.Drivers.Abstractions.csproj" />
     <ProjectReference Include="..\DataSync.Drivers.MsSql\DataSync.Drivers.MsSql.csproj" />
+    <ProjectReference Include="..\DataSync.Drivers.Postgres\DataSync.Drivers.Postgres.csproj" />
     <ProjectReference Include="..\DataSync.State\DataSync.State.csproj" />
   </ItemGroup>
 

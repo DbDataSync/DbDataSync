@@ -3,7 +3,7 @@
 // already knows the exact contract, and a codegen step would add a moving part (fetching a live
 // OpenAPI doc) without reducing risk here.
 
-export type DriverType = 'MsSql'
+export type DriverType = 'MsSql' | 'Postgres'
 export type AuthMode = 'SqlAuth' | 'IntegratedAuth'
 
 export interface ConnectionConfig {

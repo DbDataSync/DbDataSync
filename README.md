@@ -159,11 +159,18 @@ Screenshots of each screen land in `tests/DataSync.Web.Tests/screenshots/`.
 - `src/DataSync.Web` — React/TypeScript SPA.
 - `src/DataSync.Core` — config models, git-backed config store, secrets.
 - `src/DataSync.State` — shared SQLite state store (runs, logs, watermarks, locks).
-- `src/DataSync.Drivers.Abstractions` / `src/DataSync.Drivers.MsSql` — the driver interfaces and the
-  v1 MSSQL implementation (Change Tracking reader, staging-table cache, merge writer).
+- `src/DataSync.Drivers.Abstractions` — the driver interfaces and capability discovery.
+- `src/DataSync.Drivers.Generic` — the engine-neutral implementations every driver gets for free: a
+  SQL dialect, a watermark reader, a batch-reload reader, a batched-insert staging provider and a
+  delete/insert writer. A new engine's driver is a dialect, a connection factory and a catalog.
+- `src/DataSync.Drivers.MsSql` — SQL Server, with its own faster implementations (Change Tracking
+  reader, `SqlBulkCopy` staging, MERGE writers) alongside the generic ones.
+- `src/DataSync.Drivers.Postgres` — PostgreSQL, on Npgsql. Registers only the generic pipeline;
+  batch and watermark mode, no CDC.
 - `src/DataSync.TaskRunner` — the console process actually spawned per replication run.
 - `tools/DataSync.DevHarness` — the dev harness above (environment setup, workload generation,
-  drift injection, source/target verification). Not part of the shipped product.
+  drift injection, source/target verification — including SQL Server → PostgreSQL, via
+  `--target-engine postgres`). Not part of the shipped product.
 - `tools/DataSync.Benchmarks` — `tools/benchmarks`, which measures how much the in-memory shape of a
   change batch costs, through a real `SqlBulkCopy` and through a typed sink. Also not shipped.
 - `architecture/` — design docs; `architecture/implementation/` has a written summary of each build

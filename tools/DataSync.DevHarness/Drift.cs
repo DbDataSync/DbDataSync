@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Microsoft.Data.SqlClient;
 
 namespace DataSync.DevHarness;
@@ -14,27 +15,31 @@ namespace DataSync.DevHarness;
 /// </summary>
 public static class Drift
 {
-    public static async Task InjectAsync(int rows, CancellationToken cancellationToken)
+    public static async Task InjectAsync(TargetEngine engine, int rows, CancellationToken cancellationToken)
     {
-        await using var target = await SqlBootstrap.OpenAsync(
-            Scenario.TargetConnectionString(Scenario.DatabaseName), cancellationToken);
+        await using var target = await engine.OpenAsync(Scenario.DatabaseName, cancellationToken);
         await using var source = await SqlBootstrap.OpenAsync(
             Scenario.SourceConnectionString(Scenario.DatabaseName), cancellationToken);
 
-        var total = await SqlBootstrap.CountAsync(target, cancellationToken);
+        var total = await engine.CountAsync(target, cancellationToken);
         if (total == 0)
             throw new HarnessException("The target table is empty — run a replication first, so there's something to corrupt.");
 
         var each = Math.Max(1, rows / 3);
         Log.Step($"Injecting drift into the target ({each} deleted, {each} altered, {each} phantom rows)");
 
-        var deleted = await DeleteRowsAsync(target, each, cancellationToken);
-        var altered = await AlterRowsAsync(target, each, cancellationToken);
-        var phantomIds = await InsertPhantomsAsync(target, source, each, cancellationToken);
+        var deleted = await engine.DeleteSomeAsync(target, each, cancellationToken);
+        var altered = await engine.AlterSomeAsync(target, each, cancellationToken);
+        var phantomIds = await InsertPhantomsAsync(engine, target, source, each, cancellationToken);
 
         Log.Ok($"{deleted} row(s) deleted, {altered} altered, {phantomIds.Count} phantom row(s) inserted");
-        Log.Info("`verify` will now report differences; an incremental run will not fix any of them.");
-        Log.Info($"Repair with a backfill of '{Scenario.MappingName}' using a reconciling writer.");
+        Log.Info("`verify` will now report differences.");
+        Log.Info(engine.IsFullReload
+            // A reload pipeline re-reads the source every pass, so it repairs drift on its own — worth
+            // saying, because the usual "an incremental run will not fix this" advice is wrong here.
+            ? "This target runs a reload pipeline, so the next scheduled run will repair them."
+            : $"An incremental run will not fix any of them — repair with a backfill of "
+              + $"'{Scenario.MappingName}' using a reconciling writer.");
 
         if (phantomIds.Count > 0)
         {
@@ -46,27 +51,6 @@ public static class Drift
                   "gaps to use). An Auto-segmented reload derives its buckets from the source's own MIN/MAX, so " +
                   "it will not reach them — only a Full segment will.");
         }
-    }
-
-    private static async Task<int> DeleteRowsAsync(SqlConnection connection, int count, CancellationToken cancellationToken)
-    {
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"DELETE TOP (@count) FROM {Scenario.QualifiedTable};";
-        cmd.Parameters.AddWithValue("@count", count);
-        return await cmd.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    /// <summary>Alters values rather than keys, so the rows still *match* on the primary key and the
-    /// difference is a wrong value — the kind a row-count check would miss entirely.</summary>
-    private static async Task<int> AlterRowsAsync(SqlConnection connection, int count, CancellationToken cancellationToken)
-    {
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"""
-            UPDATE TOP (@count) {Scenario.QualifiedTable}
-            SET CustomerName = CONCAT('DRIFTED ', CustomerName), Amount = -1;
-            """;
-        cmd.Parameters.AddWithValue("@count", count);
-        return await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
     /// <summary>
@@ -81,7 +65,7 @@ public static class Drift
     /// </para>
     /// </summary>
     private static async Task<List<int>> InsertPhantomsAsync(
-        SqlConnection target, SqlConnection source, int count, CancellationToken cancellationToken)
+        TargetEngine engine, DbConnection target, SqlConnection source, int count, CancellationToken cancellationToken)
     {
         var ids = await FindGapIdsAsync(source, count, cancellationToken);
 
@@ -90,7 +74,7 @@ public static class Drift
         // caller is told about.
         if (ids.Count < count)
         {
-            var next = await SqlBootstrap.MaxIdAsync(target, cancellationToken) + 1;
+            var next = await engine.MaxIdAsync(target, cancellationToken) + 1;
             while (ids.Count < count)
                 ids.Add(next++);
         }
@@ -98,13 +82,13 @@ public static class Drift
         foreach (var id in ids)
         {
             await using var cmd = target.CreateCommand();
-            cmd.CommandText = $"""
-                INSERT INTO {Scenario.QualifiedTable} (Id, Region, CustomerName, Amount, UpdatedAtUtc)
-                VALUES (@id, 'EU', @name, 0, @updated);
-                """;
-            cmd.Parameters.AddWithValue("@id", id);
-            cmd.Parameters.AddWithValue("@name", $"PHANTOM {id}");
-            cmd.Parameters.AddWithValue("@updated", DateTime.UtcNow);
+            var columns = string.Join(", ", Scenario.Columns.Select(engine.Quote));
+            cmd.CommandText = $"INSERT INTO {engine.QualifiedTable} ({columns}) VALUES (@id, 'EU', @name, 0, @updated);";
+            AddParameter(cmd, "@id", id);
+            AddParameter(cmd, "@name", $"PHANTOM {id}");
+            // Unspecified rather than Utc: Postgres rejects a UTC-kinded DateTime for a `timestamp`
+            // column, and the harness stores wall-clock UTC in a column with no time zone either way.
+            AddParameter(cmd, "@updated", DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified));
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -143,5 +127,13 @@ public static class Drift
 
         var (min, max) = (reader.GetInt32(0), reader.GetInt32(1));
         return ids[0] >= min && ids[^1] <= max;
+    }
+
+    private static void AddParameter(DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 }

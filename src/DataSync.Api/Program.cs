@@ -7,6 +7,7 @@ using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
+using DataSync.Drivers.Postgres;
 using DataSync.State;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -47,6 +48,7 @@ builder.Services.AddSingleton(_ =>
 {
     var registry = new DriverRegistry();
     registry.Register(new MsSqlDriver());
+    registry.Register(new PostgresDriver());
     return registry;
 });
 

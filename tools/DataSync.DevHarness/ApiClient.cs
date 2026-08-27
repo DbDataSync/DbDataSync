@@ -55,14 +55,33 @@ public sealed class ApiClient(string baseUrl) : IDisposable
 
     /// <summary>Creates the connections, replication and table mapping the scenario needs. Every call
     /// is a PUT, so re-running <c>up</c> against an existing config converges rather than failing.</summary>
-    public async Task ConfigureScenarioAsync(CancellationToken cancellationToken)
+    public async Task ConfigureScenarioAsync(TargetEngine target, CancellationToken cancellationToken)
     {
-        Log.Step("Configuring connections, replication and table mapping");
+        Log.Step($"Configuring connections, replication and table mapping (target: {target.Name})");
 
-        await PutAsync($"/api/connections/{Scenario.SourceConnectionName}",
-            MakeConnection(Scenario.SourceConnectionName, Scenario.SourceHost, Scenario.SourcePort), cancellationToken);
-        await PutAsync($"/api/connections/{Scenario.TargetConnectionName}",
-            MakeConnection(Scenario.TargetConnectionName, Scenario.TargetHost, Scenario.TargetPort), cancellationToken);
+        await PutAsync($"/api/connections/{Scenario.SourceConnectionName}", new ConnectionInput
+        {
+            Name = Scenario.SourceConnectionName,
+            DriverType = ConnectionDriverType.MsSql,
+            Host = Scenario.SourceHost,
+            Port = Scenario.SourcePort,
+            Database = Scenario.DatabaseName,
+            AuthMode = AuthMode.SqlAuth,
+            UserId = "sa",
+            Password = Scenario.SaPassword,
+        }, cancellationToken);
+
+        await PutAsync($"/api/connections/{Scenario.TargetConnectionName}", new ConnectionInput
+        {
+            Name = Scenario.TargetConnectionName,
+            DriverType = target.DriverType,
+            Host = target.Host,
+            Port = target.Port,
+            Database = target.TargetDatabaseName,
+            AuthMode = AuthMode.SqlAuth,
+            UserId = target.UserId,
+            Password = target.Password,
+        }, cancellationToken);
 
         await PutAsync($"/api/replications/{Scenario.ReplicationName}", new ReplicationTaskConfig
         {
@@ -73,15 +92,17 @@ public sealed class ApiClient(string baseUrl) : IDisposable
             Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 15 },
             ChangeProcessing = new ChangeProcessingConfig
             {
-                Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },
-                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
-                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+                // From the target engine, not hardcoded: a Postgres target has no upsert writer yet,
+                // so it runs a reload pipeline while a SQL Server target runs the incremental one.
+                Reader = new ReaderConfig { Kind = target.Pipeline.Reader },
+                Cache = new CacheConfig { Kind = target.Pipeline.Cache },
+                Writer = new WriterConfig { Kind = target.Pipeline.Writer },
             },
             // Endpoints on the replication; the mapping below inherits both and states only its table.
             Endpoints = new TaskEndpoints
             {
                 Source = new EndpointRef { ConnectionName = Scenario.SourceConnectionName, Database = Scenario.DatabaseName },
-                Target = new EndpointRef { ConnectionName = Scenario.TargetConnectionName, Database = Scenario.DatabaseName },
+                Target = new EndpointRef { ConnectionName = Scenario.TargetConnectionName, Database = target.TargetDatabaseName },
             },
         }, cancellationToken);
 
@@ -96,7 +117,9 @@ public sealed class ApiClient(string baseUrl) : IDisposable
                 }],
                 Targets = [new TableSpec
                 {
-                    Schema = Scenario.Schema,
+                    // The one thing the target side cannot inherit: `dbo` and `public` are not the
+                    // same word, so a cross-engine mapping states its target schema.
+                    Schema = target.SchemaName,
                     Table = Scenario.Table,
                 }],
                 ColumnMappings = [.. Scenario.Columns.Select(c => new ColumnMapping { SourceColumn = c, TargetColumn = c })],
@@ -112,17 +135,6 @@ public sealed class ApiClient(string baseUrl) : IDisposable
         Log.Ok("triggered a run");
     }
 
-    private static ConnectionInput MakeConnection(string name, string host, int port) => new()
-    {
-        Name = name,
-        DriverType = ConnectionDriverType.MsSql,
-        Host = host,
-        Port = port,
-        Database = Scenario.DatabaseName,
-        AuthMode = AuthMode.SqlAuth,
-        UserId = "sa",
-        Password = Scenario.SaPassword,
-    };
 
     private async Task PutAsync<T>(string path, T body, CancellationToken cancellationToken)
     {

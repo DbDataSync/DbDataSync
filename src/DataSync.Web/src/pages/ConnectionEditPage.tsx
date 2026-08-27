@@ -6,7 +6,10 @@ import { Field } from '../components/Field'
 import { KeyValueTable } from '../components/KeyValueTable'
 import { useCapabilities, useConnections, useDeleteConnection, useTestConnection, useUpsertConnection } from '../api/hooks'
 import { ConnectionTestCard } from './connection-edit/ConnectionTestCard'
-import type { AuthMode, ConnectionInput } from '../api/types'
+import type { AuthMode, ConnectionInput, DriverType } from '../api/types'
+
+/** Each engine's default listening port, so switching the driver does not leave the other's behind. */
+const DEFAULT_PORTS: Record<DriverType, number> = { MsSql: 1433, Postgres: 5432 }
 
 const empty: ConnectionInput = {
   name: '', driverType: 'MsSql', host: '', port: 1433, database: '',
@@ -158,8 +161,22 @@ export function ConnectionEditPage() {
                   </Field>
                 </div>
                 <Field label="Driver">
-                  <select className="select" value={draft.driverType} disabled>
+                  {/* Fixed after creation: the driver decides how every existing mapping's SQL is
+                      built, so changing it under a live replication would silently repoint it at an
+                      engine that cannot answer the same questions. */}
+                  <select
+                    className="select"
+                    value={draft.driverType}
+                    disabled={!isNew}
+                    onChange={(e) => setDraft({
+                      ...draft,
+                      driverType: e.target.value as DriverType,
+                      port: DEFAULT_PORTS[e.target.value as DriverType],
+                    })}
+                    data-testid="connection-driver-select"
+                  >
                     <option value="MsSql">MsSql</option>
+                    <option value="Postgres">Postgres</option>
                   </select>
                 </Field>
                 <Field label="Database">

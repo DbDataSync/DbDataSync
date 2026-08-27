@@ -3,6 +3,7 @@ using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
+using DataSync.Drivers.Postgres;
 using DataSync.State;
 using DataSync.TaskRunner;
 
@@ -16,6 +17,7 @@ if (!TaskRunnerOptions.TryParse(args, out var options, out var parseError))
 
 var driverRegistry = new DriverRegistry();
 driverRegistry.Register(new MsSqlDriver());
+driverRegistry.Register(new PostgresDriver());
 
 var secretStore = new SecretStore(true);
 var configRepository = new ConfigRepository(options!.ConfigRoot, new GitCommitService(options.RepoRoot), secretStore);

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Data.Common;
 using Microsoft.Data.SqlClient;
 
 namespace DataSync.DevHarness;
@@ -12,30 +13,37 @@ namespace DataSync.DevHarness;
 /// </summary>
 public static class SqlBootstrap
 {
-    public static async Task CreateAsync(CancellationToken cancellationToken)
+    public static async Task CreateAsync(TargetEngine target, CancellationToken cancellationToken)
     {
-        Log.Step($"Creating the '{Scenario.DatabaseName}' database on both instances");
+        Log.Step($"Creating the '{Scenario.DatabaseName}' database on the source and the {target.Name} target");
 
         await CreateSourceAsync(cancellationToken);
-        await CreateTargetAsync(cancellationToken);
+        await target.RecreateAsync(cancellationToken);
 
-        Log.Ok($"{Scenario.QualifiedTable} exists on source (change tracking on) and target");
+        Log.Ok($"{Scenario.QualifiedTable} exists on source (change tracking on), {target.QualifiedTable} on the {target.Name} target");
     }
 
-    public static async Task DropAsync(CancellationToken cancellationToken)
+    public static async Task DropAsync(TargetEngine target, CancellationToken cancellationToken)
     {
-        Log.Step($"Dropping the '{Scenario.DatabaseName}' database on both instances");
-        foreach (var (label, connectionString) in Servers())
+        Log.Step($"Dropping the '{Scenario.DatabaseName}' database on the source and the {target.Name} target");
+
+        try
         {
-            try
-            {
-                await using var connection = await OpenAsync(connectionString, cancellationToken);
-                await ExecuteAsync(connection, DropDatabaseSql, cancellationToken);
-            }
-            catch (SqlException ex)
-            {
-                Log.Warn($"could not drop the database on {label}: {ex.Message}");
-            }
+            await using var source = await OpenAsync(Scenario.SourceConnectionString(), cancellationToken);
+            await ExecuteAsync(source, DropDatabaseSql, cancellationToken);
+        }
+        catch (Exception ex) when (ex is SqlException or HarnessException)
+        {
+            Log.Warn($"could not drop the database on the source: {ex.Message}");
+        }
+
+        try
+        {
+            await target.DropDatabaseAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is DbException or HarnessException)
+        {
+            Log.Warn($"could not drop the database on the {target.Name} target: {ex.Message}");
         }
     }
 
@@ -53,20 +61,6 @@ public static class SqlBootstrap
         await using var db = await OpenAsync(Scenario.SourceConnectionString(Scenario.DatabaseName), cancellationToken);
         await ExecuteAsync(db, Scenario.CreateTableSql, cancellationToken);
         await ExecuteAsync(db, $"ALTER TABLE {Scenario.QualifiedTable} ENABLE CHANGE_TRACKING;", cancellationToken);
-    }
-
-    private static async Task CreateTargetAsync(CancellationToken cancellationToken)
-    {
-        await using (var master = await OpenAsync(Scenario.TargetConnectionString(), cancellationToken))
-        {
-            await ExecuteAsync(master, DropDatabaseSql, cancellationToken);
-            await ExecuteAsync(master, $"CREATE DATABASE [{Scenario.DatabaseName}];", cancellationToken);
-        }
-
-        // No change tracking on the target: nothing reads changes from it, and enabling it would
-        // quietly suggest otherwise.
-        await using var db = await OpenAsync(Scenario.TargetConnectionString(Scenario.DatabaseName), cancellationToken);
-        await ExecuteAsync(db, Scenario.CreateTableSql, cancellationToken);
     }
 
     /// <summary>
@@ -160,12 +154,6 @@ public static class SqlBootstrap
         cmd.CommandText = $"SELECT ISNULL(MAX(Id), 0) FROM {Scenario.QualifiedTable};";
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
-
-    private static IEnumerable<(string Label, string ConnectionString)> Servers() =>
-    [
-        ("source", Scenario.SourceConnectionString()),
-        ("target", Scenario.TargetConnectionString()),
-    ];
 
     /// <summary>SINGLE_USER first: an idle pooled connection from a previous harness invocation is
     /// enough to make a plain DROP DATABASE block indefinitely.</summary>
