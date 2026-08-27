@@ -8,6 +8,7 @@ const keys = {
   connections: ['connections'] as const,
   connection: (name: string) => ['connections', name] as const,
   capabilities: (name: string) => ['connections', name, 'capabilities'] as const,
+  credentialSource: (name: string) => ['connections', name, 'credential-source'] as const,
   databases: (connectionName: string) => ['metadata', connectionName, 'databases'] as const,
   tables: (connectionName: string, database: string) => ['metadata', connectionName, database, 'tables'] as const,
   columns: (connectionName: string, database: string, schema: string, table: string) =>
@@ -258,5 +259,26 @@ export function useCancelRun(replicationName: string) {
   return useMutation({
     mutationFn: (runId: string) => api.runs.cancel(runId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.runHistory(replicationName) }),
+  })
+}
+
+/**
+ * Tests one connection, on demand.
+ *
+ * A mutation rather than a query on purpose: opening every configured database because a list
+ * rendered is a surprising thing for a console to do, and the result is a reading taken at a moment,
+ * not state to keep fresh. Nothing here polls.
+ */
+export function useTestConnection() {
+  return useMutation({ mutationFn: (name: string) => api.connections.test(name) })
+}
+
+/** Which secret a connection resolves through. Fixed for a given name, so cached like capabilities. */
+export function useCredentialSource(connectionName: string | undefined) {
+  return useQuery({
+    queryKey: keys.credentialSource(connectionName ?? ''),
+    queryFn: () => api.connections.credentialSource(connectionName!),
+    enabled: !!connectionName,
+    staleTime: Infinity,
   })
 }

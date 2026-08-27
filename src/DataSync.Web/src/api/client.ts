@@ -4,6 +4,8 @@ import type {
   CommitInfo,
   ConnectionConfig,
   ConnectionInput,
+  ConnectionTestReport,
+  CredentialSource,
   DriverCapabilities,
   LogEntryRecord,
   ReplicationTaskConfig,
@@ -57,6 +59,10 @@ export const api = {
     delete: (name: string) => request<void>(`/api/connections/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     capabilities: (name: string) =>
       request<DriverCapabilities>(`/api/connections/${encodeURIComponent(name)}/capabilities`),
+    test: (name: string) =>
+      request<ConnectionTestReport>(`/api/connections/${encodeURIComponent(name)}/test`, { method: 'POST' }),
+    credentialSource: (name: string) =>
+      request<CredentialSource>(`/api/connections/${encodeURIComponent(name)}/credential-source`),
   },
   metadata: {
     databases: (connectionName: string) =>

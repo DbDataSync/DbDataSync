@@ -140,6 +140,24 @@ export interface ReaderCapability {
   detectsDeletes: boolean
 }
 
+export interface ConnectionTestReport {
+  succeeded: boolean
+  /** Opening the connection — usually the dominant cost, and what fails on a wrong host or port. */
+  connectMs: number
+  /** The driver's own round trip once connected. */
+  probeMs: number
+  serverVersion: string | null
+  error: string | null
+}
+
+/** Which secret a connection resolves through. Read-only while there is one store to resolve from. */
+export interface CredentialSource {
+  store: string
+  secretRef: string
+  environmentVariable: string
+  requiresCredential: boolean
+}
+
 export interface StagingCapability {
   kind: string
 }
@@ -156,6 +174,10 @@ export interface DriverCapabilities {
   readers: ReaderCapability[]
   stagingProviders: StagingCapability[]
   writers: WriterCapability[]
+  /** Whether the driver can prove this connection reaches its engine. False is not a defect — a
+   * driver reaching an arbitrary engine may have no probe it can name — so the UI hides the Test
+   * affordance rather than offering one that could never work. */
+  supportsConnectionTest: boolean
 }
 
 // Which slice of a source table one reload covers. The discriminator property is "mode", matching

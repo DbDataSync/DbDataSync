@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.Generic;
@@ -6,7 +7,7 @@ using Microsoft.Data.SqlClient;
 
 namespace DataSync.Drivers.MsSql;
 
-public sealed class MsSqlDriver : IDriver
+public sealed class MsSqlDriver : IDriver, IConnectionTester
 {
     public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
 
@@ -109,5 +110,34 @@ public sealed class MsSqlDriver : IDriver
     {
         connection.ChangeDatabase(database);
         return await MsSqlSchemaQueries.GetColumnsAsync(connection, schema, table, cancellationToken);
+    }
+
+    /// <summary>
+    /// Round-trips <c>SELECT @@VERSION</c>. Chosen because it touches no user object and needs no
+    /// permission beyond connecting, so a successful test means "this login reaches this instance" and
+    /// nothing more — which is exactly the question being asked.
+    /// </summary>
+    public async Task<ConnectionTestResult> TestAsync(DbConnection connection, CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT @@VERSION;";
+            var version = await cmd.ExecuteScalarAsync(cancellationToken) as string;
+
+            return new ConnectionTestResult(
+                Succeeded: true,
+                Stopwatch.GetElapsedTime(started),
+                // One line: @@VERSION spans four, and the rest is build and OS detail that turns a
+                // status card into a wall of text.
+                version?.Split('\n')[0].Trim(),
+                Error: null);
+        }
+        catch (DbException ex)
+        {
+            // An unhealthy instance is an answer to the question, not a fault to propagate.
+            return new ConnectionTestResult(false, Stopwatch.GetElapsedTime(started), ServerVersion: null, ex.Message);
+        }
     }
 }

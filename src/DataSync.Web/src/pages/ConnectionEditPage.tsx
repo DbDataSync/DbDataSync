@@ -4,7 +4,8 @@ import { AppShell, SectionTabs } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import { KeyValueTable } from '../components/KeyValueTable'
-import { useConnections, useDeleteConnection, useUpsertConnection } from '../api/hooks'
+import { useCapabilities, useConnections, useDeleteConnection, useTestConnection, useUpsertConnection } from '../api/hooks'
+import { ConnectionTestCard } from './connection-edit/ConnectionTestCard'
 import type { AuthMode, ConnectionInput } from '../api/types'
 
 const empty: ConnectionInput = {
@@ -16,9 +17,12 @@ const empty: ConnectionInput = {
  * The design gives connection editing its own screen rather than a form appended to the list, and
  * surfaces the `Properties` dictionary — which has never had a UI — as a Setting/Value table.
  *
- * Omitted from the mockup, all for want of data: the "Last test" card and "Test connection" action
- * (nothing tests a connection), the environment field, the credential-store picker, and "Used by N
- * replications" (computable only by scanning every mapping of every replication).
+ * The "Last test" card and "Test connection" action are here now that a driver can prove a connection
+ * reaches its engine — both hidden entirely when the driver does not advertise the capability, since
+ * an action that could never work is worse than no action.
+ *
+ * Still omitted for want of data: the environment field, and "Used by N replications" (computable only
+ * by scanning every mapping of every replication).
  */
 export function ConnectionEditPage() {
   const { name } = useParams<{ name: string }>()
@@ -28,6 +32,11 @@ export function ConnectionEditPage() {
   const { data: connections } = useConnections()
   const upsert = useUpsertConnection()
   const del = useDeleteConnection()
+  const test = useTestConnection()
+  // A saved connection only: testing an unsaved draft would test whatever is on disk under that name,
+  // or nothing at all.
+  const capabilities = useCapabilities(isNew ? undefined : name)
+  const canTest = !isNew && capabilities.data?.supportsConnectionTest === true
   const [draft, setDraft] = useState<ConnectionInput | null>(isNew ? { ...empty } : null)
 
   const existing = connections?.find((c) => c.name === name)
@@ -74,6 +83,16 @@ export function ConnectionEditPage() {
         <>
           <SectionTabs active="connections" />
           <div className="actions">
+            {canTest && (
+              <button
+                className="btn btn-chrome"
+                onClick={() => test.mutate(name!)}
+                disabled={test.isPending}
+                data-testid="test-connection-button"
+              >
+                {test.isPending ? 'Testing…' : 'Test connection'}
+              </button>
+            )}
             <button className="btn btn-chrome" onClick={() => navigate('/connections')}>Cancel</button>
             <button
               className="btn btn-primary btn-chrome"
@@ -191,6 +210,15 @@ export function ConnectionEditPage() {
                 )}
               </div>
             </div>
+
+            {canTest && (
+              <ConnectionTestCard
+                connectionName={name}
+                report={test.data}
+                pending={test.isPending}
+                error={test.error}
+              />
+            )}
           </div>
 
           <div className="card">

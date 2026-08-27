@@ -66,6 +66,9 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
         // Change Tracking is the only reader that can report a source delete as one.
         Assert.Equal("MsSqlChangeTracking", Assert.Single(capabilities.Readers, r => r.DetectsDeletes).Kind);
 
+        // The SPA decides whether to offer a Test action from this flag alone.
+        Assert.True(capabilities.SupportsConnectionTest);
+
         // The reload writers reconcile; the incremental MERGE writer is upsert-only.
         Assert.Equal(
             ["DeleteInsert", "MsSqlDeleteInsert", "MsSqlMergeReconcile"],

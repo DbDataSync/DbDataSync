@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DataSync.Core.Config;
+using DataSync.Core.Secrets;
 using DataSync.Drivers.Abstractions;
 using Microsoft.Data.SqlClient;
 using Xunit;
@@ -328,10 +329,7 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
             ],
         }, JsonOptions)).EnsureSuccessStatusCode();
 
-    private static void SetSecretEnvVar(string connectionName, string? password)
-    {
-        var key = $"datasync:connection:{connectionName}".ToUpperInvariant();
-        var sanitized = new string(key.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
-        Environment.SetEnvironmentVariable($"CLRKERNEL_SECRET_{sanitized}", password);
-    }
+    private static void SetSecretEnvVar(string connectionName, string? password) =>
+        Environment.SetEnvironmentVariable(
+            SecretRefs.EnvironmentVariableFor(SecretRefs.ForConnection(connectionName)), password);
 }

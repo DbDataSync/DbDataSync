@@ -11,7 +11,12 @@ public sealed record DriverCapabilities(
     ConnectionDriverType DriverType,
     IReadOnlyList<ReaderCapability> Readers,
     IReadOnlyList<StagingCapability> StagingProviders,
-    IReadOnlyList<WriterCapability> Writers);
+    IReadOnlyList<WriterCapability> Writers,
+    /// <summary>Whether this driver can prove a connection reaches its engine
+    /// (<see cref="IConnectionTester"/>). False is not a defect — a driver reaching an arbitrary
+    /// engine may have no probe it can name — so a UI hides the affordance rather than offering one
+    /// that could never work.</summary>
+    bool SupportsConnectionTest);
 
 public sealed record ReaderCapability(string Kind, bool SupportsSegmentation, bool DetectsDeletes);
 

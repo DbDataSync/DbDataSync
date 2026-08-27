@@ -50,6 +50,7 @@ public sealed class DriverRegistry
                 driverType,
                 driver!.Readers.Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader, r.DetectsDeletes)).ToList(),
                 driver.StagingProviders.Select(p => new StagingCapability(p.Kind)).ToList(),
-                driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation)).ToList())
+                driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation)).ToList(),
+                driver is IConnectionTester)
             : null;
 }

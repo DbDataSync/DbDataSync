@@ -7,4 +7,17 @@ namespace DataSync.Core.Secrets;
 public static class SecretRefs
 {
     public static string ForConnection(string connectionName) => $"datasync:connection:{connectionName}";
+
+    /// <summary>
+    /// The environment variable SecretStore falls back to when no OS keyring is available — the
+    /// ref uppercased with every non-alphanumeric character replaced, under
+    /// <c>CLRKERNEL_SECRET_</c>. Defined here rather than restated per caller because it is the value
+    /// an operator staring at an auth failure needs to be told, and a subtly different spelling of it
+    /// is worse than none.
+    /// </summary>
+    public static string EnvironmentVariableFor(string secretRef)
+    {
+        var sanitized = new string(secretRef.ToUpperInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
+        return $"CLRKERNEL_SECRET_{sanitized}";
+    }
 }

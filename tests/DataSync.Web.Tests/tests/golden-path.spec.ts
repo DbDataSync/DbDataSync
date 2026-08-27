@@ -252,4 +252,32 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId(`mapping-item-${MAPPING_NAME}`).click()
     await expect(page.getByTestId('source-side')).toContainText('INHERITED', { timeout: 15_000 })
   })
+
+  test('13 - a connection can be tested from its editor, and the list reports reachability on demand', async ({ page }) => {
+    await page.goto(`/connections/${SRC_CONNECTION_NAME}`)
+
+    // The card is present before anything is tested, and says so — "not tested" is a distinct state
+    // from "unreachable", and showing a reading nobody asked for is what kept this out of phase 15.
+    await expect(page.getByTestId('connection-test-card')).toContainText('Not tested yet')
+
+    // The credential field an operator staring at an auth failure needs: which variable is read.
+    await expect(page.getByTestId('credential-env-var')).toHaveValue(
+      `CLRKERNEL_SECRET_DATASYNC_CONNECTION_${SRC_CONNECTION_NAME.replace(/-/g, '_').toUpperCase()}`,
+    )
+    await expect(page.getByTestId('credential-store-select')).toBeDisabled()
+
+    await page.getByTestId('test-connection-button').click()
+    await expect(page.getByTestId('connection-test-result')).toContainText('reachable', { timeout: 20_000 })
+    await expect(page.getByTestId('connection-test-result')).toContainText('SQL Server')
+    await shot(page, '16-connection-test.png')
+
+    // The list column stays empty until asked — no page load opens a database.
+    await page.goto('/connections')
+    await expect(page.getByTestId(`reachable-${SRC_CONNECTION_NAME}`)).toHaveText('—')
+
+    await page.getByTestId('test-all-connections-button').click()
+    await expect(page.getByTestId(`reachable-${SRC_CONNECTION_NAME}`)).toContainText('reachable', { timeout: 20_000 })
+    await expect(page.getByTestId(`reachable-${TGT_CONNECTION_NAME}`)).toContainText('reachable', { timeout: 20_000 })
+    await shot(page, '17-connections-reachability.png')
+  })
 })

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DataSync.Core.Config;
+using DataSync.Core.Secrets;
 using Microsoft.Data.SqlClient;
 using Xunit;
 
@@ -198,12 +199,8 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
     private static void ClearSecretEnvVar(string connectionName) =>
         Environment.SetEnvironmentVariable(SecretEnvVarName(connectionName), null);
 
-    private static string SecretEnvVarName(string connectionName)
-    {
-        var key = $"datasync:connection:{connectionName}".ToUpperInvariant();
-        var sanitized = new string(key.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
-        return $"CLRKERNEL_SECRET_{sanitized}";
-    }
+    private static string SecretEnvVarName(string connectionName) =>
+        SecretRefs.EnvironmentVariableFor(SecretRefs.ForConnection(connectionName));
 
     private static async Task ExecuteAsync(SqlConnection connection, string sql)
     {
