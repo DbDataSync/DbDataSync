@@ -17,6 +17,7 @@ export interface ConnectionConfig {
   credentialSecretRef: string | null
   properties: Record<string, string>
   scripts?: ScriptBindings
+  hooks?: Hooks
 }
 
 export interface ConnectionInput {
@@ -30,6 +31,7 @@ export interface ConnectionInput {
   password?: string | null
   properties?: Record<string, string>
   scripts?: ScriptBindings
+  hooks?: Hooks
 }
 
 export type ScheduleMode = 'Continuous' | 'Periodic'
@@ -82,6 +84,7 @@ export interface ReplicationTaskConfig {
   changeProcessing: ChangeProcessingConfig
   endpoints: TaskEndpoints
   scripts?: ScriptBindings
+  hooks?: Hooks
 }
 
 /** One side of a table mapping as configured: null connection/database inherit the replication's
@@ -122,6 +125,7 @@ export interface TableMappingConfig {
   targets: TableSpec[]
   columnMappings: ColumnMapping[]
   scripts?: ScriptBindings
+  hooks?: Hooks
   provisioning?: ProvisioningConfig
 }
 
@@ -149,18 +153,42 @@ export interface ScriptBinding {
  * "explicitly none" and overrides an inherited binding. */
 export type ScriptBindings = Record<string, ScriptBinding | null>
 
+// Lifecycle hooks around staging and loading — see architecture/implementation/done/phase-026-lifecycle-hooks.md.
+export type HookConnectionSide = 'Target' | 'Source'
+export type HookErrorMode = 'Fail' | 'Warn'
+
+/** One entry in a hook point's list — either inline SQL or a reference to a reusable named hook
+ * (Hook non-null). Never both. */
+export interface HookConfig {
+  name: string | null
+  sql: string | null
+  hook: string | null
+  parameters: Record<string, string>
+  connection: HookConnectionSide
+  onError: HookErrorMode
+}
+
+/** Keyed by point (beforeStage/afterStage/beforeLoad/afterLoad). Same inheritance rule as
+ * ScriptBindings: absent inherits, present-with-null-or-empty-list is what the most specific level
+ * declared, and it replaces rather than merges with a broader level's list. */
+export type Hooks = Record<string, HookConfig[] | null>
+
 export interface ScriptParameterDeclaration {
   name: string
   required: boolean
   description: string | null
 }
 
+export type ScriptLanguage = 'CSharp' | 'Sql'
+
 export interface ScriptConfig {
   name: string
   /** Which extension point this implements — see GET /api/scripts/slots. */
   kind: string
-  /** The type in the code implementing the slot's contract. */
-  entryType: string
+  language: ScriptLanguage
+  /** The type in the code implementing the slot's contract. Null for a Sql hook, which has no entry
+   * point to compile. */
+  entryType: string | null
   description: string | null
   parameters: ScriptParameterDeclaration[]
   enabled: boolean

@@ -1,6 +1,19 @@
 # Phase 26 — Lifecycle hooks around staging and loading
 
-**Status**: Planned, not started
+**Status**: Built, with the SPA scoped down. `HookConfig`/`HookResolution`/`HookValidation`/`HookRenderer`
+live in `DataSync.Core.Config`/`DataSync.Drivers.Generic`; `HookStatement`/`HookParameter` live in
+`DataSync.Drivers.Abstractions` so phase 27's `ILifecycleHook` can reference them without
+`DataSync.Scripting.Abstractions` depending on `DataSync.Drivers.Generic`. `ScriptResolution`'s walk was
+extracted into a shared `HierarchicalBinding` helper (`ScriptBindingLevel` renamed `BindingLevel` in the
+move) and `HookResolution` sits on the same helper, per the phase's own instruction. The "connection"
+level of the hierarchy is always the mapping's *target* connection — a judgement call the doc left open.
+Built: config model, save-time validation (`ConfigRepository.ValidateHooks`), the renderer, all four
+`RunExecutor` call sites, and SQL-hook support in the Scripts registry (`ScriptConfig.Language`, the
+`ScriptsController` Validate path, the SPA's Language selector). **Not built**: a dedicated Hooks-list
+editor in the SPA (a mapping/replication/connection's hook bindings are only editable via the underlying
+YAML today — the same git-tracked files the SPA writes to); the integration tests in "How it will be
+verified" (need Docker, unavailable in this environment) and the E2E case (needs the editor above). All
+three are natural follow-ups; nothing about the backend contract should need to change to add them.
 **Plan reference**: `architecture/planning/done/database-provisioning-and-lifecycle-scripts.md`. The
 authoring model is phase 22 + phase 23's, restated: SQL an operator writes, inline for a one-off and as a
 named reusable artifact in the editor area for anything shared. The artifact model, the binding hierarchy

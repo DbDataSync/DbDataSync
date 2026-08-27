@@ -25,38 +25,14 @@ public static class ScriptResolution
         string slot,
         ConnectionConfig? connection,
         ReplicationTaskConfig? task,
-        TableMappingConfig? mapping)
-    {
-        if (mapping is not null && mapping.Scripts.TryGetValue(slot, out var fromMapping))
-            return fromMapping;
-
-        if (task is not null && task.Scripts.TryGetValue(slot, out var fromTask))
-            return fromTask;
-
-        if (connection is not null && connection.Scripts.TryGetValue(slot, out var fromConnection))
-            return fromConnection;
-
-        return null;
-    }
+        TableMappingConfig? mapping) =>
+        HierarchicalBinding.Resolve(slot, mapping?.Scripts, task?.Scripts, connection?.Scripts);
 
     /// <summary>Where a resolved binding came from, for a UI that wants to show INHERITED.</summary>
-    public static ScriptBindingLevel LevelOf(
+    public static BindingLevel LevelOf(
         string slot,
         ConnectionConfig? connection,
         ReplicationTaskConfig? task,
-        TableMappingConfig? mapping)
-    {
-        if (mapping is not null && mapping.Scripts.ContainsKey(slot)) return ScriptBindingLevel.Mapping;
-        if (task is not null && task.Scripts.ContainsKey(slot)) return ScriptBindingLevel.Replication;
-        if (connection is not null && connection.Scripts.ContainsKey(slot)) return ScriptBindingLevel.Connection;
-        return ScriptBindingLevel.Unbound;
-    }
-}
-
-public enum ScriptBindingLevel
-{
-    Unbound,
-    Connection,
-    Replication,
-    Mapping,
+        TableMappingConfig? mapping) =>
+        HierarchicalBinding.LevelOf(slot, mapping?.Scripts, task?.Scripts, connection?.Scripts);
 }

@@ -16,21 +16,37 @@ public sealed class ScriptBinding
     public Dictionary<string, string> Parameters { get; set; } = new();
 }
 
+/// <summary>Which language a script's code file is written in — see phase 26 §"Reusable hooks live in
+/// the editor area". A SQL hook is the same artifact as a C# script, one field different: it has no
+/// entry point to compile, and its code file sits beside the manifest as <c>.sql</c> instead of
+/// <c>.cs</c>.</summary>
+public enum ScriptLanguage
+{
+    CSharp,
+    Sql,
+}
+
 /// <summary>
-/// Persisted as config/scripts/&lt;name&gt;.yaml, beside config/scripts/&lt;name&gt;.cs which holds the
-/// code. Two files rather than one because code embedded in YAML diffs badly, cannot be opened by an
-/// editor, and re-indents on every round trip through a serializer.
+/// Persisted as config/scripts/&lt;name&gt;.yaml, beside config/scripts/&lt;name&gt;.cs (or, for a
+/// <see cref="ScriptLanguage.Sql"/> hook, config/scripts/&lt;name&gt;.sql) which holds the code. Two
+/// files rather than one because code embedded in YAML diffs badly, cannot be opened by an editor, and
+/// re-indents on every round trip through a serializer.
 /// </summary>
 public sealed class ScriptConfig
 {
     public required string Name { get; set; }
 
-    /// <summary>Which extension point this implements — see <c>ScriptSlots</c>.</summary>
+    /// <summary>Which extension point this implements — see <c>ScriptSlots</c> for a C# script, or
+    /// <c>HookPoints</c>-shaped usage for a reusable SQL hook (bound at whichever point names it; the
+    /// manifest itself does not fix one).</summary>
     public required string Kind { get; set; }
 
-    /// <summary>The type in the script that implements the slot's contract. Named explicitly rather
-    /// than discovered, so a script holding helper types has an unambiguous entry point.</summary>
-    public required string EntryType { get; set; }
+    public ScriptLanguage Language { get; set; } = ScriptLanguage.CSharp;
+
+    /// <summary>The type in the script that implements the slot's contract. Required for
+    /// <see cref="ScriptLanguage.CSharp"/>; meaningless — and left null — for
+    /// <see cref="ScriptLanguage.Sql"/>, which has no entry point to compile.</summary>
+    public string? EntryType { get; set; }
 
     public string? Description { get; set; }
 

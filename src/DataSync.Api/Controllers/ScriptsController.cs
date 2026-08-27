@@ -59,12 +59,14 @@ public sealed class ScriptsController(
                 known = ScriptSlots.All,
             });
 
-        var compilation = scriptHost.Validate(script);
-        if (!compilation.Success)
+        var diagnostics = ValidateScript(script);
+        if (diagnostics.Count > 0)
             return BadRequest(new
             {
-                error = $"Script '{name}' did not compile.",
-                diagnostics = compilation.Diagnostics.Select(d => new { d.Line, d.Column, d.Message }),
+                error = script.Manifest.Language == ScriptLanguage.Sql
+                    ? $"Script '{name}' did not validate."
+                    : $"Script '{name}' did not compile.",
+                diagnostics = diagnostics.Select(d => new { d.Line, d.Column, d.Message }),
             });
 
         try
@@ -78,16 +80,36 @@ public sealed class ScriptsController(
         }
     }
 
-    /// <summary>Compiles without saving, so an operator can find out before committing.</summary>
+    /// <summary>Checks a script without saving, so an operator finds out before committing — compiling
+    /// for a C# script, the token/parameter check for a SQL hook (see <see cref="HookValidation"/>).
+    /// Named Compile for the C# case that motivated it; kept as one endpoint for both because the SPA's
+    /// edit page swaps only which check runs, not the action a Validate button calls.</summary>
     [HttpPost("{name}/compile")]
     public ActionResult<ScriptSaveResult> Compile(string name, [FromBody] ScriptDefinition script)
     {
         script.Manifest.Name = name;
-        var compilation = scriptHost.Validate(script);
+        var diagnostics = ValidateScript(script);
         return Ok(new ScriptSaveResult(
             script.Manifest,
-            compilation.Diagnostics.Select(d => new ScriptDiagnosticDto(d.Line, d.Column, d.Message)).ToList(),
-            compilation.Success));
+            diagnostics.Select(d => new ScriptDiagnosticDto(d.Line, d.Column, d.Message)).ToList(),
+            diagnostics.Count == 0));
+    }
+
+    /// <summary>Empty means "compiled/validated cleanly".</summary>
+    private List<ScriptDiagnostic> ValidateScript(ScriptDefinition script)
+    {
+        if (script.Manifest.Language == ScriptLanguage.Sql)
+        {
+            // Point-free: a reusable hook may be bound at more than one point, so only "is every
+            // reference to a real token/parameter" is checked here. Point-specific availability is
+            // checked when a binding names the point — see ConfigRepository.ValidateHooks.
+            var declaredNames = script.Manifest.Parameters.Select(p => p.Name).ToList();
+            return HookValidation.ValidateBody(script.Code, declaredNames)
+                .Select(e => new ScriptDiagnostic(0, 0, e)).ToList();
+        }
+
+        var compilation = scriptHost.Validate(script);
+        return compilation.Success ? [] : compilation.Diagnostics.ToList();
     }
 
     [HttpDelete("{name}")]

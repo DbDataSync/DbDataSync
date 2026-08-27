@@ -53,7 +53,14 @@ public sealed class ScriptCompiler(ScriptCacheDirectory cache)
             return ScriptCompilation.Failed(
                 [new ScriptDiagnostic(0, 0, $"Script '{script.Manifest.Name}' has no code.")]);
 
-        var hash = HashOf(script.Code, script.Manifest.EntryType);
+        // A SQL hook has no entry type to compile — ScriptHost never routes one here (see
+        // HookExecution), so reaching this with Language=Sql is a caller error, not a config problem.
+        if (script.Manifest.EntryType is not { } entryType)
+            throw new InvalidOperationException(
+                $"Script '{script.Manifest.Name}' has no EntryType and cannot be compiled — " +
+                "ScriptCompiler.Compile is only for ScriptLanguage.CSharp scripts.");
+
+        var hash = HashOf(script.Code, entryType);
         var cached = cache.TryGetAssemblyPath(hash);
         if (cached is not null)
             return Load(File.ReadAllBytes(cached), script, hash);
@@ -102,7 +109,7 @@ public sealed class ScriptCompiler(ScriptCacheDirectory cache)
         }
 
         var entryType = assembly.GetTypes().FirstOrDefault(
-            t => string.Equals(t.Name, script.Manifest.EntryType, StringComparison.Ordinal));
+            t => string.Equals(t.Name, script.Manifest.EntryType!, StringComparison.Ordinal));
 
         if (entryType is null)
         {

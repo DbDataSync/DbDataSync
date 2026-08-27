@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics;
 using System.Threading.Channels;
 using ClrKernel.Core.Secrets;
 using DataSync.Core.Config;
@@ -249,6 +250,11 @@ public sealed class RunExecutor(
             var columnMappings = ApplyScriptedTransforms(
                 task, mapping, sourceConnectionConfig, sourceScriptDialect, item.RunId);
 
+            // The hierarchy's "connection" level is always the target's — see HookResolution's doc.
+            var targetConnectionConfig = configRepository.LoadConnection(target.ConnectionName);
+            var hooksByPoint = HookPoints.All.ToDictionary(
+                point => point, point => HookResolution.Resolve(point, targetConnectionConfig, task, mapping));
+
             // The in-process half of the transform story. Built once per pass — each script is asked
             // what it wants before any row arrives, so the per-row path stays as narrow as it can be.
             var transforms = TransformPipeline.Build(
@@ -266,11 +272,25 @@ public sealed class RunExecutor(
             long totalWritten = 0;
             string? newWatermark = null;
 
-            foreach (var segment in segments)
+            var targetDialect = ResolveDialect(targetDriver.DriverType);
+            var sourceDialect = ResolveDialect(sourceDriver.DriverType);
+            var targetQualified = targetDialect.QualifyTable(target.Schema, target.Table);
+            var targetSchemaQuoted = targetDialect.QuoteIdentifier(target.Schema);
+            var targetTableQuoted = targetDialect.QuoteIdentifier(target.Table);
+            var sourceQualified = sourceDialect.QualifyTable(source.Schema, source.Table);
+
+            for (var segmentIndex = 0; segmentIndex < segments.Count; segmentIndex++)
             {
+                var segment = segments[segmentIndex];
                 var readerOptions = WithSegment(processing.Reader.Options, segment);
                 var cacheOptions = WithSegment(processing.Cache.Options, segment);
                 var writerOptions = WithSegment(processing.Writer.Options, segment);
+                var isLastSegment = segmentIndex == segments.Count - 1;
+
+                HookRenderContext Context(string? stagingQualified, long? rowsStaged, long? rowsWritten) => new(
+                    targetQualified, targetSchemaQuoted, targetTableQuoted, sourceQualified, stagingQualified,
+                    task.Name, mapping.Name, item.RunId, item.RunKind.ToString(), segment?.Describe(),
+                    segmentIndex, segments.Count, isLastSegment, rowsStaged, rowsWritten, previousWatermark);
 
                 var scope = segment?.Describe() ?? "whole table";
                 Log(item.RunId, LogSeverity.Info,
@@ -286,8 +306,16 @@ public sealed class RunExecutor(
                             $"'{mapping.Name}': {dropped} row(s) dropped by a transform script."),
                         cancellationToken);
 
+                await RunHooksAsync(
+                    HookPoints.BeforeStage, hooksByPoint[HookPoints.BeforeStage], Context(null, null, null),
+                    targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
+
                 var staged = await stagingProvider.StageAsync(
                     targetConnection, target, rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
+
+                await RunHooksAsync(
+                    HookPoints.AfterStage, hooksByPoint[HookPoints.AfterStage], Context(staged.StagingLocation, staged.RowCount, null),
+                    targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
 
                 // Only meaningful now that staging has drained the reader's stream. A run that skipped
                 // rows is a run whose source was changing under it — worth surfacing next to a mapping
@@ -299,6 +327,10 @@ public sealed class RunExecutor(
 
                 try
                 {
+                    await RunHooksAsync(
+                        HookPoints.BeforeLoad, hooksByPoint[HookPoints.BeforeLoad], Context(staged.StagingLocation, staged.RowCount, null),
+                        targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
+
                     var written = await writer.ApplyAsync(
                         targetConnection, target, staged, mapping.ColumnMappings, writerOptions, cancellationToken);
 
@@ -306,6 +338,13 @@ public sealed class RunExecutor(
                     totalWritten += written.RowsWritten;
                     Log(item.RunId, LogSeverity.Info,
                         $"'{mapping.Name}' ({scope}): {staged.RowCount} row(s) read, {written.RowsWritten} row(s) written.");
+
+                    // Inside the try, before CleanupAsync drops the staged set — otherwise {{staging}}
+                    // refers to a table that no longer exists.
+                    await RunHooksAsync(
+                        HookPoints.AfterLoad, hooksByPoint[HookPoints.AfterLoad],
+                        Context(staged.StagingLocation, staged.RowCount, written.RowsWritten),
+                        targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
                 }
                 finally
                 {
@@ -419,6 +458,88 @@ public sealed class RunExecutor(
             Log(runId, LogSeverity.Info, $"'{mapping.Name}': target table created — {step.CommandText}");
         }
     }
+
+    /// <summary>
+    /// Runs one point's hook list, in declared order. Target hooks run on the pipeline's own
+    /// <paramref name="targetConnection"/>; a source hook opens its own connection, lazily and only
+    /// once even if several hooks in the list want it, and disposes it before returning — the
+    /// <c>MsSqlChangeTrackingReader</c>'s doc comment is the reason (MARS does not help a second
+    /// command issued on the connection a streaming reader is mid-read on).
+    /// </summary>
+    private async Task RunHooksAsync(
+        string point,
+        IReadOnlyList<HookConfig>? hooks,
+        HookRenderContext context,
+        DbConnection targetConnection,
+        SqlDialect targetDialect,
+        string sourceConnectionName,
+        SqlDialect sourceDialect,
+        string mappingName,
+        Guid runId,
+        CancellationToken cancellationToken)
+    {
+        if (hooks is null || hooks.Count == 0)
+            return;
+
+        DbConnection? sourceHookConnection = null;
+        try
+        {
+            foreach (var hook in hooks)
+            {
+                var (sql, declaredParameterValues) = ResolveHookBody(hook);
+                DbConnection connection;
+                SqlDialect dialect;
+                if (hook.Connection == HookConnectionSide.Source)
+                {
+                    sourceHookConnection ??= (await OpenConnectionAsync(sourceConnectionName, cancellationToken)).Connection;
+                    connection = sourceHookConnection;
+                    dialect = sourceDialect;
+                }
+                else
+                {
+                    connection = targetConnection;
+                    dialect = targetDialect;
+                }
+
+                var statement = HookRenderer.Render(dialect, sql, declaredParameterValues, context);
+                var label = hook.Name ?? hook.Hook ?? "inline";
+                var started = Stopwatch.GetTimestamp();
+
+                try
+                {
+                    using var cmd = connection.CreateCommand();
+                    cmd.CommandText = statement.CommandText;
+                    foreach (var parameter in statement.Parameters)
+                        cmd.AddParameter(dialect.ParameterName(parameter.Name), parameter.Value);
+
+                    var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+                    Log(runId, LogSeverity.Info,
+                        $"'{mappingName}' hook '{label}' ({point}, {hook.Connection}): {rowsAffected} row(s) affected, " +
+                        $"{Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0}ms. {statement.CommandText}");
+                }
+                catch (DbException ex)
+                {
+                    var message = $"'{mappingName}' hook '{label}' ({point}) failed: {ex.Message}";
+                    if (hook.OnError == HookErrorMode.Warn)
+                        Log(runId, LogSeverity.Warning, message);
+                    else
+                        throw new InvalidOperationException(message, ex);
+                }
+            }
+        }
+        finally
+        {
+            if (sourceHookConnection is not null)
+                await sourceHookConnection.DisposeAsync();
+        }
+    }
+
+    /// <summary>The SQL and the declared-parameter values behind one hook entry: <see cref="HookConfig.Sql"/>
+    /// verbatim for an inline entry, or a named hook's own code plus the values its binding supplied.</summary>
+    private (string Sql, IReadOnlyDictionary<string, string> DeclaredParameterValues) ResolveHookBody(HookConfig hook) =>
+        hook.Sql is { } inline
+            ? (inline, new Dictionary<string, string>())
+            : (configRepository.LoadScript(hook.Hook!).Code, hook.Parameters);
 
     /// <summary>The one place TaskRunner needs a concrete <see cref="SqlDialect"/> for an engine it
     /// isn't otherwise driving — to translate the *source's* native column types into the canonical

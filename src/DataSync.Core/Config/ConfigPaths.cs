@@ -34,7 +34,9 @@ internal static class ConfigPaths
         Path.Combine(ScriptsDir(configRoot), $"{name}.yaml");
 
     /// <summary>The code, beside the manifest. Two files rather than one because code embedded in YAML
-    /// diffs badly, cannot be opened by an editor, and re-indents on every serializer round trip.</summary>
-    public static string ScriptCodeFile(string configRoot, string name) =>
-        Path.Combine(ScriptsDir(configRoot), $"{name}.cs");
+    /// diffs badly, cannot be opened by an editor, and re-indents on every serializer round trip. The
+    /// extension follows <see cref="ScriptLanguage"/> — a SQL hook is the same artifact with
+    /// <c>.sql</c> beside the manifest instead of <c>.cs</c>.</summary>
+    public static string ScriptCodeFile(string configRoot, string name, ScriptLanguage language = ScriptLanguage.CSharp) =>
+        Path.Combine(ScriptsDir(configRoot), $"{name}{(language == ScriptLanguage.Sql ? ".sql" : ".cs")}");
 }

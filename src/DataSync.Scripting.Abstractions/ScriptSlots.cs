@@ -21,10 +21,16 @@ public static class ScriptSlots
     /// three and the most expensive.</summary>
     public const string RowTransform = "rowTransform";
 
+    /// <summary>A reusable SQL hook body — <c>Language = Sql</c>, no <c>EntryType</c>, bound by name
+    /// from a hook point's list (<c>HookPoints</c> in <c>DataSync.Core.Config</c>) rather than from a
+    /// single fixed slot the way the three above are. Listed here anyway so <see cref="IsKnown"/>
+    /// accepts it as a script <c>Kind</c> at save time — see phase 26.</summary>
+    public const string Hook = "hook";
+
     /// <summary>In the order they run: the source evaluates its SQL first, then values, then the whole
     /// row. Forced by where each one lives, and worth stating because a mapping using two of them on
     /// one column is otherwise guessing.</summary>
-    public static IReadOnlyList<string> All { get; } = [SqlColumnExpression, ValueColumnExpression, RowTransform];
+    public static IReadOnlyList<string> All { get; } = [SqlColumnExpression, ValueColumnExpression, RowTransform, Hook];
 
     public static bool IsKnown(string slot) => All.Contains(slot, StringComparer.Ordinal);
 }

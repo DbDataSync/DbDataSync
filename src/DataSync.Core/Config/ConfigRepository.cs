@@ -62,7 +62,10 @@ public sealed class ConfigRepository
             CredentialSecretRef = secretRef,
             Properties = input.Properties,
             Scripts = input.Scripts,
+            Hooks = input.Hooks,
         };
+
+        ValidateHooks(config.Hooks);
 
         var path = ConfigPaths.ConnectionFile(_configRoot, input.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -109,11 +112,19 @@ public sealed class ConfigRepository
         ConfigValidation.ValidateName(script.Manifest.Name, nameof(script.Manifest.Name));
 
         var manifestPath = ConfigPaths.ScriptManifestFile(_configRoot, script.Manifest.Name);
-        var codePath = ConfigPaths.ScriptCodeFile(_configRoot, script.Manifest.Name);
+        var codePath = ConfigPaths.ScriptCodeFile(_configRoot, script.Manifest.Name, script.Manifest.Language);
         Directory.CreateDirectory(ConfigPaths.ScriptsDir(_configRoot));
 
         File.WriteAllText(manifestPath, YamlConfigSerializer.Serialize(script.Manifest));
         File.WriteAllText(codePath, script.Code);
+
+        // A script whose Language changed leaves its old code file behind under the other extension —
+        // clean it up so a stale .cs doesn't linger beside a script that is now SQL, or vice versa.
+        var otherLanguage = script.Manifest.Language == ScriptLanguage.Sql ? ScriptLanguage.CSharp : ScriptLanguage.Sql;
+        var stalePath = ConfigPaths.ScriptCodeFile(_configRoot, script.Manifest.Name, otherLanguage);
+        if (File.Exists(stalePath))
+            File.Delete(stalePath);
+
         _git.CommitChanges([manifestPath, codePath], $"Save script '{script.Manifest.Name}'", author);
 
         return script;
@@ -125,12 +136,13 @@ public sealed class ConfigRepository
         if (!File.Exists(manifestPath))
             throw new FileNotFoundException($"Script '{name}' was not found.", manifestPath);
 
-        var codePath = ConfigPaths.ScriptCodeFile(_configRoot, name);
+        var manifest = YamlConfigSerializer.Deserialize<ScriptConfig>(File.ReadAllText(manifestPath));
+        var codePath = ConfigPaths.ScriptCodeFile(_configRoot, name, manifest.Language);
         return new ScriptDefinition
         {
-            Manifest = YamlConfigSerializer.Deserialize<ScriptConfig>(File.ReadAllText(manifestPath)),
+            Manifest = manifest,
             // A manifest with no code beside it is a broken script, not an empty one — but it fails at
-            // compile with a message about the code rather than here with one about the file.
+            // compile/validate with a message about the code rather than here with one about the file.
             Code = File.Exists(codePath) ? File.ReadAllText(codePath) : "",
         };
     }
@@ -140,15 +152,19 @@ public sealed class ConfigRepository
     public void DeleteScript(string name, GitAuthor author)
     {
         var manifestPath = ConfigPaths.ScriptManifestFile(_configRoot, name);
-        var codePath = ConfigPaths.ScriptCodeFile(_configRoot, name);
         if (!File.Exists(manifestPath))
             return;
 
-        File.Delete(manifestPath);
-        if (File.Exists(codePath))
-            File.Delete(codePath);
+        var csPath = ConfigPaths.ScriptCodeFile(_configRoot, name, ScriptLanguage.CSharp);
+        var sqlPath = ConfigPaths.ScriptCodeFile(_configRoot, name, ScriptLanguage.Sql);
 
-        _git.CommitChanges([manifestPath, codePath], $"Delete script '{name}'", author);
+        File.Delete(manifestPath);
+        if (File.Exists(csPath))
+            File.Delete(csPath);
+        if (File.Exists(sqlPath))
+            File.Delete(sqlPath);
+
+        _git.CommitChanges([manifestPath, csPath, sqlPath], $"Delete script '{name}'", author);
     }
 
     // ---- Replication tasks ----
@@ -156,6 +172,7 @@ public sealed class ConfigRepository
     public ReplicationTaskConfig SaveReplicationTask(ReplicationTaskConfig task, GitAuthor author)
     {
         ConfigValidation.ValidateName(task.Name, nameof(task.Name));
+        ValidateHooks(task.Hooks);
 
         var path = ConfigPaths.TaskFile(_configRoot, task.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -215,6 +232,7 @@ public sealed class ConfigRepository
         // A mapping that resolves to no connection or database cannot run. Catch it here rather than
         // at the first run, where it surfaces as a failed run instead of a rejected edit.
         EndpointResolution.Validate(LoadReplicationTask(replicationName), mapping);
+        ValidateHooks(mapping.Hooks);
 
         var path = ConfigPaths.TableMappingFile(_configRoot, replicationName, mapping.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -258,5 +276,78 @@ public sealed class ConfigRepository
             .Select(n => n!)
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
+    }
+
+    // ---- Hooks ----
+
+    /// <summary>
+    /// Catches the same class of mistake <c>EndpointResolution.Validate</c> catches for endpoints: a
+    /// hook that cannot run is rejected here, while the operator is still looking at the edit, rather
+    /// than discovered as a failed run. Checks every point's list: exactly one of <c>Sql</c>/<c>Hook</c>
+    /// per entry, every token/parameter reference available at that point (<see cref="HookValidation"/>),
+    /// and — for a reference to a named hook — that it resolves to a <see cref="ScriptLanguage.Sql"/>
+    /// script, every required declared parameter is supplied, and no undeclared one is.
+    /// </summary>
+    private void ValidateHooks(Dictionary<string, List<HookConfig>?> hooks)
+    {
+        foreach (var (point, list) in hooks)
+        {
+            if (list is null)
+                continue;
+
+            if (!HookPoints.IsKnown(point))
+                throw new ConfigValidationException(
+                    $"'{point}' is not a hook point this build knows about. Known points: {string.Join(", ", HookPoints.All)}.");
+
+            foreach (var hook in list)
+                ValidateHook(point, hook);
+        }
+    }
+
+    private void ValidateHook(string point, HookConfig hook)
+    {
+        var label = hook.Name ?? hook.Hook ?? "inline";
+
+        if (hook.Sql is not null && hook.Hook is not null)
+            throw new ConfigValidationException($"Hook '{label}' at '{point}' sets both 'sql' and 'hook' — exactly one is allowed.");
+        if (hook.Sql is null && hook.Hook is null)
+            throw new ConfigValidationException($"Hook '{label}' at '{point}' sets neither 'sql' nor 'hook' — exactly one is required.");
+
+        if (hook.Sql is { } inlineSql)
+        {
+            var errors = HookValidation.ValidateAtPoint(point, inlineSql, []);
+            if (errors.Count > 0)
+                throw new ConfigValidationException($"Hook '{label}' at '{point}': {string.Join(" ", errors)}");
+            return;
+        }
+
+        ScriptDefinition script;
+        try
+        {
+            script = LoadScript(hook.Hook!);
+        }
+        catch (FileNotFoundException)
+        {
+            throw new ConfigValidationException($"Hook '{label}' at '{point}' references unknown script '{hook.Hook}'.");
+        }
+
+        if (script.Manifest.Language != ScriptLanguage.Sql)
+            throw new ConfigValidationException(
+                $"Hook '{label}' at '{point}' references script '{hook.Hook}', which is not a SQL hook.");
+
+        var declaredNames = script.Manifest.Parameters.Select(p => p.Name).ToList();
+        var bodyErrors = HookValidation.ValidateAtPoint(point, script.Code, declaredNames);
+        if (bodyErrors.Count > 0)
+            throw new ConfigValidationException($"Hook '{label}' at '{point}': {string.Join(" ", bodyErrors)}");
+
+        foreach (var required in script.Manifest.Parameters.Where(p => p.Required))
+            if (!hook.Parameters.ContainsKey(required.Name))
+                throw new ConfigValidationException(
+                    $"Hook '{label}' at '{point}' is missing required parameter '{required.Name}'.");
+
+        foreach (var suppliedName in hook.Parameters.Keys)
+            if (!declaredNames.Contains(suppliedName, StringComparer.Ordinal))
+                throw new ConfigValidationException(
+                    $"Hook '{label}' at '{point}' supplies parameter '{suppliedName}', which '{hook.Hook}' does not declare.");
     }
 }

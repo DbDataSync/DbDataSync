@@ -57,7 +57,7 @@ public sealed class ScriptResolutionTests
     public void NothingBoundAnywhere_ResolvesToNothing()
     {
         Assert.Null(ScriptResolution.Resolve(Slot, Connection(), Task(), Mapping()));
-        Assert.Equal(ScriptBindingLevel.Unbound, ScriptResolution.LevelOf(Slot, Connection(), Task(), Mapping()));
+        Assert.Equal(BindingLevel.Unbound, ScriptResolution.LevelOf(Slot, Connection(), Task(), Mapping()));
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class ScriptResolutionTests
         var resolved = ScriptResolution.Resolve(Slot, Connection((Slot, Bind("upper"))), Task(), Mapping());
 
         Assert.Equal("upper", resolved!.ScriptName);
-        Assert.Equal(ScriptBindingLevel.Connection,
+        Assert.Equal(BindingLevel.Connection,
             ScriptResolution.LevelOf(Slot, Connection((Slot, Bind("upper"))), Task(), Mapping()));
     }
 
@@ -86,7 +86,7 @@ public sealed class ScriptResolutionTests
             Slot, Connection((Slot, Bind("upper"))), Task((Slot, Bind("lower"))), Mapping((Slot, Bind("pad"))));
 
         Assert.Equal("pad", resolved!.ScriptName);
-        Assert.Equal(ScriptBindingLevel.Mapping,
+        Assert.Equal(BindingLevel.Mapping,
             ScriptResolution.LevelOf(Slot, Connection((Slot, Bind("upper"))), Task((Slot, Bind("lower"))), Mapping((Slot, Bind("pad")))));
     }
 
@@ -100,7 +100,7 @@ public sealed class ScriptResolutionTests
 
         Assert.Null(resolved);
         // Still *bound* at the mapping — it is an override, not an absence, and a UI should say so.
-        Assert.Equal(ScriptBindingLevel.Mapping,
+        Assert.Equal(BindingLevel.Mapping,
             ScriptResolution.LevelOf(Slot, Connection((Slot, Bind("upper"))), Task(), Mapping((Slot, null))));
     }
 

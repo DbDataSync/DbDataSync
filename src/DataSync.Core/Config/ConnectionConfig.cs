@@ -34,6 +34,11 @@ public sealed class ConnectionConfig
     /// inherits from a broader level; a key present with a null value is "explicitly none" and
     /// overrides an inherited binding. See <see cref="ScriptResolution"/>.</summary>
     public Dictionary<string, ScriptBinding?> Scripts { get; set; } = new();
+
+    /// <summary>Hooks bound at this level, keyed by point (see <c>HookPoints</c>). See
+    /// <see cref="HookResolution"/> — this is the level every mapping against this connection inherits
+    /// from unless it or its replication overrides.</summary>
+    public Dictionary<string, List<HookConfig>?> Hooks { get; set; } = new();
 }
 
 /// <summary>
@@ -57,4 +62,7 @@ public sealed class ConnectionInput
 
     /// <inheritdoc cref="ConnectionConfig.Scripts"/>
     public Dictionary<string, ScriptBinding?> Scripts { get; set; } = new();
+
+    /// <inheritdoc cref="ConnectionConfig.Hooks"/>
+    public Dictionary<string, List<HookConfig>?> Hooks { get; set; } = new();
 }

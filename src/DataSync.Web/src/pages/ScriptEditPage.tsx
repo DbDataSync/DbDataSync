@@ -20,8 +20,18 @@ public sealed class MyExpression : ISqlColumnExpression
 }
 `
 
+const SQL_STARTER = `-- {{target}}, {{targetSchema}}, {{targetTable}}, {{source}}, {{staging}} are quoted
+-- identifiers, substituted textually. @replication, @mapping, @runId, @runKind, @segment,
+-- @segmentIndex, @segmentCount, @isLastSegment, @rowsStaged, @rowsWritten, @watermark are bound
+-- values. Not every one is available at every hook point — see the phase 26 doc.
+UPDATE STATISTICS {{target}};
+`
+
 const empty = (slot: string): ScriptDefinition => ({
-  manifest: { name: '', kind: slot, entryType: 'MyExpression', description: '', parameters: [], enabled: true },
+  manifest: {
+    name: '', kind: slot, language: 'CSharp', entryType: 'MyExpression',
+    description: '', parameters: [], enabled: true,
+  },
   code: STARTER,
 })
 
@@ -63,6 +73,17 @@ export function ScriptEditPage() {
   const setManifest = (patch: Partial<ScriptDefinition['manifest']>) =>
     setDraft({ ...draft, manifest: { ...draft.manifest, ...patch } })
 
+  const isSql = draft.manifest.language === 'Sql'
+
+  const setLanguage = (language: 'CSharp' | 'Sql') => {
+    if (!isNew) return setManifest({ language }) // Changing language on a saved script is unusual but not forbidden.
+    setDraft({
+      ...draft,
+      manifest: { ...draft.manifest, language, entryType: language === 'Sql' ? null : 'MyExpression' },
+      code: language === 'Sql' ? SQL_STARTER : STARTER,
+    })
+  }
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     await upsert.mutateAsync({ name: draft.manifest.name, script: draft })
@@ -85,7 +106,7 @@ export function ScriptEditPage() {
               disabled={compile.isPending}
               data-testid="check-script-button"
             >
-              {compile.isPending ? 'Checking…' : 'Check'}
+              {compile.isPending ? (isSql ? 'Validating…' : 'Checking…') : (isSql ? 'Validate' : 'Check')}
             </button>
             <button className="btn btn-chrome" onClick={() => navigate('/scripts')}>Cancel</button>
             <button
@@ -143,16 +164,30 @@ export function ScriptEditPage() {
                 </Field>
               </div>
               <div className="form-grid">
-                <Field label="Entry type">
-                  {/* Named rather than discovered, so a script holding helper types has an
-                      unambiguous entry point. */}
-                  <input
-                    className="input mono" required
-                    value={draft.manifest.entryType}
-                    onChange={(e) => setManifest({ entryType: e.target.value })}
-                    data-testid="script-entry-type-input"
-                  />
+                <Field label="Language">
+                  <select
+                    className="select"
+                    value={draft.manifest.language}
+                    onChange={(e) => setLanguage(e.target.value as 'CSharp' | 'Sql')}
+                    disabled={!isNew}
+                    data-testid="script-language-select"
+                  >
+                    <option value="CSharp">C#</option>
+                    <option value="Sql">SQL</option>
+                  </select>
                 </Field>
+                {!isSql && (
+                  <Field label="Entry type">
+                    {/* Named rather than discovered, so a script holding helper types has an
+                        unambiguous entry point. */}
+                    <input
+                      className="input mono" required
+                      value={draft.manifest.entryType ?? ''}
+                      onChange={(e) => setManifest({ entryType: e.target.value })}
+                      data-testid="script-entry-type-input"
+                    />
+                  </Field>
+                )}
                 <Field label="Enabled">
                   <select
                     className="select"
@@ -177,11 +212,15 @@ export function ScriptEditPage() {
           <div className="card">
             <div className="card-head">
               <span className="card-title">Code</span>
-              <span className="card-note">C#, compiled on save · no file, network or process access</span>
+              <span className="card-note">
+                {isSql
+                  ? 'SQL, token/parameter-checked on save · no compilation'
+                  : 'C#, compiled on save · no file, network or process access'}
+              </span>
               {compile.data && (
                 <span className="status spacer">
                   <span className={`dot ${compile.data.compiles ? 'dot-ok' : 'dot-bad'}`} />
-                  {compile.data.compiles ? 'compiles' : `${diagnostics.length} error(s)`}
+                  {compile.data.compiles ? (isSql ? 'valid' : 'compiles') : `${diagnostics.length} error(s)`}
                 </span>
               )}
             </div>

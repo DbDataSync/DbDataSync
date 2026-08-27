@@ -111,6 +111,10 @@ public sealed class TableMappingConfig
     /// overrides an inherited binding. See <see cref="ScriptResolution"/>.</summary>
     public Dictionary<string, ScriptBinding?> Scripts { get; set; } = new();
 
+    /// <summary>Hooks bound at this level, keyed by point (see <c>HookPoints</c>). See
+    /// <see cref="HookResolution"/>.</summary>
+    public Dictionary<string, List<HookConfig>?> Hooks { get; set; } = new();
+
     public ProvisioningConfig Provisioning { get; set; } = new();
 }
 
