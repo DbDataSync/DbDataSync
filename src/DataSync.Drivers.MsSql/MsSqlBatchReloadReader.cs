@@ -124,12 +124,8 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         scope.AddTo(cmd);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        var schema = ResultSetSchema.From(reader);
         while (await reader.ReadAsync(cancellationToken))
-        {
-            var values = new Dictionary<string, object?>(reader.FieldCount);
-            for (var i = 0; i < reader.FieldCount; i++)
-                values[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-            yield return new ChangeRow(ChangeOperation.Insert, values);
-        }
+            yield return new ChangeRow(ChangeOperation.Insert, schema, ResultSetSchema.ReadValues(reader, schema.Count));
     }
 }

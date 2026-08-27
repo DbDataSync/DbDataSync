@@ -91,8 +91,8 @@ public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixt
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(2, rows.Count);
-        Assert.Contains(rows, r => (int)r.Values["Id"]! == 3 && (string)r.Values["Name"]! == "Carol");
-        Assert.Contains(rows, r => (int)r.Values["Id"]! == 2 && (string)r.Values["Name"]! == "Robert");
+        Assert.Contains(rows, r => (int)r["Id"]! == 3 && (string)r["Name"]! == "Carol");
+        Assert.Contains(rows, r => (int)r["Id"]! == 2 && (string)r["Name"]! == "Robert");
         Assert.Equal("2", result.NewWatermark);
     }
 }

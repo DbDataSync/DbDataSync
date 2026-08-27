@@ -1,4 +1,9 @@
-# Optimize the in memory layout of changes
+# Replace the per-row dictionary with a positional array
+
+> Originally filed as "Optimize the in memory layout of changes", covering two separable questions:
+> how a single row is held, and whether batches should be column-oriented. The first is answered here.
+> The second was split into `architecture/planning/todo/columnar-change-batches.md` so it could stay
+> open on its own rather than holding this one hostage — see `planning/README.md`.
 
 
 We need to consider replacing the sequence of ChangeRow objects with either a column oriented ChangeBatch concept, or even a simple fixed object[] or object[,] instead of the dictionary we are using.
@@ -183,3 +188,27 @@ Offloading batches to disk; multi-target fan-out from one read; several mappings
 (where per-slot buffering multiplies, and where the columnar peak-heap dial matters most); Server GC
 rather than workstation; and reading from a real source `DbDataReader` rather than generated values —
 a columnar reader must use typed getters (`GetInt32`) to stay unboxed, and no reader does that today.
+
+
+## Outcome — resolved 2026-08-26
+
+**Adopt the positional `object?[]` with a shared schema (option 1).** Built in
+`architecture/implementation/done/phase-014-positional-change-rows.md`.
+
+The decision was easy once the numbers existed: it captures nearly all the available win, needs no
+batching, no new dependency and no change to streaming, and its blast radius is one record, four
+readers and one consumer.
+
+Two things learned while building it that the benchmark did not show:
+
+- **The row buffer is not reused**, unlike the benchmark's `rowarray` variant. `IStagingProvider` is a
+  public extension point and a columnar staging provider — the very thing still open next door — would
+  need to *buffer* rows, which a shared buffer makes impossible. So each row owns its array, and the
+  improvement is about 3x rather than the benchmark's 3.9x.
+- **On a narrow table the wall-clock difference is not measurable.** A real before/after on the
+  change-tracking reader over a 3-column table came out 811 ms → 784 ms for 150,000 rows, inside noise:
+  the read is dominated by TDS transfer and there is little representation cost there to remove. The
+  win is allocation, and it scales with column count — 1,293 MB → 335 MB at 50 columns. Worth
+  remembering before quoting a speedup.
+
+The column-oriented question is untouched by this and remains open.

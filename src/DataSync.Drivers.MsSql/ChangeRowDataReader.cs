@@ -10,6 +10,11 @@ namespace DataSync.Drivers.MsSql;
 /// <see cref="Microsoft.Data.SqlClient.SqlBulkCopy"/> can stream rows into the staging table without
 /// materializing the whole change set in memory. Column order is <paramref name="targetColumns"/>
 /// followed by a trailing operation-marker column ("__Operation": 'I'/'U'/'D').
+/// <para>
+/// Each target column's source ordinal is resolved once, against the first row's schema, and every
+/// subsequent cell is an array index. Resolving it per cell — which a name-keyed row forces — was the
+/// single largest cost in the read path.
+/// </para>
 /// </summary>
 internal sealed class ChangeRowDataReader(
     IAsyncEnumerable<ChangeRow> rows,
@@ -19,6 +24,7 @@ internal sealed class ChangeRowDataReader(
 {
     private readonly IAsyncEnumerator<ChangeRow> _enumerator = rows.GetAsyncEnumerator(cancellationToken);
     private ChangeRow? _current;
+    private int[]? _sourceOrdinalByTarget;
     private bool _finished;
 
     public long RowsProduced { get; private set; }
@@ -50,10 +56,24 @@ internal sealed class ChangeRowDataReader(
         if (ordinal == targetColumns.Count)
             return OperationCode(_current!.Operation);
 
-        var sourceColumn = sourceColumnByTarget[targetColumns[ordinal]];
-        return _current!.Values.TryGetValue(sourceColumn, out var value) && value is not null
-            ? value
-            : DBNull.Value;
+        return _current!.Values[_sourceOrdinalByTarget![ordinal]] ?? DBNull.Value;
+    }
+
+    /// <summary>
+    /// Maps each target column to its ordinal in the source row, once, from the first row's schema.
+    /// <para>
+    /// A mapping naming a source column the reader doesn't produce throws here. It used to be a
+    /// silent dictionary miss that wrote NULL into the target — which for a NOT NULL column surfaced
+    /// much later as a constraint violation naming a column nobody had touched, and for a nullable one
+    /// never surfaced at all.
+    /// </para>
+    /// </summary>
+    private int[] ResolveOrdinalsFor(ChangeSchema schema)
+    {
+        var map = new int[targetColumns.Count];
+        for (var i = 0; i < targetColumns.Count; i++)
+            map[i] = schema.GetOrdinal(sourceColumnByTarget[targetColumns[i]]);
+        return map;
     }
 
     public override bool IsDBNull(int ordinal) => GetValue(ordinal) is DBNull;
@@ -70,6 +90,7 @@ internal sealed class ChangeRowDataReader(
         }
 
         _current = _enumerator.Current;
+        _sourceOrdinalByTarget ??= ResolveOrdinalsFor(_current.Schema);
         RowsProduced++;
         return true;
     }

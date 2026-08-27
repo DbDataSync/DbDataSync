@@ -102,8 +102,9 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
             $"SELECT * FROM {SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}{filterClause};";
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        var schema = ResultSetSchema.From(reader);
         while (await reader.ReadAsync(cancellationToken))
-            yield return new ChangeRow(ChangeOperation.Insert, ReadRowValues(reader));
+            yield return new ChangeRow(ChangeOperation.Insert, schema, ResultSetSchema.ReadValues(reader, schema.Count));
     }
 
     private static async IAsyncEnumerable<ChangeRow> ReadIncrementalAsync(
@@ -121,6 +122,10 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
             throw new InvalidOperationException(
                 $"Table '{source.Schema}.{source.Table}' has no primary key; Change Tracking requires one.");
         var nonKeyColumns = columns.Where(c => !c.IsPrimaryKey).Select(c => c.Name).ToList();
+
+        // Matches the select list's tail, so a result-set ordinal maps to a schema ordinal by
+        // subtracting the two leading bookkeeping columns.
+        var schema = new ChangeSchema([.. pkColumns, .. nonKeyColumns]);
 
         using var cmd = connection.CreateCommand();
         cmd.CommandText = MsSqlChangeTrackingStatement.BuildIncremental(source.Schema, source.Table, pkColumns, nonKeyColumns);
@@ -201,24 +206,22 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
                     // resizes 3 -> 7 -> 17 -> 37 -> 79 on the way to a wide row, discarding each
                     // intermediate: measured at 5,424 B/row against 2,584 B/row for a 50-column
                     // table. This is the incremental path, so it is the one that runs constantly.
-                    var values = new Dictionary<string, object?>(pkColumns.Count + nonKeyColumns.Count);
-                    for (var i = 0; i < pkColumns.Count; i++)
-                    {
-                        var ordinal = MsSqlChangeTrackingStatement.FirstKeyOrdinal + i;
-                        values[reader.GetName(ordinal)] = reader.IsDBNull(ordinal) ? null : reader.GetValue(ordinal);
-                    }
-
                     // Deleted rows are gone from the source table — the LEFT JOIN yields NULLs for
                     // every non-key column, which would be indistinguishable from a real NULL value.
-                    // Only key columns are reliable for deletes (see ChangeRow's XML doc).
-                    if (operation != ChangeOperation.Delete)
+                    // Only key columns are reliable for deletes, so the rest of the row stays unset
+                    // (see ChangeRow's XML doc).
+                    var populated = operation == ChangeOperation.Delete
+                        ? pkColumns.Count
+                        : schema.Count;
+
+                    var values = new object?[schema.Count];
+                    for (var i = 0; i < populated; i++)
                     {
-                        var firstNonKey = MsSqlChangeTrackingStatement.FirstKeyOrdinal + pkColumns.Count;
-                        for (var ordinal = firstNonKey; ordinal < reader.FieldCount; ordinal++)
-                            values[reader.GetName(ordinal)] = reader.IsDBNull(ordinal) ? null : reader.GetValue(ordinal);
+                        var ordinal = MsSqlChangeTrackingStatement.FirstKeyOrdinal + i;
+                        values[i] = reader.IsDBNull(ordinal) ? null : reader.GetValue(ordinal);
                     }
 
-                    yield return new ChangeRow(operation, values);
+                    yield return new ChangeRow(operation, schema, values);
                 }
             }
 
@@ -266,11 +269,4 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         }
     }
 
-    private static Dictionary<string, object?> ReadRowValues(DbDataReader reader)
-    {
-        var values = new Dictionary<string, object?>(reader.FieldCount);
-        for (var i = 0; i < reader.FieldCount; i++)
-            values[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-        return values;
-    }
 }

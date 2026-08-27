@@ -136,8 +136,8 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
         Assert.NotEmpty(rows);
         Assert.All(rows, row =>
         {
-            Assert.True(row.Values.TryGetValue("Id", out var id), "every row must carry its key");
-            Assert.NotNull(id);
+            Assert.True(row.Schema.TryGetOrdinal("Id", out var idOrdinal), "every row must know its key column");
+            Assert.NotNull(row[idOrdinal]);
         });
 
         // Informational: if this is 0 the race did not fire this run and the assertions above passed
@@ -153,7 +153,7 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
         var (rows, _) = await ReadUnderDeletePressureAsync(new Dictionary<string, string>());
 
         foreach (var deletion in rows.Where(r => r.Operation == ChangeOperation.Delete))
-            Assert.NotNull(deletion.Values["Id"]);
+            Assert.NotNull(deletion["Id"]);
     }
 
     /// <summary>
@@ -172,7 +172,7 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
 
             Assert.NotEmpty(rows);
             Assert.Equal(0, diagnostics.RowsSkippedSourceRowGone);
-            Assert.All(rows, row => Assert.NotNull(row.Values["Id"]));
+            Assert.All(rows, row => Assert.NotNull(row["Id"]));
         }
         finally
         {
@@ -209,7 +209,7 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
         var count = 0;
         await foreach (var row in read.Rows)
         {
-            Assert.NotNull(row.Values["Id"]);
+            Assert.NotNull(row["Id"]);
             count++;
         }
 

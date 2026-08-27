@@ -66,7 +66,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
 
         Assert.Equal(2, rows.Count);
         Assert.All(rows, r => Assert.Equal(ChangeOperation.Insert, r.Operation));
-        Assert.Contains(rows, r => (int)r.Values["Id"]! == 1 && (string)r.Values["Name"]! == "Alice");
+        Assert.Contains(rows, r => (int)r["Id"]! == 1 && (string)r["Name"]! == "Alice");
         Assert.False(string.IsNullOrEmpty(result.NewWatermark));
     }
 
@@ -90,16 +90,19 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         Assert.Equal(3, rows.Count);
 
         var inserted = Assert.Single(rows, r => r.Operation == ChangeOperation.Insert);
-        Assert.Equal(4, (int)inserted.Values["Id"]!);
-        Assert.Equal("Dave", (string)inserted.Values["Name"]!);
+        Assert.Equal(4, (int)inserted["Id"]!);
+        Assert.Equal("Dave", (string)inserted["Name"]!);
 
         var updated = Assert.Single(rows, r => r.Operation == ChangeOperation.Update);
-        Assert.Equal(2, (int)updated.Values["Id"]!);
-        Assert.Equal("Robert", (string)updated.Values["Name"]!);
+        Assert.Equal(2, (int)updated["Id"]!);
+        Assert.Equal("Robert", (string)updated["Name"]!);
 
         var deleted = Assert.Single(rows, r => r.Operation == ChangeOperation.Delete);
-        Assert.Equal(3, (int)deleted.Values["Id"]!);
-        Assert.False(deleted.Values.ContainsKey("Name"));
+        Assert.Equal(3, (int)deleted["Id"]!);
+        // The column is in the schema but was never populated: a deleted row's non-key values are
+        // gone from the source, so only the key is meaningful. Writers key off Operation, not off
+        // whether a value is present.
+        Assert.Null(deleted["Name"]);
     }
 
     [Fact]

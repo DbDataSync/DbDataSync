@@ -343,7 +343,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
 
         var ids = new List<object?>();
         await foreach (var row in read.Rows)
-            ids.Add(row.Values["Id"]);
+            ids.Add(row["Id"]);
 
         Assert.Equal([1], ids);
     }
