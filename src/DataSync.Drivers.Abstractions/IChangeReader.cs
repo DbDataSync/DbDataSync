@@ -34,10 +34,21 @@ public interface IChangeReader
     /// </summary>
     bool DetectsDeletes => false;
 
+    /// <param name="columnMappings">
+    /// What this read is being asked to produce. A reader projects these columns rather than selecting
+    /// everything, and applies each one's <see cref="ColumnMapping.Transform"/> — a SQL expression in
+    /// the source's own dialect — into its SELECT list.
+    /// <para>
+    /// Empty means no projection was specified, and a reader should return whole rows. Staging and
+    /// writing have always taken the mappings; the reader taking them too is what lets it stop asking
+    /// the source for columns nobody mapped.
+    /// </para>
+    /// </param>
     Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        IReadOnlyList<ColumnMapping> columnMappings,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken);
 }

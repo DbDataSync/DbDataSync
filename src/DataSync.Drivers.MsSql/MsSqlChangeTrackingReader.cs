@@ -42,6 +42,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        IReadOnlyList<ColumnMapping> columnMappings,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -63,10 +64,11 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
 
         var diagnostics = new ReadDiagnostics();
         var rows = previousWatermark is null
-            ? ReadFullLoadAsync(sourceConnection, source, cancellationToken)
+            ? ReadFullLoadAsync(
+                sourceConnection, source, SourceProjection.Render(MsSqlDialect.Instance, columnMappings), cancellationToken)
             : ReadIncrementalAsync(
                 sourceConnection, source, long.Parse(previousWatermark), targetVersion,
-                UseSnapshotIsolation(options), diagnostics, cancellationToken);
+                UseSnapshotIsolation(options), columnMappings, diagnostics, cancellationToken);
 
         return new ReadResult(rows, targetVersion.ToString(), diagnostics);
     }
@@ -97,7 +99,8 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
     }
 
     private static async IAsyncEnumerable<ChangeRow> ReadFullLoadAsync(
-        DbConnection connection, SourceTableRef source, [EnumeratorCancellation] CancellationToken cancellationToken)
+        DbConnection connection, SourceTableRef source, string projection,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
         var filterClause = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" WHERE {source.Filter}";
@@ -105,7 +108,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         // input — see the type's XML doc. It cannot be parameterized since it's an arbitrary
         // boolean expression, not a value.
         cmd.CommandText =
-            $"SELECT * FROM {SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}{filterClause};";
+            $"SELECT {projection} FROM {SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}{filterClause};";
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         var schema = ResultSetSchema.From(reader);
@@ -119,6 +122,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         long previousVersion,
         long targetVersion,
         bool useSnapshotIsolation,
+        IReadOnlyList<ColumnMapping> columnMappings,
         ReadDiagnostics diagnostics,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -134,7 +138,12 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         var schema = new ChangeSchema([.. pkColumns, .. nonKeyColumns]);
 
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = MsSqlChangeTrackingStatement.BuildIncremental(source.Schema, source.Table, pkColumns, nonKeyColumns);
+        // The statement joins the table under the alias `base`, so a transform's {{column}} has to
+        // resolve to `base.[Col]` and not to a bare name — which for a primary key column would be
+        // ambiguous against CHANGETABLE's own copy. This is the reason the token exists.
+        cmd.CommandText = MsSqlChangeTrackingStatement.BuildIncremental(
+            source.Schema, source.Table, pkColumns, nonKeyColumns,
+            column => RenderNonKeyColumn(column, columnMappings));
         cmd.AddParameter("@previousVersion", previousVersion);
         cmd.AddParameter("@targetVersion", targetVersion);
 
@@ -275,4 +284,24 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         }
     }
 
+    /// <summary>
+    /// A non-key column as it appears in the incremental statement's select list: the mapping's
+    /// transform if it has one, otherwise the plain <c>base.[Col]</c> reference.
+    /// </summary>
+    private static string RenderNonKeyColumn(string column, IReadOnlyList<ColumnMapping> columnMappings)
+    {
+        var baseReference = $"base.{SqlIdentifier.Quote(column)}";
+        var mapping = columnMappings.FirstOrDefault(
+            m => string.Equals(m.SourceColumn, column, StringComparison.OrdinalIgnoreCase)
+                 && !string.IsNullOrWhiteSpace(m.Transform));
+
+        if (mapping is null)
+            return baseReference;
+
+        var expression = mapping.Transform!.Contains(SourceProjection.ColumnToken, StringComparison.Ordinal)
+            ? mapping.Transform.Replace(SourceProjection.ColumnToken, baseReference, StringComparison.Ordinal)
+            : mapping.Transform;
+
+        return $"{expression} AS {SqlIdentifier.Quote(column)}";
+    }
 }

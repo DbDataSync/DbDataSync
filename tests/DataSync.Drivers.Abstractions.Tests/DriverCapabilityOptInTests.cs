@@ -78,6 +78,7 @@ public sealed class DriverCapabilityOptInTests
             DbConnection sourceConnection,
             SourceTableRef source,
             string? previousWatermark,
+            IReadOnlyList<ColumnMapping> columnMappings,
             IReadOnlyDictionary<string, string> options,
             CancellationToken cancellationToken) => throw new NotSupportedException();
     }

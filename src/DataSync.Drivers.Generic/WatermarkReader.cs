@@ -31,6 +31,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        IReadOnlyList<ColumnMapping> columnMappings,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -52,7 +53,8 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
                 ?? throw new InvalidOperationException(
                     $"Watermark column '{watermarkColumn}' was not found on '{source.Schema}.{source.Table}'.");
 
-        var rows = ReadRowsAsync(sourceConnection, source, watermarkColumn, previousWatermark, column, cancellationToken);
+        var projection = SourceProjection.Render(dialect, columnMappings);
+        var rows = ReadRowsAsync(sourceConnection, source, watermarkColumn, previousWatermark, column, projection, cancellationToken);
         return new ReadResult(rows, newWatermark);
     }
 
@@ -73,11 +75,12 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         string watermarkColumn,
         string? previousWatermark,
         ColumnMetadata? column,
+        string projection,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = WatermarkStatement.BuildRead(
-            dialect, source.Schema, source.Table, watermarkColumn, previousWatermark is not null, source.Filter);
+            dialect, source.Schema, source.Table, watermarkColumn, previousWatermark is not null, source.Filter, projection);
         if (previousWatermark is not null)
         {
             // Bound as the watermark column's own type, not as text. SQL Server would convert

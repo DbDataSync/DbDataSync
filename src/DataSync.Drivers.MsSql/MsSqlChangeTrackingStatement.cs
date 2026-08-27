@@ -24,9 +24,17 @@ internal static class MsSqlChangeTrackingStatement
     /// row into a failed run. CHANGETABLE always has the key; base may not.
     /// </para>
     /// </summary>
+    /// <param name="renderNonKeyColumn">
+    /// How each non-key column is written. Plain <c>base.[Col]</c> by default; a mapping carrying a
+    /// <see cref="ColumnMapping.Transform"/> renders an expression aliased back to the column's own
+    /// name. Taking it as a function rather than a list of names is what keeps this method's ordinal
+    /// arithmetic — and therefore <see cref="BaseMissingOrdinal"/> — unchanged.
+    /// </param>
     public static string BuildIncremental(
-        string schema, string table, IReadOnlyList<string> primaryKeyColumns, IReadOnlyList<string> nonKeyColumns)
+        string schema, string table, IReadOnlyList<string> primaryKeyColumns, IReadOnlyList<string> nonKeyColumns,
+        Func<string, string>? renderNonKeyColumn = null)
     {
+        renderNonKeyColumn ??= c => $"base.{SqlIdentifier.Quote(c)}";
         var quotedSchema = SqlIdentifier.Quote(schema);
         var quotedTable = SqlIdentifier.Quote(table);
         var joinCondition = string.Join(" AND ",
@@ -40,7 +48,7 @@ internal static class MsSqlChangeTrackingStatement
             $"CASE WHEN base.{SqlIdentifier.Quote(primaryKeyColumns[0])} IS NULL THEN 1 ELSE 0 END AS {BaseMissingColumn}");
 
         selected.AddRange(primaryKeyColumns.Select(pk => $"CT.{SqlIdentifier.Quote(pk)}"));
-        selected.AddRange(nonKeyColumns.Select(c => $"base.{SqlIdentifier.Quote(c)}"));
+        selected.AddRange(nonKeyColumns.Select(renderNonKeyColumn));
 
         return $"""
             SELECT {string.Join(", ", selected)}

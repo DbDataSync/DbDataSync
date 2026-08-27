@@ -252,7 +252,8 @@ public sealed class RunExecutor(
                 Log(item.RunId, LogSeverity.Info,
                     $"Reading changes for '{mapping.Name}' ({scope}, watermark: {previousWatermark ?? "<none>"}).");
 
-                var read = await reader.ReadChangesAsync(sourceConnection, source, previousWatermark, readerOptions, cancellationToken);
+                var read = await reader.ReadChangesAsync(
+                    sourceConnection, source, previousWatermark, mapping.ColumnMappings, readerOptions, cancellationToken);
                 var staged = await stagingProvider.StageAsync(
                     targetConnection, target, read.Rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
 

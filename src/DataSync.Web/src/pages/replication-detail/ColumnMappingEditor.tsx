@@ -9,13 +9,18 @@ interface Props {
   onChange: (mappings: ColumnMapping[]) => void
 }
 
-const COLUMNS = '1fr 26px 1fr 110px 80px'
+const COLUMNS = '1fr 26px 1fr 1.3fr 80px'
 
 /**
  * Once both sides have a table, lists the target's columns and lets each be fed from a source column,
  * auto-suggesting a same-name match on first load. The design adds the source column's SQL type
  * beside its name and a PK badge on the target — both come from the metadata endpoint, so both are
- * real; the mockup's per-row Transform value is a field on ColumnMapping and is editable here.
+ * real.
+ *
+ * Transform is a SQL expression in the *source's* dialect, evaluated by the source engine — not by
+ * this process and not by the target. `{{column}}` stands for the column being transformed, and has
+ * to, because the reference is not spelled the same way in every reader's statement (the Change
+ * Tracking reader joins the source table under an alias). See phase 22.
  */
 export function ColumnMappingEditor({ source, target, mappings, onChange }: Props) {
   const { data: sourceColumns } = useColumns(source.connectionName, source.database, source.schema, source.table)
@@ -60,7 +65,10 @@ export function ColumnMappingEditor({ source, target, mappings, onChange }: Prop
     <div className="card flush" data-testid="column-mappings-table">
       <div className="card-head tight">
         <span className="card-title sm">Column mappings</span>
-        <span className="card-note">{mappings.length} of {targetColumns.length} target columns mapped</span>
+        <span className="card-note">
+          {mappings.length} of {targetColumns.length} target columns mapped · transforms are SQL in the
+          source's dialect, with <code>{'{{column}}'}</code> for the column itself
+        </span>
         <button type="button" className="btn btn-sm spacer" onClick={autoMap}>Auto-map by name</button>
       </div>
 
@@ -89,12 +97,12 @@ export function ColumnMappingEditor({ source, target, mappings, onChange }: Prop
           </span>
           <span>
             <input
-              className="input sm"
-              style={{ maxWidth: 100 }}
-              placeholder="—"
+              className="input sm mono"
+              placeholder="UPPER({{column}})"
               value={m.transform ?? ''}
               onChange={(e) => updateRow(i, { transform: e.target.value || null })}
               aria-label={`${m.targetColumn} transform`}
+              data-testid={`column-mapping-transform-${m.targetColumn}`}
             />
           </span>
           <button

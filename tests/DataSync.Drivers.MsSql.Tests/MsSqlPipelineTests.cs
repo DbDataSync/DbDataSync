@@ -65,7 +65,7 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
 
     private async Task<(long RowsWritten, string Watermark)> RunOnceAsync(string? previousWatermark)
     {
-        var read = await _reader.ReadChangesAsync(_sourceConnection, Source(), previousWatermark, new Dictionary<string, string>(), CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_sourceConnection, Source(), previousWatermark, Mappings, new Dictionary<string, string>(), CancellationToken.None);
         var staged = await _staging.StageAsync(_targetConnection, Target(), read.Rows, Mappings, new Dictionary<string, string>(), CancellationToken.None);
         var written = await _writer.ApplyAsync(_targetConnection, Target(), staged, Mappings, new Dictionary<string, string>(), CancellationToken.None);
         return (written.RowsWritten, read.NewWatermark);

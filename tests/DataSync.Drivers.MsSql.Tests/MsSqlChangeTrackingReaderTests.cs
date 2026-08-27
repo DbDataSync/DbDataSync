@@ -61,7 +61,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob');");
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, options: new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), previousWatermark: null, [], options: new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(2, rows.Count);
@@ -76,7 +76,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol');");
 
         var baseline = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), previousWatermark: null, [], new Dictionary<string, string>(), CancellationToken.None);
         await CollectAsync(baseline.Rows);
         var watermark = baseline.NewWatermark;
 
@@ -84,7 +84,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"UPDATE dbo.[{_tableName}] SET Name = 'Robert' WHERE Id = 2;");
         await ExecuteAsync($"DELETE FROM dbo.[{_tableName}] WHERE Id = 3;");
 
-        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, new Dictionary<string, string>(), CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(3, rows.Count);
@@ -109,11 +109,11 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
     public async Task Incremental_WithNoChanges_ReturnsEmptyButAdvancesWatermark()
     {
         var baseline = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), previousWatermark: null, [], new Dictionary<string, string>(), CancellationToken.None);
         await CollectAsync(baseline.Rows);
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), baseline.NewWatermark, new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), baseline.NewWatermark, [], new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Empty(rows);

@@ -71,7 +71,7 @@ public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<M
     private async Task<long> RunOnceAsync(IReadOnlyDictionary<string, string>? options = null, string? filter = null)
     {
         options ??= new Dictionary<string, string>();
-        var read = await _reader.ReadChangesAsync(_sourceConnection, Source(filter), null, options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_sourceConnection, Source(filter), null, Mappings, options, CancellationToken.None);
         var staged = await _staging.StageAsync(_targetConnection, Target(), read.Rows, Mappings, options, CancellationToken.None);
         try
         {

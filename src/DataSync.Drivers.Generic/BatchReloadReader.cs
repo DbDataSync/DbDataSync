@@ -31,6 +31,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        IReadOnlyList<ColumnMapping> columnMappings,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -40,7 +41,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
         var columns = await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
         var scope = SegmentScope.Build(dialect, binder, segment, columns);
 
-        var rows = ReadRowsAsync(sourceConnection, source, scope, cancellationToken);
+        var rows = ReadRowsAsync(sourceConnection, source, scope, SourceProjection.Render(dialect, columnMappings), cancellationToken);
 
         // This reader has no watermark of its own to report. It echoes the previous one back rather
         // than inventing a value, so that a standalone reload replication — which runs as a Primary
@@ -106,10 +107,11 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
         DbConnection connection,
         SourceTableRef source,
         SegmentScope scope,
+        string projection,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = BatchReloadStatement.BuildRead(dialect, source.Schema, source.Table, scope.Predicate, source.Filter);
+        cmd.CommandText = BatchReloadStatement.BuildRead(dialect, source.Schema, source.Table, scope.Predicate, source.Filter, projection);
         scope.AddTo(cmd);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -127,11 +129,12 @@ public static class BatchReloadStatement
     /// The segment predicate and the mapping's own static Filter compose — a segment narrows a reload
     /// within whatever subset of the table the mapping was always scoped to, it doesn't replace it.
     /// </summary>
-    public static string BuildRead(SqlDialect dialect, string schema, string table, string scopePredicate, string? filter)
+    public static string BuildRead(
+        SqlDialect dialect, string schema, string table, string scopePredicate, string? filter, string projection = "*")
     {
         var userFilter = string.IsNullOrWhiteSpace(filter) ? "" : $" AND ({filter})";
         return $"""
-            SELECT * FROM {dialect.QualifyTable(schema, table)}
+            SELECT {projection} FROM {dialect.QualifyTable(schema, table)}
             WHERE {scopePredicate}{userFilter};
             """;
     }

@@ -64,7 +64,7 @@ public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixt
     public async Task MissingWatermarkOption_Throws()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _reader.ReadChangesAsync(_connection, Source(), null, new Dictionary<string, string>(), CancellationToken.None));
+            _reader.ReadChangesAsync(_connection, Source(), null, [], new Dictionary<string, string>(), CancellationToken.None));
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixt
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name, Version) VALUES (1, 'Alice', 1), (2, 'Bob', 1);");
 
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "Version" };
-        var result = await _reader.ReadChangesAsync(_connection, Source(), null, options, CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), null, [], options, CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(2, rows.Count);
@@ -86,13 +86,13 @@ public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixt
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name, Version) VALUES (1, 'Alice', 1), (2, 'Bob', 1);");
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "Version" };
 
-        var baseline = await _reader.ReadChangesAsync(_connection, Source(), null, options, CancellationToken.None);
+        var baseline = await _reader.ReadChangesAsync(_connection, Source(), null, [], options, CancellationToken.None);
         await CollectAsync(baseline.Rows);
 
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name, Version) VALUES (3, 'Carol', 2);");
         await ExecuteAsync($"UPDATE dbo.[{_tableName}] SET Name = 'Robert', Version = 2 WHERE Id = 2;");
 
-        var result = await _reader.ReadChangesAsync(_connection, Source(), baseline.NewWatermark, options, CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), baseline.NewWatermark, [], options, CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(2, rows.Count);

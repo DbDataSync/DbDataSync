@@ -23,8 +23,17 @@ public static class WatermarkStatement
     /// The rows to emit. With no previous watermark the predicate is <c>1 = 1</c> rather than an
     /// omitted WHERE clause, so a configured filter can always be appended with <c>AND</c>.
     /// </summary>
+    /// <param name="projection">
+    /// The SELECT list from <see cref="SourceProjection"/>. Defaults to <c>*</c>, which is what this
+    /// built before mappings reached the reader and what it still builds when none are supplied.
+    /// <para>
+    /// The watermark column need not be in it: <c>ORDER BY</c> on a column outside the select list is
+    /// valid SQL, and a mapping that does not carry its own watermark column is perfectly ordinary.
+    /// </para>
+    /// </param>
     public static string BuildRead(
-        SqlDialect dialect, string schema, string table, string watermarkColumn, bool hasPreviousWatermark, string? filter)
+        SqlDialect dialect, string schema, string table, string watermarkColumn, bool hasPreviousWatermark,
+        string? filter, string projection = "*")
     {
         var quotedColumn = dialect.QuoteIdentifier(watermarkColumn);
         var predicate = hasPreviousWatermark
@@ -33,7 +42,7 @@ public static class WatermarkStatement
         var userFilter = string.IsNullOrWhiteSpace(filter) ? "" : $" AND ({filter})";
 
         return $"""
-            SELECT * FROM {dialect.QualifyTable(schema, table)}
+            SELECT {projection} FROM {dialect.QualifyTable(schema, table)}
             WHERE {predicate}{userFilter}
             ORDER BY {quotedColumn};
             """;

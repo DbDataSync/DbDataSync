@@ -68,7 +68,7 @@ public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixtu
     private async Task<long> ReloadAsync(IReadOnlyDictionary<string, string>? options = null)
     {
         options ??= new Dictionary<string, string>();
-        var read = await _reader.ReadChangesAsync(_source, Source(), null, options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_source, Source(), null, Mappings, options, CancellationToken.None);
         var staged = await _staging.StageAsync(_target, Target(), read.Rows, Mappings, options, CancellationToken.None);
         try
         {
@@ -165,12 +165,12 @@ public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixtu
         await ExecuteAsync(_source, $"INSERT INTO public.\"{_sourceTable}\" VALUES (1, 'a', 1, '2026-01-01 00:00:00');");
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "modified_at" };
 
-        var first = await _watermark.ReadChangesAsync(_source, Source(), null, options, CancellationToken.None);
+        var first = await _watermark.ReadChangesAsync(_source, Source(), null, Mappings, options, CancellationToken.None);
         Assert.Single(await CollectAsync(first.Rows));
 
         await ExecuteAsync(_source, $"INSERT INTO public.\"{_sourceTable}\" VALUES (2, 'b', 2, '2026-02-01 00:00:00');");
 
-        var second = await _watermark.ReadChangesAsync(_source, Source(), first.NewWatermark, options, CancellationToken.None);
+        var second = await _watermark.ReadChangesAsync(_source, Source(), first.NewWatermark, Mappings, options, CancellationToken.None);
         var rows = await CollectAsync(second.Rows);
 
         Assert.Equal(2, (int)Assert.Single(rows)["id"]!);
@@ -198,7 +198,7 @@ public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixtu
         var tgt = new TableRef { ConnectionName = "tgt", Database = db.DatabaseName, Schema = "public", Table = $"{table}_t" };
         var options = new Dictionary<string, string>();
 
-        var read = await _reader.ReadChangesAsync(_source, src, null, options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_source, src, null, mappings, options, CancellationToken.None);
         var staged = await _staging.StageAsync(_target, tgt, read.Rows, mappings, options, CancellationToken.None);
         var written = await _writer.ApplyAsync(_target, tgt, staged, mappings, options, CancellationToken.None);
         await _staging.CleanupAsync(_target, staged, CancellationToken.None);

@@ -31,6 +31,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        IReadOnlyList<ColumnMapping> columnMappings,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -40,7 +41,8 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         var columns = await MsSqlSchemaQueries.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
         var scope = MsSqlSegmentScope.Build(segment, columns);
 
-        var rows = ReadRowsAsync(sourceConnection, source, scope, cancellationToken);
+        var rows = ReadRowsAsync(
+            sourceConnection, source, scope, SourceProjection.Render(MsSqlDialect.Instance, columnMappings), cancellationToken);
 
         // This reader has no watermark of its own to report. It echoes the previous one back rather
         // than inventing a value, so that a standalone reload replication — which runs as a Primary
@@ -111,6 +113,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         DbConnection connection,
         SourceTableRef source,
         SegmentScope scope,
+        string projection,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         // The segment predicate and the mapping's own static Filter compose — a segment narrows a
@@ -120,7 +123,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
 
         using var cmd = connection.CreateCommand();
         cmd.CommandText = $"""
-            SELECT * FROM {SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}
+            SELECT {projection} FROM {SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}
             WHERE {scope.Predicate}{userFilter};
             """;
         scope.AddTo(cmd);

@@ -10,6 +10,10 @@ fs.mkdirSync(screenshotsDir, { recursive: true })
 
 const REPLICATION_NAME = 'playwright-sync'
 const MAPPING_NAME = 'items'
+const SOURCE_NAME_COLUMN = 'Name'
+// The mapping created in test 05 puts UPPER({{column}}) on Name, so everything downstream of the
+// source sees it upper-cased — which is the end-to-end proof that a source-dialect transform runs.
+const NAMES = { widget: 'WIDGET', gadget: 'GADGET' }
 
 async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(screenshotsDir, name), fullPage: true })
@@ -103,6 +107,10 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await expect(page.getByTestId('column-mappings-table').locator('.grid-row')).toHaveCount(2, { timeout: 15_000 })
     await shot(page, '05-table-mapping-form.png')
 
+    // A transform is SQL in the source's own dialect, evaluated by the source engine. {{column}} is
+    // substituted with whatever reference is correct for the reader's statement.
+    await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}`).fill('UPPER({{column}})')
+
     await page.getByTestId('save-mapping-button').click()
     // The mappings list is the sidebar now, not a table below the form, and saving puts the mapping
     // that was actually saved in the URL — a create names something that had no route a moment ago.
@@ -137,11 +145,13 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await shot(page, '10-config-history.png')
   })
 
-  test('08 - data actually replicated to the target table', async () => {
-    // The real end-to-end proof, independent of anything the UI claims.
+  test('08 - data actually replicated to the target table, with the transform applied', async () => {
+    // The real end-to-end proof, independent of anything the UI claims — and the source's own
+    // rows are still 'Widget'/'Gadget', so upper case at the target can only have come from the
+    // transform being evaluated by the source engine.
     const output = querySql(`SET NOCOUNT ON; SELECT Id, Name FROM dbo.[${TARGET_TABLE}] ORDER BY Id;`, DB_NAME)
-    expect(output).toContain('Widget')
-    expect(output).toContain('Gadget')
+    expect(output).toContain(NAMES.widget)
+    expect(output).toContain(NAMES.gadget)
     expect(output.trim().split('\n').filter((l) => l.trim())).toHaveLength(2)
   })
 
@@ -149,8 +159,8 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     // Diverge the target from the source behind the replication's back. An incremental pass can't fix
     // this — Change Tracking has nothing new to report, since nothing changed at the *source* — which
     // is exactly the situation a reload exists for.
-    runSql(`DELETE FROM dbo.[${TARGET_TABLE}] WHERE Name = 'Widget';`, DB_NAME)
-    expect(querySql(`SET NOCOUNT ON; SELECT Name FROM dbo.[${TARGET_TABLE}];`, DB_NAME)).not.toContain('Widget')
+    runSql(`DELETE FROM dbo.[${TARGET_TABLE}] WHERE Name = '${NAMES.widget}';`, DB_NAME)
+    expect(querySql(`SET NOCOUNT ON; SELECT Name FROM dbo.[${TARGET_TABLE}];`, DB_NAME)).not.toContain(NAMES.widget)
 
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('backfill-button').click()
@@ -175,8 +185,8 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await shot(page, '13-run-history-with-backfill.png')
 
     const rows = querySql(`SET NOCOUNT ON; SELECT Id, Name FROM dbo.[${TARGET_TABLE}] ORDER BY Id;`, DB_NAME)
-    expect(rows).toContain('Widget')
-    expect(rows).toContain('Gadget')
+    expect(rows).toContain(NAMES.widget)
+    expect(rows).toContain(NAMES.gadget)
   })
 
   test('10 - the backfill left the incremental sync\'s watermark alone', async ({ page }) => {
