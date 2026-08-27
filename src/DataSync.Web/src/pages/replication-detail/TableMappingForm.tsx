@@ -13,11 +13,13 @@ const emptySpec: TableSpec = { connectionName: null, database: null, schema: '',
 interface Props {
   replicationName: string
   existing?: TableMappingConfig
-  onDone: () => void
+  /** The name actually saved, which a rename or a create makes different from the one that was open. */
+  onSaved: (mappingName: string) => void
+  onRemoved: () => void
   onCancel: () => void
 }
 
-export function TableMappingForm({ replicationName, existing, onDone, onCancel }: Props) {
+export function TableMappingForm({ replicationName, existing, onSaved, onRemoved, onCancel }: Props) {
   const upsert = useUpsertTableMapping(replicationName)
   const del = useDeleteTableMapping(replicationName)
   const { data: task } = useReplication(replicationName)
@@ -41,7 +43,7 @@ export function TableMappingForm({ replicationName, existing, onDone, onCancel }
       mappingName: name,
       mapping: { name, sources: [source], targets: [target], columnMappings },
     })
-    onDone()
+    onSaved(name)
   }
 
   return (
@@ -55,7 +57,7 @@ export function TableMappingForm({ replicationName, existing, onDone, onCancel }
             <button
               type="button"
               className="btn btn-danger"
-              onClick={async () => { await del.mutateAsync(existing.name); onDone() }}
+              onClick={async () => { await del.mutateAsync(existing.name); onRemoved() }}
               data-testid={`delete-mapping-${existing.name}`}
             >
               Delete

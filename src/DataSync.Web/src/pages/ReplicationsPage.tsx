@@ -81,7 +81,7 @@ export function ReplicationsPage() {
   }
 
   return (
-    <AppShell crumbs={[{ label: 'Replications' }]} tabs={<SectionTabs active="replications" />}>
+    <AppShell crumbs={[{ label: 'Replications' }]} tabs={<SectionTabs />}>
       <aside className="sidebar">
         <div className="sidebar-head"><span>Explorer</span></div>
         <div className="sidebar-list">

@@ -57,7 +57,8 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('replication-name-input').fill(REPLICATION_NAME)
     await page.getByTestId('create-replication-button').click()
 
-    await expect(page).toHaveURL(new RegExp(`/replications/${REPLICATION_NAME}$`))
+    // Landing on the replication lands on a tab, not on a bare frame.
+    await expect(page).toHaveURL(new RegExp(`/replications/${REPLICATION_NAME}/overview$`))
     await expect(page.getByRole('heading', { name: REPLICATION_NAME })).toBeVisible()
   })
 
@@ -84,6 +85,9 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('tab-mappings').click()
     await page.getByTestId('new-mapping-button').click()
+    await expect(page).toHaveURL(new RegExp(`/replications/${REPLICATION_NAME}/mappings/new$`))
+    // The mapping being created has no row in the list until it is saved, so the sidebar stands one in.
+    await expect(page.getByTestId('mappings-sidebar')).toContainText('new mapping')
 
     await page.getByTestId('mapping-name-input').fill(MAPPING_NAME)
 
@@ -100,8 +104,10 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await shot(page, '05-table-mapping-form.png')
 
     await page.getByTestId('save-mapping-button').click()
-    // The mappings list is the sidebar now, not a table below the form.
+    // The mappings list is the sidebar now, not a table below the form, and saving puts the mapping
+    // that was actually saved in the URL — a create names something that had no route a moment ago.
     await expect(page.getByTestId(`mapping-item-${MAPPING_NAME}`)).toBeVisible({ timeout: 15_000 })
+    await expect(page).toHaveURL(new RegExp(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}$`))
     await shot(page, '06-table-mappings-list.png')
   })
 
@@ -279,5 +285,51 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await expect(page.getByTestId(`reachable-${SRC_CONNECTION_NAME}`)).toContainText('reachable', { timeout: 20_000 })
     await expect(page.getByTestId(`reachable-${TGT_CONNECTION_NAME}`)).toContainText('reachable', { timeout: 20_000 })
     await shot(page, '17-connections-reachability.png')
+  })
+
+  test('14 - every screen has its own URL, and reloading one stays on it', async ({ page }) => {
+    // The reason this matters: all four tabs and the open mapping used to be component state under a
+    // single route, so a reload dropped you back on Overview and there was no link to send anyone.
+    const base = `/replications/${REPLICATION_NAME}`
+    await page.goto(base)
+
+    for (const [testId, path] of [
+      ['tab-mappings', 'mappings'],
+      ['tab-runs', 'runs'],
+      ['tab-history', 'history'],
+      ['tab-overview', 'overview'],
+    ] as const) {
+      await page.getByTestId(testId).click()
+      await expect(page).toHaveURL(new RegExp(`${base}/${path}`))
+    }
+
+    // Deep-linked straight in, with no navigation to get there.
+    await page.goto(`${base}/history`)
+    await expect(page.getByTestId('history-table')).toBeVisible()
+    await expect(page.getByTestId('tab-history')).toHaveClass(/active/)
+
+    await page.goto(`${base}/mappings/${MAPPING_NAME}`)
+    await expect(page.getByRole('heading', { name: MAPPING_NAME })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId(`mapping-item-${MAPPING_NAME}`)).toHaveClass(/active/)
+    await page.reload()
+    await expect(page.getByRole('heading', { name: MAPPING_NAME })).toBeVisible({ timeout: 15_000 })
+
+    // /mappings with nothing chosen opens the first one rather than an empty pane beside a
+    // populated sidebar — and `replace`, so Back leaves the tab instead of bouncing off the redirect.
+    await page.goto(`${base}/runs`)
+    await page.getByTestId('tab-mappings').click()
+    await expect(page).toHaveURL(new RegExp(`${base}/mappings/${MAPPING_NAME}$`))
+    await page.goBack()
+    await expect(page).toHaveURL(new RegExp(`${base}/runs$`))
+
+    // The browser's own history works across tabs, which is what it means for these to be pages.
+    await page.goBack()
+    await expect(page).toHaveURL(new RegExp(`${base}/mappings/${MAPPING_NAME}$`))
+    await page.goForward()
+    await expect(page).toHaveURL(new RegExp(`${base}/runs$`))
+
+    // A stale or mistyped URL lands somewhere real.
+    await page.goto('/replications/does-not-exist-anywhere/nonsense')
+    await expect(page).toHaveURL(/\/replications$/)
   })
 })

@@ -73,7 +73,7 @@ export function ConnectionEditPage() {
 
   if (!draft) {
     return (
-      <AppShell crumbs={crumbs} tabs={<SectionTabs active="connections" />}>
+      <AppShell crumbs={crumbs} tabs={<SectionTabs />}>
         <div className="pane"><span className="hint">Loading…</span></div>
       </AppShell>
     )
@@ -84,7 +84,7 @@ export function ConnectionEditPage() {
       crumbs={crumbs}
       tabs={
         <>
-          <SectionTabs active="connections" />
+          <SectionTabs />
           <div className="actions">
             {canTest && (
               <button

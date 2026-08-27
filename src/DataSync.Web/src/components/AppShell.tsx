@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
+import { tabClass } from './tabClass'
 import { DatabaseIcon, FlowIcon, GridIcon, LogoIcon } from './icons'
 
 /**
@@ -15,30 +16,29 @@ export function AppShell({ crumbs, tabs, actions, children }: {
   actions?: ReactNode
   children: ReactNode
 }) {
-  const navigate = useNavigate()
-  const { pathname } = useLocation()
-  const section = pathname.startsWith('/connections') ? 'connections' : 'replications'
-
   return (
     <>
       <nav className="rail">
         <div className="rail-mark"><LogoIcon /></div>
-        <button
-          className={`rail-item ${section === 'replications' ? 'active' : ''}`}
-          onClick={() => navigate('/replications')}
+        {/* Not `end`: a section stays lit while you are anywhere inside it, which is what the rail is
+            for. That the router decides it — rather than each screen declaring which section it
+            belongs to — is the point of every destination having a route. */}
+        <NavLink
+          to="/replications"
+          className={({ isActive }) => `rail-item ${isActive ? 'active' : ''}`}
           title="Replications"
           data-testid="rail-replications"
         >
           <FlowIcon />
-        </button>
-        <button
-          className={`rail-item ${section === 'connections' ? 'active' : ''}`}
-          onClick={() => navigate('/connections')}
+        </NavLink>
+        <NavLink
+          to="/connections"
+          className={({ isActive }) => `rail-item ${isActive ? 'active' : ''}`}
           title="Connections"
           data-testid="rail-connections"
         >
           <DatabaseIcon />
-        </button>
+        </NavLink>
         <span className="rail-item" style={{ color: 'var(--ink-faint)', cursor: 'default' }} title="Overview">
           <GridIcon />
         </span>
@@ -85,25 +85,13 @@ export interface Crumb {
   heading?: boolean
 }
 
-/** The two top-level sections, shown on the list screens. */
-export function SectionTabs({ active }: { active: 'replications' | 'connections' }) {
-  const navigate = useNavigate()
+/** The two top-level sections, shown on the list screens. Which one is lit comes from the URL, so no
+ * screen has to declare it. */
+export function SectionTabs() {
   return (
     <>
-      <button
-        className={`tab ${active === 'replications' ? 'active' : ''}`}
-        onClick={() => navigate('/replications')}
-        data-testid="tab-replications"
-      >
-        Replications
-      </button>
-      <button
-        className={`tab ${active === 'connections' ? 'active' : ''}`}
-        onClick={() => navigate('/connections')}
-        data-testid="tab-connections"
-      >
-        Connections
-      </button>
+      <NavLink to="/replications" className={tabClass} data-testid="tab-replications">Replications</NavLink>
+      <NavLink to="/connections" className={tabClass} data-testid="tab-connections">Connections</NavLink>
     </>
   )
 }

@@ -32,7 +32,7 @@ export function ConnectionsPage() {
   }
 
   return (
-    <AppShell crumbs={[{ label: 'Connections' }]} tabs={<SectionTabs active="connections" />}>
+    <AppShell crumbs={[{ label: 'Connections' }]} tabs={<SectionTabs />}>
       <div className="pane">
         <div className="page-head">
           <h1 className="page-title">Connections</h1>
