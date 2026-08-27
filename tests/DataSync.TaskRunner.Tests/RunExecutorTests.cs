@@ -1,5 +1,6 @@
 using ClrKernel.Core.Secrets;
 using DataSync.Core.Config;
+using DataSync.Scripting;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
@@ -47,7 +48,8 @@ public sealed class RunExecutorTests : IDisposable
 
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore, _taskRunStore,
-            new ChangeWatermarkStore(_stateDatabase), _runLockStore, _workQueueStore, _logWriter);
+            new ChangeWatermarkStore(_stateDatabase), _runLockStore, _workQueueStore, _logWriter,
+            Scripting.ForTests(_configRepository, _repoRoot));
     }
 
     public void Dispose()

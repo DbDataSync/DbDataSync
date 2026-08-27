@@ -6,6 +6,8 @@
     <Project Path="src/DataSync.Drivers.Generic/DataSync.Drivers.Generic.csproj" />
     <Project Path="src/DataSync.Drivers.MsSql/DataSync.Drivers.MsSql.csproj" />
     <Project Path="src/DataSync.Drivers.Postgres/DataSync.Drivers.Postgres.csproj" />
+    <Project Path="src/DataSync.Scripting/DataSync.Scripting.csproj" />
+    <Project Path="src/DataSync.Scripting.Abstractions/DataSync.Scripting.Abstractions.csproj" />
     <Project Path="src/DataSync.State/DataSync.State.csproj" />
     <Project Path="src/DataSync.TaskRunner/DataSync.TaskRunner.csproj" />
   </Folder>
@@ -20,6 +22,7 @@
     <Project Path="tests/DataSync.Drivers.Generic.Tests/DataSync.Drivers.Generic.Tests.csproj" />
     <Project Path="tests/DataSync.Drivers.MsSql.Tests/DataSync.Drivers.MsSql.Tests.csproj" />
     <Project Path="tests/DataSync.Drivers.Postgres.Tests/DataSync.Drivers.Postgres.Tests.csproj" />
+    <Project Path="tests/DataSync.Scripting.Tests/DataSync.Scripting.Tests.csproj" />
     <Project Path="tests/DataSync.State.Tests/DataSync.State.Tests.csproj" />
     <Project Path="tests/DataSync.TaskRunner.Tests/DataSync.TaskRunner.Tests.csproj" />
   </Folder>

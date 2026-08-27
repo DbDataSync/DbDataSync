@@ -29,6 +29,11 @@ public sealed class ConnectionConfig
     public string? UserId { get; set; }
     public string? CredentialSecretRef { get; set; }
     public Dictionary<string, string> Properties { get; set; } = new();
+
+    /// <summary>Scripts bound at this level, keyed by slot (see <c>ScriptSlots</c>). An absent key
+    /// inherits from a broader level; a key present with a null value is "explicitly none" and
+    /// overrides an inherited binding. See <see cref="ScriptResolution"/>.</summary>
+    public Dictionary<string, ScriptBinding?> Scripts { get; set; } = new();
 }
 
 /// <summary>

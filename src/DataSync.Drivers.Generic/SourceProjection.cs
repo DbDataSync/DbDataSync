@@ -14,12 +14,6 @@ namespace DataSync.Drivers.Generic;
 /// </summary>
 public static class SourceProjection
 {
-    /// <summary>The token a transform uses to refer to the column it is transforming. Substituted with
-    /// a reference that is correct for the statement being built — which is not the same string in
-    /// every reader, and is why this is a token rather than the bare column name. See
-    /// <see cref="Render"/>.</summary>
-    public const string ColumnToken = "{{column}}";
-
     /// <summary>
     /// The SELECT list, or <c>*</c> when there is nothing to project.
     /// </summary>
@@ -64,10 +58,11 @@ public static class SourceProjection
 
         // An expression with no token is used verbatim, which keeps a literal, another column, or a
         // correlated subquery expressible — a transform is not required to be *about* its own column.
-        var expression = mapping.Transform.Contains(ColumnToken, StringComparison.Ordinal)
-            ? mapping.Transform.Replace(ColumnToken, columnRef, StringComparison.Ordinal)
+        var expression = mapping.Transform.Contains(ColumnMapping.ColumnToken, StringComparison.Ordinal)
+            ? mapping.Transform.Replace(ColumnMapping.ColumnToken, columnRef, StringComparison.Ordinal)
             : mapping.Transform;
 
         return $"{expression} AS {dialect.QuoteIdentifier(mapping.SourceColumn)}";
     }
 }
+

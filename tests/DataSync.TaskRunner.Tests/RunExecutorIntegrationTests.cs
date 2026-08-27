@@ -1,5 +1,6 @@
 using ClrKernel.Core.Secrets;
 using DataSync.Core.Config;
+using DataSync.Scripting;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
@@ -80,7 +81,8 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _watermarkStore = new ChangeWatermarkStore(stateDatabase);
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore, _taskRunStore,
-            _watermarkStore, new RunLockStore(stateDatabase), _workQueueStore, new LogWriter(stateDatabase));
+            _watermarkStore, new RunLockStore(stateDatabase), _workQueueStore, new LogWriter(stateDatabase),
+            Scripting.ForTests(_configRepository, _repoRoot));
 
         SetUpConfig();
     }
@@ -315,4 +317,5 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             ],
         }, Author);
     }
+
 }

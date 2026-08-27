@@ -4,6 +4,7 @@ using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
 using DataSync.Drivers.Postgres;
+using DataSync.Scripting;
 using DataSync.State;
 using DataSync.TaskRunner;
 
@@ -32,7 +33,10 @@ var executor = new RunExecutor(
     new ChangeWatermarkStore(stateDatabase),
     new RunLockStore(stateDatabase),
     new WorkQueueStore(stateDatabase),
-    logWriter);
+    logWriter,
+    // The cache is what makes scripting affordable here: this process is spawned per run, so without
+    // it every pass would start a compiler before compiling anything of ours.
+    new ScriptHost(configRepository, new ScriptCompiler(ScriptCacheDirectory.BesideStateDatabase(options.StateDbPath))));
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>

@@ -97,6 +97,59 @@ public sealed class ConfigRepository
         _git.CommitChanges([path], $"Delete connection '{name}'", author);
     }
 
+    // ---- Scripts ----
+
+    /// <summary>
+    /// Manifest and code are written and committed **together**, so history never shows a manifest
+    /// describing code that was not yet there, or code with no manifest to say what it implements.
+    /// </summary>
+    public ScriptDefinition SaveScript(ScriptDefinition script, GitAuthor author)
+    {
+        ConfigValidation.ValidateName(script.Manifest.Name, nameof(script.Manifest.Name));
+
+        var manifestPath = ConfigPaths.ScriptManifestFile(_configRoot, script.Manifest.Name);
+        var codePath = ConfigPaths.ScriptCodeFile(_configRoot, script.Manifest.Name);
+        Directory.CreateDirectory(ConfigPaths.ScriptsDir(_configRoot));
+
+        File.WriteAllText(manifestPath, YamlConfigSerializer.Serialize(script.Manifest));
+        File.WriteAllText(codePath, script.Code);
+        _git.CommitChanges([manifestPath, codePath], $"Save script '{script.Manifest.Name}'", author);
+
+        return script;
+    }
+
+    public ScriptDefinition LoadScript(string name)
+    {
+        var manifestPath = ConfigPaths.ScriptManifestFile(_configRoot, name);
+        if (!File.Exists(manifestPath))
+            throw new FileNotFoundException($"Script '{name}' was not found.", manifestPath);
+
+        var codePath = ConfigPaths.ScriptCodeFile(_configRoot, name);
+        return new ScriptDefinition
+        {
+            Manifest = YamlConfigSerializer.Deserialize<ScriptConfig>(File.ReadAllText(manifestPath)),
+            // A manifest with no code beside it is a broken script, not an empty one — but it fails at
+            // compile with a message about the code rather than here with one about the file.
+            Code = File.Exists(codePath) ? File.ReadAllText(codePath) : "",
+        };
+    }
+
+    public IReadOnlyList<string> ListScripts() => ListFileNamesWithoutExtension(ConfigPaths.ScriptsDir(_configRoot));
+
+    public void DeleteScript(string name, GitAuthor author)
+    {
+        var manifestPath = ConfigPaths.ScriptManifestFile(_configRoot, name);
+        var codePath = ConfigPaths.ScriptCodeFile(_configRoot, name);
+        if (!File.Exists(manifestPath))
+            return;
+
+        File.Delete(manifestPath);
+        if (File.Exists(codePath))
+            File.Delete(codePath);
+
+        _git.CommitChanges([manifestPath, codePath], $"Delete script '{name}'", author);
+    }
+
     // ---- Replication tasks ----
 
     public ReplicationTaskConfig SaveReplicationTask(ReplicationTaskConfig task, GitAuthor author)

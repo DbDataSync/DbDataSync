@@ -5,6 +5,7 @@ namespace DataSync.Core.Config;
 /// config/connections/&lt;name&gt;.yaml
 /// config/replications/&lt;name&gt;/task.yaml
 /// config/replications/&lt;name&gt;/table-mappings/&lt;mapping-name&gt;.yaml
+/// config/scripts/&lt;name&gt;.yaml + config/scripts/&lt;name&gt;.cs
 /// </summary>
 internal static class ConfigPaths
 {
@@ -26,4 +27,14 @@ internal static class ConfigPaths
 
     public static string TableMappingFile(string configRoot, string replicationName, string mappingName) =>
         Path.Combine(TableMappingsDir(configRoot, replicationName), $"{mappingName}.yaml");
+
+    public static string ScriptsDir(string configRoot) => Path.Combine(configRoot, "scripts");
+
+    public static string ScriptManifestFile(string configRoot, string name) =>
+        Path.Combine(ScriptsDir(configRoot), $"{name}.yaml");
+
+    /// <summary>The code, beside the manifest. Two files rather than one because code embedded in YAML
+    /// diffs badly, cannot be opened by an editor, and re-indents on every serializer round trip.</summary>
+    public static string ScriptCodeFile(string configRoot, string name) =>
+        Path.Combine(ScriptsDir(configRoot), $"{name}.cs");
 }

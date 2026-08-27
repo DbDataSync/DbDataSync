@@ -3,6 +3,8 @@ using System.Threading.Channels;
 using ClrKernel.Core.Secrets;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
+using DataSync.Scripting;
+using DataSync.Scripting.Abstractions;
 using DataSync.State;
 
 namespace DataSync.TaskRunner;
@@ -31,7 +33,8 @@ public sealed class RunExecutor(
     ChangeWatermarkStore watermarkStore,
     RunLockStore runLockStore,
     WorkQueueStore workQueueStore,
-    LogWriter logWriter)
+    LogWriter logWriter,
+    ScriptHost scriptHost)
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
@@ -234,6 +237,12 @@ public sealed class RunExecutor(
             var watermarkKey = WatermarkKey.Build(source);
             var previousWatermark = item.RunKind == RunKind.Primary ? watermarkStore.GetWatermark(task.Name, watermarkKey) : null;
 
+            // Resolved once per pass, not per statement: the script generates an expression in exactly
+            // the form a hand-written transform takes, and phase 22's projection does the rest —
+            // including the {{column}} substitution that makes it correct in a reader whose statement
+            // aliases the source table.
+            var columnMappings = ApplyScriptedTransforms(task, mapping, source, sourceDriver, item.RunId);
+
             var segments = await ResolveSegmentsAsync(reader, sourceConnection, source, item, processing.Reader.Options, cancellationToken);
             if (segments.Count > 1)
                 Log(item.RunId, LogSeverity.Info, $"Processing {segments.Count} configured segment(s) in this pass.");
@@ -253,7 +262,7 @@ public sealed class RunExecutor(
                     $"Reading changes for '{mapping.Name}' ({scope}, watermark: {previousWatermark ?? "<none>"}).");
 
                 var read = await reader.ReadChangesAsync(
-                    sourceConnection, source, previousWatermark, mapping.ColumnMappings, readerOptions, cancellationToken);
+                    sourceConnection, source, previousWatermark, columnMappings, readerOptions, cancellationToken);
                 var staged = await stagingProvider.StageAsync(
                     targetConnection, target, read.Rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
 
@@ -307,6 +316,41 @@ public sealed class RunExecutor(
     /// one pass), or a single null meaning "no segment, read the whole thing" — every ordinary
     /// incremental pass.
     /// </summary>
+    /// <summary>
+    /// The mapping's columns with any bound <c>sqlColumnExpression</c> script's output folded into
+    /// <see cref="ColumnMapping.Transform"/>.
+    /// <para>
+    /// Only the reader is given these. Staging and the writer keep the *configured* mappings, because a
+    /// transform changes a value on its way out of the source and has nothing to say about which target
+    /// column it lands in.
+    /// </para>
+    /// </summary>
+    private IReadOnlyList<ColumnMapping> ApplyScriptedTransforms(
+        ReplicationTaskConfig task, TableMappingConfig mapping, SourceTableRef source, IDriver sourceDriver, Guid runId)
+    {
+        var connection = configRepository.LoadConnection(source.ConnectionName);
+        var binding = scriptHost.ResolveBinding<ISqlColumnExpression>(
+            ScriptSlots.SqlColumnExpression, connection, task, mapping);
+
+        if (binding is null)
+            return mapping.ColumnMappings;
+
+        var generated = new List<string>();
+        var result = ScriptedColumnTransforms.Apply(
+            mapping.ColumnMappings,
+            binding.Value.Script,
+            binding.Value.Parameters,
+            new RunnerScriptDialect(sourceDriver.DriverType),
+            columnMetadata: null,
+            log: generated.Add);
+
+        if (generated.Count > 0)
+            Log(runId, LogSeverity.Info,
+                $"Column-expression script generated {generated.Count} source transform(s): {string.Join("; ", generated)}");
+
+        return result;
+    }
+
     private static async Task<IReadOnlyList<BatchReloadSegment?>> ResolveSegmentsAsync(
         IChangeReader reader,
         DbConnection sourceConnection,
@@ -372,4 +416,23 @@ public sealed class RunExecutor(
 
     private sealed class ConnectivityException(string connectionName, Exception inner)
         : Exception($"Failed to open connection '{connectionName}': {inner.Message}", inner);
+}
+
+/// <summary>
+/// What a column-expression script is told about the engine, when the transform is generated before
+/// any statement exists. Quoting comes from the driver's own dialect where there is one; the column
+/// the script is transforming is handed to it as <see cref="ColumnMapping.ColumnToken"/>, so a script
+/// rarely needs to quote anything itself.
+/// </summary>
+internal sealed class RunnerScriptDialect(ConnectionDriverType driverType) : IScriptDialect
+{
+    public string EngineName => driverType.ToString();
+
+    public string QuoteIdentifier(string identifier) => driverType switch
+    {
+        ConnectionDriverType.MsSql => $"[{identifier.Replace("]", "]]")}]",
+        _ => $"\"{identifier.Replace("\"", "\"\"")}\"",
+    };
+
+    public string ParameterReference(string name) => $"@{name}";
 }

@@ -298,8 +298,8 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         if (mapping is null)
             return baseReference;
 
-        var expression = mapping.Transform!.Contains(SourceProjection.ColumnToken, StringComparison.Ordinal)
-            ? mapping.Transform.Replace(SourceProjection.ColumnToken, baseReference, StringComparison.Ordinal)
+        var expression = mapping.Transform!.Contains(ColumnMapping.ColumnToken, StringComparison.Ordinal)
+            ? mapping.Transform.Replace(ColumnMapping.ColumnToken, baseReference, StringComparison.Ordinal)
             : mapping.Transform;
 
         return $"{expression} AS {SqlIdentifier.Quote(column)}";

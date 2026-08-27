@@ -7,6 +7,7 @@ using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
+using DataSync.Scripting;
 using DataSync.Drivers.Postgres;
 using DataSync.State;
 
@@ -52,6 +53,10 @@ builder.Services.AddSingleton(_ =>
     return registry;
 });
 
+builder.Services.AddSingleton(sp =>
+    ScriptCacheDirectory.BesideStateDatabase(sp.GetRequiredService<ApiOptions>().StateDbPath));
+builder.Services.AddSingleton<ScriptCompiler>();
+builder.Services.AddSingleton<ScriptHost>();
 builder.Services.AddSingleton<DriverConnectionFactory>();
 builder.Services.AddSingleton<MetadataService>();
 builder.Services.AddSingleton<ProcessSupervisor>();
