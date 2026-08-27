@@ -241,7 +241,16 @@ public sealed class RunExecutor(
             // the form a hand-written transform takes, and phase 22's projection does the rest —
             // including the {{column}} substitution that makes it correct in a reader whose statement
             // aliases the source table.
-            var columnMappings = ApplyScriptedTransforms(task, mapping, source, sourceDriver, item.RunId);
+            var sourceScriptDialect = new RunnerScriptDialect(sourceDriver.DriverType);
+            var sourceConnectionConfig = configRepository.LoadConnection(source.ConnectionName);
+            var columnMappings = ApplyScriptedTransforms(
+                task, mapping, sourceConnectionConfig, sourceScriptDialect, item.RunId);
+
+            // The in-process half of the transform story. Built once per pass — each script is asked
+            // what it wants before any row arrives, so the per-row path stays as narrow as it can be.
+            var transforms = TransformPipeline.Build(
+                scriptHost, sourceConnectionConfig, task, mapping, columnMappings, sourceScriptDialect,
+                message => Log(item.RunId, LogSeverity.Info, $"[{mapping.Name}] {message}"));
 
             var segments = await ResolveSegmentsAsync(reader, sourceConnection, source, item, processing.Reader.Options, cancellationToken);
             if (segments.Count > 1)
@@ -263,8 +272,16 @@ public sealed class RunExecutor(
 
                 var read = await reader.ReadChangesAsync(
                     sourceConnection, source, previousWatermark, columnMappings, readerOptions, cancellationToken);
+                var rows = transforms.IsEmpty
+                    ? read.Rows
+                    : transforms.ApplyAsync(
+                        read.Rows,
+                        dropped => Log(item.RunId, LogSeverity.Info,
+                            $"'{mapping.Name}': {dropped} row(s) dropped by a transform script."),
+                        cancellationToken);
+
                 var staged = await stagingProvider.StageAsync(
-                    targetConnection, target, read.Rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
+                    targetConnection, target, rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
 
                 // Only meaningful now that staging has drained the reader's stream. A run that skipped
                 // rows is a run whose source was changing under it — worth surfacing next to a mapping
@@ -326,9 +343,9 @@ public sealed class RunExecutor(
     /// </para>
     /// </summary>
     private IReadOnlyList<ColumnMapping> ApplyScriptedTransforms(
-        ReplicationTaskConfig task, TableMappingConfig mapping, SourceTableRef source, IDriver sourceDriver, Guid runId)
+        ReplicationTaskConfig task, TableMappingConfig mapping, ConnectionConfig connection,
+        IScriptDialect dialect, Guid runId)
     {
-        var connection = configRepository.LoadConnection(source.ConnectionName);
         var binding = scriptHost.ResolveBinding<ISqlColumnExpression>(
             ScriptSlots.SqlColumnExpression, connection, task, mapping);
 
@@ -340,7 +357,7 @@ public sealed class RunExecutor(
             mapping.ColumnMappings,
             binding.Value.Script,
             binding.Value.Parameters,
-            new RunnerScriptDialect(sourceDriver.DriverType),
+            dialect,
             columnMetadata: null,
             log: generated.Add);
 

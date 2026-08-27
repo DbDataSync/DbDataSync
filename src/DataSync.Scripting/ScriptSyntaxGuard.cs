@@ -28,6 +28,17 @@ namespace DataSync.Scripting;
 /// </summary>
 internal static class ScriptSyntaxGuard
 {
+    /// <summary>
+    /// Namespaces a script has no business in.
+    /// <para>
+    /// <c>System.Threading</c> is deliberately **not** here, though it was until the row-transform
+    /// contract was written against it. <c>ValueTask</c>, <c>Task</c> and <c>CancellationToken</c> live
+    /// there, so banning it makes <see cref="Abstractions.IRowTransform"/> literally unimplementable —
+    /// a guard that forbids the shape of the contract it is guarding is just broken. What it would have
+    /// bought (<c>Thread.Sleep</c>) is a script blocking itself, which is a bug in that script and not
+    /// a way out of the process.
+    /// </para>
+    /// </summary>
     private static readonly string[] BannedNamespaces =
     [
         "System.IO",
@@ -35,7 +46,6 @@ internal static class ScriptSyntaxGuard
         "System.Diagnostics",
         "System.Reflection",
         "System.Runtime.InteropServices",
-        "System.Threading",
     ];
 
     public static IReadOnlyList<ScriptDiagnostic> Check(SyntaxTree tree)

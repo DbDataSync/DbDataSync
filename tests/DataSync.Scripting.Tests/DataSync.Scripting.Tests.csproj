@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataSync.Scripting\DataSync.Scripting.csproj" />
+    <ProjectReference Include="..\..\src\DataSync.Drivers.Abstractions\DataSync.Drivers.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

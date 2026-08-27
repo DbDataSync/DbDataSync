@@ -412,4 +412,67 @@ public sealed class ReverseName : ISqlColumnExpression
     const rows = querySql(`SET NOCOUNT ON; SELECT Name FROM dbo.[${TARGET_TABLE}];`, DB_NAME)
     expect(rows).toContain('tegdiW')
   })
+
+  test('16 - a C# row transform filters rows in process, between the reader and staging', async ({ page }) => {
+    // The other half of the transform story. Phase 22's SQL runs at the source; this runs here, on the
+    // stream, and can do the one thing SQL in a SELECT list cannot: drop the row entirely.
+    const SCRIPT = 'drop-gadgets'
+
+    await page.goto('/scripts/new')
+    await page.getByTestId('script-name-input').fill(SCRIPT)
+    await page.getByTestId('script-kind-select').selectOption('rowTransform')
+    await page.getByTestId('script-entry-type-input').fill('DropGadgets')
+    await page.getByTestId('script-code-input').fill(`using System.Threading;
+using System.Threading.Tasks;
+using DataSync.Drivers.Abstractions;
+using DataSync.Scripting.Abstractions;
+
+public sealed class DropGadgets : IRowTransform
+{
+    public ChangeSchema DeclareSchema(ChangeSchema input, RowTransformContext c) => input;
+
+    public ValueTask<ChangeRow?> TransformAsync(ChangeRow row, RowTransformContext c, CancellationToken ct)
+    {
+        // 'tegdaG', not 'Gadget': the source's own SQL transform has already run by the time a row
+        // reaches here, so this sees REVERSE(Name). That ordering is the contract — source SQL, then
+        // values, then the row — and this is what it looks like.
+        var name = row["Name"] as string;
+        if (name == "tegdaG")
+        {
+            c.Log($"dropping {name}");
+            return ValueTask.FromResult<ChangeRow?>(null);
+        }
+        return ValueTask.FromResult<ChangeRow?>(row);
+    }
+}
+`)
+    await page.getByTestId('save-script-button').click()
+    await expect(page.getByTestId('scripts-table')).toContainText(SCRIPT, { timeout: 15_000 })
+
+    // Bound on the replication this time — the middle level, inherited by every mapping under it.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await expect(page.getByTestId('script-bindings-card')).toBeVisible({ timeout: 15_000 })
+    await page.getByTestId('script-binding-rowTransform').selectOption(SCRIPT)
+    await page.getByTestId('save-settings-button').click()
+
+    // Clear the target and touch the source, so this pass genuinely re-reads both rows.
+    runSql(`DELETE FROM dbo.[${TARGET_TABLE}];`, DB_NAME)
+    runSql(`UPDATE dbo.[${SOURCE_TABLE}] SET Name = Name;`, DB_NAME)
+
+    await page.goto(`/replications/${REPLICATION_NAME}/runs`)
+    await page.getByTestId('trigger-run-button').click()
+    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
+
+    await shot(page, '21-row-transform-run.png')
+
+    // The script's log line lands in the run log too, but the live panel auto-clears a few seconds
+    // after completion and a two-row run beats the assertion to it. That the log reaches the run is
+    // covered by TransformPipelineTests; what matters here is the data.
+
+    // One row staged out of two read, and the one that survived is the source-transformed 'Widget'.
+    const rows = querySql(`SET NOCOUNT ON; SELECT Name FROM dbo.[${TARGET_TABLE}];`, DB_NAME)
+    expect(rows).toContain('tegdiW')
+    expect(rows).not.toContain('tegdaG')
+    expect(rows.trim().split('\n').filter((l) => l.trim())).toHaveLength(1)
+  })
 })
