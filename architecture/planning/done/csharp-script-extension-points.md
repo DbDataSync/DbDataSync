@@ -1,6 +1,6 @@
 # C# scripting — the extension points
 
-**Status: proposal, not agreed.** The contracts an operator implements, and where each one is invoked.
+**Status: resolved 2026-08-27 — see Outcome at the end.** The contracts an operator implements, and where each one is invoked.
 The host that compiles and resolves them is `csharp-scripting-host.md`.
 
 Every contract below lives in `DataSync.Scripting.Abstractions` and is referenced by the driver
@@ -69,12 +69,65 @@ public interface IColumnExpression
 }
 ```
 
-This is what **`ColumnMapping.Transform` should become.** That field has existed since phase 1 and is
-read by nothing — it is either this, or it should be deleted.
-
 **Measure before choosing.** A delegate call per cell over millions of rows is precisely the class of
 cost phase 14 measured for the row representation, and `tools/benchmarks` already exists to answer it.
 The stated house rule applies: the only correct answer is to measure the impact.
+
+### …and a third place a transform can happen — settled 2026-08-27
+
+The two above both run **in this process**. There is a third option that runs in the *source engine*,
+and it is the one the config model has always had a field for:
+
+```csharp
+public sealed class ColumnMapping
+{
+    public required string SourceColumn { get; set; }
+    public required string TargetColumn { get; set; }
+    public string? Transform { get; set; }   // declared in phase 1, read by nothing until phase 22
+}
+```
+
+`Transform` is **a SQL expression in the source dialect**, rendered into the reader's SELECT list and
+evaluated by the source. `UPPER("region")`, `CAST("amount" AS numeric(18,2))`,
+`COALESCE("code", 'UNKNOWN')`.
+
+It is **not** a script and does not become one. It is kept, implemented, and supported on its own —
+`implementation/todo/phase-022-source-sql-column-transforms.md`.
+
+The three are genuinely different tools and all three are wanted:
+
+| | runs on | cost | can do |
+| --- | --- | --- | --- |
+| `Transform` (SQL) | the **source engine** | free to us; the source does the work, and it moves less data when the expression narrows | anything that engine's SQL can express |
+| `columnExpression` (C#) | this process, per cell | a delegate call per cell | anything C# can express, on one value |
+| `rowTransform` (C#) | this process, per row | a delegate call per row | anything C# can express, across the whole row, including dropping it |
+
+**And a script may generate the first.** That is the fourth combination and it is the interesting one:
+a C# script that emits a source-dialect SQL expression gets the flexibility of code at *configuration*
+time and the cost profile of SQL at *run* time. A script that computes a per-engine cast, or builds a
+`CASE` from a lookup table, writes it once and the source evaluates it a billion times for free.
+
+So `columnExpression` has two shapes, and the manifest says which:
+
+```csharp
+/// Emits SQL evaluated by the source engine. Generated once per pass.
+public interface ISqlColumnExpression
+{
+    /// Return null to emit the column unchanged.
+    string? RenderSql(ColumnMetadata column, SqlDialect dialect, ColumnExpressionContext context);
+}
+
+/// Transforms the value in this process, per cell.
+public interface IValueColumnExpression
+{
+    object? Evaluate(object? value, ColumnExpressionContext context);
+}
+```
+
+`ISqlColumnExpression` and `ISelectListContribution` below are the same idea reached from two
+directions; they should be **one interface**, not two. The name that survives is
+`ISqlColumnExpression`, because "select list contribution" describes the mechanism and this describes
+the intent.
 
 ---
 
@@ -117,17 +170,12 @@ from metadata". Those are different amounts of ownership and should be different
 script that only wants to add a computed column should not have to take responsibility for the WHERE
 clause, the segment predicate and the watermark.
 
-### 3a. `selectListContribution` — the smallest
+### 3a. `columnExpression` in its SQL shape — the smallest
 
-Contributes one entry to the SELECT list for a column. The host still builds the statement.
-
-```csharp
-public interface ISelectListContribution
-{
-    /// Return null to emit the column unchanged.
-    string? RenderColumn(ColumnMetadata column, SqlDialect dialect, SourceQueryContext context);
-}
-```
+Already described above as `ISqlColumnExpression`: contributes one entry to the SELECT list for a
+column, and the host still builds the statement. Listed here too because it is the smallest rung of the
+source-query ladder as well as the largest rung of the transform ladder — it is the same thing seen
+from both ends.
 
 Use: `CAST("amount" AS numeric(18,2))`, `COALESCE("region", 'UNKNOWN')`, a spatial column rendered as
 WKT because the target cannot hold the native type.
@@ -226,6 +274,9 @@ another slot: `script-generated-change-queries.md`.
 
 ## Open questions
 
+- **Ordering of the three transform stages.** SQL runs at the source, then `columnExpression`, then
+  `rowTransform` — that ordering is forced by where each one lives, but a mapping that uses two of them
+  on the same column needs the UI to make it obvious which runs first.
 - **Does a row transform see deletes?** A `ChangeOperation.Delete` row carries only its key. Passing it
   through a transform that expects values is a trap. Options: pass it and document; skip transforms for
   deletes; or let the manifest declare which operations the transform wants. The third is probably
@@ -235,3 +286,20 @@ another slot: `script-generated-change-queries.md`.
 - **Where preview data comes from.** The Test action needs sample rows. Reading N rows from the real
   source is the honest sample and also a real query against production. Probably fine with an explicit
   row cap; worth deciding rather than defaulting.
+
+---
+
+# Outcome — resolved 2026-08-27
+
+Agreed. The substantive change from the original proposal is that **a transform can happen in three
+places, not two**, and the config field that has been dangling since phase 1 is the third:
+
+- `ColumnMapping.Transform` — SQL in the source dialect, evaluated by the source. **Kept and
+  implemented**, independent of scripting, in phase 22.
+- `columnExpression` — a script, in either of two shapes: `ISqlColumnExpression` generating the above,
+  or `IValueColumnExpression` transforming the value in process.
+- `rowTransform` — a script, per row, between the reader and staging.
+
+Phasing is recorded in `csharp-scripting-host.md`'s Outcome. Phase 22 is the prerequisite for all of
+it, because a source-dialect transform requires the reader to build an explicit projection rather than
+`SELECT *` — and once it does, a generated expression has somewhere to go.

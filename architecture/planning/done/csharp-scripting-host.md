@@ -1,6 +1,6 @@
 # Embedding C# as a scripting language — the host
 
-**Status: proposal, not agreed.** Written to the brief "embed C# as a scripting language that can be
+**Status: resolved 2026-08-27 — see Outcome at the end.** Written to the brief "embed C# as a scripting language that can be
 configured at a per connection, per replication task, or per table mapping level". This doc covers the
 *host*: how a script is stored, compiled, resolved and run. The extension points it plugs into are
 `csharp-script-extension-points.md`; change-tracking query generation is
@@ -99,6 +99,20 @@ populates the cache when it validates on save, so in the normal case a run never
 The in-memory cache still matters in the API, which is long-lived and compiles on every save and
 preview.
 
+## Security — settled: acceptable, and gated by permissions
+
+**Decided 2026-08-27.** The risk of running operator-authored C# in process is accepted. Access to
+register and edit scripts is gated by permissions, which puts it in the same category as the ability to
+write a connection config pointing at any database — something a privileged operator can already do.
+
+That settles the two questions this section originally left open:
+
+- **Metadata providers run in process**, in the API, like any other script. No child-process isolation,
+  no separate execution host.
+- **No sandbox is attempted.** See below for what the reference set is and is not.
+
+The rest of this section stands as written, because the reasoning still governs what we build.
+
 ## The reference set is a guardrail, not a sandbox
 
 Scripts get an explicit, closed set of assembly references: `System.Runtime`, `System.Linq`,
@@ -122,10 +136,15 @@ hostile author:
 - scripts execute in the **TaskRunner**, which is already a separate short-lived process per run, so a
   script that hangs or crashes takes down one run and not the API
 
-That last point has one genuine hole: **metadata providers and query previews have to run in the API**,
-because that is where the SPA's pickers ask. A metadata provider script therefore *can* hang or crash
-the API. Options: run them with a hard timeout and accept the risk; or run them in a short-lived child
-process the way runs already are. The second is more work and more correct. Not decided here.
+That last point has one consequence worth stating rather than hiding: **metadata providers and query
+previews run in the API**, because that is where the SPA's pickers ask. A metadata provider script
+therefore can hang or crash the API. That is accepted — it is the same trust boundary as everything
+else here, and the alternative (a child process per metadata call) buys isolation that the permission
+gate already provides more cheaply.
+
+A cooperative `CancellationToken` and a timeout on the *call* still apply, so a script that respects
+cancellation is bounded. One that does not will hold a request thread; that is a bug in the script,
+found the first time it runs.
 
 ## Resolution: connection → replication → table mapping
 
@@ -230,13 +249,34 @@ Each of these is a phase doc's worth of work; none of them is useful without the
 
 ## Open questions
 
-- **Metadata-provider isolation.** Accept the API risk, or spawn a child process? The second is
-  correct and is more work than the rest of slot B.
-- **Timeouts.** A `CancellationToken` is honoured only by a cooperative script. `while(true){}` needs a
-  process boundary to kill. Same answer as above, and it is the same question.
 - **Per-cell cost.** Phase 14 measured what the in-memory row shape costs; a per-cell delegate over
   millions of rows is the same class of question and the same benchmark tool answers it
   (`tools/benchmarks`). Measure before choosing per-column over per-row, not after.
-- **`ColumnMapping.Transform` already exists and is never read.** Declared in phase 1 and dangling
-  since. It should either become the `columnExpression` binding or be deleted; leaving a field that
-  looks like it does something is worse than either.
+- ~~**`ColumnMapping.Transform` already exists and is never read.**~~ **Settled 2026-08-27: it stays,
+  and it is a SQL expression in the *source* dialect, evaluated by the source engine.** It is not a
+  script and never becomes one. A script's role is to *generate* one — see the extension-points doc and
+  `implementation/todo/phase-022-source-sql-column-transforms.md`.
+
+---
+
+# Outcome — resolved 2026-08-27
+
+Agreed, with three decisions recorded above:
+
+1. **The security risk is accepted** and gated by permissions. Metadata providers run in process.
+2. **`ColumnMapping.Transform` stays and gets implemented** — a SQL expression in the source dialect,
+   evaluated by the source engine. Independent of scripting, and a prerequisite for it.
+3. **A script can do both**: generate a source-dialect SQL transform, *and* transform rows in process
+   between the reader and staging. They are different slots with different costs, and both are wanted.
+
+Broken into phases. Only the first is written — each later one gets designed once the phase before it
+has landed and changed what we know, following the practice `additional-database-drivers.md` set.
+
+| phase | what | doc |
+| --- | --- | --- |
+| 22 | **Column transforms in the source SQL dialect** — `ColumnMapping.Transform` implemented; readers gain an explicit projection | `implementation/todo/phase-022-source-sql-column-transforms.md` |
+| 23 | Scripting host: registry, manifest, Roslyn compile, disk cache, `ScriptResolution`, API and SPA | not yet written |
+| 24 | Scripted transforms — the SQL-expression generator (feeding phase 22's projection) and the in-process row transform | not yet written |
+| 25 | Scripted metadata providers | not yet written |
+| 26 | Scripted source query builders | not yet written |
+| — | Scripted target statement generation | deliberately later; "eventually" in the brief and the riskiest slot |
