@@ -35,7 +35,7 @@ jobs:
         ports:
           - 14330:1433
         options: >-
-          --health-cmd "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1'"
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -48,7 +48,7 @@ jobs:
         ports:
           - 14331:1433
         options: >-
-          --health-cmd "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1'"
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10

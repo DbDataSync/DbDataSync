@@ -44,4 +44,22 @@ than a dash that reads like zero.
 That is a real design, but it should be written after phases 32 and 34 exist rather than in front of
 them — both will have learned something about what their position actually compares against.
 
-**Next step**: build 32 and 34, then come back with two working examples instead of a table of guesses.
+## What "lag" should mean (2026-08-28)
+
+Both numbers from the phase 15 mockups are wanted, not one instead of the other — they answer different
+questions and both belong on the card:
+
+1. **Time since last completed pass** — wall-clock since the most recent successful run finished. This
+   is the trivial one (item 1 above); it stays in scope alongside the harder number rather than being
+   dropped as "nearly useless" on its own. It answers "is this replication still running at all."
+2. **Time difference between source and target applied data** — the watermark-age number (item 2
+   above), expressed as a *time* wherever the reader's position can be converted to one. This is the
+   one that answers "how stale is the data."
+
+This confirms the per-mechanism table still matters for (2): a reader that can't produce a time-based
+answer (PgLogicalSlot's bytes, MsSqlChangeTracking's version count, BatchReload's nothing) should say so
+rather than force a number, per the "declares a capability, with its unit, or says not applicable"
+design above. (1) is uniform across all readers and doesn't need the capability interface at all.
+
+**Next step**: build 32 and 34, then come back with two working examples for (2) instead of a table of
+guesses. (1) has no such blocker and could be built any time — it's just less valuable alone.
