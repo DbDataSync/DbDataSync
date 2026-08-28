@@ -30,6 +30,23 @@ public sealed class ScriptedQueryReader(ScriptHost scriptHost, SqlDialect dialec
     /// are one decision and belong in one place.</summary>
     public const string ScriptOption = "script";
 
+    /// <summary>
+    /// Named rather than a dropdown of script names: which scripts exist is the registry's question
+    /// and the driver layer cannot see it. The SPA fills the choices in from the scripts endpoint —
+    /// see <c>ParameterForm</c>'s handling of a script-typed name.
+    /// </summary>
+    public IReadOnlyList<ParameterDescriptor> Parameters { get; } =
+    [
+        new()
+        {
+            Name = ScriptOption,
+            Label = "Query builder script",
+            Description = "The script that builds this reader's statements. Bound by name, not through the hierarchy.",
+            Type = ParameterType.Dropdown,
+            Required = true,
+        },
+    ];
+
     public string Kind => "ScriptedQuery";
 
     /// <summary>

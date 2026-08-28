@@ -23,6 +23,17 @@ public interface IChangeReader
     string Kind { get; }
 
     /// <summary>
+    /// The settings this reader reads out of its options bag, declared beside the code that reads
+    /// them. Empty by default, so a reader with no settings says nothing rather than being made to.
+    /// <para>
+    /// Choosing a Kind used to mean knowing its option keys by heart and typing them into a free-form
+    /// table. Declaring them is what lets the SPA offer them instead — the same relationship
+    /// <see cref="DriverCapabilities"/> already has with the Kind pickers.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<ParameterDescriptor> Parameters => [];
+
+    /// <summary>
     /// Whether a row deleted at the source surfaces as a <see cref="ChangeOperation.Delete"/> change.
     /// False for readers that can only observe rows that still exist — a watermark scan, or a batch
     /// reload whose deletes are reconciled by the writer rather than reported by the reader.

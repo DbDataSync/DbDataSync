@@ -70,10 +70,13 @@ public sealed class DriverRegistry
         TryGet(driverType, out var driver)
             ? new DriverCapabilities(
                 driverType,
-                Readers(driverType).Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader, r.DetectsDeletes)).ToList(),
-                driver.StagingProviders.Select(p => new StagingCapability(p.Kind)).ToList(),
-                driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation)).ToList(),
+                Readers(driverType)
+                    .Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader, r.DetectsDeletes, r.Parameters))
+                    .ToList(),
+                driver.StagingProviders.Select(p => new StagingCapability(p.Kind, p.Parameters)).ToList(),
+                driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation, w.Parameters)).ToList(),
                 driver is IConnectionTester,
-                driver is IProvisioner provisioner ? provisioner.SupportedActions : [])
+                driver is IProvisioner provisioner ? provisioner.SupportedActions : [],
+                driver.ConnectionParameters)
             : null;
 }

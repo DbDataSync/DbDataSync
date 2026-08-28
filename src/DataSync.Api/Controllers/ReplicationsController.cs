@@ -1,3 +1,4 @@
+using DataSync.Api.Services;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
 using Microsoft.AspNetCore.Mvc;
@@ -6,7 +7,8 @@ namespace DataSync.Api.Controllers;
 
 [ApiController]
 [Route("api/replications")]
-public sealed class ReplicationsController(ConfigRepository configRepository, GitAuthor author) : ControllerBase
+public sealed class ReplicationsController(
+    ConfigRepository configRepository, ParameterCheck parameterCheck, GitAuthor author) : ControllerBase
 {
     [HttpGet]
     public ActionResult<IReadOnlyList<string>> List() => Ok(configRepository.ListReplications());
@@ -30,6 +32,7 @@ public sealed class ReplicationsController(ConfigRepository configRepository, Gi
         task.Name = name;
         try
         {
+            parameterCheck.ThrowIfInvalid(task);
             return Ok(configRepository.SaveReplicationTask(task, author));
         }
         catch (ConfigValidationException ex)

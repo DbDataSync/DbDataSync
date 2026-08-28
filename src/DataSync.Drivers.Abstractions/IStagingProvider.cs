@@ -13,6 +13,9 @@ public interface IStagingProvider
     /// <summary>Identifier matched against <see cref="CacheConfig.Kind"/>, e.g. "MsSqlStagingTable".</summary>
     string Kind { get; }
 
+    /// <inheritdoc cref="IChangeReader.Parameters"/>
+    IReadOnlyList<ParameterDescriptor> Parameters => [];
+
     Task<StagedChangeSet> StageAsync(
         DbConnection targetConnection,
         TableRef target,

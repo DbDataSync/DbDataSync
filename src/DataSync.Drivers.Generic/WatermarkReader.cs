@@ -28,6 +28,22 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
 {
     public string Kind => GenericDriverKinds.Watermark;
 
+    /// <summary>Required, and it is: without it this reader cannot run at all, which an operator
+    /// previously found out on the first pass rather than while choosing the Kind.</summary>
+    public IReadOnlyList<ParameterDescriptor> Parameters { get; } =
+    [
+        new()
+        {
+            Name = "watermarkColumn",
+            Label = "Watermark column",
+            Description =
+                "The column whose highest value marks how far this replication has read — a row " +
+                "version, an identity, or a modified-at timestamp. Must be indexed to be worth using.",
+            Type = ParameterType.ColumnPicker,
+            Required = true,
+        },
+    ];
+
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,

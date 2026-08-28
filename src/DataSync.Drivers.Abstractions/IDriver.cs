@@ -13,6 +13,13 @@ public interface IDriver
 {
     ConnectionDriverType DriverType { get; }
 
+    /// <summary>
+    /// What this driver's connections take beyond the fields every connection has. Defaults to the
+    /// free-form properties bag every driver has had since phase 3, so declaring nothing keeps the
+    /// behaviour that was already there — a driver that wants named settings instead overrides it.
+    /// </summary>
+    IReadOnlyList<ParameterDescriptor> ConnectionParameters => [DriverParameters.ConnectionProperties];
+
     IReadOnlyList<IChangeReader> Readers { get; }
     IReadOnlyList<IStagingProvider> StagingProviders { get; }
     IReadOnlyList<IChangeWriter> Writers { get; }

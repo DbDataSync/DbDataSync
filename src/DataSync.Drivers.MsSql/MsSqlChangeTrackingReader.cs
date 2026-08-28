@@ -29,6 +29,21 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     /// </summary>
     public const string SnapshotIsolationOption = "snapshotIsolation";
 
+    /// <summary>Declared beside the code that reads it, so the two cannot describe different things.</summary>
+    public IReadOnlyList<ParameterDescriptor> Parameters { get; } =
+    [
+        new()
+        {
+            Name = SnapshotIsolationOption,
+            Label = "Snapshot isolation",
+            Description =
+                "Reads the change window inside a snapshot transaction, so a row changing mid-pass " +
+                "cannot be read in two states. Requires the source database to allow snapshot isolation.",
+            Type = ParameterType.Bool,
+            Default = "false",
+        },
+    ];
+
     /// <summary>Snapshot isolation transaction failed because it isn't allowed in this database.</summary>
     private const int SnapshotIsolationNotAllowedError = 3952;
 

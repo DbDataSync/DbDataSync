@@ -83,6 +83,7 @@ builder.Services.AddSingleton<DriverConnectionFactory>();
 builder.Services.AddSingleton<MetadataService>();
 builder.Services.AddSingleton<ProvisioningService>();
 builder.Services.AddSingleton<ScriptUsageScanner>();
+builder.Services.AddSingleton<ParameterCheck>();
 builder.Services.AddSingleton<PreviewService>();
 builder.Services.AddSingleton<ScriptTestService>();
 builder.Services.AddSingleton<ProcessSupervisor>();

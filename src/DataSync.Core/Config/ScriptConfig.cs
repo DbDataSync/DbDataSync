@@ -50,16 +50,15 @@ public sealed class ScriptConfig
 
     public string? Description { get; set; }
 
-    public List<ScriptParameterDeclaration> Parameters { get; set; } = new();
+    /// <summary>
+    /// What a binding must supply. The same <see cref="ParameterDescriptor"/> a driver's settings use,
+    /// since phase 42 — and additive rather than a migration, because a declaration written before it
+    /// had only a name, a required flag and a description, all of which this still has, and everything
+    /// new defaults to what those manifests already meant.
+    /// </summary>
+    public List<ParameterDescriptor> Parameters { get; set; } = new();
 
     public bool Enabled { get; set; } = true;
-}
-
-public sealed class ScriptParameterDeclaration
-{
-    public required string Name { get; set; }
-    public bool Required { get; set; }
-    public string? Description { get; set; }
 }
 
 /// <summary>A script and its code, as one thing, for the API and the compiler.</summary>

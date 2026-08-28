@@ -122,7 +122,7 @@ public sealed class HookSaveValidationTests : IDisposable
             Manifest = new ScriptConfig
             {
                 Name = "record-load", Kind = ScriptSlotHook, Language = ScriptLanguage.Sql,
-                Parameters = [new ScriptParameterDeclaration { Name = "controlTable", Required = true }],
+                Parameters = [new ParameterDescriptor { Name = "controlTable", Required = true }],
             },
             Code = "INSERT INTO {{controlTable}} (Mapping) VALUES (@mapping);",
         }, Author);
@@ -143,7 +143,7 @@ public sealed class HookSaveValidationTests : IDisposable
             Manifest = new ScriptConfig
             {
                 Name = "record-load", Kind = ScriptSlotHook, Language = ScriptLanguage.Sql,
-                Parameters = [new ScriptParameterDeclaration { Name = "controlTable", Required = true }],
+                Parameters = [new ParameterDescriptor { Name = "controlTable", Required = true }],
             },
             Code = "INSERT INTO {{controlTable}} (Mapping) VALUES (@mapping);",
         }, Author);
@@ -168,7 +168,7 @@ public sealed class HookSaveValidationTests : IDisposable
             Manifest = new ScriptConfig
             {
                 Name = "record-load", Kind = ScriptSlotHook, Language = ScriptLanguage.Sql,
-                Parameters = [new ScriptParameterDeclaration { Name = "controlTable", Required = true }],
+                Parameters = [new ParameterDescriptor { Name = "controlTable", Required = true }],
             },
             Code = "INSERT INTO {{controlTable}} (Mapping, RowsWritten) VALUES (@mapping, @rowsWritten);",
         }, Author);

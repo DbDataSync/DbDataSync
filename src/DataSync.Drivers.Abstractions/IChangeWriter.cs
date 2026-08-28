@@ -12,6 +12,9 @@ public interface IChangeWriter
     /// <summary>Identifier matched against <see cref="WriterConfig.Kind"/>, e.g. "MsSqlMerge".</summary>
     string Kind { get; }
 
+    /// <inheritdoc cref="IChangeReader.Parameters"/>
+    IReadOnlyList<ParameterDescriptor> Parameters => [];
+
     /// <summary>
     /// Whether this writer makes the target *match* the change set within the scope it was given —
     /// i.e. rows present in the target's scope but absent from the change set are removed. False for

@@ -16,6 +16,7 @@ public sealed class ConnectionsController(
     ConfigRepository configRepository,
     DriverRegistry driverRegistry,
     DriverConnectionFactory connectionFactory,
+    ParameterCheck parameterCheck,
     GitAuthor author) : ControllerBase
 {
     [HttpGet]
@@ -145,6 +146,7 @@ public sealed class ConnectionsController(
         input.Name = name;
         try
         {
+            parameterCheck.ThrowIfInvalid(input);
             return Ok(configRepository.SaveConnection(input, author));
         }
         catch (ConfigValidationException ex)
