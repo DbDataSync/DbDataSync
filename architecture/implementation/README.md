@@ -35,7 +35,7 @@ So the order lives here, and is the one to work through:
 | 4 | **035** — config history diff and revert | |
 | 5 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-28; 039, 040, 037, 041, 036 and 044 done and removed. 042, 043 and 044 done and removed. A phase moving up or down is an ordinary decision and only this
+Set 2026-08-28; 036, 037, 039, 040, 041, 042, 043 and 044 done and removed. A phase moving up or down is an ordinary decision and only this
 table changes.
 
 ## What counts as a phase
