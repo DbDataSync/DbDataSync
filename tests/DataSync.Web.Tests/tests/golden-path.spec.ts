@@ -98,6 +98,19 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await expect(page.getByTestId('task-source-connection-select')).toHaveValue(SRC_CONNECTION_NAME, { timeout: 15_000 })
   })
 
+  test('04b - the Overview leads with what a replication is, not with an advanced customisation', async ({ page }) => {
+    // Phase 23 put the scripts card first because it was the new thing, which is the oldest reason to
+    // get an ordering wrong. Endpoints are what a replication *is*.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await expect(page.locator('.card-title').first()).toContainText('Endpoints', { timeout: 15_000 })
+
+    // And the scripts card is one line until it has something to say.
+    await expect(page.getByTestId('script-bindings-toggle')).toContainText('Custom transforms and providers')
+    await expect(page.getByTestId('script-binding-rowTransform')).toBeHidden()
+    await page.getByTestId('script-bindings-toggle').click()
+    await expect(page.getByTestId('script-binding-rowTransform')).toBeVisible()
+  })
+
   test('05 - add a table mapping that inherits the replication\'s endpoints', async ({ page }) => {
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('tab-mappings').click()
@@ -403,7 +416,11 @@ public sealed class ReverseName : ISqlColumnExpression
 
     // Bind it on the mapping — the most specific level, which is what the hierarchy exists for.
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    // Collapsed until something is bound (phase 37) — an advanced customisation should not hold the
+    // best space on a screen for the majority who never use it.
     await expect(page.getByTestId('script-bindings-card')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('script-binding-sqlColumnExpression')).toBeHidden()
+    await page.getByTestId('script-bindings-toggle').click()
     await page.getByTestId('script-binding-sqlColumnExpression').selectOption(SCRIPT)
 
     const parameters = page.getByTestId('script-parameters-sqlColumnExpression')
@@ -475,6 +492,7 @@ public sealed class DropGadgets : IRowTransform
     // Bound on the replication this time — the middle level, inherited by every mapping under it.
     await page.goto(`/replications/${REPLICATION_NAME}/overview`)
     await expect(page.getByTestId('script-bindings-card')).toBeVisible({ timeout: 15_000 })
+    await page.getByTestId('script-bindings-toggle').click()
     await page.getByTestId('script-binding-rowTransform').selectOption(SCRIPT)
     await page.getByTestId('save-settings-button').click()
 

@@ -73,15 +73,6 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
 
       <form onSubmit={save} style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <ScriptBindingsCard
-            bindings={draft.scripts ?? {}}
-            // What a mapping under this replication would inherit if the replication said nothing:
-            // whatever the *source* connection binds, since these slots are source-side.
-            inherited={sourceConnection?.scripts ?? {}}
-            level="replication"
-            onChange={(scripts) => setDraft({ ...draft, scripts })}
-          />
-
           <EndpointsCard
             endpoints={draft.endpoints ?? { source: null, target: null }}
             mappingCount={mappings?.length}
@@ -149,6 +140,15 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
               </div>
             </div>
           </div>
+
+          <ScriptBindingsCard
+            bindings={draft.scripts ?? {}}
+            // What a mapping under this replication would inherit if the replication said nothing:
+            // whatever the *source* connection binds, since these slots are source-side.
+            inherited={sourceConnection?.scripts ?? {}}
+            level="replication"
+            onChange={(scripts) => setDraft({ ...draft, scripts })}
+          />
         </div>
 
         <div style={{ width: 288, flex: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>

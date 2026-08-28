@@ -271,15 +271,6 @@ export function ConnectionEditPage() {
               </div>
             </div>
 
-            {!isNew && (
-              <ScriptBindingsCard
-                bindings={draft.scripts ?? {}}
-                inherited={{}}
-                level="connection"
-                onChange={(scripts) => setDraft({ ...draft, scripts })}
-              />
-            )}
-
             {canTest && (
               <ConnectionTestCard
                 connectionName={name}
@@ -304,6 +295,15 @@ export function ConnectionEditPage() {
               />
             </div>
           </div>
+
+            {!isNew && (
+              <ScriptBindingsCard
+                bindings={draft.scripts ?? {}}
+                inherited={{}}
+                level="connection"
+                onChange={(scripts) => setDraft({ ...draft, scripts })}
+              />
+            )}
         </form>
       </div>
     </AppShell>

@@ -210,6 +210,9 @@ export interface ScriptDefinition {
 export interface ScriptSlotInfo {
   slot: string
   levels: ('connection' | 'replication' | 'mapping')[]
+  /** What the slot is called in the UI — `sqlColumnExpression` is a good key and a bad label. */
+  label: string
+  description: string
 }
 
 export interface ScriptDiagnostic {

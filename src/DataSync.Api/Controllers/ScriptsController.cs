@@ -32,7 +32,9 @@ public sealed class ScriptsController(
         Ok(ScriptSlots.All
             .Select(slot => new ScriptSlotInfo(
                 slot,
-                BindingLevels.All.Where(level => ScriptSlots.IsBindableAt(slot, level)).ToList()))
+                BindingLevels.All.Where(level => ScriptSlots.IsBindableAt(slot, level)).ToList(),
+                ScriptSlots.Describe(slot).Label,
+                ScriptSlots.Describe(slot).Description))
             .ToList());
 
     [HttpGet("{name}")]
@@ -130,7 +132,7 @@ public sealed class ScriptsController(
     }
 }
 
-public sealed record ScriptSlotInfo(string Slot, IReadOnlyList<string> Levels);
+public sealed record ScriptSlotInfo(string Slot, IReadOnlyList<string> Levels, string Label, string Description);
 
 public sealed record ScriptDiagnosticDto(int Line, int Column, string Message);
 

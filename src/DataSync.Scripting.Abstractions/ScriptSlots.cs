@@ -66,6 +66,37 @@ public static class ScriptSlots
 
     public static bool IsBindableAt(string slot, string level) => BindableAt(level).Contains(slot, StringComparer.Ordinal);
 
+    /// <summary>
+    /// What a slot is called, and what binding one does, in words an operator can act on.
+    /// <para>
+    /// Served through the API rather than kept in the SPA because the slot list is the server's: a
+    /// build that adds a slot should not need a matching SPA release before the new slot has a name.
+    /// <c>sqlColumnExpression</c> is a good key and a bad label.
+    /// </para>
+    /// </summary>
+    public static (string Label, string Description) Describe(string slot) => slot switch
+    {
+        SqlColumnExpression => (
+            "Source SQL for a column",
+            "Generates a SQL expression the source database evaluates, in place of a literal transform. Costs nothing here — the source does the work."),
+        ValueColumnExpression => (
+            "Value transform",
+            "Rewrites one column's value in this process, cell by cell, between the reader and staging."),
+        RowTransform => (
+            "Row transform",
+            "Rewrites or drops whole rows in this process. The most capable of the three, and the most expensive."),
+        LifecycleHook => (
+            "Generated lifecycle SQL",
+            "Generates the SQL run before or after a stage, in place of writing it by hand."),
+        MetadataProvider => (
+            "Catalog provider",
+            "Answers what this connection's databases, tables and columns are, in place of the driver's own catalog."),
+        Hook => (
+            "Lifecycle hook body",
+            "Reusable SQL for a lifecycle hook point, selected by name rather than through the binding hierarchy."),
+        _ => (slot, ""),
+    };
+
     /// <summary>Every <c>Kind</c> a script's manifest may declare — the four bindable slots in
     /// <see cref="All"/> plus <see cref="Hook"/>, which is known but not one of them.</summary>
     public static bool IsKnown(string slot) => slot == Hook || All.Contains(slot, StringComparer.Ordinal);
