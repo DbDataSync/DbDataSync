@@ -1,0 +1,1 @@
+The target table should automatically match the source table, and it be a searchable text not a fixed drop-down.  The user needs to be able to enter a table that doesn't exist on the target.
