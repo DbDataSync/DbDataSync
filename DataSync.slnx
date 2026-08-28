@@ -9,6 +9,7 @@
     <Project Path="src/DataSync.Scripting/DataSync.Scripting.csproj" />
     <Project Path="src/DataSync.Scripting.Abstractions/DataSync.Scripting.Abstractions.csproj" />
     <Project Path="src/DataSync.State/DataSync.State.csproj" />
+    <Project Path="src/DataSync.Verification/DataSync.Verification.csproj" />
     <Project Path="src/DataSync.TaskRunner/DataSync.TaskRunner.csproj" />
   </Folder>
   <Folder Name="/tools/">
@@ -24,6 +25,7 @@
     <Project Path="tests/DataSync.Drivers.Postgres.Tests/DataSync.Drivers.Postgres.Tests.csproj" />
     <Project Path="tests/DataSync.Scripting.Tests/DataSync.Scripting.Tests.csproj" />
     <Project Path="tests/DataSync.State.Tests/DataSync.State.Tests.csproj" />
+    <Project Path="tests/DataSync.Verification.Tests/DataSync.Verification.Tests.csproj" />
     <Project Path="tests/DataSync.TaskRunner.Tests/DataSync.TaskRunner.Tests.csproj" />
   </Folder>
 </Solution>
