@@ -1,3 +1,4 @@
+using DataSync.Api.Controllers;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -152,14 +153,17 @@ public sealed class ScriptsControllerTests(TestApiFactory factory) : IClassFixtu
         var name = $"upper-{Guid.NewGuid():N}";
         (await _client.PutAsJsonAsync($"/api/scripts/{name}", Definition(name, ValidCode), JsonOptions)).EnsureSuccessStatusCode();
 
-        var listed = await _client.GetFromJsonAsync<List<ScriptConfig>>("/api/scripts", JsonOptions);
-        Assert.Contains(listed!, s => s.Name == name);
+        var listed = await _client.GetFromJsonAsync<List<ScriptListItem>>("/api/scripts", JsonOptions);
+        var script = Assert.Single(listed!, s => s.Manifest.Name == name);
+
+        // A script nobody has bound reports so, which is the whole point of the column (phase 37).
+        Assert.Empty(script.UsedBy);
 
         Assert.Equal(HttpStatusCode.NoContent, (await _client.DeleteAsync($"/api/scripts/{name}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/scripts/{name}")).StatusCode);
     }
 
-    private sealed record SlotInfo(string Slot, List<string> Levels);
+    private sealed record SlotInfo(string Slot, List<string> Levels, string Label, string Description);
 
     [Fact]
     public async Task Slots_ReportsWhatThisBuildSupports_AndWhereEachOneBinds()
@@ -174,5 +178,10 @@ public sealed class ScriptsControllerTests(TestApiFactory factory) : IClassFixtu
         // The SPA renders each slot only where it means something, from this.
         var metadata = Assert.Single(slots!, s => s.Slot == "metadataProvider");
         Assert.Equal(["connection"], metadata.Levels);
+
+        // And each carries a name a person can read: `sqlColumnExpression` is a good key and a bad
+        // label, and which one the SPA shows should not be the SPA's guess about the server's slots.
+        Assert.Equal("Source SQL for a column", transform.Label);
+        Assert.NotEmpty(metadata.Description);
     }
 }
