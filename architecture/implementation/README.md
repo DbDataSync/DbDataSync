@@ -29,17 +29,16 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **040** — an editable target table | Phase 25's provisioning is built, tested, and unreachable from the screen where it is needed |
-| 2 | **037** — making the scripting features legible | Seven phases of scripting with no way to see what a pass will run |
-| 3 | **041** — testing a script before a run does | Follows 037: the preview says what will run, the test says whether it works |
-| 4 | **036** — run metrics | The data is already stored; this is an endpoint and a card |
-| 5 | **032** — SQL Server CDC | Change tracking starts here, per `planning/done/change-tracking-strategies.md` |
-| 6 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
-| 7 | **034** — PostgreSQL logical replication | |
-| 8 | **035** — config history diff and revert | |
-| 9 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **037** — making the scripting features legible | Seven phases of scripting with no way to see what a pass will run |
+| 2 | **041** — testing a script before a run does | Follows 037: the preview says what will run, the test says whether it works |
+| 3 | **036** — run metrics | The data is already stored; this is an endpoint and a card |
+| 4 | **032** — SQL Server CDC | Change tracking starts here, per `planning/done/change-tracking-strategies.md` |
+| 5 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
+| 6 | **034** — PostgreSQL logical replication | |
+| 7 | **035** — config history diff and revert | |
+| 8 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-28; 039 done and removed. A phase moving up or down is an ordinary decision and only this
+Set 2026-08-28; 039 and 040 done and removed. A phase moving up or down is an ordinary decision and only this
 table changes.
 
 ## What counts as a phase
