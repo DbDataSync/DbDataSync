@@ -186,6 +186,57 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Contains("CHANGETABLE", read.Sql!);
     }
 
+    /// <summary>
+    /// Live mode, which is the half of phase 41 with a safety property: it happens only because a
+    /// connection was named, it reads real rows, and the result says which system it touched. The
+    /// labelling is asserted because it is the whole guarantee.
+    /// </summary>
+    [Fact]
+    public async Task ALiveScriptTest_ReadsRealRows_AndSaysWhichConnectionItQueried()
+    {
+        var scriptName = $"live-test-{Guid.NewGuid():N}";
+        var response = await _client.PostAsJsonAsync($"/api/scripts/{scriptName}/test", new
+        {
+            script = new ScriptDefinition
+            {
+                Manifest = new ScriptConfig
+                {
+                    Name = scriptName, Kind = "valueColumnExpression", EntryType = "Upper",
+                },
+                Code = """
+                    using System.Collections.Generic;
+                    using DataSync.Scripting.Abstractions;
+
+                    public sealed class Upper : IValueColumnExpression
+                    {
+                        public IReadOnlyList<string> DeclareColumns(ValueColumnDeclarationContext c) => ["Name"];
+
+                        public object? Evaluate(object? value, ValueColumnExpressionContext c) =>
+                            value is string s ? s.ToUpperInvariant() : value;
+                    }
+                    """,
+            },
+            replicationName = _replicationName,
+            mappingName = "main",
+            connectionName = _connectionName,
+            sampleRows = 3,
+        }, JsonOptions);
+
+        response.EnsureSuccessStatusCode();
+        var result = (await response.Content.ReadFromJsonAsync<ScriptTestResultDto>(JsonOptions))!;
+
+        Assert.Null(result.Error);
+        Assert.Equal("live", result.Mode);
+        Assert.Equal($"live query against '{_connectionName}'", result.Source);
+
+        // The rows are the real ones seeded in this database — 'alice', not a generated 'sample'.
+        Assert.Contains(result.Cases, c => c.Input == "Name = 'alice'" && c.Output == "'ALICE'");
+    }
+
+    private sealed record ScriptTestCaseDto(string Input, string? Output, string? Note);
+    private sealed record ScriptTestResultDto(
+        string Mode, string Source, List<ScriptTestCaseDto> Cases, List<string> Log, string? Statement, string? Error);
+
     private sealed record PreviewStatementDto(string Stage, string Title, string? Sql, string Origin, string? Detail);
     private sealed record PreviewReportDto(List<PreviewStatementDto> Statements, List<string> Problems);
 

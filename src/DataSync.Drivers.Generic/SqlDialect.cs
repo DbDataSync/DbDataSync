@@ -66,6 +66,18 @@ public abstract class SqlDialect
 
     /// <summary>Drops a table if it is there. <c>IF EXISTS</c> is not universal (Oracle needs a PL/SQL
     /// block around the drop), so the whole statement is the hook.</summary>
+    /// <summary>
+    /// A handful of rows from a table, for looking at rather than for moving. Used by phase 41's live
+    /// script test, which reads real rows so an operator can see what their transform does to them.
+    /// <para>
+    /// <c>LIMIT</c> by default because most engines have it; SQL Server does not and overrides with
+    /// <c>TOP</c>. No ordering: an unordered sample is honest about being a sample, and adding one
+    /// would mean choosing a column and paying for a sort against a table that may be enormous.
+    /// </para>
+    /// </summary>
+    public virtual string RenderSampleSelect(string qualifiedTable, int rows) =>
+        $"SELECT * FROM {qualifiedTable} LIMIT {rows};";
+
     public virtual string RenderDropTableIfExists(string qualifiedTable) =>
         $"DROP TABLE IF EXISTS {qualifiedTable};";
 

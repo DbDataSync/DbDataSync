@@ -18,6 +18,7 @@ public sealed class ScriptsController(
     ConfigRepository configRepository,
     ScriptHost scriptHost,
     ScriptUsageScanner usageScanner,
+    ScriptTestService testService,
     GitAuthor author) : ControllerBase
 {
     /// <summary>
@@ -110,6 +111,37 @@ public sealed class ScriptsController(
     /// for a C# script, the token/parameter check for a SQL hook (see <see cref="HookValidation"/>).
     /// Named Compile for the C# case that motivated it; kept as one endpoint for both because the SPA's
     /// edit page swaps only which check runs, not the action a Validate button calls.</summary>
+    /// <summary>
+    /// Runs the script against sample input and reports what it did — see phase 41.
+    /// <para>
+    /// Takes the definition in the body like <c>Compile</c> does, so what is tested is what is in the
+    /// editor rather than what was last saved. A test that could only run saved code would mean saving
+    /// to find out whether it was worth saving.
+    /// </para>
+    /// <para>
+    /// Generated input unless the caller names a connection. There is deliberately no fallback the
+    /// other way: a live test is a query against a real system, and it happens only because somebody
+    /// asked for it by name.
+    /// </para>
+    /// </summary>
+    [HttpPost("{name}/test")]
+    public async Task<ActionResult<ScriptTestResult>> Test(
+        string name, [FromBody] ScriptTestRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await testService.RunAsync(request, cancellationToken));
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (ConfigValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
     [HttpPost("{name}/compile")]
     public ActionResult<ScriptSaveResult> Compile(string name, [FromBody] ScriptDefinition script)
     {

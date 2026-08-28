@@ -247,6 +247,33 @@ export interface PreviewReport {
   problems: string[]
 }
 
+/** What a script did to one sample input. */
+export interface ScriptTestCase {
+  input: string
+  output: string | null
+  note: string | null
+}
+
+export interface ScriptTestResult {
+  mode: 'generated' | 'live'
+  /** Where the input came from, in words. A safety property: "generated sample" and "live query
+   * against 'prod-src'" must never be confusable, because one of them touched a real system. */
+  source: string
+  cases: ScriptTestCase[]
+  log: string[]
+  statement: string | null
+  error: string | null
+}
+
+export interface ScriptTestRequest {
+  script: ScriptDefinition
+  replicationName?: string
+  mappingName?: string
+  /** Set only for a live test, and only because the operator chose one. */
+  connectionName?: string
+  sampleRows?: number
+}
+
 export interface ScriptDiagnostic {
   line: number
   column: number

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AppShell, SectionTabs } from '../components/AppShell'
+import { ScriptTestPanel } from './script-edit/ScriptTestPanel'
 import { CodeEditor } from '../components/CodeEditor'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
@@ -257,6 +258,10 @@ export function ScriptEditPage() {
               )}
             </div>
           </div>
+
+          {/* Below the code, because a test is something you do to what you just wrote. Only for C#:
+              a SQL hook has no entry point to run, and its check is the token/parameter one. */}
+          {!isSql && <ScriptTestPanel draft={draft} />}
         </form>
       </div>
     </AppShell>

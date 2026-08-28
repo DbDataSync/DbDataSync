@@ -13,6 +13,8 @@ import type {
   ScriptDefinition,
   PreviewReport,
   ScriptListItem,
+  ScriptTestRequest,
+  ScriptTestResult,
   ScriptSlotInfo,
   LogEntryRecord,
   ReplicationTaskConfig,
@@ -77,6 +79,13 @@ export const api = {
     get: (name: string) => request<ScriptDefinition>(`/api/scripts/${encodeURIComponent(name)}`),
     upsert: (name: string, script: ScriptDefinition) =>
       put<ScriptCompileResult>(`/api/scripts/${encodeURIComponent(name)}`, script),
+    /** Runs the script against sample input. Takes the definition in the body, so what is tested is
+     * what is in the editor rather than what was last saved. */
+    test: (name: string, body: ScriptTestRequest) =>
+      request<ScriptTestResult>(`/api/scripts/${encodeURIComponent(name)}/test`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     /** Checks without saving, so an operator finds out before committing. */
     compile: (name: string, script: ScriptDefinition) =>
       request<ScriptCompileResult>(`/api/scripts/${encodeURIComponent(name)}/compile`, {

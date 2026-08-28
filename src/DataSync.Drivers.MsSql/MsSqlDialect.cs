@@ -43,6 +43,10 @@ public sealed class MsSqlDialect : SqlDialect
     /// <summary>See the type-mapping table in phase 25 §2 — the pairs listed there are what the tests
     /// pin. <c>sql_variant</c>, <c>hierarchyid</c> and geospatial types fall through to
     /// <see cref="CanonicalTypeKind.Unmappable"/>: nothing here guesses a rendering for them.</summary>
+    /// <summary>SQL Server has no LIMIT.</summary>
+    public override string RenderSampleSelect(string qualifiedTable, int rows) =>
+        $"SELECT TOP ({rows}) * FROM {qualifiedTable};";
+
     public override CanonicalType ToCanonicalType(string nativeType)
     {
         var (baseName, args) = CanonicalTypeSpec.Parse(nativeType);

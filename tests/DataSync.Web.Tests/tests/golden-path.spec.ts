@@ -723,4 +723,67 @@ public sealed class DropGadgets : IRowTransform
 
     await shot(page, '25-mapping-preview.png')
   })
+
+  test('20 - a script can be run against sample data before a pass ever runs it', async ({ page }) => {
+    // Compiling proves a script is C#. It proves nothing about whether it does what was meant — and
+    // until now the next thing that happened after writing one was a replication run.
+    await page.goto('/scripts/new')
+    await page.getByTestId('script-name-input').fill('shout')
+    await page.getByTestId('script-kind-select').selectOption('valueColumnExpression')
+    await page.getByTestId('script-entry-type-input').fill('Shout')
+    await setCode(page, 'script-code-input', `using System.Collections.Generic;
+using DataSync.Scripting.Abstractions;
+
+public sealed class Shout : IValueColumnExpression
+{
+    public IReadOnlyList<string> DeclareColumns(ValueColumnDeclarationContext c) => ["Name"];
+
+    public object? Evaluate(object? value, ValueColumnExpressionContext c) =>
+        value is string s ? s.ToUpperInvariant() : value;
+}
+`)
+
+    await page.getByTestId('run-script-test-button').click()
+
+    // Which data it ran against, said every time — this is the safety property, not a caption.
+    await expect(page.getByTestId('script-test-source')).toContainText('generated sample', { timeout: 20_000 })
+    const cases = page.getByTestId('script-test-cases')
+    await expect(cases).toContainText("'SAMPLE'")
+    // The values that find the bug: an empty string and a null.
+    await expect(cases).toContainText("Name = ''")
+    await expect(cases).toContainText('Name = NULL')
+    await shot(page, '26-script-test-generated.png')
+
+    // Change the code, test again, and the output changes — the loop this phase exists to close.
+    await setCode(page, 'script-code-input', `using System.Collections.Generic;
+using DataSync.Scripting.Abstractions;
+
+public sealed class Shout : IValueColumnExpression
+{
+    public IReadOnlyList<string> DeclareColumns(ValueColumnDeclarationContext c) => ["Name"];
+
+    public object? Evaluate(object? value, ValueColumnExpressionContext c) =>
+        value is string s ? s + "!" : value;
+}
+`)
+    await page.getByTestId('run-script-test-button').click()
+    await expect(cases).toContainText("'sample!'", { timeout: 20_000 })
+
+    // And a script that throws says so, rather than leaving a blank panel to be interpreted.
+    await setCode(page, 'script-code-input', `using System.Collections.Generic;
+using DataSync.Scripting.Abstractions;
+
+public sealed class Shout : IValueColumnExpression
+{
+    public IReadOnlyList<string> DeclareColumns(ValueColumnDeclarationContext c) => ["Name"];
+
+    public object? Evaluate(object? value, ValueColumnExpressionContext c) => ((string)value!).Substring(3);
+}
+`)
+    await page.getByTestId('run-script-test-button').click()
+    await expect(page.getByTestId('script-test-error')).toBeVisible({ timeout: 20_000 })
+
+    // Live is a deliberate choice, never a fallback: the picker starts on generated.
+    await expect(page.getByTestId('script-test-connection-select')).toHaveValue('')
+  })
 })

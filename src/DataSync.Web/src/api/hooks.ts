@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { api } from './client'
 import type {
-  ScriptDefinition, BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
+  ScriptDefinition, ScriptTestRequest, BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
@@ -345,6 +345,15 @@ export function useMappingPreview(replicationName: string | undefined, mappingNa
     queryKey: keys.preview(replicationName ?? '', mappingName ?? ''),
     queryFn: () => api.preview.get(replicationName!, mappingName!),
     enabled: !!replicationName && !!mappingName,
+  })
+}
+
+/** Not a query: a test is an explicit action against sample — or real — data, and must never happen
+ * as a side effect of a refetch. Same shape as phase 19's connection test. */
+export function useTestScript() {
+  return useMutation({
+    mutationFn: ({ name, request }: { name: string; request: ScriptTestRequest }) =>
+      api.scripts.test(name, request),
   })
 }
 
