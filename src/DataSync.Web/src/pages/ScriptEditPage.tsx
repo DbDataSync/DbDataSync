@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AppShell, SectionTabs } from '../components/AppShell'
+import { CodeEditor } from '../components/CodeEditor'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import { useCompileScript, useDeleteScript, useScript, useScriptSlots, useUpsertScript } from '../api/hooks'
@@ -39,8 +40,10 @@ const empty = (slot: string): ScriptDefinition => ({
  * Write a script, compile it, save it. Compilation happens on save too, server-side — a script that
  * will not compile is never stored, so a binding can never name one that cannot run.
  *
- * A plain monospace textarea rather than an embedded editor: the compile diagnostics carry most of what
- * a language service would, and Monaco is a large dependency to take for the rest.
+ * The editor is Monaco, lazy-loaded (phase 28). Syntax colouring for both languages a script can be
+ * written in, and — the reason it is worth the dependency — the server's own diagnostics rendered as
+ * markers on the token that caused them. The list below stays: a squiggle you have to hunt for is
+ * worse than a list you can read, and every real editor shows both.
  */
 export function ScriptEditPage() {
   const { name } = useParams<{ name: string }>()
@@ -233,13 +236,15 @@ export function ScriptEditPage() {
               )}
             </div>
             <div className="card-body">
-              <textarea
-                className="input mono"
-                spellCheck={false}
-                style={{ minHeight: 320, lineHeight: 1.5, resize: 'vertical', whiteSpace: 'pre' }}
+              <CodeEditor
                 value={draft.code}
-                onChange={(e) => setDraft({ ...draft, code: e.target.value })}
-                data-testid="script-code-input"
+                language={isSql ? 'sql' : 'csharp'}
+                onChange={(code) => setDraft({ ...draft, code })}
+                // The payoff over a textarea: the compiler's line and column become a squiggle on the
+                // offending token instead of a message the reader has to go and find.
+                diagnostics={diagnostics}
+                minLines={16}
+                testId="script-code-input"
               />
               {diagnostics.length > 0 && (
                 <div data-testid="script-diagnostics" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

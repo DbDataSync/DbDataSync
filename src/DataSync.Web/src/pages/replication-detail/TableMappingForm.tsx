@@ -5,6 +5,7 @@ import { useConnections, useDeleteTableMapping, useReplication, useUpsertTableMa
 import type { ColumnMapping, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec } from '../../api/types'
 import { MappingSide } from './MappingSide'
 import { resolveSide } from '../../api/resolveEndpoint'
+import { CodeEditor } from '../../components/CodeEditor'
 import { ColumnMappingEditor } from './ColumnMappingEditor'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { ProvisioningCard } from './ProvisioningCard'
@@ -102,11 +103,16 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
           <div className="card">
             <div className="card-body">
               <Field label="Source filter — optional SQL predicate">
-                <input
-                  className="input"
-                  placeholder="e.g. Status = 'Active'"
+                {/* An editor rather than an input: a predicate that narrows a real table outgrows forty
+                    visible characters quickly, and this one is spliced into the reader's WHERE clause
+                    verbatim. */}
+                <CodeEditor
                   value={source.filter ?? ''}
-                  onChange={(e) => setSource({ ...source, filter: e.target.value || null })}
+                  language="sql"
+                  onChange={(filter) => setSource({ ...source, filter: filter.trim() ? filter : null })}
+                  minLines={2}
+                  maxLines={8}
+                  testId="source-filter-editor"
                 />
               </Field>
             </div>

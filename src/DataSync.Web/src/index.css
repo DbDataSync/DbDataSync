@@ -433,3 +433,16 @@ select.select {
 .stack { display: flex; flex-direction: column; gap: 11px; }
 .divider { height: 1px; background: var(--row-edge); }
 .field-error { margin: 4px 0 0; font: 400 11px var(--ui); color: var(--danger-ink); }
+
+/* ── Code editor ────────────────────────────────────────────────────────────── */
+
+.code-editor {
+  border: 1px solid var(--control-edge);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.code-editor.loading { background: var(--sunken); }
+/* Monaco draws its own focus affordance inside; the border tracks it so the control reads like every
+   other input on the page. */
+.code-editor:focus-within { border-color: var(--accent); }

@@ -19,6 +19,19 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(screenshotsDir, name), fullPage: true })
 }
 
+/**
+ * Replaces a Monaco editor's contents. Monaco is not an <input>, so `fill()` does not reach it — but it
+ * keeps a hidden textarea for input, which `insertText` writes through in one event rather than as
+ * keystrokes, so auto-closing brackets and auto-indent never fire.
+ */
+async function setCode(page: Page, testId: string, code: string) {
+  const editor = page.getByTestId(testId)
+  await expect(editor.locator('.monaco-editor')).toBeVisible({ timeout: 20_000 })
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.insertText(code)
+}
+
 /** Waits for a <select data-testid=testId>'s options to include `value` (populated asynchronously by
  * a metadata-browsing API call) before selecting it — avoids racing react-query. */
 async function selectWhenReady(page: Page, testId: string, value: string) {
@@ -352,7 +365,7 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('new-script-button').click()
     await page.getByTestId('script-name-input').fill(SCRIPT)
     await page.getByTestId('script-entry-type-input').fill('ReverseName')
-    await page.getByTestId('script-code-input').fill(`using DataSync.Scripting.Abstractions;
+    await setCode(page, 'script-code-input', `using DataSync.Scripting.Abstractions;
 
 public sealed class ReverseName : ISqlColumnExpression
 {
@@ -373,9 +386,14 @@ public sealed class ReverseName : ISqlColumnExpression
     // A script that does not compile is refused, with the compiler's own diagnostics.
     await page.getByTestId('new-script-button').click()
     await page.getByTestId('script-name-input').fill('broken-script')
-    await page.getByTestId('script-code-input').fill('this is not C#')
+    await setCode(page, 'script-code-input', 'this is not C#')
     await page.getByTestId('check-script-button').click()
     await expect(page.getByTestId('script-diagnostics')).toBeVisible({ timeout: 15_000 })
+
+    // The reason the editor is worth its weight: the compiler's line and column become a squiggle on
+    // the offending token, not just a message underneath that the reader has to go and find.
+    await expect(page.getByTestId('script-code-input').locator('.squiggly-error').first())
+      .toBeVisible({ timeout: 15_000 })
     await shot(page, '19-script-diagnostics.png')
 
     // Bind it on the mapping — the most specific level, which is what the hierarchy exists for.
@@ -422,7 +440,7 @@ public sealed class ReverseName : ISqlColumnExpression
     await page.getByTestId('script-name-input').fill(SCRIPT)
     await page.getByTestId('script-kind-select').selectOption('rowTransform')
     await page.getByTestId('script-entry-type-input').fill('DropGadgets')
-    await page.getByTestId('script-code-input').fill(`using System.Threading;
+    await setCode(page, 'script-code-input', `using System.Threading;
 using System.Threading.Tasks;
 using DataSync.Drivers.Abstractions;
 using DataSync.Scripting.Abstractions;
