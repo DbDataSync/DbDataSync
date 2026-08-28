@@ -52,17 +52,30 @@ public static class SourceProjection
 
     private static string RenderColumn(SqlDialect dialect, ColumnMapping mapping, Func<string, string> reference)
     {
+        var expression = RenderExpression(mapping, reference);
+        return string.IsNullOrWhiteSpace(mapping.Transform)
+            ? expression
+            : $"{expression} AS {dialect.QuoteIdentifier(mapping.SourceColumn)}";
+    }
+
+    /// <summary>
+    /// One column's source-side expression, transform applied, **without** an alias — for a caller
+    /// that needs the value rather than a select-list entry. A verification check grouping by a
+    /// transformed column has to group by what the transform produces, or it compares the source's
+    /// raw value against a target holding the transformed one and reports a difference that is not
+    /// one.
+    /// </summary>
+    public static string RenderExpression(ColumnMapping mapping, Func<string, string> reference)
+    {
         var columnRef = reference(mapping.SourceColumn);
         if (string.IsNullOrWhiteSpace(mapping.Transform))
             return columnRef;
 
         // An expression with no token is used verbatim, which keeps a literal, another column, or a
         // correlated subquery expressible — a transform is not required to be *about* its own column.
-        var expression = mapping.Transform.Contains(ColumnMapping.ColumnToken, StringComparison.Ordinal)
+        return mapping.Transform.Contains(ColumnMapping.ColumnToken, StringComparison.Ordinal)
             ? mapping.Transform.Replace(ColumnMapping.ColumnToken, columnRef, StringComparison.Ordinal)
             : mapping.Transform;
-
-        return $"{expression} AS {dialect.QuoteIdentifier(mapping.SourceColumn)}";
     }
 }
 

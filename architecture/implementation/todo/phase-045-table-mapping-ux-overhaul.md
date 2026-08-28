@@ -5,14 +5,17 @@
 
 ## What this covers
 
-Five related changes to how table mappings are created and edited, aimed at cutting the number of clicks
-and decisions needed for the common case (map a table, accept sensible defaults) while keeping every
-default overridable:
+Related changes to how table mappings are created and edited, aimed at cutting the number of clicks and
+decisions needed for the common case (map a table, accept sensible defaults) while keeping every default
+overridable — plus two bug fixes surfaced while designing this:
 
 1. Inferred mapping name, target-table autofill, and `.` allowed in names.
 2. Inheritable "create target table if missing."
 3. Editable target column name/type and transform, via a consistent show-value-plus-pencil interaction.
-4. A mappings overview grid as the section's landing page, with bulk mapping creation.
+4. A mappings overview grid as the section's landing page, with single-request bulk mapping creation.
+5. Fix: schema/table names combined into one string and split back apart — a real bug, not a hypothetical.
+6. Fix: the auto-mapping editor silently showing the wrong source column for a row whose stored value
+   isn't in the freshly loaded column list.
 
 ## 1. Name inference and target autofill
 

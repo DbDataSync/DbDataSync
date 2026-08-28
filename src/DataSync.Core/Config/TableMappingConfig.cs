@@ -116,6 +116,12 @@ public sealed class TableMappingConfig
     public Dictionary<string, List<HookConfig>?> Hooks { get; set; } = new();
 
     public ProvisioningConfig Provisioning { get; set; } = new();
+
+    /// <summary>
+    /// Comparisons between this mapping's source and target, run on demand rather than as part of a
+    /// pass — see phase 43. Empty for a mapping nobody has asked to verify.
+    /// </summary>
+    public List<VerificationCheckConfig> Verification { get; set; } = new();
 }
 
 /// <summary>See phase 25 §5 — the one provisioning action DataSync ever runs unattended, and why it is
