@@ -274,6 +274,33 @@ export interface ScriptTestRequest {
   sampleRows?: number
 }
 
+export interface RunMetricsBucket {
+  startUtc: string
+  runs: number
+  failures: number
+  rowsWritten: number
+}
+
+export interface RunMetrics {
+  taskName: string
+  runKind: RunKind | null
+  fromUtc: string
+  toUtc: string
+  runs: number
+  failures: number
+  rowsRead: number
+  rowsWritten: number
+  /** Null when nothing in the window finished — a run still going has no duration. */
+  durationP50Ms: number | null
+  durationP95Ms: number | null
+  durationMaxMs: number | null
+  /** When the most recent *successful* pass finished, unbounded by the window. */
+  lastCompletedPassUtc: string | null
+  buckets: RunMetricsBucket[]
+}
+
+export type MetricsWindow = '1h' | '24h' | '7d'
+
 export interface ScriptDiagnostic {
   line: number
   column: number

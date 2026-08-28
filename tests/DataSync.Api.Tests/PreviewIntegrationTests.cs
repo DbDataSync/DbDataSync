@@ -233,6 +233,61 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Contains(result.Cases, c => c.Input == "Name = 'alice'" && c.Output == "'ALICE'");
     }
 
+    /// <summary>
+    /// The endpoint against a replication that has actually run — the numbers come from TaskRuns, so
+    /// the only way to know they are the right ones is to produce a run and look.
+    /// </summary>
+    [Fact]
+    public async Task Metrics_ReportTheRunThatJustHappened_AndWhenItCompleted()
+    {
+        var before = await GetMetricsAsync();
+        Assert.Equal(0, before.Runs);
+        Assert.Null(before.LastCompletedPassUtc);
+
+        await TriggerAndWaitAsync();
+
+        var after = await GetMetricsAsync();
+        Assert.Equal(1, after.Runs);
+        Assert.Equal(0, after.Failures);
+        Assert.Equal(3, after.RowsWritten);
+        Assert.NotNull(after.DurationP50Ms);
+        Assert.NotNull(after.LastCompletedPassUtc);
+
+        // The window is a real filter, not decoration: a one-hour window still holds a run from a
+        // moment ago, and the bucket count follows what was asked for.
+        var hour = await GetMetricsAsync("1h");
+        Assert.Equal(1, hour.Runs);
+        Assert.Equal(24, hour.Buckets.Count);
+        Assert.Equal(1, hour.Buckets.Sum(b => b.Runs));
+
+        // A backfill is a different question and is not folded into the incremental figures.
+        var backfill = await GetMetricsAsync(kind: "Backfill");
+        Assert.Equal(0, backfill.Runs);
+    }
+
+    [Fact]
+    public async Task AnUnrecognisedWindow_IsRefusedRatherThanSilentlyDefaulted()
+    {
+        var response = await _client.GetAsync(
+            $"/api/replications/{_replicationName}/metrics?window=90d");
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private sealed record RunMetricsBucketDto(DateTimeOffset StartUtc, int Runs, int Failures, long RowsWritten);
+    private sealed record RunMetricsDto(
+        int Runs, int Failures, long RowsRead, long RowsWritten,
+        double? DurationP50Ms, double? DurationP95Ms, double? DurationMaxMs,
+        DateTimeOffset? LastCompletedPassUtc, List<RunMetricsBucketDto> Buckets);
+
+    private async Task<RunMetricsDto> GetMetricsAsync(string window = "24h", string kind = "Primary")
+    {
+        var response = await _client.GetAsync(
+            $"/api/replications/{_replicationName}/metrics?window={window}&kind={kind}");
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<RunMetricsDto>(JsonOptions))!;
+    }
+
     private sealed record ScriptTestCaseDto(string Input, string? Output, string? Note);
     private sealed record ScriptTestResultDto(
         string Mode, string Source, List<ScriptTestCaseDto> Cases, List<string> Log, string? Statement, string? Error);

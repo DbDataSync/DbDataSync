@@ -120,5 +120,16 @@ internal static class Migrations
         ALTER TABLE Logs ADD COLUMN SourceKey TEXT NULL;
         CREATE UNIQUE INDEX UX_Logs_SourceKey ON Logs(SourceKey) WHERE SourceKey IS NOT NULL;
         """,
+
+        """
+        -- Every metrics query is "this replication, this time range" (phase 36), and TaskRuns grows
+        -- without bound: an aggregate over 24 hours is cheap on a small table and a full scan on a
+        -- large one, and a console offering 7 days invites the larger scan.
+        --
+        -- An index and nothing else. Not a rollup table: that is a second copy of the truth, it needs
+        -- maintaining, and there is no evidence yet that this is insufficient. Measure first —
+        -- tools/benchmarks is where.
+        CREATE INDEX IX_TaskRuns_TaskName_StartedAt ON TaskRuns(TaskName, StartedAtUtc);
+        """,
     ];
 }

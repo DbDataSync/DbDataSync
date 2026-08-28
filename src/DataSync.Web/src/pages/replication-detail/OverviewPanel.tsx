@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
 import { EndpointsCard } from './EndpointsCard'
+import { MetricsCard } from './MetricsCard'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { readerNotes } from '../../api/readerNotes'
 import { useConnections, useReplication, useReplicationCapabilities, useTableMappings, useUpsertReplication } from '../../api/hooks'
@@ -168,6 +169,8 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
         </div>
 
         <div style={{ width: 288, flex: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <MetricsCard replicationName={replicationName} />
+
           <div className="card">
             <div className="card-head"><span className="card-title">Schedule</span></div>
             <div className="card-body">

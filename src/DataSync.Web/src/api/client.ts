@@ -11,7 +11,9 @@ import type {
   ProvisioningPlanReport,
   ScriptCompileResult,
   ScriptDefinition,
+  MetricsWindow,
   PreviewReport,
+  RunMetrics,
   ScriptListItem,
   ScriptTestRequest,
   ScriptTestResult,
@@ -150,6 +152,12 @@ export const api = {
     get: (replicationName: string, mappingName: string) =>
       request<PreviewReport>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/preview`,
+      ),
+  },
+  metrics: {
+    get: (replicationName: string, window: MetricsWindow) =>
+      request<RunMetrics>(
+        `/api/replications/${encodeURIComponent(replicationName)}/metrics?window=${window}`,
       ),
   },
   runs: {

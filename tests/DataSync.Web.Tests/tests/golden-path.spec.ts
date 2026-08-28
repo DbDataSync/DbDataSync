@@ -786,4 +786,33 @@ public sealed class Shout : IValueColumnExpression
     // Live is a deliberate choice, never a fallback: the picker starts on generated.
     await expect(page.getByTestId('script-test-connection-select')).toHaveValue('')
   })
+
+  test('21 - the Overview reports what the last day of passes actually did', async ({ page }) => {
+    // Every figure comes from TaskRuns, which has recorded them since phase 5. The gap this closes is
+    // that nobody had written the query — so by this point in the suite there are real runs to count.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+
+    const card = page.getByTestId('metrics-card')
+    await expect(card).toBeVisible({ timeout: 15_000 })
+
+    // Real numbers or nothing: several passes have run above, so this is not zero.
+    await expect(page.getByTestId('metrics-runs')).not.toContainText('0', { timeout: 15_000 })
+    await expect(page.getByTestId('metrics-duration')).toContainText('p50')
+    await expect(page.getByTestId('metrics-sparkline')).toBeVisible()
+
+    // Not "lag" — a pass that ran two minutes ago and found nothing looks identical to one that ran
+    // two minutes ago and is an hour behind, so this says the thing it can actually answer.
+    await expect(card).toContainText('Last completed pass')
+    await expect(page.getByTestId('metrics-last-pass')).not.toContainText('never')
+
+    await shot(page, '27-run-metrics.png')
+
+    // The window is a real filter: an hour ago there had been no runs yet in this suite, so switching
+    // to 1h and back to 24h must change something rather than re-rendering the same card.
+    await expect(card).toContainText('Last 24h')
+    await page.getByTestId('metrics-window-7d').click()
+    await expect(card).toContainText('Last 7d')
+    await page.getByTestId('metrics-window-1h').click()
+    await expect(card).toContainText('Last 1h')
+  })
 })

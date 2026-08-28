@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { api } from './client'
 import type {
-  ScriptDefinition, ScriptTestRequest, BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
+  ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
@@ -29,6 +29,8 @@ const keys = {
     ['replications', replicationName, 'table-mappings', mappingName, 'provisioning'] as const,
   preview: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'preview'] as const,
+  metrics: (replicationName: string, window: string) =>
+    ['replications', replicationName, 'metrics', window] as const,
 }
 
 export function useConnections() {
@@ -354,6 +356,17 @@ export function useTestScript() {
   return useMutation({
     mutationFn: ({ name, request }: { name: string; request: ScriptTestRequest }) =>
       api.scripts.test(name, request),
+  })
+}
+
+/** Polled rather than pushed: a 24-hour aggregate is not something anyone watches change, and the
+ * case where someone is watching is a live run, which the run hub already covers. */
+export function useRunMetrics(replicationName: string | undefined, window: MetricsWindow) {
+  return useQuery({
+    queryKey: keys.metrics(replicationName ?? '', window),
+    queryFn: () => api.metrics.get(replicationName!, window),
+    enabled: !!replicationName,
+    refetchInterval: 30_000,
   })
 }
 
