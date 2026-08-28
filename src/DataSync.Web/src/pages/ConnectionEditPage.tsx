@@ -12,8 +12,10 @@ import type { AuthMode, ConnectionInput, DriverType } from '../api/types'
 /** Each engine's default listening port, so switching the driver does not leave the other's behind. */
 const DEFAULT_PORTS: Record<DriverType, number> = { MsSql: 1433, Postgres: 5432 }
 
+// `connectionString: null` rather than absent: null is what "this connection uses host mode" looks
+// like, and the toggle reads exactly that.
 const empty: ConnectionInput = {
-  name: '', driverType: 'MsSql', host: '', port: 1433, database: '',
+  name: '', driverType: 'MsSql', host: '', port: 1433, connectionString: null, database: '',
   authMode: 'SqlAuth', userId: '', password: '', properties: {},
 }
 
@@ -52,6 +54,7 @@ export function ConnectionEditPage() {
       driverType: existing.driverType,
       host: existing.host,
       port: existing.port,
+      connectionString: existing.connectionString,
       database: existing.database,
       authMode: existing.authMode,
       userId: existing.userId ?? '',
@@ -60,6 +63,8 @@ export function ConnectionEditPage() {
       scripts: structuredClone(existing.scripts ?? {}),
     })
   }, [isNew, draft, existing])
+
+  const usesConnectionString = draft?.connectionString !== null && draft?.connectionString !== undefined
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -144,24 +149,59 @@ export function ConnectionEditPage() {
                     data-testid="connection-name-input"
                   />
                 </Field>
-                <div className="form-row">
-                  <Field label="Host">
+                <Field label="Address">
+                  {/* One mode or the other, never both — the server rejects a connection that sets a
+                      host and a connection string, because nothing decides which one is used. */}
+                  <select
+                    className="select"
+                    value={usesConnectionString ? 'connectionString' : 'host'}
+                    onChange={(e) => setDraft(e.target.value === 'connectionString'
+                      ? { ...draft, host: null, port: null, connectionString: '' }
+                      : { ...draft, connectionString: null, host: '', port: DEFAULT_PORTS[draft.driverType] })}
+                    data-testid="connection-address-mode-select"
+                  >
+                    <option value="host">Host &amp; port</option>
+                    <option value="connectionString">Connection string</option>
+                  </select>
+                </Field>
+
+                {usesConnectionString ? (
+                  <Field label="Connection string">
+                    {/* Hidden rather than disabled in the other mode: a greyed-out Host beside a
+                        connection string invites the question of which one is being used. */}
                     <input
-                      className="input" required value={draft.host}
-                      onChange={(e) => setDraft({ ...draft, host: e.target.value })}
-                      data-testid="connection-host-input"
+                      className="input mono"
+                      required
+                      placeholder="Server=sql01;Failover Partner=sql02"
+                      value={draft.connectionString ?? ''}
+                      onChange={(e) => setDraft({ ...draft, connectionString: e.target.value })}
+                      data-testid="connection-string-input"
                     />
+                    <span className="hint">
+                      The credential is never part of this — it is kept in the secret store and applied
+                      when connecting, because config is committed to git.
+                    </span>
                   </Field>
-                  <Field label="Port" alignLabel="right" style={{ width: 92, flex: 'none' }}>
-                    <input
-                      id="conn-port"
-                      className="input"
-                      type="number"
-                      value={draft.port ?? ''}
-                      onChange={(e) => setDraft({ ...draft, port: e.target.value ? Number(e.target.value) : null })}
-                    />
-                  </Field>
-                </div>
+                ) : (
+                  <div className="form-row">
+                    <Field label="Host">
+                      <input
+                        className="input" required value={draft.host ?? ''}
+                        onChange={(e) => setDraft({ ...draft, host: e.target.value })}
+                        data-testid="connection-host-input"
+                      />
+                    </Field>
+                    <Field label="Port" alignLabel="right" style={{ width: 92, flex: 'none' }}>
+                      <input
+                        id="conn-port"
+                        className="input"
+                        type="number"
+                        value={draft.port ?? ''}
+                        onChange={(e) => setDraft({ ...draft, port: e.target.value ? Number(e.target.value) : null })}
+                      />
+                    </Field>
+                  </div>
+                )}
                 <Field label="Driver">
                   {/* Fixed after creation: the driver decides how every existing mapping's SQL is
                       built, so changing it under a live replication would silently repoint it at an
@@ -173,7 +213,7 @@ export function ConnectionEditPage() {
                     onChange={(e) => setDraft({
                       ...draft,
                       driverType: e.target.value as DriverType,
-                      port: DEFAULT_PORTS[e.target.value as DriverType],
+                      port: usesConnectionString ? null : DEFAULT_PORTS[e.target.value as DriverType],
                     })}
                     data-testid="connection-driver-select"
                   >
@@ -203,6 +243,7 @@ export function ConnectionEditPage() {
                   >
                     <option value="SqlAuth">SQL Auth</option>
                     <option value="IntegratedAuth">Integrated Auth</option>
+                    <option value="None">None — supplied by the address or environment</option>
                   </select>
                 </Field>
                 {draft.authMode === 'SqlAuth' && (

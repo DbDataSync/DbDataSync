@@ -7,10 +7,27 @@ public enum ConnectionDriverType
     Postgres,
 }
 
+/// <summary>
+/// What DataSync supplies when connecting. Deliberately not an enumeration of every engine's mechanism
+/// — wallets, <c>.pgpass</c>, Kerberos ticket caches, DSN-stored credentials, auth plugins — because
+/// that list would be wrong the day it was written and extended forever. Three members that describe
+/// *our* side of it.
+/// </summary>
 public enum AuthMode
 {
+    /// <summary>A user id, and a credential resolved from the secret store at connect time.</summary>
     SqlAuth,
+
+    /// <summary>The process's own OS identity — Windows integrated security, Kerberos.</summary>
     IntegratedAuth,
+
+    /// <summary>
+    /// DataSync supplies nothing. What an Oracle wallet, a DSN with stored credentials, a
+    /// <c>.pgpass</c> file and a credential-bearing JDBC URL all look like from here: the address or
+    /// the environment provides it. Anything more specific is a per-engine detail and belongs in
+    /// <see cref="ConnectionConfig.Properties"/>.
+    /// </summary>
+    None,
 }
 
 /// <summary>
@@ -22,9 +39,31 @@ public sealed class ConnectionConfig
 {
     public required string Name { get; set; }
     public required ConnectionDriverType DriverType { get; set; }
-    public required string Host { get; set; }
+
+    /// <summary>Host-mode addressing. Null when <see cref="ConnectionString"/> is used instead —
+    /// exactly one of the two, enforced at save (see <c>ConfigValidation.ValidateAddressing</c>).</summary>
+    public string? Host { get; set; }
+
     public int? Port { get; set; }
+
+    /// <summary>
+    /// The engine-native address, for a connection that host and port cannot express: an ODBC DSN or
+    /// full connection string, a JDBC URL, an Oracle EZConnect or TNS name — or a SQL Server string
+    /// carrying a failover partner or <c>MultiSubnetFailover</c>.
+    /// <para>
+    /// **Never carries a credential.** Config is git-committed and diffed in the UI; a password here
+    /// would be committed, pushed and visible in the Version Control tab forever. Save-time validation
+    /// rejects one, and the driver splices the resolved credential in at connect time exactly as it
+    /// does for host mode.
+    /// </para>
+    /// </summary>
+    public string? ConnectionString { get; set; }
+
+    /// <summary>Which database to work in. Allowed with either addressing mode: "how do I connect" and
+    /// "which database" are separate questions, and <c>SqlDialect.UseDatabaseAsync</c> already answers
+    /// the second.</summary>
     public string? Database { get; set; }
+
     public required AuthMode AuthMode { get; set; }
     public string? UserId { get; set; }
     public string? CredentialSecretRef { get; set; }
@@ -49,8 +88,12 @@ public sealed class ConnectionInput
 {
     public required string Name { get; set; }
     public required ConnectionDriverType DriverType { get; set; }
-    public required string Host { get; set; }
+    public string? Host { get; set; }
     public int? Port { get; set; }
+
+    /// <inheritdoc cref="ConnectionConfig.ConnectionString"/>
+    public string? ConnectionString { get; set; }
+
     public string? Database { get; set; }
     public required AuthMode AuthMode { get; set; }
     public string? UserId { get; set; }

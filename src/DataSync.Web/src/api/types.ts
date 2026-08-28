@@ -4,13 +4,18 @@
 // OpenAPI doc) without reducing risk here.
 
 export type DriverType = 'MsSql' | 'Postgres'
-export type AuthMode = 'SqlAuth' | 'IntegratedAuth'
+/** What DataSync supplies when connecting. `None` is what a wallet, a DSN with stored credentials, a
+ * .pgpass file or a credential-bearing URL all look like from here — the address or the environment
+ * provides it and DataSync passes nothing. */
+export type AuthMode = 'SqlAuth' | 'IntegratedAuth' | 'None'
 
 export interface ConnectionConfig {
   name: string
   driverType: DriverType
-  host: string
+  host: string | null
   port: number | null
+  /** The engine-native address, when host and port cannot express it. Never carries a credential. */
+  connectionString: string | null
   database: string | null
   authMode: AuthMode
   userId: string | null
@@ -23,8 +28,9 @@ export interface ConnectionConfig {
 export interface ConnectionInput {
   name: string
   driverType: DriverType
-  host: string
+  host?: string | null
   port?: number | null
+  connectionString?: string | null
   database?: string | null
   authMode: AuthMode
   userId?: string | null

@@ -31,6 +31,10 @@ public sealed class ConfigRepository
     public ConnectionConfig SaveConnection(ConnectionInput input, GitAuthor author)
     {
         ConfigValidation.ValidateName(input.Name, nameof(input.Name));
+        // Before anything with a side effect. This used to sit after the credential block, which meant
+        // a save rejected for having a password in its connection string had already written that
+        // password to the secret store on the way to being rejected.
+        ConfigValidation.ValidateAddressing(input.Host, input.ConnectionString, input.Name);
 
         string? secretRef = null;
         if (input.AuthMode == AuthMode.SqlAuth)
@@ -55,6 +59,7 @@ public sealed class ConfigRepository
             Name = input.Name,
             DriverType = input.DriverType,
             Host = input.Host,
+            ConnectionString = input.ConnectionString,
             Port = input.Port,
             Database = input.Database,
             AuthMode = input.AuthMode,

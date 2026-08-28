@@ -42,16 +42,24 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
 
     public DbConnection CreateConnection(ConnectionConfig connection, string? credential)
     {
-        var builder = new NpgsqlConnectionStringBuilder
-        {
-            Host = connection.Host,
-            Database = connection.Database ?? "postgres",
-        };
+        // An operator's own connection string is the base, not the whole truth: the credential goes on
+        // top through this builder, so it is escaped correctly and config never carries it.
+        var builder = string.IsNullOrWhiteSpace(connection.ConnectionString)
+            ? new NpgsqlConnectionStringBuilder { Host = connection.Host, Database = connection.Database ?? "postgres" }
+            : new NpgsqlConnectionStringBuilder(connection.ConnectionString);
+
+        if (!string.IsNullOrWhiteSpace(connection.Database))
+            builder.Database = connection.Database;
 
         if (connection.Port is int port)
             builder.Port = port;
 
-        if (connection.AuthMode == AuthMode.IntegratedAuth)
+        if (connection.AuthMode == AuthMode.None)
+        {
+            // Whatever the address or the environment provides — a .pgpass file, a certificate, a
+            // credential already in the connection string. DataSync adds nothing.
+        }
+        else if (connection.AuthMode == AuthMode.IntegratedAuth)
         {
             // Kerberos/GSSAPI or peer auth, depending on the server's pg_hba.conf. Npgsql needs a
             // username either way; there is no equivalent of SQL Server's "integrated security" flag

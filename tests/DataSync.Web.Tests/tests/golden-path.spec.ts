@@ -493,4 +493,35 @@ public sealed class DropGadgets : IRowTransform
     expect(rows).not.toContain('tegdaG')
     expect(rows.trim().split('\n').filter((l) => l.trim())).toHaveLength(1)
   })
+
+  test('17 - a connection can be addressed by connection string instead of host and port', async ({ page }) => {
+    // The prerequisite for ODBC and JDBC, whose engines have no host and port to give — and useful
+    // today for a SQL Server string carrying a failover partner.
+    const NAME = 'playwright-cs'
+
+    await page.goto('/connections/new')
+    await page.getByTestId('connection-name-input').fill(NAME)
+    await page.getByTestId('connection-address-mode-select').selectOption('connectionString')
+
+    // Host and port are gone rather than greyed out: a disabled Host beside a connection string
+    // invites the question of which one is being used.
+    await expect(page.getByTestId('connection-host-input')).toHaveCount(0)
+
+    await page.getByTestId('connection-string-input').fill('Server=localhost,14330;TrustServerCertificate=True')
+    await page.getByTestId('connection-database-input').fill(DB_NAME)
+    await page.getByTestId('connection-userid-input').fill('sa')
+    await page.getByTestId('connection-password-input').fill(SA_PASSWORD)
+    await shot(page, '22-connection-string.png')
+
+    await page.getByTestId('save-connection-button').click()
+    await expect(page.getByTestId('connections-table')).toContainText(NAME)
+
+    // It survives a reload in the mode it was saved in, and it actually connects.
+    await page.goto(`/connections/${NAME}`)
+    await expect(page.getByTestId('connection-address-mode-select')).toHaveValue('connectionString', { timeout: 15_000 })
+    await expect(page.getByTestId('connection-string-input')).toHaveValue(/Server=localhost,14330/)
+
+    await page.getByTestId('test-connection-button').click()
+    await expect(page.getByTestId('connection-test-result')).toContainText('reachable', { timeout: 20_000 })
+  })
 })

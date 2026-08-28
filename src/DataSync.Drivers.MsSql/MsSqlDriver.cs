@@ -46,10 +46,47 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
 
     public DbConnection CreateConnection(ConnectionConfig connection, string? credential)
     {
-        var builder = new SqlConnectionStringBuilder
+        // An operator's own connection string is the *base*, not the whole truth: the credential is
+        // applied on top through this builder, so it is escaped correctly rather than concatenated, and
+        // config never has to carry it. Everything below then behaves identically in both modes.
+        var builder = string.IsNullOrWhiteSpace(connection.ConnectionString)
+            ? new SqlConnectionStringBuilder
+            {
+                DataSource = connection.Port is int port ? $"{connection.Host},{port}" : connection.Host,
+                InitialCatalog = connection.Database ?? "master",
+            }
+            : new SqlConnectionStringBuilder(connection.ConnectionString);
+
+        if (!string.IsNullOrWhiteSpace(connection.Database))
+            builder.InitialCatalog = connection.Database;
+
+        ApplyDefaults(builder);
+
+        if (connection.AuthMode == AuthMode.IntegratedAuth)
         {
-            DataSource = connection.Port is int port ? $"{connection.Host},{port}" : connection.Host,
-            InitialCatalog = connection.Database ?? "master",
+            builder.IntegratedSecurity = true;
+        }
+        else if (connection.AuthMode == AuthMode.SqlAuth)
+        {
+            builder.UserID = connection.UserId
+                ?? throw new InvalidOperationException("UserId is required for SqlAuth connections.");
+            builder.Password = credential
+                ?? throw new InvalidOperationException("A resolved credential is required for SqlAuth connections.");
+        }
+
+        // AuthMode.None: whatever the address or the environment provides is used, and DataSync adds
+        // nothing.
+
+        foreach (var (key, value) in connection.Properties)
+            builder[key] = value;
+
+        return new SqlConnection(builder.ConnectionString);
+    }
+
+    private static void ApplyDefaults(SqlConnectionStringBuilder builder)
+    {
+        var defaults = new SqlConnectionStringBuilder
+        {
             // Dev/test default for connecting to self-signed instances (e.g. the local Docker
             // container used in Phase 3 testing). Revisit before any hardened-production deployment
             // guidance ships — see architecture/implementation/done/phase-003-mssql-driver.md.
@@ -61,22 +98,14 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
             MultipleActiveResultSets = true,
         };
 
-        if (connection.AuthMode == AuthMode.IntegratedAuth)
+        // Only where the operator has not already said otherwise — a connection string that sets
+        // Encrypt or turns MARS off meant it, and silently overriding it would be worse than the
+        // default being absent.
+        foreach (var key in new[] { nameof(SqlConnectionStringBuilder.TrustServerCertificate), nameof(SqlConnectionStringBuilder.MultipleActiveResultSets) })
         {
-            builder.IntegratedSecurity = true;
+            if (!builder.ShouldSerialize(key))
+                builder[key] = defaults[key];
         }
-        else
-        {
-            builder.UserID = connection.UserId
-                ?? throw new InvalidOperationException("UserId is required for SqlAuth connections.");
-            builder.Password = credential
-                ?? throw new InvalidOperationException("A resolved credential is required for SqlAuth connections.");
-        }
-
-        foreach (var (key, value) in connection.Properties)
-            builder[key] = value;
-
-        return new SqlConnection(builder.ConnectionString);
     }
 
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(DbConnection connection, CancellationToken cancellationToken)
