@@ -246,7 +246,7 @@ public sealed class RunExecutor(
             // the form a hand-written transform takes, and phase 22's projection does the rest —
             // including the {{column}} substitution that makes it correct in a reader whose statement
             // aliases the source table.
-            var sourceScriptDialect = new RunnerScriptDialect(sourceDriver.DriverType);
+            var sourceScriptDialect = ScriptDialectFor(sourceDriver);
             var sourceConnectionConfig = configRepository.LoadConnection(source.ConnectionName);
             var columnMappings = ApplyScriptedTransforms(
                 task, mapping, sourceConnectionConfig, sourceScriptDialect, item.RunId);
@@ -273,8 +273,8 @@ public sealed class RunExecutor(
             long totalWritten = 0;
             string? newWatermark = null;
 
-            var targetDialect = ResolveDialect(targetDriver.DriverType);
-            var sourceDialect = ResolveDialect(sourceDriver.DriverType);
+            var targetDialect = ResolveDialect(targetDriver);
+            var sourceDialect = ResolveDialect(sourceDriver);
             var targetQualified = targetDialect.QualifyTable(target.Schema, target.Table);
             var targetSchemaQuoted = targetDialect.QuoteIdentifier(target.Schema);
             var targetTableQuoted = targetDialect.QuoteIdentifier(target.Table);
@@ -284,7 +284,7 @@ public sealed class RunExecutor(
             // it (the same "connection" level as HookResolution's — the target's). Declared once per
             // pass, before the first read, so the host never even builds a LifecycleHookContext — let
             // alone calls the script — for a mapping with nothing bound.
-            var targetScriptDialect = new RunnerScriptDialect(targetDriver.DriverType);
+            var targetScriptDialect = ScriptDialectFor(targetDriver);
             var lifecycleHookBinding = scriptHost.ResolveBinding<ILifecycleHook>(
                 ScriptSlots.LifecycleHook, targetConnectionConfig, task, mapping);
             IReadOnlySet<string> declaredHookPoints = ImmutableHashSet<string>.Empty;
@@ -474,7 +474,7 @@ public sealed class RunExecutor(
         var sourceColumns = await sourceDriver.ListColumnsAsync(
             sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
         var (columns, identityWarnings) = ProvisioningColumnBuilder.Build(
-            ResolveDialect(sourceDriver.DriverType), sourceColumns, mapping.ColumnMappings);
+            ResolveDialect(sourceDriver), sourceColumns, mapping.ColumnMappings);
 
         var request = new ProvisioningRequest(
             ProvisioningActions.CreateTargetTable, target, ReaderKind: null,
@@ -652,17 +652,15 @@ public sealed class RunExecutor(
                 mappingName, runId, cancellationToken);
     }
 
-    /// <summary>The one place TaskRunner needs a concrete <see cref="SqlDialect"/> for an engine it
-    /// isn't otherwise driving — to translate the *source's* native column types into the canonical
-    /// form <see cref="ProvisioningColumnBuilder"/> needs. Same shape as <see cref="RunnerScriptDialect"/>
-    /// just below: a per-engine switch at the one call site that needs it, rather than widening
-    /// <see cref="IDriver"/> to expose a dialect no other caller needs.</summary>
-    private static SqlDialect ResolveDialect(ConnectionDriverType driverType) => driverType switch
-    {
-        ConnectionDriverType.MsSql => MsSqlDialect.Instance,
-        ConnectionDriverType.Postgres => PostgresDialect.Instance,
-        _ => throw new InvalidOperationException($"No SqlDialect is registered for driver type '{driverType}'."),
-    };
+    /// <summary>
+    /// The dialect a driver speaks. Was a per-engine switch here (and a second one in the script
+    /// adapter below it) until phase 29 made a driver name its own through <see cref="IDialectProvider"/>
+    /// — two switches in two processes that every new driver had to remember to extend.
+    /// </summary>
+    private static SqlDialect ResolveDialect(IDriver driver) =>
+        (driver as IDialectProvider)?.Dialect
+        ?? throw new InvalidOperationException(
+            $"The '{driver.DriverType}' driver does not name a SQL dialect.");
 
     private static async Task<IReadOnlyList<BatchReloadSegment?>> ResolveSegmentsAsync(
         IChangeReader reader,
@@ -727,36 +725,17 @@ public sealed class RunExecutor(
 
     private void Log(Guid runId, LogSeverity level, string message) => logWriter.Log(runId, level, message);
 
+    /// <summary>
+    /// What a script generating SQL for this engine is told about it. A driver that names no dialect —
+    /// an ODBC or JDBC driver reaching an arbitrary engine — cannot support the slots that generate
+    /// SQL, and says so here rather than at the point a script tries to quote something.
+    /// </summary>
+    private static IScriptDialect ScriptDialectFor(IDriver driver) =>
+        ScriptDialectAdapter.For(driver)
+        ?? throw new InvalidOperationException(
+            $"The '{driver.DriverType}' driver does not name a SQL dialect, so scripts cannot generate SQL for it.");
+
     private sealed class ConnectivityException(string connectionName, Exception inner)
         : Exception($"Failed to open connection '{connectionName}': {inner.Message}", inner);
 }
 
-/// <summary>
-/// What a column-expression script is told about the engine, when the transform is generated before
-/// any statement exists. Quoting comes from the driver's own dialect where there is one; the column
-/// the script is transforming is handed to it as <see cref="ColumnMapping.ColumnToken"/>, so a script
-/// rarely needs to quote anything itself.
-/// </summary>
-internal sealed class RunnerScriptDialect(ConnectionDriverType driverType) : IScriptDialect
-{
-    public string EngineName => driverType.ToString();
-
-    public string QuoteIdentifier(string identifier) => driverType switch
-    {
-        ConnectionDriverType.MsSql => $"[{identifier.Replace("]", "]]")}]",
-        _ => $"\"{identifier.Replace("\"", "\"\"")}\"",
-    };
-
-    public string ParameterReference(string name) => $"@{name}";
-
-    public CanonicalType ToCanonicalType(string nativeType) => Dialect().ToCanonicalType(nativeType);
-
-    public RenderedColumnType RenderColumnType(CanonicalType type) => Dialect().RenderColumnType(type);
-
-    private SqlDialect Dialect() => driverType switch
-    {
-        ConnectionDriverType.MsSql => MsSqlDialect.Instance,
-        ConnectionDriverType.Postgres => PostgresDialect.Instance,
-        _ => throw new InvalidOperationException($"No SqlDialect is registered for driver type '{driverType}'."),
-    };
-}

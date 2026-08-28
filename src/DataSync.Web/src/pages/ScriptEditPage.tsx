@@ -56,7 +56,7 @@ export function ScriptEditPage() {
   const compile = useCompileScript()
   const del = useDeleteScript()
 
-  const [draft, setDraft] = useState<ScriptDefinition | null>(isNew ? empty(slots?.[0] ?? 'sqlColumnExpression') : null)
+  const [draft, setDraft] = useState<ScriptDefinition | null>(isNew ? empty(slots?.[0]?.slot ?? 'sqlColumnExpression') : null)
 
   useEffect(() => {
     if (isNew || draft || !existing) return
@@ -86,7 +86,7 @@ export function ScriptEditPage() {
       ...draft,
       manifest: {
         ...draft.manifest, language,
-        kind: language === 'Sql' ? 'hook' : (slots?.[0] ?? draft.manifest.kind),
+        kind: language === 'Sql' ? 'hook' : (slots?.[0]?.slot ?? draft.manifest.kind),
         entryType: language === 'Sql' ? null : 'MyExpression',
       },
       code: language === 'Sql' ? SQL_STARTER : STARTER,
@@ -169,7 +169,7 @@ export function ScriptEditPage() {
                       onChange={(e) => setManifest({ kind: e.target.value })}
                       data-testid="script-kind-select"
                     >
-                      {(slots ?? [draft.manifest.kind]).map((s) => <option key={s} value={s}>{s}</option>)}
+                      {(slots?.map((s) => s.slot) ?? [draft.manifest.kind]).map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </Field>
                 )}

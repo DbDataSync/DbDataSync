@@ -159,12 +159,20 @@ public sealed class ScriptsControllerTests(TestApiFactory factory) : IClassFixtu
         Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/scripts/{name}")).StatusCode);
     }
 
+    private sealed record SlotInfo(string Slot, List<string> Levels);
+
     [Fact]
-    public async Task Slots_ReportsWhatThisBuildSupports()
+    public async Task Slots_ReportsWhatThisBuildSupports_AndWhereEachOneBinds()
     {
-        var slots = await _client.GetFromJsonAsync<List<string>>("/api/scripts/slots", JsonOptions);
+        var slots = await _client.GetFromJsonAsync<List<SlotInfo>>("/api/scripts/slots", JsonOptions);
 
         // Driven by the build rather than hardcoded in the SPA, the same way driver capabilities are.
-        Assert.Contains("sqlColumnExpression", slots!);
+        var transform = Assert.Single(slots!, s => s.Slot == "sqlColumnExpression");
+        Assert.Equal(["connection", "replication", "mapping"], transform.Levels);
+
+        // Metadata describes an engine, not a mapping — and the pickers ask before a mapping exists.
+        // The SPA renders each slot only where it means something, from this.
+        var metadata = Assert.Single(slots!, s => s.Slot == "metadataProvider");
+        Assert.Equal(["connection"], metadata.Levels);
     }
 }

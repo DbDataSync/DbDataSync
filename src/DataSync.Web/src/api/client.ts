@@ -12,6 +12,7 @@ import type {
   ScriptCompileResult,
   ScriptConfig,
   ScriptDefinition,
+  ScriptSlotInfo,
   LogEntryRecord,
   ReplicationTaskConfig,
   TableMappingConfig,
@@ -71,7 +72,7 @@ export const api = {
   },
   scripts: {
     list: () => request<ScriptConfig[]>('/api/scripts'),
-    slots: () => request<string[]>('/api/scripts/slots'),
+    slots: () => request<ScriptSlotInfo[]>('/api/scripts/slots'),
     get: (name: string) => request<ScriptDefinition>(`/api/scripts/${encodeURIComponent(name)}`),
     upsert: (name: string, script: ScriptDefinition) =>
       put<ScriptCompileResult>(`/api/scripts/${encodeURIComponent(name)}`, script),

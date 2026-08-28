@@ -22,8 +22,18 @@ public sealed class ScriptsController(
     public ActionResult<IReadOnlyList<ScriptConfig>> List() =>
         Ok(configRepository.ListScripts().Select(n => configRepository.LoadScript(n).Manifest).ToList());
 
+    /// <summary>
+    /// The slots this build supports, each with the binding levels it may be bound at — so the SPA
+    /// renders a slot only where it means something rather than offering a control that silently does
+    /// nothing. <c>metadataProvider</c> is connection-only; see <see cref="ScriptSlots.BindableAt"/>.
+    /// </summary>
     [HttpGet("slots")]
-    public ActionResult<IReadOnlyList<string>> Slots() => Ok(ScriptSlots.All);
+    public ActionResult<IReadOnlyList<ScriptSlotInfo>> Slots() =>
+        Ok(ScriptSlots.All
+            .Select(slot => new ScriptSlotInfo(
+                slot,
+                BindingLevels.All.Where(level => ScriptSlots.IsBindableAt(slot, level)).ToList()))
+            .ToList());
 
     [HttpGet("{name}")]
     public ActionResult<ScriptDefinition> Get(string name)
@@ -119,6 +129,8 @@ public sealed class ScriptsController(
         return NoContent();
     }
 }
+
+public sealed record ScriptSlotInfo(string Slot, IReadOnlyList<string> Levels);
 
 public sealed record ScriptDiagnosticDto(int Line, int Column, string Message);
 

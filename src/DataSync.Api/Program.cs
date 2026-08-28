@@ -57,6 +57,7 @@ builder.Services.AddSingleton(sp =>
     ScriptCacheDirectory.BesideStateDatabase(sp.GetRequiredService<ApiOptions>().StateDbPath));
 builder.Services.AddSingleton<ScriptCompiler>();
 builder.Services.AddSingleton<ScriptHost>();
+builder.Services.AddSingleton<ScriptedMetadata>();
 builder.Services.AddSingleton<DriverConnectionFactory>();
 builder.Services.AddSingleton<MetadataService>();
 builder.Services.AddSingleton<ProvisioningService>();

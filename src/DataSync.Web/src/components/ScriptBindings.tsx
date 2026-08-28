@@ -44,7 +44,9 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
         </span>
       </div>
       <div className="card-body">
-        {(slots ?? []).map((slot) => (
+        {/* Only the slots that mean something at this level. A metadata provider bound on a mapping
+            would be invisible to the pickers, which ask before a mapping exists. */}
+        {(slots ?? []).filter((s) => s.levels.includes(level)).map(({ slot }) => (
           <SlotBinding
             key={slot}
             slot={slot}
@@ -59,7 +61,9 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
             }}
           />
         ))}
-        {slots?.length === 0 && <span className="hint">This build has no script slots.</span>}
+        {slots?.every((s) => !s.levels.includes(level)) && (
+          <span className="hint">No script slots apply at this level.</span>
+        )}
       </div>
     </div>
   )

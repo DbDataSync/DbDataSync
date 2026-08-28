@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\DataSync.Core\DataSync.Core.csproj" />
     <ProjectReference Include="..\DataSync.Drivers.Abstractions\DataSync.Drivers.Abstractions.csproj" />
+    <ProjectReference Include="..\DataSync.Scripting.Abstractions\DataSync.Scripting.Abstractions.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

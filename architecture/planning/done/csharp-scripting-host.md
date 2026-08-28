@@ -277,6 +277,10 @@ has landed and changed what we know, following the practice `additional-database
 | 22 | **Column transforms in the source SQL dialect** — `ColumnMapping.Transform` implemented; readers gain an explicit projection | `implementation/todo/phase-022-source-sql-column-transforms.md` |
 | 23 | Scripting host: registry, manifest, Roslyn compile, disk cache, `ScriptResolution`, API and SPA | not yet written |
 | 24 | Scripted transforms — the SQL-expression generator (feeding phase 22's projection) and the in-process row transform | not yet written |
-| 25 | Scripted metadata providers | not yet written |
-| 26 | Scripted source query builders | not yet written |
+| 29 | Scripted metadata providers | `implementation/done/phase-029-scripted-metadata-providers.md` |
+| 30 | Scripted source query builders | `implementation/done/phase-030-scripted-source-queries.md` |
 | — | Scripted target statement generation | deliberately later; "eventually" in the brief and the riskiest slot |
+
+**Renumbered 2026-08-27.** The last two were written here as 25 and 26 before phases 25–27
+(provisioning, lifecycle hooks, scripted hook generation) were planned and built against those numbers.
+They are 29 and 30. Nothing about their content changed; the numbers in this table did.

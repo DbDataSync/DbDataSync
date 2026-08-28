@@ -17,8 +17,11 @@ namespace DataSync.Drivers.Postgres;
 /// later phase; nothing here is waiting on it.
 /// </para>
 /// </summary>
-public sealed class PostgresDriver : IDriver, IConnectionTester, IProvisioner
+public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvider, IProvisioner
 {
+    /// <summary>What a script generating SQL for this engine is told about it.</summary>
+    public SqlDialect Dialect => PostgresDialect.Instance;
+
     public ConnectionDriverType DriverType => ConnectionDriverType.Postgres;
 
     public IReadOnlyList<IChangeReader> Readers { get; } =

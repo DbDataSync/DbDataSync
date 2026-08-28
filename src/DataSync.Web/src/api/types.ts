@@ -199,6 +199,13 @@ export interface ScriptDefinition {
   code: string
 }
 
+/** A slot this build supports, and the binding levels it may be bound at. `metadataProvider` is
+ * connection-only — metadata describes an engine, not a mapping. */
+export interface ScriptSlotInfo {
+  slot: string
+  levels: ('connection' | 'replication' | 'mapping')[]
+}
+
 export interface ScriptDiagnostic {
   line: number
   column: number
