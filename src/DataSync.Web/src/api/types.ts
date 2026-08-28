@@ -179,10 +179,39 @@ export interface HookConfig {
  * declared, and it replaces rather than merges with a broader level's list. */
 export type Hooks = Record<string, HookConfig[] | null>
 
-export interface ScriptParameterDeclaration {
+/** What kind of value a parameter takes, and therefore what control it gets. A closed set: the point
+ * of declaring a parameter is that this app can render it without knowing what it is for. */
+export type ParameterType =
+  | 'Text' | 'Number' | 'Bool' | 'Date' | 'DateTime' | 'Dropdown' | 'ColumnPicker' | 'Property'
+
+export interface ParameterCardinality {
+  min: number
+  max: number
+}
+
+/** Hints, not layout. A declaration that says nothing still renders. */
+export interface ParameterLayout {
+  card: string
+  group: string
+  /** Relative width within its group, in flex units. */
+  size: number
+}
+
+/** One setting an author declared and an operator fills in — a driver's, a handler's, or a
+ * script's. The server says what exists and this app renders it generically, the same relationship
+ * DriverCapabilities already has with the Kind pickers. */
+export interface ParameterDescriptor {
   name: string
-  required: boolean
+  label: string | null
   description: string | null
+  type: ParameterType
+  required: boolean
+  /** Null — the common case — means a single value. */
+  cardinality: ParameterCardinality | null
+  dropdownOptions: string[] | null
+  /** What the form pre-fills. Null means empty, which is distinct from an empty string. */
+  default: string | null
+  layout: ParameterLayout | null
 }
 
 export type ScriptLanguage = 'CSharp' | 'Sql'
@@ -196,7 +225,7 @@ export interface ScriptConfig {
    * point to compile. */
   entryType: string | null
   description: string | null
-  parameters: ScriptParameterDeclaration[]
+  parameters: ParameterDescriptor[]
   enabled: boolean
 }
 
@@ -318,6 +347,8 @@ export interface ScriptCompileResult {
 // *source* connection's driver, staging providers and writers from the *target*'s.
 export interface ReaderCapability {
   kind: string
+  /** The settings this Kind reads out of its options bag, declared beside the code that reads them. */
+  parameters: ParameterDescriptor[]
   supportsSegmentation: boolean
   /** Whether a row deleted at the source reaches the target as a delete. False for a watermark scan,
    * which can only see rows that still exist, and for a batch reload, whose deletes are the
@@ -345,10 +376,12 @@ export interface CredentialSource {
 
 export interface StagingCapability {
   kind: string
+  parameters: ParameterDescriptor[]
 }
 
 export interface WriterCapability {
   kind: string
+  parameters: ParameterDescriptor[]
   /** Removes target rows that are absent from the change set, within the scope it was given. False
    * for upsert-only writers, which can add and update but never notice an absence. */
   supportsReconciliation: boolean
@@ -363,6 +396,9 @@ export interface DriverCapabilities {
    * driver reaching an arbitrary engine may have no probe it can name — so the UI hides the Test
    * affordance rather than offering one that could never work. */
   supportsConnectionTest: boolean
+  /** What this driver's connections take beyond the fields every connection has — its free-form
+   * properties bag is one of these, declared rather than assumed. */
+  connectionParameters: ParameterDescriptor[]
   /** Which provisioning actions (see ProvisioningPlan) this driver can plan. Empty for a driver that
    * implements no provisioning at all. */
   supportedProvisioningActions: string[]

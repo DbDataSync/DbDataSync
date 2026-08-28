@@ -70,6 +70,9 @@ export const api = {
     delete: (name: string) => request<void>(`/api/connections/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     capabilities: (name: string) =>
       request<DriverCapabilities>(`/api/connections/${encodeURIComponent(name)}/capabilities`),
+    /** For a connection being created, which has no name to ask about yet. */
+    capabilitiesForDriver: (driverType: string) =>
+      request<DriverCapabilities>(`/api/drivers/${encodeURIComponent(driverType)}/capabilities`),
     test: (name: string) =>
       request<ConnectionTestReport>(`/api/connections/${encodeURIComponent(name)}/test`, { method: 'POST' }),
     credentialSource: (name: string) =>

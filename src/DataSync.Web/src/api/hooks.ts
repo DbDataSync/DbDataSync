@@ -108,6 +108,15 @@ export function useReplicationCapabilities(replicationName: string | undefined) 
  * connection: with one registered driver that is the same answer, and it is a far better default than
  * a list of Kind strings compiled into this app, which would be a guess about the server's drivers.
  */
+/** Capabilities for a driver type — what a connection being created can ask, having no name yet. */
+export function useDriverCapabilities(driverType: string | undefined) {
+  return useQuery({
+    queryKey: ['drivers', driverType ?? '', 'capabilities'] as const,
+    queryFn: () => api.connections.capabilitiesForDriver(driverType!),
+    enabled: !!driverType,
+  })
+}
+
 export function useDefaultCapabilities() {
   const { data: connections } = useConnections()
   return useCapabilities(connections?.[0]?.name)

@@ -3,12 +3,13 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { Link } from 'react-router-dom'
 import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
+import { ParameterForm } from '../../components/ParameterForm'
 import { EndpointsCard } from './EndpointsCard'
 import { MetricsCard } from './MetricsCard'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { readerNotes } from '../../api/readerNotes'
-import { useConnections, useReplication, useReplicationCapabilities, useTableMappings, useUpsertReplication } from '../../api/hooks'
-import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
+import { useConnections, useReplication, useReplicationCapabilities, useScripts, useTableMappings, useUpsertReplication } from '../../api/hooks'
+import type { ParameterDescriptor, ReplicationTaskConfig, ScheduleMode } from '../../api/types'
 
 type Stage = 'reader' | 'cache' | 'writer'
 
@@ -27,6 +28,7 @@ const STAGES: { id: Stage; label: string }[] = [
 export function OverviewPanel({ replicationName }: { replicationName: string }) {
   const { data: task, error } = useReplication(replicationName)
   const { data: mappings } = useTableMappings(replicationName)
+  const { data: scripts } = useScripts()
   const mappingsBase = `/replications/${encodeURIComponent(replicationName)}/mappings`
   const capabilities = useReplicationCapabilities(replicationName)
   const upsert = useUpsertReplication()
@@ -59,6 +61,13 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
     id === 'reader' ? capabilities.readers.map((r) => ({ kind: r.kind, note: readerNotes(r).join(' · ') || undefined }))
     : id === 'writer' ? capabilities.writers.map((w) => ({ kind: w.kind, note: w.supportsReconciliation ? 'reconciling' : 'upsert-only' }))
     : capabilities.stagingProviders.map((p) => ({ kind: p.kind, note: undefined }))
+
+  /** What the chosen Kind says it takes. Declared by the component that reads them, so choosing a
+   * Kind now offers its settings instead of leaving an operator to know the keys by heart. */
+  const parametersFor = (id: Stage, kind: string): ParameterDescriptor[] =>
+    (id === 'reader' ? capabilities.readers.find((r) => r.kind === kind)?.parameters
+      : id === 'writer' ? capabilities.writers.find((w) => w.kind === kind)?.parameters
+      : capabilities.stagingProviders.find((p) => p.kind === kind)?.parameters) ?? []
 
   const current = draft.changeProcessing[stage]
   const options = kindsFor(stage)
@@ -128,12 +137,24 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
                 </Field>
               </div>
 
-              <KeyValueTable
-                value={current.options}
+              {/* The declared settings, plus whatever else is already in the bag. A Kind that
+                  declares nothing still gets the free-form table, because an option a driver reads
+                  but has not declared is still an option somebody set. */}
+              <ParameterForm
+                parameters={parametersFor(stage, current.kind)}
+                values={current.options}
                 onChange={(next) => setStageValue(stage, { options: next })}
-                addLabel="Setting name"
-                testId={`${stage}-options`}
+                options={{ script: scripts?.map((s) => s.manifest.name) ?? [] }}
+                testIdPrefix={`${stage}-options`}
               />
+              {parametersFor(stage, current.kind).length === 0 && (
+                <KeyValueTable
+                  value={current.options}
+                  onChange={(next) => setStageValue(stage, { options: next })}
+                  addLabel="Setting name"
+                  testId={`${stage}-options`}
+                />
+              )}
 
               <div className="row">
                 <button type="submit" className="btn btn-primary" disabled={upsert.isPending} data-testid="save-settings-button">

@@ -19,6 +19,7 @@ public static class DriverParameters
         Description = "Appended to the connection string. Engine-specific settings this driver does not name.",
         Type = ParameterType.Property,
         Cardinality = ParameterCardinality.Any,
-        Layout = new ParameterLayout(Card: "Custom properties"),
+        // No layout card. It would be a heading saying the same thing as this parameter's own label,
+        // inside a card that already says "Driver settings" — three headings for one control.
     };
 }

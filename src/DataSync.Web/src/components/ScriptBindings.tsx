@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Field } from './Field'
 import { KeyValueTable } from './KeyValueTable'
 import { useScripts, useScriptSlots } from '../api/hooks'
-import type { ScriptBinding, ScriptBindings, ScriptSlotInfo } from '../api/types'
+import { ParameterForm } from './ParameterForm'
+import type { ScriptBinding, ScriptBindings, ScriptConfig, ScriptSlotInfo } from '../api/types'
 
 /**
  * Binds scripts to slots at one level of the hierarchy — connection, replication or table mapping.
@@ -80,7 +81,7 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
             description={description}
             binding={slot in bindings ? bindings[slot] : undefined}
             inherited={inherited[slot] ?? null}
-            available={(scripts ?? []).map((s) => s.manifest).filter((m) => m.kind === slot && m.enabled).map((m) => m.name)}
+            available={(scripts ?? []).map((s) => s.manifest).filter((m) => m.kind === slot && m.enabled)}
             onChange={(next) => {
               const copy = { ...bindings }
               if (next === undefined) delete copy[slot]
@@ -114,9 +115,12 @@ function SlotBinding({ slot, label, description, binding, inherited, available, 
   /** undefined: the key is absent, so this level inherits. null: explicitly none. */
   binding: ScriptBinding | null | undefined
   inherited: ScriptBinding | null
-  available: string[]
+  /** The manifests, not just the names — a binding's parameter form is rendered from the manifest of
+   * the script it names, so a script that declares what it needs stops being a table to guess at. */
+  available: ScriptConfig[]
   onChange: (next: ScriptBinding | null | undefined) => void
 }) {
+  const declared = available.find((s) => s.name === binding?.scriptName)?.parameters ?? []
   const value = binding === undefined ? INHERIT : binding === null ? NONE : binding.scriptName
 
   return (
@@ -142,11 +146,22 @@ function SlotBinding({ slot, label, description, binding, inherited, available, 
             {inherited ? `Inherit — ${inherited.scriptName}` : 'Inherit — nothing bound'}
           </option>
           <option value={NONE}>None (override)</option>
-          {available.map((name) => <option key={name} value={name}>{name}</option>)}
+          {available.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
         </select>
       </Field>
 
-      {binding && (
+      {binding && declared.length > 0 && (
+        <ParameterForm
+          parameters={declared}
+          values={binding.parameters}
+          onChange={(parameters) => onChange({ ...binding, parameters })}
+          testIdPrefix={`script-parameters-${slot}`}
+        />
+      )}
+
+      {/* A script that declares nothing still takes parameters — the declaration is new and the
+          manifests that predate it are not wrong, just silent. The free-form table stays for them. */}
+      {binding && declared.length === 0 && (
         <Field label="Parameters">
           <KeyValueTable
             value={binding.parameters}

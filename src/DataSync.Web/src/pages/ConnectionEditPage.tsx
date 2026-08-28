@@ -3,11 +3,31 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
-import { KeyValueTable } from '../components/KeyValueTable'
-import { useCapabilities, useConnections, useDeleteConnection, useTestConnection, useUpsertConnection } from '../api/hooks'
+import { ParameterForm } from '../components/ParameterForm'
+import { useCapabilities, useDriverCapabilities, useConnections, useDeleteConnection, useTestConnection, useUpsertConnection } from '../api/hooks'
 import { ConnectionTestCard } from './connection-edit/ConnectionTestCard'
 import { ScriptBindingsCard } from '../components/ScriptBindings'
 import type { AuthMode, ConnectionInput, DriverType } from '../api/types'
+
+/**
+ * A connection's properties bag as the vararg values a `ParameterForm` expects, and back again.
+ *
+ * The persisted shape is unchanged — a flat `Record<string, string>` on `ConnectionInput` — because
+ * every connection already on disk has one and a new shape would be a migration. This is purely about
+ * what the form is handed.
+ */
+const PROPERTIES = 'properties'
+
+function flattenProperties(properties: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(properties).map(([k, v]) => [`${PROPERTIES}.${k}`, v]))
+}
+
+function unflattenProperties(values: Record<string, string>): Record<string, string> {
+  const prefix = `${PROPERTIES}.`
+  return Object.fromEntries(
+    Object.entries(values).filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k.slice(prefix.length), v]),
+  )
+}
 
 /** Each engine's default listening port, so switching the driver does not leave the other's behind. */
 const DEFAULT_PORTS: Record<DriverType, number> = { MsSql: 1433, Postgres: 5432 }
@@ -44,6 +64,11 @@ export function ConnectionEditPage() {
   const capabilities = useCapabilities(isNew ? undefined : name)
   const canTest = !isNew && capabilities.data?.supportsConnectionTest === true
   const [draft, setDraft] = useState<ConnectionInput | null>(isNew ? { ...empty } : null)
+  // A connection being created has no name to ask about, so it asks about its driver instead —
+  // and re-asks when the driver picker changes, which is the moment the settings on offer change.
+  const driverCapabilities = useDriverCapabilities(isNew ? draft?.driverType : undefined)
+  const declaredParameters =
+    (isNew ? driverCapabilities.data : capabilities.data)?.connectionParameters ?? []
 
   const existing = connections?.find((c) => c.name === name)
 
@@ -280,17 +305,20 @@ export function ConnectionEditPage() {
             )}
           </div>
 
+          {/* What this driver says its connections take beyond the fields every connection has. The
+              free-form properties bag is one of these now — declared by the driver rather than
+              assumed by this screen, which is what lets a driver narrow or replace it later. */}
           <div className="card">
             <div className="card-head">
-              <span className="card-title">Custom properties</span>
-              <span className="card-note">appended to the connection string</span>
+              <span className="card-title">Driver settings</span>
+              <span className="card-note">declared by the {draft.driverType} driver</span>
             </div>
             <div className="card-body">
-              <KeyValueTable
-                value={draft.properties ?? {}}
-                onChange={(properties) => setDraft({ ...draft, properties })}
-                addLabel="Property name"
-                testId="connection-properties"
+              <ParameterForm
+                parameters={declaredParameters}
+                values={flattenProperties(draft.properties ?? {})}
+                onChange={(next) => setDraft({ ...draft, properties: unflattenProperties(next) })}
+                testIdPrefix="connection-parameters"
               />
             </div>
           </div>

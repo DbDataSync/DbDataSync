@@ -62,6 +62,24 @@ public sealed class ConnectionsController(
     }
 
     /// <summary>
+    /// The same, for a driver type rather than a saved connection.
+    /// <para>
+    /// A connection being created has no capabilities to look up by name, and it still has to offer
+    /// the driver's settings — which was fine while the connection form hardcoded them and stopped
+    /// being fine the moment a driver started declaring them (phase 42). Asking by type is the
+    /// question the new-connection screen actually has.
+    /// </para>
+    /// </summary>
+    [HttpGet("~/api/drivers/{driverType}/capabilities")]
+    public ActionResult<DriverCapabilities> CapabilitiesForDriver(ConnectionDriverType driverType)
+    {
+        var capabilities = driverRegistry.Describe(driverType);
+        return capabilities is null
+            ? NotFound(new { error = $"No driver is registered for '{driverType}'." })
+            : Ok(capabilities);
+    }
+
+    /// <summary>
     /// Opens the connection and runs the driver's probe.
     /// <para>
     /// A failure is reported as <c>succeeded: false</c> with the provider's message, not as a 500: an

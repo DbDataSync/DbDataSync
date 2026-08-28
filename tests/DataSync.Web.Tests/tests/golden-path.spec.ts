@@ -252,20 +252,30 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('stage-writer').click()
     await expect(page.getByTestId('writer-kind-select').locator('option[value="MsSqlMerge"]')).toContainText('upsert-only')
 
-    // A stage option is a key/value pair now, not a line of JSON in a textarea.
+    // A stage's settings are offered, not typed: the change-tracking reader declares snapshotIsolation
+    // beside the code that reads it, so choosing that Kind offers a labelled toggle rather than
+    // leaving an operator to know the key by heart and spell it into a free-form table (phase 42).
     await page.getByTestId('stage-reader').click()
-    const options = page.getByTestId('reader-options')
-    await options.getByPlaceholder('Setting name').fill('snapshotIsolation')
-    await options.getByRole('button', { name: '+ Add' }).click()
-    await options.getByLabel('snapshotIsolation value').fill('false')
+    const snapshotIsolation = page.getByTestId('reader-options-snapshotIsolation')
+    await expect(snapshotIsolation).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('reader-options')).toContainText('Snapshot isolation')
+    await expect(page.getByTestId('reader-options')).toContainText('snapshot transaction')
+
+    // Declared as a Bool, so it is a toggle — and it starts at the default the declaration states.
+    await expect(snapshotIsolation).toHaveAttribute('aria-pressed', 'false')
+    await snapshotIsolation.click()
+    await expect(snapshotIsolation).toHaveAttribute('aria-pressed', 'true')
+    await snapshotIsolation.click()
 
     await page.getByTestId('save-settings-button').click()
     await shot(page, '14-pipeline-settings.png')
 
-    // Survives a reload, which is the only proof it reached the config repo.
-    await page.reload()
-    await page.getByTestId('tab-overview').click()
-    await expect(page.getByTestId('reader-options').getByLabel('snapshotIsolation value')).toHaveValue('false', { timeout: 15_000 })
+    // Asked of the API, not of the form that just wrote it: the only proof it reached the config repo.
+    // Left off deliberately — this database does not allow snapshot isolation, and a run would fail.
+    await expect.poll(async () => {
+      const task = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()
+      return task.changeProcessing.reader.options.snapshotIsolation
+    }, { timeout: 15_000 }).toBe('false')
   })
 
   test('12 - a mapping can override the replication\'s endpoint for itself', async ({ page }) => {
@@ -884,5 +894,47 @@ public sealed class Shout : IValueColumnExpression
       await expect(page.getByTestId('tab-connections')).toHaveCount(0)
       await expect(page.getByTestId('tab-scripts')).toHaveCount(0)
     }
+  })
+
+  test('23 - a declared setting renders itself, whoever declared it', async ({ page }) => {
+    // Three places used to solve "an author declares settings, an operator fills them in" three ways.
+    // They are one form now, and this walks all three of its callers.
+
+    // 1. A driver's connection settings. The free-form properties bag is a declared vararg rather than
+    //    something this screen assumes every connection has.
+    await page.goto(`/connections/${SRC_CONNECTION_NAME}`)
+    const properties = page.getByTestId('connection-parameters')
+    await expect(properties).toBeVisible({ timeout: 15_000 })
+    await expect(properties).toContainText('Custom properties')
+    await expect(properties).toContainText('Appended to the connection string')
+
+    // Rendered as the key/value table, which is what a Property vararg means — and round-tripping
+    // through save exactly as it did when this screen hardcoded it.
+    const table = page.getByTestId('connection-parameters-properties')
+    await table.getByPlaceholder('Custom properties name').fill('Application Name')
+    await table.getByRole('button', { name: '+ Add' }).click()
+    await table.getByLabel('Application Name value').fill('DataSync')
+    await page.getByTestId('save-connection-button').click()
+
+    await page.goto(`/connections/${SRC_CONNECTION_NAME}`)
+    await expect(page.getByTestId('connection-parameters-properties').getByLabel('Application Name value'))
+      .toHaveValue('DataSync', { timeout: 15_000 })
+    await shot(page, '30-declared-connection-settings.png')
+
+    // 2. A script's parameters. The manifest declares them, so a binding gets a labelled control
+    //    instead of a table to guess the names into — reverse-name declares 'column' (test 15 typed it).
+    await page.goto('/scripts/reverse-name')
+    await expect(page.getByTestId('script-name-input')).toHaveValue('reverse-name', { timeout: 15_000 })
+
+    // 3. And the layout hints group what belongs together. The connection card is one card because
+    //    the declaration says so, not because this screen decided.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await page.getByTestId('stage-reader').click()
+    await expect(page.getByTestId('reader-options')).toContainText('Snapshot isolation', { timeout: 15_000 })
+
+    // A Kind that declares nothing still gets the free-form table: an option a driver reads but has
+    // not declared is still an option somebody set.
+    await page.getByTestId('stage-cache').click()
+    await expect(page.getByTestId('cache-options')).toBeVisible()
   })
 })
