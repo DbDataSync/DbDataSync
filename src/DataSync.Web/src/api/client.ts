@@ -11,6 +11,7 @@ import type {
   ProvisioningPlanReport,
   ScriptCompileResult,
   ScriptDefinition,
+  PreviewReport,
   ScriptListItem,
   ScriptSlotInfo,
   LogEntryRecord,
@@ -134,6 +135,12 @@ export const api = {
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}` +
           `/provisioning/${encodeURIComponent(action)}/apply`,
         { method: 'POST' },
+      ),
+  },
+  preview: {
+    get: (replicationName: string, mappingName: string) =>
+      request<PreviewReport>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/preview`,
       ),
   },
   runs: {

@@ -229,6 +229,24 @@ export interface ScriptListItem {
   usedBy: ScriptUsage[]
 }
 
+/** Where a previewed statement came from, which is the first thing to know about an unexpected one. */
+export type PreviewOrigin = 'BuiltIn' | 'OperatorSql' | 'Script'
+
+export interface PreviewStatement {
+  stage: string
+  title: string
+  /** Null for a step that generates no SQL — an in-process transform is C# running over rows. */
+  sql: string | null
+  origin: PreviewOrigin
+  detail: string | null
+}
+
+export interface PreviewReport {
+  statements: PreviewStatement[]
+  /** Things that would stop this pass running, said plainly rather than left to be discovered. */
+  problems: string[]
+}
+
 export interface ScriptDiagnostic {
   line: number
   column: number

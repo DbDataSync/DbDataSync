@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import { useConnections, useDeleteTableMapping, useReplication, useTables, useUpsertTableMapping } from '../../api/hooks'
@@ -74,6 +75,15 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
         <h2 className="page-title mono">{existing ? existing.name : 'New table mapping'}</h2>
         {existing && <span className="badge badge-accent">MAPPED</span>}
         <div className="right">
+          {existing && (
+            <Link
+              className="btn"
+              to={`/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(existing.name)}/preview`}
+              data-testid="preview-mapping-link"
+            >
+              Preview SQL
+            </Link>
+          )}
           <button type="button" className="btn" onClick={onCancel}>Cancel</button>
           {existing && (
             <button

@@ -23,7 +23,7 @@ namespace DataSync.Drivers.MsSql;
 /// fallback for tables without Change Tracking metadata.
 /// </para>
 /// </summary>
-public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingReader
+public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingReader, IStatementPreview
 {
     public string Kind => MsSqlDriverKinds.BatchReload;
 
@@ -49,6 +49,33 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         // pass, and whose Primary passes therefore do persist whatever comes back here — leaves the
         // stored watermark exactly as it found it instead of writing a meaningless one over it.
         return new ReadResult(rows, previousWatermark ?? "");
+    }
+
+    /// <inheritdoc cref="BatchReloadReader.DescribeAsync"/>
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        request.Connection.ChangeDatabase(request.Source.Database);
+
+        var segment = SegmentSerializer.ReadOptional(request.Options);
+        var columns = await MsSqlSchemaQueries.GetColumnsAsync(
+            request.Connection, request.Source.Schema, request.Source.Table, cancellationToken);
+        var scope = MsSqlSegmentScope.Build(segment, columns);
+
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.SourceRead,
+                segment is null ? "Reload every row" : $"Reload the segment {segment.Describe()}",
+                BatchReloadStatement.BuildRead(
+                    MsSqlDialect.Instance, request.Source.Schema, request.Source.Table, scope.Predicate,
+                    request.Source.Filter, SourceProjection.Render(MsSqlDialect.Instance, request.ColumnMappings)),
+                PreviewOrigin.BuiltIn,
+                segment is null
+                    ? "A backfill supplies its own segment, which narrows this further — this is the " +
+                      "unsegmented form the mapping's own config would run."
+                    : null),
+        ];
     }
 
     public async Task<IReadOnlyList<BatchReloadSegment>> ExpandAutoSegmentsAsync(
@@ -94,13 +121,9 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
     private static async Task<(object? Min, object? Max)> GetRangeAsync(
         DbConnection connection, SourceTableRef source, ColumnMetadata column, CancellationToken cancellationToken)
     {
-        var quoted = SqlIdentifier.Quote(column.Name);
-        var filterClause = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" WHERE {source.Filter}";
-
         using var cmd = connection.CreateCommand();
-        cmd.CommandText =
-            $"SELECT MIN({quoted}), MAX({quoted}) FROM " +
-            $"{SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}{filterClause};";
+        cmd.CommandText = BatchReloadStatement.BuildRange(
+            MsSqlDialect.Instance, source.Schema, source.Table, column.Name, source.Filter);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -116,16 +139,11 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         string projection,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // The segment predicate and the mapping's own static Filter compose — a segment narrows a
-        // reload within whatever subset of the table the mapping was always scoped to, it doesn't
-        // replace it.
-        var userFilter = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" AND ({source.Filter})";
-
+        // The shared builder rather than a second copy of the same SQL: this reader differs from the
+        // generic one in how it discovers columns and binds segment values, not in what it selects.
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"""
-            SELECT {projection} FROM {SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}
-            WHERE {scope.Predicate}{userFilter};
-            """;
+        cmd.CommandText = BatchReloadStatement.BuildRead(
+            MsSqlDialect.Instance, source.Schema, source.Table, scope.Predicate, source.Filter, projection);
         scope.AddTo(cmd);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);

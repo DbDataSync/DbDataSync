@@ -16,7 +16,7 @@ namespace DataSync.Drivers.MsSql;
 /// one connection per target throughout a run (Phase 4).
 /// </para>
 /// </summary>
-public sealed class MsSqlStagingTableProvider : IStagingProvider
+public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPreview
 {
     private const string OperationColumn = "__Operation";
 
@@ -47,17 +47,67 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider
         }
 
         var stagingTable = $"#Staging_{Guid.NewGuid():N}";
-        var columnDefs = string.Join(", ", mappedTargetColumns.Select(c => $"{SqlIdentifier.Quote(c)} {typeByName[c]} NULL"));
 
         using (var createCmd = targetConnection.CreateCommand())
         {
-            createCmd.CommandText = $"CREATE TABLE {stagingTable} ({columnDefs}, {OperationColumn} CHAR(1) NOT NULL);";
+            createCmd.CommandText = BuildCreateStagingTable(stagingTable, mappedTargetColumns, typeByName);
             await createCmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
         var rowCount = await BulkCopyAsync(targetConnection, stagingTable, mappedTargetColumns, columnMappings, rows, cancellationToken);
 
         return new StagedChangeSet(stagingTable, rowCount);
+    }
+
+    /// <summary>
+    /// The staging table this pass would create, with the target's own column types — which is the
+    /// part worth previewing, because a mapped column the target does not have fails here rather than
+    /// at the write, and the DDL is where that becomes visible.
+    /// </summary>
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        request.Connection.ChangeDatabase(request.Target.Database);
+
+        var columns = await MsSqlSchemaQueries.GetColumnsAsync(
+            request.Connection, request.Target.Schema, request.Target.Table, cancellationToken);
+        var typeByName = columns.ToDictionary(c => c.Name, c => c.NativeType, StringComparer.OrdinalIgnoreCase);
+        var mapped = request.ColumnMappings.Select(m => m.TargetColumn).Distinct().ToList();
+
+        var missing = mapped.Where(c => !typeByName.ContainsKey(c)).ToList();
+        if (missing.Count > 0)
+        {
+            return
+            [
+                new PreviewStatement(
+                    PreviewStages.Staging, "Create the staging table", null, PreviewOrigin.BuiltIn,
+                    $"Mapped column(s) {string.Join(", ", missing)} are not on " +
+                    $"'{request.Target.Schema}.{request.Target.Table}', so this pass would fail here."),
+            ];
+        }
+
+        // A fresh name per pass, so the one shown is illustrative rather than the one that will exist.
+        var stagingTable = "#Staging_<per pass>";
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.Staging, "Create the staging table",
+                BuildCreateStagingTable(stagingTable, mapped, typeByName), PreviewOrigin.BuiltIn,
+                "A local temporary table, dropped when the pass finishes with it."),
+
+            new PreviewStatement(
+                PreviewStages.Staging, "Load the rows into it", null, PreviewOrigin.BuiltIn,
+                $"SqlBulkCopy into {stagingTable} — a bulk stream rather than a statement, which is " +
+                "why there is none to show."),
+        ];
+    }
+
+    /// <summary>One builder for the DDL, so the preview and the run cannot disagree about it.</summary>
+    private static string BuildCreateStagingTable(
+        string stagingTable, IReadOnlyList<string> columns, IReadOnlyDictionary<string, string> typeByName)
+    {
+        var columnDefs = string.Join(", ", columns.Select(c => $"{SqlIdentifier.Quote(c)} {typeByName[c]} NULL"));
+        return $"CREATE TABLE {stagingTable} ({columnDefs}, {OperationColumn} CHAR(1) NOT NULL);";
     }
 
     public async Task CleanupAsync(

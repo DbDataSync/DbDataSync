@@ -16,7 +16,7 @@ namespace DataSync.Drivers.MsSql;
 /// ever queries it, never enables it (keeps the app's own DB permissions to read-only + VIEW CHANGE
 /// TRACKING, per §6's least-privilege guidance).
 /// </summary>
-public sealed class MsSqlChangeTrackingReader : IChangeReader
+public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
 {
     /// <summary>
     /// Opt-in: read CHANGETABLE and the source table inside one snapshot transaction, which is the
@@ -73,6 +73,59 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         return new ReadResult(rows, targetVersion.ToString(), diagnostics);
     }
 
+    /// <summary>
+    /// What this reader would issue next, built by the same calls <see cref="ReadChangesAsync"/> makes.
+    /// Which of the two statements it describes depends on the stored watermark, exactly as the run
+    /// does — a preview that always showed the first-pass form would be wrong for every pass after
+    /// the first, which is all of them.
+    /// </summary>
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        request.Connection.ChangeDatabase(request.Source.Database);
+        var projection = SourceProjection.Render(MsSqlDialect.Instance, request.ColumnMappings);
+
+        if (request.PreviousWatermark is null)
+        {
+            return
+            [
+                new PreviewStatement(
+                    PreviewStages.SourceRead,
+                    "Full load — no change-tracking version stored yet, so the next pass reads every row",
+                    MsSqlChangeTrackingStatement.BuildFullLoad(
+                        request.Source.Schema, request.Source.Table, projection, request.Source.Filter),
+                    PreviewOrigin.BuiltIn),
+            ];
+        }
+
+        var columns = await MsSqlSchemaQueries.GetColumnsAsync(
+            request.Connection, request.Source.Schema, request.Source.Table, cancellationToken);
+        var pkColumns = columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
+        if (pkColumns.Count == 0)
+        {
+            return
+            [
+                new PreviewStatement(
+                    PreviewStages.SourceRead, "Incremental read", null, PreviewOrigin.BuiltIn,
+                    $"Table '{request.Source.Schema}.{request.Source.Table}' has no primary key; " +
+                    "Change Tracking requires one, so this pass would fail before issuing a statement."),
+            ];
+        }
+
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.SourceRead,
+                $"Incremental read of changes after version {request.PreviousWatermark}",
+                MsSqlChangeTrackingStatement.BuildIncremental(
+                    request.Source.Schema, request.Source.Table, pkColumns,
+                    columns.Where(c => !c.IsPrimaryKey).Select(c => c.Name).ToList(),
+                    column => RenderNonKeyColumn(column, request.ColumnMappings)),
+                PreviewOrigin.BuiltIn,
+                UseSnapshotIsolation(request.Options) ? "Runs in a snapshot-isolation transaction." : null),
+        ];
+    }
+
     private static bool UseSnapshotIsolation(IReadOnlyDictionary<string, string> options) =>
         options.TryGetValue(SnapshotIsolationOption, out var raw)
         && (string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) || raw == "1");
@@ -103,12 +156,8 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
-        var filterClause = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" WHERE {source.Filter}";
-        // source.Filter is an admin-authored raw predicate from TableMappingConfig, not end-user
-        // input — see the type's XML doc. It cannot be parameterized since it's an arbitrary
-        // boolean expression, not a value.
-        cmd.CommandText =
-            $"SELECT {projection} FROM {SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}{filterClause};";
+        cmd.CommandText = MsSqlChangeTrackingStatement.BuildFullLoad(
+            source.Schema, source.Table, projection, source.Filter);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         var schema = ResultSetSchema.From(reader);

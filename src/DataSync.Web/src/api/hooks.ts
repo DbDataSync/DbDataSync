@@ -27,6 +27,8 @@ const keys = {
   run: (runId: string) => ['runs', runId] as const,
   provisioning: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'provisioning'] as const,
+  preview: (replicationName: string, mappingName: string) =>
+    ['replications', replicationName, 'table-mappings', mappingName, 'preview'] as const,
 }
 
 export function useConnections() {
@@ -336,6 +338,16 @@ export function useDeleteScript() {
 }
 
 /** Both sides' provisioning plans for one table mapping — the Setup card's state badges and preview SQL. */
+/** What a pass would run. Not cached across mounts for long: it reflects the mapping as saved *and*
+ * the watermark as stored, both of which move. */
+export function useMappingPreview(replicationName: string | undefined, mappingName: string | undefined) {
+  return useQuery({
+    queryKey: keys.preview(replicationName ?? '', mappingName ?? ''),
+    queryFn: () => api.preview.get(replicationName!, mappingName!),
+    enabled: !!replicationName && !!mappingName,
+  })
+}
+
 export function useProvisioning(replicationName: string | undefined, mappingName: string | undefined) {
   return useQuery({
     queryKey: keys.provisioning(replicationName ?? '', mappingName ?? ''),

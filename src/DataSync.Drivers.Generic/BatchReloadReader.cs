@@ -19,7 +19,7 @@ namespace DataSync.Drivers.Generic;
 /// </para>
 /// </summary>
 public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
-    : IChangeReader, ISegmentExpandingReader
+    : IChangeReader, ISegmentExpandingReader, IStatementPreview
 {
     public string Kind => GenericDriverKinds.BatchReload;
 
@@ -48,6 +48,37 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
         // pass, and whose Primary passes therefore do persist whatever comes back here — leaves the
         // stored watermark exactly as it found it instead of writing a meaningless one over it.
         return new ReadResult(rows, previousWatermark ?? "");
+    }
+
+    /// <summary>
+    /// The read as it would be issued for whatever segment the options carry — which, for a preview
+    /// taken from a mapping's saved config, is normally none. A reload's statement depends on its
+    /// segment, so an unsegmented preview says so rather than implying a backfill would run this.
+    /// </summary>
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        await dialect.UseDatabaseAsync(request.Connection, request.Source.Database, cancellationToken);
+
+        var segment = SegmentSerializer.ReadOptional(request.Options);
+        var columns = await catalog.GetColumnsAsync(
+            request.Connection, request.Source.Schema, request.Source.Table, cancellationToken);
+        var scope = SegmentScope.Build(dialect, binder, segment, columns);
+
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.SourceRead,
+                segment is null ? "Reload every row" : $"Reload the segment {segment.Describe()}",
+                BatchReloadStatement.BuildRead(
+                    dialect, request.Source.Schema, request.Source.Table, scope.Predicate, request.Source.Filter,
+                    SourceProjection.Render(dialect, request.ColumnMappings)),
+                PreviewOrigin.BuiltIn,
+                segment is null
+                    ? "A backfill supplies its own segment, which narrows this further — this is the " +
+                      "unsegmented form the mapping's own config would run."
+                    : null),
+        ];
     }
 
     public async Task<IReadOnlyList<BatchReloadSegment>> ExpandAutoSegmentsAsync(

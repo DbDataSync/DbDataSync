@@ -17,7 +17,7 @@ namespace DataSync.Drivers.MsSql;
 /// <see cref="MsSqlMergeReconcileWriter"/> existing.
 /// </para>
 /// </summary>
-public sealed class MsSqlMergeWriter : IChangeWriter
+public sealed class MsSqlMergeWriter : IChangeWriter, IStatementPreview
 {
     public string Kind => MsSqlDriverKinds.Merge;
 
@@ -34,18 +34,9 @@ public sealed class MsSqlMergeWriter : IChangeWriter
         targetConnection.ChangeDatabase(target.Database);
 
         var shape = await MsSqlTargetShape.LoadAsync(targetConnection, target, columnMappings, cancellationToken);
-        var onClause = shape.BuildMergeOnClause();
 
         using var cmd = targetConnection.CreateCommand();
-        cmd.CommandText = $"""
-            MERGE INTO {shape.QuotedTarget} AS tgt
-            USING {staged.StagingLocation} AS src
-            ON {onClause}
-            WHEN MATCHED AND src.{MsSqlTargetShape.OperationColumn} = 'D' THEN DELETE
-            {shape.BuildUpdateClause()}
-            WHEN NOT MATCHED BY TARGET AND src.{MsSqlTargetShape.OperationColumn} <> 'D'
-                THEN INSERT ({shape.InsertColumnList}) VALUES ({shape.SourceValueList});
-            """;
+        cmd.CommandText = BuildMerge(shape, staged.StagingLocation);
 
         var rowsAffected = await MsSqlIdentityInsert.RunAsync(
             targetConnection, transaction: null, shape.QuotedTarget, shape.RequiresIdentityInsert,
@@ -53,5 +44,37 @@ public sealed class MsSqlMergeWriter : IChangeWriter
             cancellationToken);
 
         return new WriteResult(rowsAffected);
+    }
+
+    /// <summary>The statement itself, so the preview shows what runs rather than a reconstruction of
+    /// it.</summary>
+    private static string BuildMerge(MsSqlTargetShape shape, string stagingLocation) => $"""
+        MERGE INTO {shape.QuotedTarget} AS tgt
+        USING {stagingLocation} AS src
+        ON {shape.BuildMergeOnClause()}
+        WHEN MATCHED AND src.{MsSqlTargetShape.OperationColumn} = 'D' THEN DELETE
+        {shape.BuildUpdateClause()}
+        WHEN NOT MATCHED BY TARGET AND src.{MsSqlTargetShape.OperationColumn} <> 'D'
+            THEN INSERT ({shape.InsertColumnList}) VALUES ({shape.SourceValueList});
+        """;
+
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        request.Connection.ChangeDatabase(request.Target.Database);
+
+        var shape = await MsSqlTargetShape.LoadAsync(
+            request.Connection, request.Target, request.ColumnMappings, cancellationToken);
+
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.Write, "Merge the staged rows into the target",
+                BuildMerge(shape, "#Staging_<per pass>"), PreviewOrigin.BuiltIn,
+                shape.RequiresIdentityInsert
+                    ? "Wrapped in SET IDENTITY_INSERT ON/OFF — a mapped identity column means the " +
+                      "source's own values are written rather than the target generating new ones."
+                    : null),
+        ];
     }
 }

@@ -19,7 +19,8 @@ namespace DataSync.Drivers.Generic;
 /// a convenience — a real table outlives the connection that made it.
 /// </para>
 /// </summary>
-public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog catalog) : IStagingProvider
+public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog catalog)
+    : IStagingProvider, IStatementPreview
 {
     public const string OperationColumn = "__Operation";
 
@@ -77,6 +78,46 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
             }
             throw;
         }
+    }
+
+    /// <inheritdoc cref="MsSqlStagingTableProvider.DescribeAsync"/>
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        await dialect.UseDatabaseAsync(request.Connection, request.Target.Database, cancellationToken);
+
+        var targetColumns = await catalog.GetColumnsAsync(
+            request.Connection, request.Target.Schema, request.Target.Table, cancellationToken);
+        var typeByName = targetColumns.ToDictionary(c => c.Name, c => c.NativeType, StringComparer.OrdinalIgnoreCase);
+        var mapped = request.ColumnMappings.Select(m => m.TargetColumn).Distinct().ToList();
+
+        var missing = mapped.Where(c => !typeByName.ContainsKey(c)).ToList();
+        if (missing.Count > 0)
+        {
+            return
+            [
+                new PreviewStatement(
+                    PreviewStages.Staging, "Create the staging table", null, PreviewOrigin.BuiltIn,
+                    $"Mapped column(s) {string.Join(", ", missing)} are not on " +
+                    $"'{request.Target.Schema}.{request.Target.Table}', so this pass would fail here."),
+            ];
+        }
+
+        var stagingTable = dialect.QualifyTable(request.Target.Schema, "DS_STG_<per pass>");
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.Staging, "Create the staging table",
+                StagingStatement.BuildCreate(dialect, stagingTable, mapped, typeByName), PreviewOrigin.BuiltIn,
+                "A real table in the target's own schema — there is no portable scratch namespace — " +
+                "dropped when the pass finishes with it."),
+
+            new PreviewStatement(
+                PreviewStages.Staging, "Load the rows into it",
+                StagingStatement.BuildInsert(dialect, stagingTable, mapped, rowCount: 1), PreviewOrigin.BuiltIn,
+                $"One row shown; a pass batches up to {StagingStatement.RowsPerStatement(dialect, mapped.Count + 1)} " +
+                "rows per statement, bounded by the dialect's parameter limit."),
+        ];
     }
 
     public async Task CleanupAsync(

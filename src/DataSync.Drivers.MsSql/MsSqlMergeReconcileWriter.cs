@@ -18,7 +18,7 @@ namespace DataSync.Drivers.MsSql;
 /// cheap, and keeps the delete side from ranging over rows the segment was supposed to exclude.
 /// </para>
 /// </summary>
-public sealed class MsSqlMergeReconcileWriter : IChangeWriter
+public sealed class MsSqlMergeReconcileWriter : IChangeWriter, IStatementPreview
 {
     public string Kind => MsSqlDriverKinds.MergeReconcile;
 
@@ -35,25 +35,10 @@ public sealed class MsSqlMergeReconcileWriter : IChangeWriter
         targetConnection.ChangeDatabase(target.Database);
 
         var shape = await MsSqlTargetShape.LoadAsync(targetConnection, target, columnMappings, cancellationToken);
-        var onClause = shape.BuildMergeOnClause();
         var scope = MsSqlSegmentScope.Build(SegmentSerializer.ReadOptional(options), shape.Columns, columnMappings);
 
         using var cmd = targetConnection.CreateCommand();
-        // SELECT * rather than just the mapped columns: the CTE has to stay updatable for MERGE to use
-        // it as a target, and projecting a subset of columns is one of the things that stops it being.
-        cmd.CommandText = $"""
-            ;WITH TargetScope AS (
-                SELECT * FROM {shape.QuotedTarget} WHERE {scope.Predicate}
-            )
-            MERGE INTO TargetScope AS tgt
-            USING {staged.StagingLocation} AS src
-            ON {onClause}
-            WHEN MATCHED AND src.{MsSqlTargetShape.OperationColumn} = 'D' THEN DELETE
-            {shape.BuildUpdateClause()}
-            WHEN NOT MATCHED BY TARGET AND src.{MsSqlTargetShape.OperationColumn} <> 'D'
-                THEN INSERT ({shape.InsertColumnList}) VALUES ({shape.SourceValueList})
-            WHEN NOT MATCHED BY SOURCE THEN DELETE;
-            """;
+        cmd.CommandText = BuildMerge(shape, scope.Predicate, staged.StagingLocation);
         scope.AddTo(cmd);
 
         var rowsAffected = await MsSqlIdentityInsert.RunAsync(
@@ -62,5 +47,45 @@ public sealed class MsSqlMergeReconcileWriter : IChangeWriter
             cancellationToken);
 
         return new WriteResult(rowsAffected);
+    }
+
+    /// <summary>
+    /// SELECT * rather than just the mapped columns: the CTE has to stay updatable for MERGE to use it
+    /// as a target, and projecting a subset of columns is one of the things that stops it being.
+    /// </summary>
+    private static string BuildMerge(MsSqlTargetShape shape, string scopePredicate, string stagingLocation) => $"""
+        ;WITH TargetScope AS (
+            SELECT * FROM {shape.QuotedTarget} WHERE {scopePredicate}
+        )
+        MERGE INTO TargetScope AS tgt
+        USING {stagingLocation} AS src
+        ON {shape.BuildMergeOnClause()}
+        WHEN MATCHED AND src.{MsSqlTargetShape.OperationColumn} = 'D' THEN DELETE
+        {shape.BuildUpdateClause()}
+        WHEN NOT MATCHED BY TARGET AND src.{MsSqlTargetShape.OperationColumn} <> 'D'
+            THEN INSERT ({shape.InsertColumnList}) VALUES ({shape.SourceValueList})
+        WHEN NOT MATCHED BY SOURCE THEN DELETE;
+        """;
+
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        request.Connection.ChangeDatabase(request.Target.Database);
+
+        var shape = await MsSqlTargetShape.LoadAsync(
+            request.Connection, request.Target, request.ColumnMappings, cancellationToken);
+        var segment = SegmentSerializer.ReadOptional(request.Options);
+        var scope = MsSqlSegmentScope.Build(segment, shape.Columns, request.ColumnMappings);
+
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.Write, "Merge the staged rows and remove anything else in scope",
+                BuildMerge(shape, scope.Predicate, "#Staging_<per pass>"), PreviewOrigin.BuiltIn,
+                segment is null
+                    ? "WHEN NOT MATCHED BY SOURCE deletes within the scope this writer was given — " +
+                      "unsegmented, that scope is the whole table."
+                    : $"Scoped to {segment.Describe()}; rows outside it are untouched."),
+        ];
     }
 }

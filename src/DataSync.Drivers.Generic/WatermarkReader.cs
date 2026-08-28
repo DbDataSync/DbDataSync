@@ -23,7 +23,8 @@ namespace DataSync.Drivers.Generic;
 /// from scratch. This reader is the ongoing incremental-sync fallback; that one is the reload path.
 /// </para>
 /// </summary>
-public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder) : IChangeReader
+public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
+    : IChangeReader, IStatementPreview
 {
     public string Kind => GenericDriverKinds.Watermark;
 
@@ -56,6 +57,57 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         var projection = SourceProjection.Render(dialect, columnMappings);
         var rows = ReadRowsAsync(sourceConnection, source, watermarkColumn, previousWatermark, column, projection, cancellationToken);
         return new ReadResult(rows, newWatermark);
+    }
+
+    /// <summary>
+    /// Both statements a pass issues, in order: the one that decides the new watermark, then the one
+    /// that reads the rows. The second is the interesting one — whether it carries a predicate at all
+    /// depends on the stored watermark, and that is the difference between an incremental read and a
+    /// full table scan.
+    /// </summary>
+    public Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        if (!request.Options.TryGetValue("watermarkColumn", out var watermarkColumn)
+            || string.IsNullOrWhiteSpace(watermarkColumn))
+        {
+            return Task.FromResult<IReadOnlyList<PreviewStatement>>(
+            [
+                new PreviewStatement(
+                    PreviewStages.SourceRead, "Read", null, PreviewOrigin.BuiltIn,
+                    "The 'watermarkColumn' option is required for this reader and is not set, so this " +
+                    "pass would fail before issuing a statement."),
+            ]);
+        }
+
+        var source = request.Source;
+        var incremental = request.PreviousWatermark is not null;
+
+        return Task.FromResult<IReadOnlyList<PreviewStatement>>(
+        [
+            new PreviewStatement(
+                PreviewStages.SourceRead,
+                $"Read the highest '{watermarkColumn}', which becomes the next pass's watermark",
+                WatermarkStatement.BuildMaxWatermark(dialect, source.Schema, source.Table, watermarkColumn, source.Filter),
+                PreviewOrigin.BuiltIn,
+                "Taken before the rows are read, not derived from them — a row written during the pass " +
+                "must be picked up by the next one rather than silently skipped."),
+
+            new PreviewStatement(
+                PreviewStages.SourceRead,
+                incremental
+                    ? $"Read rows after watermark '{request.PreviousWatermark}'"
+                    : "Read every row — no watermark stored yet",
+                WatermarkStatement.BuildRead(
+                    dialect, source.Schema, source.Table, watermarkColumn, incremental, source.Filter,
+                    SourceProjection.Render(dialect, request.ColumnMappings)),
+                PreviewOrigin.BuiltIn,
+                incremental
+                    ? $"{dialect.ParameterName(WatermarkStatement.PreviousWatermarkParameter)} is bound as " +
+                      $"'{watermarkColumn}'s own type, not as text — a conversion on the column side would " +
+                      "prevent the index seek this strategy depends on."
+                    : null),
+        ]);
     }
 
     private async Task<string?> GetMaxWatermarkAsync(

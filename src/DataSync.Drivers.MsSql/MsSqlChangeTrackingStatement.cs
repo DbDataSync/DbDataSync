@@ -4,7 +4,7 @@ namespace DataSync.Drivers.MsSql;
 /// Builds the incremental Change Tracking query. Separated from the reader so the select list — the
 /// part that had a real defect in it — can be asserted without a live SQL Server.
 /// </summary>
-internal static class MsSqlChangeTrackingStatement
+public static class MsSqlChangeTrackingStatement
 {
     /// <summary>Computed marker, not a real column: 1 when the LEFT JOIN found no source row.</summary>
     public const string BaseMissingColumn = "__BaseMissing";
@@ -13,6 +13,22 @@ internal static class MsSqlChangeTrackingStatement
     public const int OperationOrdinal = 0;
     public const int BaseMissingOrdinal = 1;
     public const int FirstKeyOrdinal = 2;
+
+    /// <summary>
+    /// The first pass, before any watermark exists: every row, as an insert. Extracted from the reader
+    /// so the preview and the run build it in one place — a preview that re-derives a statement is a
+    /// statement that can drift from the one that runs.
+    /// </summary>
+    /// <param name="filter">
+    /// An admin-authored raw predicate from <c>TableMappingConfig</c>, not end-user input — see the
+    /// type's XML doc. It cannot be parameterized, being an arbitrary boolean expression rather than
+    /// a value.
+    /// </param>
+    public static string BuildFullLoad(string schema, string table, string projection, string? filter)
+    {
+        var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
+        return $"SELECT {projection} FROM {SqlIdentifier.Quote(schema)}.{SqlIdentifier.Quote(table)}{filterClause};";
+    }
 
     /// <summary>
     /// Every column is named explicitly, and the primary key is taken **only** from CHANGETABLE.

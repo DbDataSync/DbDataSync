@@ -7,6 +7,7 @@ import { ScriptsPage } from './pages/ScriptsPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
+import { MappingPreview } from './pages/replication-detail/MappingPreview'
 
 /**
  * Every destination has a URL.
@@ -38,6 +39,9 @@ export default function App() {
               sentinel this screen has always used, and worth revisiting only if anyone hits it. */}
           <Route path="new" element={<MappingEditorRoute />} />
           <Route path=":mappingName" element={<MappingEditorRoute />} />
+          {/* Beside the editor rather than inside it: the preview is about the mapping as
+              *saved*, which is not what an editor with unsaved changes is showing. */}
+          <Route path=":mappingName/preview" element={<MappingPreview />} />
         </Route>
         <Route path="runs" element={<RunsTab />} />
         <Route path="history" element={<HistoryTab />} />

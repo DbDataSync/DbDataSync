@@ -681,4 +681,41 @@ public sealed class DropGadgets : IRowTransform
     expect(querySql(`SET NOCOUNT ON; SELECT Description FROM dbo.${NEW_TARGET} ORDER BY Id;`, DB_NAME))
       .toContain('second order')
   })
+
+  test('19 - the mapping preview shows every statement a pass would run, and where each came from', async ({ page }) => {
+    // The complaint phase 37 answers: a mapping's behaviour is spread across a literal transform, a
+    // script that generates more of them, an in-process transform, four hook points and whatever the
+    // reader, staging provider and writer build themselves — and none of it was visible without
+    // running a pass and reading the log.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.getByTestId('preview-mapping-link').click()
+    await expect(page).toHaveURL(new RegExp(`/mappings/${MAPPING_NAME}/preview$`))
+
+    const preview = page.getByTestId('mapping-preview')
+    await expect(preview).toContainText('Source read', { timeout: 20_000 })
+    await expect(preview).toContainText('Staging')
+    await expect(preview).toContainText('Write')
+
+    // And it answers a question that could not be asked before. Test 05 wrote UPPER({{column}}) on
+    // Name by hand; test 15 bound a script to the same slot, and the script wins. The preview says so
+    // — the generated expression, the script that produced it, and the level it is bound at — where
+    // previously the only way to find out was to run a pass and look at the data.
+    await expect(preview).toContainText('Generated column expression')
+    await expect(preview).toContainText("Script 'reverse-name', bound on the mapping")
+    await expect(preview).not.toContainText('UPPER(')
+
+    // The row transform bound in test 16 runs in this process and generates no SQL. It is named and
+    // says so — inventing a statement for it would be worse than admitting it has none.
+    await expect(preview).toContainText('Row transform')
+    await expect(preview).toContainText('No SQL')
+
+    // The reader's own statement, which nobody could see before at all — carrying REVERSE, not UPPER.
+    await expect(preview).toContainText('CHANGETABLE')
+    await expect(preview).toContainText('REVERSE(base.[Name])')
+
+    // Read-only: the place to change a statement is the thing that generated it.
+    await expect(preview.locator('.monaco-editor textarea').first()).toHaveAttribute('readonly')
+
+    await shot(page, '25-mapping-preview.png')
+  })
 })

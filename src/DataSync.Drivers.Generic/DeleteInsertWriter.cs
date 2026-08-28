@@ -24,7 +24,8 @@ namespace DataSync.Drivers.Generic;
 /// empty: a read during the write sees either the old contents or the new ones, never neither.
 /// </para>
 /// </summary>
-public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder) : IChangeWriter
+public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
+    : IChangeWriter, IStatementPreview
 {
     public string Kind => GenericDriverKinds.DeleteInsert;
 
@@ -78,6 +79,37 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
             await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
+    }
+
+    /// <summary>Both halves, in one transaction: the scope is emptied and then refilled, which is what
+    /// makes this writer reconciling and what makes the delete's predicate the thing to read closely.</summary>
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        await dialect.UseDatabaseAsync(request.Connection, request.Target.Database, cancellationToken);
+
+        var shape = await TargetShape.LoadAsync(
+            dialect, catalog, request.Connection, request.Target, request.ColumnMappings, cancellationToken);
+        var segment = SegmentSerializer.ReadOptional(request.Options);
+        var scope = SegmentScope.Build(dialect, binder, segment, shape.Columns, request.ColumnMappings);
+
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.Write, "Empty the scope", 
+                DeleteInsertStatement.BuildDelete(shape.QuotedTarget, scope.Predicate), PreviewOrigin.BuiltIn,
+                segment is null
+                    ? "Unsegmented, that scope is the whole table."
+                    : $"Scoped to {segment.Describe()}; rows outside it are untouched."),
+
+            new PreviewStatement(
+                PreviewStages.Write, "Refill it from the staged rows",
+                DeleteInsertStatement.BuildInsert(
+                    dialect, shape.QuotedTarget, shape.InsertColumnList, "<staging>",
+                    shape.RequiresGeneratedColumnOverride),
+                PreviewOrigin.BuiltIn,
+                "Both statements run in one transaction."),
+        ];
     }
 }
 

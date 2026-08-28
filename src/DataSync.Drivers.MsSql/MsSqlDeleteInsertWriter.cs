@@ -15,7 +15,7 @@ namespace DataSync.Drivers.MsSql;
 /// empty: a read during the write sees either the old contents or the new ones, never neither.
 /// </para>
 /// </summary>
-public sealed class MsSqlDeleteInsertWriter : IChangeWriter
+public sealed class MsSqlDeleteInsertWriter : IChangeWriter, IStatementPreview
 {
     public string Kind => MsSqlDriverKinds.DeleteInsert;
 
@@ -40,7 +40,7 @@ public sealed class MsSqlDeleteInsertWriter : IChangeWriter
             using (var deleteCmd = targetConnection.CreateCommand())
             {
                 deleteCmd.Transaction = transaction;
-                deleteCmd.CommandText = $"DELETE FROM {shape.QuotedTarget} WHERE {scope.Predicate};";
+                deleteCmd.CommandText = BuildDelete(shape, scope.Predicate);
                 scope.AddTo(deleteCmd);
                 await deleteCmd.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -51,14 +51,7 @@ public sealed class MsSqlDeleteInsertWriter : IChangeWriter
                 {
                     using var insertCmd = targetConnection.CreateCommand();
                     insertCmd.Transaction = transaction;
-                    // Deletes in the change set are dropped rather than applied: the delete above has
-                    // already removed everything in scope, so a 'D' row would only be re-adding a row
-                    // in order to say it isn't there.
-                    insertCmd.CommandText = $"""
-                        INSERT INTO {shape.QuotedTarget} ({shape.InsertColumnList})
-                        SELECT {shape.InsertColumnList} FROM {staged.StagingLocation}
-                        WHERE {MsSqlTargetShape.OperationColumn} <> 'D';
-                        """;
+                    insertCmd.CommandText = BuildInsert(shape, staged.StagingLocation);
                     return await insertCmd.ExecuteNonQueryAsync(cancellationToken);
                 },
                 cancellationToken);
@@ -74,5 +67,44 @@ public sealed class MsSqlDeleteInsertWriter : IChangeWriter
             await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
+    }
+
+    private static string BuildDelete(MsSqlTargetShape shape, string scopePredicate) =>
+        $"DELETE FROM {shape.QuotedTarget} WHERE {scopePredicate};";
+
+    /// <summary>
+    /// Deletes in the change set are dropped rather than applied: the delete has already removed
+    /// everything in scope, so a 'D' row would only be re-adding a row in order to say it isn't there.
+    /// </summary>
+    private static string BuildInsert(MsSqlTargetShape shape, string stagingLocation) => $"""
+        INSERT INTO {shape.QuotedTarget} ({shape.InsertColumnList})
+        SELECT {shape.InsertColumnList} FROM {stagingLocation}
+        WHERE {MsSqlTargetShape.OperationColumn} <> 'D';
+        """;
+
+    /// <inheritdoc cref="DeleteInsertWriter.DescribeAsync"/>
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+        PreviewRequest request, CancellationToken cancellationToken)
+    {
+        request.Connection.ChangeDatabase(request.Target.Database);
+
+        var shape = await MsSqlTargetShape.LoadAsync(
+            request.Connection, request.Target, request.ColumnMappings, cancellationToken);
+        var segment = SegmentSerializer.ReadOptional(request.Options);
+        var scope = MsSqlSegmentScope.Build(segment, shape.Columns, request.ColumnMappings);
+
+        return
+        [
+            new PreviewStatement(
+                PreviewStages.Write, "Empty the scope", BuildDelete(shape, scope.Predicate), PreviewOrigin.BuiltIn,
+                segment is null
+                    ? "Unsegmented, that scope is the whole table."
+                    : $"Scoped to {segment.Describe()}; rows outside it are untouched."),
+
+            new PreviewStatement(
+                PreviewStages.Write, "Refill it from the staged rows",
+                BuildInsert(shape, "#Staging_<per pass>"), PreviewOrigin.BuiltIn,
+                "Both statements run in one transaction."),
+        ];
     }
 }
