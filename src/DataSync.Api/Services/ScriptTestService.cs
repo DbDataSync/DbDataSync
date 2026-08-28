@@ -86,6 +86,9 @@ public sealed class ScriptTestService(
                 ScriptSlots.SourceQueryBuilder => TestSourceQueryBuilder(
                     compiled.CreateInstance<ISourceQueryBuilder>(manifest.Name),
                     mappings, columns, dialect, manifest, request),
+                ScriptSlots.VerificationQueryBuilder => TestVerificationQueryBuilder(
+                    compiled.CreateInstance<IVerificationQueryBuilder>(manifest.Name),
+                    mappings, columns, dialect, manifest, request),
                 ScriptSlots.MetadataProvider => await TestMetadataProviderAsync(
                     compiled.CreateInstance<IMetadataProvider>(manifest.Name),
                     dialect, manifest, request, live, cancellationToken),
@@ -375,6 +378,48 @@ public sealed class ScriptTestService(
         {
             await connection.DisposeAsync();
         }
+    }
+
+    /// <summary>
+    /// Both sides' statements and the shape it says they come back in — described, not run. A
+    /// verification query reads from live tables, and running one because a button says Test is the
+    /// kind of thing an operator should choose deliberately rather than have chosen for them.
+    /// <para>
+    /// Asked once per side, which is the point of the contract: a builder that answers the same for
+    /// both is a builder that could have been a generic SQL check, and one that does not is the reason
+    /// this slot exists.
+    /// </para>
+    /// </summary>
+    private IReadOnlyList<ScriptTestCase> TestVerificationQueryBuilder(
+        IVerificationQueryBuilder script, IReadOnlyList<ColumnMapping> mappings,
+        IReadOnlyList<ColumnMetadata> columns, IScriptDialect dialect, ScriptConfig manifest,
+        ScriptTestRequest request)
+    {
+        var (source, target) = ResolveTables(request);
+        var parameters = new ScriptParameters(DefaultParameters(manifest));
+
+        VerificationQueryContext Context(VerificationSideKind side, TableRef? table) => new(
+            side, table ?? (side == VerificationSideKind.Source ? SampleSource : SampleTarget),
+            mappings, columns, Filter: null, dialect, parameters);
+
+        var sourceContext = Context(VerificationSideKind.Source, source);
+        var targetContext = Context(VerificationSideKind.Target, target);
+
+        var shape = script.DescribeResult(sourceContext);
+
+        return
+        [
+            new ScriptTestCase("Source query", script.BuildQuery(sourceContext).CommandText),
+            new ScriptTestCase("Target query", script.BuildQuery(targetContext).CommandText),
+            new ScriptTestCase(
+                "Result shape",
+                $"grouped by {Join(shape.GroupColumns)}; measuring {Join(shape.MeasureColumns)}",
+                shape.GroupColumns.Count == 0 && shape.MeasureColumns.Count == 0
+                    ? "Nothing to compare — a check with no measures reports no differences."
+                    : null),
+        ];
+
+        static string Join(IReadOnlyList<string> names) => names.Count == 0 ? "(none)" : string.Join(", ", names);
     }
 
     /// <summary>Stand-ins for a script not yet bound to a mapping, so it can be tested the moment it

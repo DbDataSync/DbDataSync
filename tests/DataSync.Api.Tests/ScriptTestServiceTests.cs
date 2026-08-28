@@ -285,6 +285,38 @@ public sealed class ScriptTestServiceTests(TestApiFactory factory) : IClassFixtu
     }
 
     /// <summary>
+    /// Described, not run: a verification query reads from live tables, and running one because a
+    /// button says Test is a choice an operator should make rather than have made for them.
+    /// </summary>
+    [Fact]
+    public async Task AVerificationQueryBuilder_ShowsBothSidesStatementsAndTheShapeTheyComeBackIn()
+    {
+        var result = await TestAsync("verificationQueryBuilder", "Counts", """
+            using DataSync.Scripting.Abstractions;
+
+            public sealed class Counts : IVerificationQueryBuilder
+            {
+                public SourceQuery BuildQuery(VerificationQueryContext c) =>
+                    SourceQuery.Text($"SELECT COUNT(*) AS n FROM {c.Dialect.QuoteIdentifier(c.Table.Table)} -- {c.Side}");
+
+                public VerificationQueryShape DescribeResult(VerificationQueryContext c) => new([], ["n"]);
+            }
+            """);
+
+        Assert.True(result.Error is null, result.Error);
+
+        // Asked once per side, which is the point of the contract: a builder that answers the same for
+        // both could have been a generic SQL check.
+        var source = Assert.Single(result.Cases, c => c.Input == "Source query");
+        var target = Assert.Single(result.Cases, c => c.Input == "Target query");
+        Assert.Contains("-- Source", source.Output!);
+        Assert.Contains("-- Target", target.Output!);
+
+        var shape = Assert.Single(result.Cases, c => c.Input == "Result shape");
+        Assert.Contains("measuring n", shape.Output!);
+    }
+
+    /// <summary>
     /// The one slot with no generated mode, and the refusal says why rather than producing something
     /// meaningless: its contract hands the script a live connection, so testing it means choosing one.
     /// </summary>

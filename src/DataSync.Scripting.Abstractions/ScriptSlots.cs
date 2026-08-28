@@ -48,6 +48,13 @@ public static class ScriptSlots
     /// </summary>
     public const string SourceQueryBuilder = "sourceQueryBuilder";
 
+    /// <summary>
+    /// Generates a verification query — see phase 43. Bound by **name**, from the check that uses it,
+    /// for the same reason <see cref="SourceQueryBuilder"/> is: which script answers a particular
+    /// question is a property of that question, not something to inherit from a connection.
+    /// </summary>
+    public const string VerificationQueryBuilder = "verificationQueryBuilder";
+
     /// <summary>C# that generates the SQL a lifecycle hook point runs — see phase 27. One slot for all
     /// four points: <see cref="ILifecycleHook.DeclarePoints"/> is how a binding says which ones it
     /// wants, not four separate bindings.</summary>
@@ -111,6 +118,9 @@ public static class ScriptSlots
         SourceQueryBuilder => (
             "Source query builder",
             "Owns a source read outright: the script supplies the statement, the host runs it. Selected by name from the ScriptedQuery reader."),
+        VerificationQueryBuilder => (
+            "Verification query builder",
+            "Generates the query a verification check runs, per side, from the table's own metadata. Selected by name from the check."),
         _ => (slot, ""),
     };
 
@@ -118,5 +128,6 @@ public static class ScriptSlots
     /// <see cref="All"/>, plus <see cref="Hook"/> and <see cref="SourceQueryBuilder"/>, which are
     /// known but bound by name rather than through the hierarchy.</summary>
     public static bool IsKnown(string slot) =>
-        slot == Hook || slot == SourceQueryBuilder || All.Contains(slot, StringComparer.Ordinal);
+        slot == Hook || slot == SourceQueryBuilder || slot == VerificationQueryBuilder
+        || All.Contains(slot, StringComparer.Ordinal);
 }

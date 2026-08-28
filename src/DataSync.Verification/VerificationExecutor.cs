@@ -1,11 +1,23 @@
 using System.Data.Common;
 using DataSync.Core.Config;
+using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.Generic;
+using DataSync.Scripting.Abstractions;
 
 namespace DataSync.Verification;
 
 /// <summary>One side's connection, dialect and table, as the executor needs them.</summary>
-public sealed record VerificationEndpoint(DbConnection Connection, SqlDialect Dialect, string Schema, string Table);
+/// <param name="Columns">This side's catalog, fetched only when a script check needs it — a built-in
+/// derives everything it asks from the mapping and should not pay for a round trip to learn what it
+/// already knows.</param>
+public sealed record VerificationEndpoint(
+    DbConnection Connection,
+    SqlDialect Dialect,
+    string Schema,
+    string Table,
+    IScriptDialect? ScriptDialect = null,
+    IReadOnlyList<ColumnMetadata>? Columns = null,
+    TableRef? Ref = null);
 
 /// <summary>
 /// Runs one check against both sides and compares the answers.
@@ -23,17 +35,19 @@ public static class VerificationExecutor
         IReadOnlyList<ColumnMapping> columnMappings,
         VerificationEndpoint source,
         VerificationEndpoint target,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IVerificationQueryBuilder? queryBuilder = null)
     {
-        var (sourceSql, targetSql) = BuildStatements(check, columnMappings, source, target);
+        var (sourceSql, targetSql) = BuildStatements(check, columnMappings, source, target, queryBuilder);
+        var shape = DescribeShape(check, columnMappings, source, queryBuilder);
 
-        var (sourceSide, sourceRead) = await ReadAsync(source.Connection, sourceSql, check, cancellationToken);
-        var (targetSide, targetRead) = await ReadAsync(target.Connection, targetSql, check, cancellationToken);
+        var (sourceSide, sourceRead) = await ReadAsync(source.Connection, sourceSql, shape, cancellationToken);
+        var (targetSide, targetRead) = await ReadAsync(target.Connection, targetSql, shape, cancellationToken);
 
         return new VerificationResult(
             check.Name,
-            check.GroupBy,
-            MeasureNames(check),
+            shape.GroupColumns,
+            shape.MeasureColumns,
             check.DifferenceThreshold,
             sourceRead,
             targetRead,
@@ -53,7 +67,8 @@ public static class VerificationExecutor
         VerificationCheckConfig check,
         IReadOnlyList<ColumnMapping> columnMappings,
         VerificationEndpoint source,
-        VerificationEndpoint target)
+        VerificationEndpoint target,
+        IVerificationQueryBuilder? queryBuilder = null)
     {
         switch (check.Kind)
         {
@@ -82,11 +97,55 @@ public static class VerificationExecutor
                     throw new ConfigValidationException($"Verification check '{check.Name}' has no SQL.");
                 return (check.SourceSql, check.TargetSql ?? check.SourceSql);
 
+            case VerificationCheckKind.Script:
+                if (queryBuilder is null)
+                {
+                    throw new ConfigValidationException(
+                        $"Verification check '{check.Name}' names script '{check.ScriptName}', which could not be resolved.");
+                }
+                // Built once per side, so a script can produce genuinely different SQL for two engines
+                // — which is what a per-dialect check covers and a generic one does not.
+                return (
+                    queryBuilder.BuildQuery(ContextFor(check, columnMappings, source, VerificationSideKind.Source)).CommandText,
+                    queryBuilder.BuildQuery(ContextFor(check, columnMappings, target, VerificationSideKind.Target)).CommandText);
+
             default:
                 throw new ConfigValidationException(
                     $"Verification check '{check.Name}' is of kind '{check.Kind}', which nothing runs yet.");
         }
     }
+
+    /// <summary>
+    /// What the two result sets are shaped like. A built-in and a hand-written check say so in their
+    /// config; a generated one says so through its own <see cref="IVerificationQueryBuilder.DescribeResult"/>,
+    /// because a query that decides its own columns is the only thing that can describe them.
+    /// </summary>
+    private static VerificationQueryShape DescribeShape(
+        VerificationCheckConfig check,
+        IReadOnlyList<ColumnMapping> columnMappings,
+        VerificationEndpoint source,
+        IVerificationQueryBuilder? queryBuilder) =>
+        check.Kind == VerificationCheckKind.Script && queryBuilder is not null
+            ? queryBuilder.DescribeResult(ContextFor(check, columnMappings, source, VerificationSideKind.Source))
+            : new VerificationQueryShape(check.GroupBy, MeasureNames(check));
+
+    private static VerificationQueryContext ContextFor(
+        VerificationCheckConfig check,
+        IReadOnlyList<ColumnMapping> columnMappings,
+        VerificationEndpoint side,
+        VerificationSideKind kind) =>
+        new(
+            kind,
+            side.Ref ?? new TableRef
+            {
+                ConnectionName = "", Database = "", Schema = side.Schema, Table = side.Table,
+            },
+            columnMappings,
+            side.Columns ?? [],
+            check.Filter,
+            side.ScriptDialect ?? throw new ConfigValidationException(
+                $"Verification check '{check.Name}' needs a script dialect, which this side did not supply."),
+            new ScriptParameters(check.Parameters));
 
     /// <summary>
     /// A row count's measure has no column to be named after, so it is fixed and both sides agree on
@@ -96,7 +155,7 @@ public static class VerificationExecutor
         check.Kind == VerificationCheckKind.RowCount ? [VerificationStatement.RowCountColumn] : check.Measures;
 
     private static async Task<(VerificationSide Side, DateTimeOffset ReadAt)> ReadAsync(
-        DbConnection connection, string sql, VerificationCheckConfig check, CancellationToken cancellationToken)
+        DbConnection connection, string sql, VerificationQueryShape shape, CancellationToken cancellationToken)
     {
         var readAt = DateTimeOffset.UtcNow;
 
@@ -107,14 +166,13 @@ public static class VerificationExecutor
 
         var groups = new List<IReadOnlyList<string>>();
         var measures = new List<IReadOnlyDictionary<string, double>>();
-        var measureNames = MeasureNames(check);
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            groups.Add([.. check.GroupBy.Select(name => VerificationComparison.GroupValue(Read(reader, name)))]);
+            groups.Add([.. shape.GroupColumns.Select(name => VerificationComparison.GroupValue(Read(reader, name)))]);
 
             var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-            foreach (var measure in measureNames)
+            foreach (var measure in shape.MeasureColumns)
             {
                 // A measure the statement did not return is absent rather than zero. Zero is a number
                 // somebody measured; this is a check whose SQL does not match what it declared.

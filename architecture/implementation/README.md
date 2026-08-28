@@ -29,14 +29,13 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **043** — sync verification queries | |
-| 2 | **032** — SQL Server CDC | Change tracking starts here, per `planning/done/change-tracking-strategies.md` |
-| 3 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
-| 4 | **034** — PostgreSQL logical replication | |
-| 5 | **035** — config history diff and revert | |
-| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **032** — SQL Server CDC | Change tracking starts here, per `planning/done/change-tracking-strategies.md` |
+| 2 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
+| 3 | **034** — PostgreSQL logical replication | |
+| 4 | **035** — config history diff and revert | |
+| 5 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-28; 039, 040, 037, 041, 036 and 044 done and removed. 042 and 044 done; 043 next. A phase moving up or down is an ordinary decision and only this
+Set 2026-08-28; 039, 040, 037, 041, 036 and 044 done and removed. 042, 043 and 044 done and removed. A phase moving up or down is an ordinary decision and only this
 table changes.
 
 ## What counts as a phase

@@ -276,6 +276,23 @@ public sealed class RunExecutor(
             await sourceDialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
             await targetDialect.UseDatabaseAsync(targetConnection, target.Database, cancellationToken);
 
+            // Fetched once, and only when a script check needs it: a built-in derives everything it
+            // asks from the mapping and should not pay a catalog round trip to learn what it knows.
+            var needsCatalog = mapping.Verification.Any(c => c.Kind == VerificationCheckKind.Script);
+            var sourceColumns = needsCatalog
+                ? await sourceDriver.ListColumnsAsync(sourceConnection, source.Database, source.Schema, source.Table, cancellationToken)
+                : [];
+            var targetColumns = needsCatalog
+                ? await targetDriver.ListColumnsAsync(targetConnection, target.Database, target.Schema, target.Table, cancellationToken)
+                : [];
+
+            var sourceSide = new VerificationEndpoint(
+                sourceConnection, sourceDialect, source.Schema, source.Table,
+                ScriptDialectFor(sourceDriver), sourceColumns, source);
+            var targetSide = new VerificationEndpoint(
+                targetConnection, targetDialect, target.Schema, target.Table,
+                ScriptDialectFor(targetDriver), targetColumns, target);
+
             long compared = 0;
             long differing = 0;
 
@@ -284,10 +301,12 @@ public sealed class RunExecutor(
                 try
                 {
                     var result = await VerificationExecutor.RunAsync(
-                        check, mapping.ColumnMappings,
-                        new VerificationEndpoint(sourceConnection, sourceDialect, source.Schema, source.Table),
-                        new VerificationEndpoint(targetConnection, targetDialect, target.Schema, target.Table),
-                        cancellationToken);
+                        check, mapping.ColumnMappings, sourceSide, targetSide, cancellationToken,
+                        // Bound by name from the check, never through the hierarchy: which script
+                        // answers a particular question is a property of that question.
+                        check.Kind == VerificationCheckKind.Script && check.ScriptName is { } name
+                            ? scriptHost.Resolve<IVerificationQueryBuilder>(name)
+                            : null);
 
                     var path = VerificationPaths.For(stateDbPath, task.Name, item.RunId, check.Name);
                     await VerificationResultFile.WriteAsync(path, result, cancellationToken);
