@@ -61,5 +61,19 @@ answer (PgLogicalSlot's bytes, MsSqlChangeTracking's version count, BatchReload'
 rather than force a number, per the "declares a capability, with its unit, or says not applicable"
 design above. (1) is uniform across all readers and doesn't need the capability interface at all.
 
-**Next step**: build 32 and 34, then come back with two working examples for (2) instead of a table of
-guesses. (1) has no such blocker and could be built any time — it's just less valuable alone.
+## Where each half went (2026-08-28)
+
+**(1) is built by phase 36**, not by a phase of its own. It is one column of one query on the
+Last-24-hours card that phase already builds, and a phase for it alone would be almost empty.
+
+One decision came with it: **it is not labelled "lag" in the UI.** This doc's own observation is why — a
+replication that ran two minutes ago and found nothing looks identical to one that ran two minutes ago
+and is an hour behind. Calling it lag would tell the operator something false. It is *Last pass*.
+
+**(2) stays here and stays blocked**, on phases 32 and 34, for the reason above: it is a version count
+for Change Tracking, a real duration for CDC, bytes for a Postgres slot, a timestamp difference for
+watermark mode only when the watermark column happens to be a timestamp, and undefined for batch
+reload. The "reader declares a capability, with its unit, or says not applicable" design is probably
+right and should be written with two working examples rather than a table of guesses.
+
+**Next step**: build 32 and 34, then come back.

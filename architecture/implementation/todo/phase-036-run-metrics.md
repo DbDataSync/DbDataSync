@@ -31,10 +31,32 @@ sparkline — one endpoint, two shapes, because two round trips for one card is 
 
 Straightforward SQL over a table that already has the data. The only design question is indexing, below.
 
+### Time since the last completed pass
+
+**Added 2026-08-28**, from `planning/todo/run-lag.md`'s decision that *both* of the mockup's lag numbers
+are wanted rather than one instead of the other.
+
+This is the trivial one: wall-clock since the most recent successful run finished, straight out of
+`TaskRuns`. It answers **"is this replication still running at all"**, which is a different question
+from "how stale is the data" and is worth having on its own.
+
+It lands here rather than in a phase of its own because it is one column of one query on a card this
+phase is already building, and because it would be an almost-empty phase otherwise.
+
+**It is not called "lag" in the UI**, and that matters. A replication that ran two minutes ago and found
+nothing looks identical to one that ran two minutes ago and is an hour behind — so labelling this "lag"
+would tell the operator something false. *Last pass* is what it is.
+
+The staleness number — how far behind the source the applied data is — stays in `run-lag.md`, blocked on
+phases 32 and 34 for the reason recorded there: it is a version count for Change Tracking, a real
+duration for CDC, bytes for a Postgres slot, and undefined for batch reload, so it wants two working
+examples before a design.
+
 ### The Last-24-hours card
 
-On the replication's Overview, where the mockup put it: runs, rows written, failures, and duration
-percentiles with a sparkline. Real numbers or nothing — the rule phase 15 set and this phase keeps.
+On the replication's Overview, where the mockup put it: runs, rows written, failures, duration
+percentiles with a sparkline, and time since the last completed pass. Real numbers or nothing — the
+rule phase 15 set and this phase keeps.
 
 **Duration is presented as a distribution, not as an SLA.** The mockup shows it as a single figure,
 which reads like a target the system is measuring itself against. It is not; it is what happened. p50
@@ -68,8 +90,9 @@ someone *is* — they are watching a run, not a 24-hour aggregate.
 
 ## What this phase does not build
 
-- **Lag.** It needs a definition before an implementation, and the definition is the hard part. See
-  `planning/todo/run-lag.md`.
+- **Data staleness** — how far behind the source the applied data is. It needs a definition before an
+  implementation, and the definition is the hard part. Time-since-last-pass *is* built here, above; the
+  two are different numbers. See `planning/todo/run-lag.md`.
 - **The health rollup** ("4 of 5 healthy"). It is a presentation of connection tests (phase 19) plus
   recent run outcomes, and inventing a third notion of "healthy" before those two are composed would
   be the third notion.
@@ -79,6 +102,9 @@ someone *is* — they are watching a run, not a 24-hour aggregate.
 
 ## How to verify when built
 
+- Time since the last **completed** pass, asserted against a replication whose most recent run failed —
+  the case where "last run" and "last successful run" differ, and the one that makes the number mean
+  something.
 - Unit tests on the aggregation over a seeded `TaskRuns`: counts, sums, percentiles at known
   distributions, and an empty window returning zeroes rather than nulls — a dash that reads like zero
   is exactly the invented reading phase 15 refused.
