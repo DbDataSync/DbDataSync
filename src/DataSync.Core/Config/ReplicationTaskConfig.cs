@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace DataSync.Core.Config;
 
 /// <summary>
@@ -7,6 +9,18 @@ namespace DataSync.Core.Config;
 public sealed class ReplicationTaskConfig
 {
     public required string Name { get; set; }
+    /// <summary>
+    /// Whether the scheduler runs this replication at all.
+    /// <para>
+    /// <see cref="DefaultValueAttribute"/> is load-bearing, not documentation. The YAML serializer is
+    /// configured to omit defaults, and it compares against <c>default(T)</c> unless told otherwise —
+    /// so <c>false</c>, being <c>default(bool)</c>, was never written, and this property's own
+    /// initializer set it straight back to <c>true</c> on load. Disabling a replication did nothing.
+    /// With the attribute the comparison is against <c>true</c>, so <c>false</c> is written and
+    /// <c>true</c> is omitted, which is the right way round.
+    /// </para>
+    /// </summary>
+    [DefaultValue(true)]
     public bool Enabled { get; set; } = true;
     public required SchedulingConfig Scheduling { get; set; }
     public required ChangeProcessingConfig ChangeProcessing { get; set; }

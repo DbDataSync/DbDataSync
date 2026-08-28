@@ -32,6 +32,45 @@ public sealed class ProcessSupervisor(
 
     public IReadOnlyCollection<string> ActiveTaskNames => _workers.Keys.ToList();
 
+    /// <summary>
+    /// The worker process for this replication, as it stands right now.
+    /// <para>
+    /// **Not running is normal, not a fault.** A worker drains its queue and exits, so a replication
+    /// that is caught up has no process between cycles — which is most of the time for most of them.
+    /// The card that shows this has to say so, or an operator reads a healthy idle replication as a
+    /// broken one.
+    /// </para>
+    /// <para>
+    /// Zero or one, matching the one-worker-per-replication model. Deliberately not shaped as a list:
+    /// the architecture does not produce one, and a shape that could would be a promise nothing keeps.
+    /// </para>
+    /// </summary>
+    public ReplicationStatus DescribeStatus(string taskName)
+    {
+        if (!_workers.TryGetValue(taskName, out var process))
+            return ReplicationStatus.NotRunning;
+
+        try
+        {
+            if (process.HasExited)
+                return ReplicationStatus.NotRunning;
+
+            // Refreshed, because a Process caches these the first time they are read and would
+            // otherwise report the same memory figure for the life of the worker.
+            process.Refresh();
+            return new ReplicationStatus(
+                true, process.Id, process.WorkingSet64, process.TotalProcessorTime.TotalMilliseconds,
+                new DateTimeOffset(process.StartTime.ToUniversalTime(), TimeSpan.Zero));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or SystemException)
+        {
+            // The process ended between the liveness check and the read, or the OS refused the
+            // counters. Either way there is nothing to report, and reporting a fault would be
+            // reporting one about this endpoint rather than about the replication.
+            return ReplicationStatus.NotRunning;
+        }
+    }
+
     /// <summary>Idempotent: no-op if a live worker process is already tracked for this replication.
     /// Spawning a process is comparatively slow and never has to be on a request's critical path —
     /// callers enqueue work first (cheap, a few SQLite writes) and call this after.</summary>
@@ -230,4 +269,23 @@ public sealed class ProcessSupervisor(
             return false;
         }
     }
+}
+
+/// <summary>
+/// What a replication's worker process is doing, right now. Live telemetry only — no history, no
+/// trend: this answers "is something happening", which is a different question from phase 36's "what
+/// has been happening", and that one already has an answer.
+/// </summary>
+/// <param name="MemoryBytes">Resident set. Null when nothing is running.</param>
+/// <param name="CpuMilliseconds">Processor time this worker has used since it started.</param>
+public sealed record ReplicationStatus(
+    bool Running,
+    int? Pid = null,
+    long? MemoryBytes = null,
+    double? CpuMilliseconds = null,
+    DateTimeOffset? StartedAtUtc = null)
+{
+    /// <summary>A replication with no worker. The common state, and not a problem — a worker drains
+    /// its queue and exits, so an idle replication has no process by design.</summary>
+    public static ReplicationStatus NotRunning { get; } = new(false);
 }

@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace DataSync.Core.Config;
 
 /// <summary>
@@ -58,6 +60,8 @@ public sealed class ScriptConfig
     /// </summary>
     public List<ParameterDescriptor> Parameters { get; set; } = new();
 
+    /// <inheritdoc cref="ReplicationTaskConfig.Enabled"/>
+    [DefaultValue(true)]
     public bool Enabled { get; set; } = true;
 }
 
