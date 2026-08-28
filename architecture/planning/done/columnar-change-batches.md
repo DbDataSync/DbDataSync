@@ -1,5 +1,7 @@
 # Column-oriented change batches
 
+**Status: resolved 2026-08-27 — see Outcome at the end.**
+
 Split out of what was originally "Optimize the in memory layout of changes". The per-row half of that
 question is answered and built (`planning/done/replace-per-row-dictionary-with-positional-array.md`);
 this is the half that is deliberately still open.
@@ -55,3 +57,36 @@ guessed at in advance.
 deliberately not reused. A columnar provider is the consumer that needs that, so the two fit together;
 but it also means a columnar path would want the schema before the first row, to size its buffers, and
 today the schema is reachable only from a row. `ReadResult` is the natural place to hoist it.
+
+---
+
+# Outcome — resolved 2026-08-27
+
+The trigger this doc was explicitly waiting for has arrived, and the work goes to
+`implementation/todo/phase-038-postgres-copy-staging.md`.
+
+> **The trigger: a target that can consume typed values.** Everything above says this is worth building
+> the moment one exists, and worth nothing before.
+
+Phase 20 built the Postgres driver, and Npgsql's binary `COPY` (`NpgsqlBinaryImporter`, `Write<T>` per
+cell) is that sink. Postgres currently stages through `BatchInsertStagingProvider` — the deliberately
+lowest-common-denominator path phase 18 built for ODBC and JDBC — so there is a real improvement to
+make regardless of what the columnar answer turns out to be.
+
+**The phase does not assume the answer.** This doc's own warning is why:
+
+> **The source side.** The benchmark generates values; a columnar reader would have to call typed
+> getters on the source reader to stay unboxed. No reader does that today, so without it the boxing
+> floor simply moves upstream and the win evaporates. This is the first thing to check, not the last.
+
+Every reader goes through `ResultSetSchema.ReadValues`, which is `GetValue(i)` — boxing every cell on
+the way in. A typed sink downstream of a boxing source saves the second boxing, not the first. So the
+phase measures three configurations through `tools/DataSync.Benchmarks` before designing anything, and
+ships the `COPY` provider either way, because it beats multi-row `INSERT` whatever the in-memory
+representation is.
+
+The two constraints this doc recorded are carried into the phase as things the measurement has to
+account for: **the schema is needed before the first row** to size buffers (and `ReadResult` is where
+it should be hoisted), and **concurrent mappings** are the case that should actually decide a batch
+size, since the work queue runs several at once by design.
+
