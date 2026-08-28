@@ -34,11 +34,7 @@ public sealed class RunExecutor(
     ConfigRepository configRepository,
     DriverRegistry driverRegistry,
     SecretStore secretStore,
-    TaskRunStore taskRunStore,
-    ChangeWatermarkStore watermarkStore,
-    RunLockStore runLockStore,
-    WorkQueueStore workQueueStore,
-    LogWriter logWriter,
+    IRunnerState state,
     ScriptHost scriptHost)
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
@@ -63,7 +59,7 @@ public sealed class RunExecutor(
             return ExitCode.ConfigError;
         }
 
-        taskRunStore.UpsertTask(task.Name, task.Enabled);
+        state.UpsertTask(task.Name, task.Enabled);
 
         var workerId = Guid.NewGuid().ToString("N");
         var channel = Channel.CreateBounded<WorkItem>(new BoundedChannelOptions(Math.Max(1, degreeOfParallelism) * 2)
@@ -79,7 +75,7 @@ public sealed class RunExecutor(
 
         await producer;
         await Task.WhenAll(consumers);
-        logWriter.Flush();
+        state.Flush();
 
         return ExitCode.Success;
     }
@@ -108,13 +104,13 @@ public sealed class RunExecutor(
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var item = workQueueStore.TryClaimNext(taskName, workerId);
+                var item = state.TryClaimNext(taskName, workerId);
                 if (item is not null)
                 {
                     consecutiveEmptyPolls = 0;
                     await writer.WriteAsync(item, cancellationToken);
                 }
-                else if (!workQueueStore.HasOutstandingWork(taskName))
+                else if (!state.HasOutstandingWork(taskName))
                 {
                     if (++consecutiveEmptyPolls >= EmptyPollsBeforeExit)
                         break;
@@ -141,16 +137,16 @@ public sealed class RunExecutor(
 
     private async Task ProcessWorkItemAsync(WorkItem item, CancellationToken cancellationToken)
     {
-        if (!runLockStore.TryAcquire(item.TaskName, item.RunKind, item.MappingName, item.RunId))
+        if (!state.TryAcquireLock(item.TaskName, item.RunKind, item.MappingName, item.RunId))
         {
             // Lost the real RunLocks race despite the queue's own NOT EXISTS pre-filter (rare) — give
             // the claim back so a later poll retries it, rather than recording a spurious failure.
-            workQueueStore.ReleaseClaim(item.Id);
+            state.ReleaseClaim(item.Id);
             return;
         }
 
-        workQueueStore.MarkRunning(item.Id);
-        taskRunStore.BeginRun(item.RunId, Environment.ProcessId);
+        state.MarkRunning(item.Id);
+        state.BeginRun(item.RunId, Environment.ProcessId);
         var scope = item.SegmentLabel == WorkQueueStore.NoSegment ? "" : $", segment {item.SegmentLabel}";
         Log(item.RunId, LogSeverity.Info, $"Run started for mapping '{item.MappingName}' ({item.RunKind}{scope}).");
 
@@ -172,34 +168,34 @@ public sealed class RunExecutor(
             // it) long before the process itself exits — unlike the old one-run-per-process model,
             // where a single end-of-process Flush() was always guaranteed to happen first. Log lines
             // must be durable before the status that makes a poller stop looking for them.
-            logWriter.Flush();
-            taskRunStore.CompleteRun(item.RunId, RunStatus.Succeeded, rowsRead, rowsWritten, errorSummary: null);
-            workQueueStore.MarkDone(item.Id);
+            state.Flush();
+            state.CompleteRun(item.RunId, RunStatus.Succeeded, rowsRead, rowsWritten, errorSummary: null);
+            state.MarkDone(item.Id);
         }
         catch (Exception ex) when (ex is FileNotFoundException or ConfigValidationException)
         {
             Log(item.RunId, LogSeverity.Error, $"Config error: {ex.Message}");
-            logWriter.Flush();
-            taskRunStore.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
-            workQueueStore.MarkFailed(item.Id);
+            state.Flush();
+            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
+            state.MarkFailed(item.Id);
         }
         catch (ConnectivityException ex)
         {
             Log(item.RunId, LogSeverity.Error, $"Run failed: {ex.Message}");
-            logWriter.Flush();
-            taskRunStore.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
-            workQueueStore.MarkFailed(item.Id);
+            state.Flush();
+            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
+            state.MarkFailed(item.Id);
         }
         catch (Exception ex)
         {
             Log(item.RunId, LogSeverity.Error, $"Run failed: {ex.Message}");
-            logWriter.Flush();
-            taskRunStore.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
-            workQueueStore.MarkFailed(item.Id);
+            state.Flush();
+            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
+            state.MarkFailed(item.Id);
         }
         finally
         {
-            runLockStore.Release(item.TaskName, item.RunKind, item.MappingName);
+            state.ReleaseLock(item.TaskName, item.RunKind, item.MappingName);
         }
     }
 
@@ -242,7 +238,7 @@ public sealed class RunExecutor(
             // able to disturb the cursor a replication's ongoing incremental sync depends on,
             // regardless of which reader/writer Kind it happens to use internally.
             var watermarkKey = WatermarkKey.Build(source);
-            var previousWatermark = item.RunKind == RunKind.Primary ? watermarkStore.GetWatermark(task.Name, watermarkKey) : null;
+            var previousWatermark = item.RunKind == RunKind.Primary ? state.GetWatermark(task.Name, watermarkKey) : null;
 
             // Resolved once per pass, not per statement: the script generates an expression in exactly
             // the form a hand-written transform takes, and phase 22's projection does the rest —
@@ -406,7 +402,7 @@ public sealed class RunExecutor(
             // own and echoes back whatever it was given — so taking the last segment's value is the
             // same as taking any of them. An ordinary incremental pass has exactly one segment (none).
             if (item.RunKind == RunKind.Primary && newWatermark is not null)
-                watermarkStore.SetWatermark(task.Name, watermarkKey, newWatermark);
+                state.SetWatermark(task.Name, watermarkKey, newWatermark);
 
             return (totalRead, totalWritten);
         }
@@ -725,7 +721,7 @@ public sealed class RunExecutor(
         return (connection, driver);
     }
 
-    private void Log(Guid runId, LogSeverity level, string message) => logWriter.Log(runId, level, message);
+    private void Log(Guid runId, LogSeverity level, string message) => state.Log(runId, level, message);
 
     /// <summary>
     /// What a script generating SQL for this engine is told about it. A driver that names no dialect —

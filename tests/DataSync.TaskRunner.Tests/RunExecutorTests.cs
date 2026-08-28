@@ -47,8 +47,9 @@ public sealed class RunExecutorTests : IDisposable
         driverRegistry.Register(new MsSqlDriver());
 
         _executor = new RunExecutor(
-            _configRepository, driverRegistry, secretStore, _taskRunStore,
-            new ChangeWatermarkStore(_stateDatabase), _runLockStore, _workQueueStore, _logWriter,
+            _configRepository, driverRegistry, secretStore,
+            new LocalRunnerState(_taskRunStore, _workQueueStore, _runLockStore,
+                new ChangeWatermarkStore(_stateDatabase), _logWriter),
             Scripting.ForTests(_configRepository, _repoRoot));
     }
 

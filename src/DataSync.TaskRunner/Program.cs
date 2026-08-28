@@ -32,16 +32,13 @@ driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
 
 using var logWriter = new LogWriter(stateDatabase);
-var executor = new RunExecutor(
-    configRepository,
-    driverRegistry,
-    secretStore,
+var state = new LocalRunnerState(
     new TaskRunStore(stateDatabase),
-    new ChangeWatermarkStore(stateDatabase),
-    new RunLockStore(stateDatabase),
     new WorkQueueStore(stateDatabase),
-    logWriter,
-    scriptHost);
+    new RunLockStore(stateDatabase),
+    new ChangeWatermarkStore(stateDatabase),
+    logWriter);
+var executor = new RunExecutor(configRepository, driverRegistry, secretStore, state, scriptHost);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
