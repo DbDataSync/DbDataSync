@@ -45,18 +45,22 @@ builder.Services.AddSingleton(sp => new RunLockStore(sp.GetRequiredService<State
 builder.Services.AddSingleton(sp => new WorkQueueStore(sp.GetRequiredService<StateDatabase>()));
 builder.Services.AddSingleton(sp => new LogWriter(sp.GetRequiredService<StateDatabase>()));
 
-builder.Services.AddSingleton(_ =>
-{
-    var registry = new DriverRegistry();
-    registry.Register(new MsSqlDriver());
-    registry.Register(new PostgresDriver());
-    return registry;
-});
-
 builder.Services.AddSingleton(sp =>
     ScriptCacheDirectory.BesideStateDatabase(sp.GetRequiredService<ApiOptions>().StateDbPath));
 builder.Services.AddSingleton<ScriptCompiler>();
 builder.Services.AddSingleton<ScriptHost>();
+
+builder.Services.AddSingleton(sp =>
+{
+    // The scripted reader is composed here rather than inside a driver, because it needs the script
+    // host and a driver must not depend on Roslyn. From every caller's side it is a reader the driver
+    // has — including the capability endpoint the SPA's reader picker is built from.
+    var registry = new DriverRegistry();
+    var scriptHost = sp.GetRequiredService<ScriptHost>();
+    registry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
+    registry.RegisterWithScripting(new PostgresDriver(), scriptHost);
+    return registry;
+});
 builder.Services.AddSingleton<ScriptedMetadata>();
 builder.Services.AddSingleton<DriverConnectionFactory>();
 builder.Services.AddSingleton<MetadataService>();

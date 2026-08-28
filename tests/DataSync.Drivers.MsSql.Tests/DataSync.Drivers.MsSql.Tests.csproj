@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataSync.Drivers.MsSql\DataSync.Drivers.MsSql.csproj" />
+    <ProjectReference Include="..\..\src\DataSync.Scripting\DataSync.Scripting.csproj" />
   </ItemGroup>
 
 </Project>

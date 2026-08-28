@@ -224,7 +224,9 @@ public sealed class RunExecutor(
             var cacheKind = item.Kinds.CacheKind ?? processing.Cache.Kind;
             var writerKind = item.Kinds.WriterKind ?? processing.Writer.Kind;
 
-            var reader = sourceDriver.Readers.FirstOrDefault(r => r.Kind == readerKind)
+            // Through the registry rather than the driver, so a host-supplied reader (phase 30's
+            // ScriptedQuery) is as visible to the pipeline as it is to the capability endpoint.
+            var reader = driverRegistry.FindReader(sourceDriver.DriverType, readerKind)
                 ?? throw new InvalidOperationException($"Source driver does not support reader kind '{readerKind}'.");
             var stagingProvider = targetDriver.StagingProviders.FirstOrDefault(p => p.Kind == cacheKind)
                 ?? throw new InvalidOperationException($"Target driver does not support staging kind '{cacheKind}'.");

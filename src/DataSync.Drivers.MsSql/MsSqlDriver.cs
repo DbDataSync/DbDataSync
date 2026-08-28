@@ -7,8 +7,12 @@ using Microsoft.Data.SqlClient;
 
 namespace DataSync.Drivers.MsSql;
 
-public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, IProvisioner
+public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, ITableCatalogProvider, IProvisioner
 {
+    /// <summary>The catalog this driver's own components use, for anything composing a generic
+    /// component for this engine from outside the driver.</summary>
+    public ITableCatalog Catalog => MsSqlCatalog.Instance;
+
     /// <summary>What a script generating SQL for this engine is told about it.</summary>
     public SqlDialect Dialect => MsSqlDialect.Instance;
 

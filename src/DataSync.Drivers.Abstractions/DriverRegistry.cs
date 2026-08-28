@@ -9,8 +9,31 @@ namespace DataSync.Drivers.Abstractions;
 public sealed class DriverRegistry
 {
     private readonly Dictionary<ConnectionDriverType, IDriver> _drivers = new();
+    private readonly Dictionary<ConnectionDriverType, IReadOnlyList<IChangeReader>> _hostReaders = new();
 
-    public void Register(IDriver driver) => _drivers[driver.DriverType] = driver;
+    /// <param name="hostReaders">
+    /// Readers the *host* supplies for this driver rather than the driver supplying itself — phase 30's
+    /// <c>ScriptedQuery</c>, which needs the script host and so cannot be constructed inside a driver
+    /// project without dragging Roslyn in with it. Composed here because this is the composition root's
+    /// job; from every caller's point of view they are simply readers this driver has.
+    /// </param>
+    public void Register(IDriver driver, IReadOnlyList<IChangeReader>? hostReaders = null)
+    {
+        _drivers[driver.DriverType] = driver;
+        if (hostReaders is { Count: > 0 })
+            _hostReaders[driver.DriverType] = hostReaders;
+    }
+
+    /// <summary>Every reader available for this engine — the driver's own plus any the host supplied.
+    /// The one place to ask, so a host-supplied reader is not visible to the pipeline but invisible to
+    /// the capability endpoint, or the other way round.</summary>
+    public IReadOnlyList<IChangeReader> Readers(ConnectionDriverType driverType) =>
+        TryGet(driverType, out var driver)
+            ? [.. driver!.Readers, .. _hostReaders.TryGetValue(driverType, out var extra) ? extra : []]
+            : [];
+
+    public IChangeReader? FindReader(ConnectionDriverType driverType, string kind) =>
+        Readers(driverType).FirstOrDefault(r => r.Kind == kind);
 
     public IDriver Get(ConnectionDriverType driverType) =>
         _drivers.TryGetValue(driverType, out var driver)
@@ -21,7 +44,7 @@ public sealed class DriverRegistry
         _drivers.TryGetValue(driverType, out driver);
 
     public bool SupportsReader(ConnectionDriverType driverType, string kind) =>
-        TryGet(driverType, out var driver) && driver!.Readers.Any(r => r.Kind == kind);
+        FindReader(driverType, kind) is not null;
 
     public bool SupportsStagingProvider(ConnectionDriverType driverType, string kind) =>
         TryGet(driverType, out var driver) && driver!.StagingProviders.Any(p => p.Kind == kind);
@@ -33,8 +56,7 @@ public sealed class DriverRegistry
     /// — an interface check, so a reader gains the capability by implementing it, not by being added
     /// to a list here.</summary>
     public bool SupportsSegmentation(ConnectionDriverType driverType, string readerKind) =>
-        TryGet(driverType, out var driver)
-        && driver!.Readers.FirstOrDefault(r => r.Kind == readerKind) is ISegmentExpandingReader;
+        FindReader(driverType, readerKind) is ISegmentExpandingReader;
 
     /// <summary>Whether the named writer removes target rows absent from the change set within the
     /// scope it was given (see <see cref="IChangeWriter.SupportsReconciliation"/>).</summary>
@@ -48,7 +70,7 @@ public sealed class DriverRegistry
         TryGet(driverType, out var driver)
             ? new DriverCapabilities(
                 driverType,
-                driver!.Readers.Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader, r.DetectsDeletes)).ToList(),
+                Readers(driverType).Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader, r.DetectsDeletes)).ToList(),
                 driver.StagingProviders.Select(p => new StagingCapability(p.Kind)).ToList(),
                 driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation)).ToList(),
                 driver is IConnectionTester,

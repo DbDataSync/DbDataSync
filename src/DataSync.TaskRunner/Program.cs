@@ -16,13 +16,20 @@ if (!TaskRunnerOptions.TryParse(args, out var options, out var parseError))
     return (int)ExitCode.ConfigError;
 }
 
-var driverRegistry = new DriverRegistry();
-driverRegistry.Register(new MsSqlDriver());
-driverRegistry.Register(new PostgresDriver());
-
 var secretStore = new SecretStore(true);
 var configRepository = new ConfigRepository(options!.ConfigRoot, new GitCommitService(options.RepoRoot), secretStore);
 var stateDatabase = new StateDatabase(options.StateDbPath);
+
+// The cache is what makes scripting affordable here: this process is spawned per run, so without it
+// every pass would start a compiler before compiling anything of ours.
+var scriptHost = new ScriptHost(
+    configRepository, new ScriptCompiler(ScriptCacheDirectory.BesideStateDatabase(options.StateDbPath)));
+
+var driverRegistry = new DriverRegistry();
+// The scripted reader is composed here rather than inside a driver, because it needs the script host
+// and a driver must not depend on Roslyn.
+driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
+driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
 
 using var logWriter = new LogWriter(stateDatabase);
 var executor = new RunExecutor(
@@ -34,9 +41,7 @@ var executor = new RunExecutor(
     new RunLockStore(stateDatabase),
     new WorkQueueStore(stateDatabase),
     logWriter,
-    // The cache is what makes scripting affordable here: this process is spawned per run, so without
-    // it every pass would start a compiler before compiling anything of ours.
-    new ScriptHost(configRepository, new ScriptCompiler(ScriptCacheDirectory.BesideStateDatabase(options.StateDbPath))));
+    scriptHost);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>

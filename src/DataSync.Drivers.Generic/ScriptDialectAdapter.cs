@@ -17,6 +17,24 @@ public interface IDialectProvider
 }
 
 /// <summary>
+/// A driver that can hand out the catalog its own components use.
+/// <para>
+/// Opt-in for the same reason as <see cref="IDialectProvider"/>, and useful for the same kind of
+/// caller: something composing a generic component *for* a driver from outside it — phase 30's
+/// <c>ScriptedQuery</c> reader, which cannot be built inside a driver project because it needs the
+/// script host.
+/// </para>
+/// <para>
+/// It is also the seam a per-connection catalog override would use, which phase 29 recorded as needing
+/// per-connection driver components. Nothing does that yet.
+/// </para>
+/// </summary>
+public interface ITableCatalogProvider
+{
+    ITableCatalog Catalog { get; }
+}
+
+/// <summary>
 /// Presents a <see cref="SqlDialect"/> to a script through the narrow <see cref="IScriptDialect"/> view.
 /// <para>
 /// The adapter exists so the script surface can stay still while <see cref="SqlDialect"/> keeps moving —
