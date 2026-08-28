@@ -132,7 +132,34 @@ anywhere else.
 **Loopback is not the same as trusted**, and the design should not pretend otherwise: any process
 belonging to any user on that host can reach `127.0.0.1`. So the token the parent generates per child
 is not belt-and-braces, it is the part that distinguishes *our* TaskRunner from anything else local.
-It should be a per-process random value passed on the command line and never written to disk.
+A per-process random value, never written to disk.
+
+**The token goes in the environment, not on the command line.** On Linux a process's command line is
+world-readable and its environment is not:
+
+```
+-r--r--r--  /proc/self/cmdline
+-r--------  /proc/self/environ
+```
+
+So a token in `ArgumentList` is visible to every local user through `ps aux` — which is precisely the
+local-user threat the token exists to answer, handed straight back. The same holds on Windows, where a
+command line is readable through `Get-CimInstance Win32_Process` while the environment block is not.
+
+`ProcessSupervisor` already sets `UseShellExecute = false`, which is the prerequisite for
+`ProcessStartInfo.Environment`, so this is `startInfo.Environment[…] = token` beside the existing
+`ArgumentList` calls rather than a change to how the child is launched. It also matches how this
+codebase already passes secrets between processes — `SecretStore`'s `CLRKERNEL_SECRET_*` fallback,
+which the Playwright fixture and the integration tests both use.
+
+Two things that follow and are worth stating rather than discovering:
+
+- **The environment is inherited.** Anything TaskRunner spawns sees the token. It spawns nothing today,
+  and that is a constraint to keep rather than an observation.
+- **Root and the same user can still read it.** This is defence against *other* local users, which is
+  exactly the gap loopback leaves, and not against a compromised host. Crash dumps and some diagnostic
+  tooling also capture environment blocks — so the token stays short-lived and per-process, and is not
+  reused across restarts.
 
 ### TaskRunner talks to it over HTTP
 
@@ -268,6 +295,9 @@ documented as one.
 
 ## How to verify when built
 
+- **The token is not in the child's command line.** Assert it directly against the spawned process —
+  `ProcessStartInfo.ArgumentList` carries no secret — because this is the kind of thing a later
+  "just add a flag" refactor undoes silently.
 - **The state endpoint refuses a non-loopback client**, tested against both defences independently:
   bound to loopback (connection refused), and the middleware (rejected even if the binding is widened).
 - **Journal round trip**: kill the API mid-run, confirm the runner spills and exits with the distinct
