@@ -19,6 +19,25 @@ Both point at the same fix: replace (or augment) the dropdown with an editable/c
 accepts a name not in the existing-tables list, and wire that case to phase 25's provisioning flow
 (show the generated DDL, let the operator confirm) instead of leaving it unreachable.
 
-**Next step**: this is now specific enough to design — find the current dropdown component (target-table
-selection in the replication setup UI) and scope a combobox replacement plus the "name not found ->
-offer to provision" path.
+---
+
+# Outcome — resolved 2026-08-28
+
+Agreed, as `implementation/todo/phase-040-editable-target-table.md`. The diagnosis is confirmed in the
+code: `MappingSide.tsx` renders the target table as a closed `<select>` over `useTables(connection,
+database)`, so a name not already in the target database cannot be expressed at all — and phase 25's
+provisioning, which exists and is tested, is unreachable from the screen where the need arises.
+
+Three decisions the phase adds beyond the note:
+
+- **Target side only.** A source table that does not exist is a typo, not something to create.
+- **Saving a mapping whose target does not exist stays legal.** Phase 16 validates a mapping at save and
+  does not check the target's existence; keeping it that way means an operator can describe what they
+  want before provisioning it, rather than being forced into the opposite order.
+- **Column mappings for a not-yet-existing target default to the source's columns**, auto-mapped by
+  name — because those *are* what `IProvisioner` will create. This looks like a UI convenience and is
+  actually the thing that decides what gets created, which makes it the part most likely to be got
+  wrong quietly.
+
+Explicitly out: editing an existing target's shape. That is schema evolution, which phase 27's hook
+example already touches, and it is a different problem from creating a table that is not there.
