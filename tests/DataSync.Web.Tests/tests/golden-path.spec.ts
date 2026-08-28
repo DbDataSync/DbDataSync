@@ -937,4 +937,58 @@ public sealed class Shout : IValueColumnExpression
     await page.getByTestId('stage-cache').click()
     await expect(page.getByTestId('cache-options')).toBeVisible()
   })
+
+  test('24 - a mapping can be checked against its target, and the threshold decides what is flagged', async ({ page }) => {
+    test.setTimeout(180_000)
+
+    // Checks live on the mapping; the API is the honest way to add them, since there is no editor for
+    // them yet and this test is about running and reading them.
+    const setCheck = async (differenceThreshold: number) => {
+      const mapping = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+      mapping.verification = [{ name: 'total-rows', kind: 'RowCount', groupBy: [], measures: [], differenceThreshold }]
+      const saved = await page.request.put(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: mapping })
+      expect(saved.ok(), await saved.text()).toBeTruthy()
+    }
+
+    const runAndWait = async (expectedResults: number) => {
+      await page.getByTestId('run-verification-button').click()
+      await expect.poll(async () => {
+        const results = await (await page.request.get(
+          `/api/replications/${REPLICATION_NAME}/verification-results?mappingName=${MAPPING_NAME}`)).json()
+        return results.length
+      }, { timeout: 60_000 }).toBeGreaterThanOrEqual(expectedResults)
+    }
+
+    await setCheck(0)
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.getByTestId('verify-mapping-link').click()
+    await expect(page).toHaveURL(new RegExp(`/mappings/${MAPPING_NAME}/verification$`))
+
+    await runAndWait(1)
+    await expect(page.getByTestId('verification-result-total-rows')).toBeVisible({ timeout: 30_000 })
+
+    // A real difference, and an explainable one: test 16 bound a row transform that drops a row, so
+    // the source has two rows where the target has one. The check finds it without being told.
+    const result = page.getByTestId('verification-result')
+    await expect(result).toContainText('differs', { timeout: 30_000 })
+    await expect(page.getByTestId('verification-row-total')).toContainText('-1')
+
+    // Both read times, as a gap — the number a difference has to be weighed against.
+    await expect(page.getByTestId('verification-read-gap')).toContainText('apart')
+    await expect(page.getByTestId('verification-read-gap')).toContainText('any difference is flagged')
+    await shot(page, '31-verification-difference.png')
+
+    // The same difference, under a threshold that tolerates it: still reported as a number, because
+    // an operator reads it to judge drift — but no longer called a failure, because a replication
+    // being behind is the premise of the feature rather than a fault.
+    await setCheck(0.6)
+    await runAndWait(2)
+
+    await expect(result).toContainText('match', { timeout: 30_000 })
+    await expect(result).toContainText('are not flagged')
+    await expect(page.getByTestId('verification-row-total')).toContainText('-1')
+    await shot(page, '32-verification-within-threshold.png')
+  })
 })

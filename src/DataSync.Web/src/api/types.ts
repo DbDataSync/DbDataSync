@@ -133,6 +133,7 @@ export interface TableMappingConfig {
   scripts?: ScriptBindings
   hooks?: Hooks
   provisioning?: ProvisioningConfig
+  verification?: VerificationCheckConfig[]
 }
 
 export interface TableMetadata {
@@ -329,6 +330,63 @@ export interface RunMetrics {
 }
 
 export type MetricsWindow = '1h' | '24h' | '7d'
+
+export type VerificationCheckKind = 'RowCount' | 'Sum' | 'Sql' | 'Script'
+
+/** One comparison between a mapping's source and its target. Columns are named by their *target*
+ * names and each side's statement is derived, so an aliased column is one selection. */
+export interface VerificationCheckConfig {
+  name: string
+  kind: VerificationCheckKind
+  groupBy: string[]
+  measures: string[]
+  sourceSql: string | null
+  targetSql: string | null
+  scriptName: string | null
+  parameters: Record<string, string>
+  filter: string | null
+  /** How far apart two measures may be before it is worth pointing at, as a fraction of the larger
+   * side. Zero means any difference at all. */
+  differenceThreshold: number
+}
+
+export type VerificationRowStatus = 'Match' | 'Differs' | 'MissingFromTarget' | 'MissingFromSource'
+
+export interface VerificationResultRow {
+  group: string[]
+  /** Null when the group was absent from that side — distinct from a zero, which is a number
+   * somebody measured. */
+  source: Record<string, number> | null
+  target: Record<string, number> | null
+  differences: Record<string, number>
+  status: VerificationRowStatus
+}
+
+export interface VerificationResult {
+  checkName: string
+  groupColumns: string[]
+  measureColumns: string[]
+  differenceThreshold: number
+  /** Each side's read time, separately: the gap is what a difference has to be weighed against. */
+  sourceReadAtUtc: string
+  targetReadAtUtc: string
+  rows: VerificationResultRow[]
+}
+
+/** Where a result is, not what it says. */
+export interface VerificationResultRecord {
+  id: number
+  runId: string
+  taskName: string
+  mappingName: string
+  checkName: string
+  completedAtUtc: string
+  sourceReadAtUtc: string
+  targetReadAtUtc: string
+  groupsCompared: number
+  differingGroups: number
+  resultPath: string
+}
 
 export interface ScriptDiagnostic {
   line: number

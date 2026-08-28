@@ -31,6 +31,10 @@ const keys = {
     ['replications', replicationName, 'table-mappings', mappingName, 'preview'] as const,
   metrics: (replicationName: string, window: string) =>
     ['replications', replicationName, 'metrics', window] as const,
+  verificationResults: (replicationName: string, mappingName: string) =>
+    ['replications', replicationName, 'verification-results', mappingName] as const,
+  verificationResult: (replicationName: string, id: number) =>
+    ['replications', replicationName, 'verification-results', id] as const,
 }
 
 export function useConnections() {
@@ -376,6 +380,47 @@ export function useRunMetrics(replicationName: string | undefined, window: Metri
     queryFn: () => api.metrics.get(replicationName!, window),
     enabled: !!replicationName,
     refetchInterval: 30_000,
+  })
+}
+
+/**
+ * Past results for one mapping, most recent first.
+ *
+ * Polled, because "Run checks" queues a run rather than performing one: the mutation succeeds the
+ * moment the work is enqueued, and the result arrives seconds later when a TaskRunner has done it.
+ * Invalidating on the mutation refetches too early and then never again, which leaves an operator
+ * looking at an unchanged screen wondering whether the button worked.
+ *
+ * Five seconds, not the metrics card's thirty: this is a screen somebody is watching immediately
+ * after pressing a button, which is exactly the case a 24-hour aggregate is not.
+ */
+export function useVerificationResults(replicationName: string, mappingName: string | undefined) {
+  return useQuery({
+    queryKey: keys.verificationResults(replicationName, mappingName ?? ''),
+    queryFn: () => api.verification.results(replicationName, mappingName!),
+    enabled: !!mappingName,
+    refetchInterval: 5_000,
+  })
+}
+
+/** One result, read back out of the parquet the runner wrote. */
+export function useVerificationResult(replicationName: string, id: number | undefined) {
+  return useQuery({
+    queryKey: keys.verificationResult(replicationName, id ?? 0),
+    queryFn: () => api.verification.result(replicationName, id!),
+    enabled: !!id,
+  })
+}
+
+/** Running checks is an explicit action, like phase 41's script test and phase 19's connection test —
+ * never something that happens as a side effect of a refetch. */
+export function useRunVerification(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (mappingName: string) => api.verification.run(replicationName, mappingName),
+    onSuccess: () => queryClient.invalidateQueries({
+      queryKey: ['replications', replicationName, 'verification-results'],
+    }),
   })
 }
 

@@ -14,6 +14,8 @@ import type {
   MetricsWindow,
   PreviewReport,
   RunMetrics,
+  VerificationResult,
+  VerificationResultRecord,
   ScriptListItem,
   ScriptTestRequest,
   ScriptTestResult,
@@ -161,6 +163,22 @@ export const api = {
     get: (replicationName: string, window: MetricsWindow) =>
       request<RunMetrics>(
         `/api/replications/${encodeURIComponent(replicationName)}/metrics?window=${window}`,
+      ),
+  },
+  verification: {
+    run: (replicationName: string, mappingName: string) =>
+      request<{ runIds: string[] }>(
+        `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}/verify`,
+        { method: 'POST' },
+      ),
+    results: (replicationName: string, mappingName: string) =>
+      request<VerificationResultRecord[]>(
+        `/api/replications/${encodeURIComponent(replicationName)}/verification-results` +
+          `?mappingName=${encodeURIComponent(mappingName)}`,
+      ),
+    result: (replicationName: string, id: number) =>
+      request<VerificationResult>(
+        `/api/replications/${encodeURIComponent(replicationName)}/verification-results/${id}`,
       ),
   },
   runs: {

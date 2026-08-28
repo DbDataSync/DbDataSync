@@ -8,6 +8,7 @@ import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
 import { MappingPreview } from './pages/replication-detail/MappingPreview'
+import { VerificationPanel } from './pages/replication-detail/VerificationPanel'
 
 /**
  * Every destination has a URL.
@@ -42,6 +43,9 @@ export default function App() {
           {/* Beside the editor rather than inside it: the preview is about the mapping as
               *saved*, which is not what an editor with unsaved changes is showing. */}
           <Route path=":mappingName/preview" element={<MappingPreview />} />
+          {/* Beside the editor for the same reason the preview is: a result is about the mapping as
+              saved and as it stands in the two databases, not as an editor has it. */}
+          <Route path=":mappingName/verification" element={<VerificationPanel />} />
         </Route>
         <Route path="runs" element={<RunsTab />} />
         <Route path="history" element={<HistoryTab />} />

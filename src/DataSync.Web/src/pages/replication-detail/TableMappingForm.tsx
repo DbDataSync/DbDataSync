@@ -85,6 +85,15 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
               Preview SQL
             </Link>
           )}
+          {existing && (
+            <Link
+              className="btn"
+              to={`/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(existing.name)}/verification`}
+              data-testid="verify-mapping-link"
+            >
+              Verify
+            </Link>
+          )}
           <button type="button" className="btn" onClick={onCancel}>Cancel</button>
           {existing && (
             <button
