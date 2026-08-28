@@ -50,7 +50,12 @@ public sealed class StateHost(
         // able to report anyway.
         builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, options.StatePort));
 
-        builder.Services.AddSingleton(loggerFactory);
+        // Warning and above only. This is a polling channel — a worker asks for outstanding work
+        // roughly once a second for as long as it lives — and at Information level its request log
+        // buries everything an operator actually came to read. Its own startup line below goes
+        // through the API's logger, where it belongs.
+        builder.Logging.SetMinimumLevel(LogLevel.Warning);
+
         builder.Services.ConfigureHttpJsonOptions(json =>
             json.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

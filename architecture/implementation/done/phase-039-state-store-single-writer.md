@@ -333,3 +333,168 @@ documented as one.
 - **Should a spilled journal ever be applied by a *different* API instance** than the one that spawned
   the runner? On one host with one API, no — but it is the question that decides whether the journal
   needs to identify who wrote it.
+
+---
+
+# Retrospective
+
+Built as planned. The design held; what it cost was three real bugs, and all three were found by the
+things the plan said to verify rather than by the things it said to build. Two of them predate this
+phase and would have been just as wrong before it.
+
+## The structural test found the hole the behavioural ones could not
+
+`new StateDatabase(` reachable from exactly one project was written as a formality — the requirement
+restated as an assertion. It failed immediately: `RunnerStateFactory` still opened the file directly
+when no endpoint was supplied, kept as a fallback for "running a worker by hand".
+
+Running a worker by hand *while the API is up* is the second writer this entire phase exists to
+prevent. The fallback is gone, and a runner without an endpoint now refuses to start with a message
+saying why — at startup, rather than later with corruption.
+
+Every behavioural test would have stayed green with that fallback in place, because nothing exercised
+it. The assertion that catches it is the one that says what the requirement is instead of what the
+system does.
+
+## A killed worker used to strand its work, permanently
+
+Killing the API mid-backfill in the dev harness left two work items `Claimed` forever. Since
+`UX_WorkQueue_InFlight` covers `Claimed` and `Running`, their mapping could never be enqueued again:
+the replication stopped, and stopped *silently* — no failed run, no error, just nothing.
+
+Reconciliation released the lock and the run row, and never touched the queue. Fixing the release was
+half of it; the other half was the trigger. It asked "which runs are `Running` with a dead pid", and
+an item claimed by a worker that died before starting it has **no run to be found by** — the exact
+case the harness produced. It now asks the queue which replications hold in-flight work and returns
+those with nothing alive working on them, logged at warning.
+
+This bug predates phase 39 entirely. It surfaced here because this was the first time anything killed
+an API mid-run and then looked at what was left behind.
+
+## Returning from `Main` took the consumers with it
+
+`await producer; await Task.WhenAll(consumers);` loses the second line the moment the first throws —
+and the owner going away is precisely when the first throws. The consumers were left as unawaited
+tasks, and the process returned from `Main` and terminated them mid-item, along with the outcomes they
+were in the middle of recording.
+
+The journal cannot help with work whose recording never gets a chance to run. The producer's failure
+is now captured, the consumers awaited, and only then rethrown. A consumer that cannot reach the owner
+stops taking work rather than recording an outcome it is in no position to observe — which is why
+`StateOwnerUnavailableException` is the one exception `ProcessWorkItemAsync` does not convert to
+`MarkFailed`.
+
+## Prerequisites and outcomes, and why the split is the whole design
+
+Everything else follows from one distinction. A **prerequisite** — claiming an item, taking a lock,
+reading a watermark — fails when the owner is unreachable, because there is no outcome to preserve and
+proceeding would mean assuming a claim nobody granted. An **outcome** — a completion, a release, a
+watermark, a log line — is written to a journal, because the work is already done and losing it with
+the process is the thing worth avoiding.
+
+`JournalOperation` has no members for prerequisites, and that absence is deliberate: there is no way to
+spell "replay a claim the owner never gave me".
+
+## A separate server, not another route
+
+The state endpoint is its own Kestrel server bound to `127.0.0.1`, constructed in `StateHost`. The main
+API is the thing an operator puts behind a reverse proxy, binds to `0.0.0.0`, or exposes through a
+container port map, and anything sharing its pipeline inherits all of those decisions. Serving these
+routes from a separate server means "what is reachable from off-box" has an answer that does not depend
+on how the main API was configured.
+
+It also made the integration tests honest. `WebApplicationFactory` replaces the main server with an
+in-memory one, so a spawned child could never have reached a route on it — the tests that trigger real
+runs would have had to be given a local fallback, which is the very thing being removed. `StateHost` is
+a real socket in those tests, and the children really do talk HTTP to it.
+
+The port is ephemeral by default. Nothing needs to know it in advance: the only clients are children
+this process spawns, and each is told the address actually bound. A fixed default would buy nothing and
+cost a collision every time two instances ran on one host.
+
+## The token goes in the environment
+
+`/proc/<pid>/cmdline` is world-readable and `/proc/<pid>/environ` is not, so a token in an argument is
+visible to every local user through `ps` — precisely the threat it exists to answer. Windows has the
+same asymmetry. `BuildStartInfo` was extracted so this can be asserted against the value rather than
+trusted to survive the next "just add a flag" refactor.
+
+Loopback is not a trust boundary. Any local process can reach `127.0.0.1`; the binding keeps remote
+clients out and the token is what distinguishes this API's own children from everything else on the
+host. Both are tested, independently.
+
+## Recovered log lines needed two things they did not have
+
+A timestamp, because a recovered run whose every line is stamped with the moment of recovery says
+nothing about when anything happened. And an idempotency key, because recovery applies a journal and
+then deletes it, and a process dying between those two steps replays the whole file. Every other
+operation was already last-writer-wins; appending a log line was the exception, so it now carries a
+`<runId>:<sequence>` source key with a unique index over it — `NULL` for every live line, and `NULL` is
+distinct from `NULL` in SQLite, so two genuinely identical live lines are still two lines.
+
+## Verification
+
+- `StateJournalTests` (4) — ordered replay with payloads, a truncated final line skipped with the rest
+  surviving, no file *or directory* when nothing is appended, and per-replication grouping.
+- `RemoteRunnerStateTests` (9) — a prerequisite failing after the grace period with nothing spilled, a
+  prerequisite succeeding when the owner returns, outcomes journalled, an abandoned item journalled as
+  `ReleaseClaim` and never `MarkDone`, a 4xx raised rather than spilled, no re-spending the grace
+  period per call, logs batched into one request, and logs journalled one entry per line.
+- `RunnerStateEndpointTests` (6) — bound to loopback, a request with the token served, missing and
+  wrong tokens refused, the guard refusing a non-loopback client *with* a valid token, and the whole
+  `IRunnerState` surface over a real socket checked against what the owner recorded.
+- `JournalRecoveryTests` (6) — silent when there is nothing, applied/removed/logged at warning, a
+  double apply leaving one outcome and one of each log line, the journal winning a conflict visibly, a
+  claimed-but-unfinished item coming back claimable, and a truncated journal applied as far as it goes.
+- `StateOwnershipTests` (2) — `new StateDatabase(` reachable from exactly one project, and no token in
+  the child's `ArgumentList`.
+- `RunnerWithoutItsOwnerTests` (3) — the runner as a real process: refusing to start without an
+  endpoint (and creating no state file), exiting with the distinct code when the owner never answers,
+  and refusing an endpoint with no token in the environment.
+- `WorkQueueStoreTests` (+4) — release returning an in-flight item, leaving a finished one alone, also
+  returning one claimed but never started, and reporting which replications hold in-flight work.
+- `RunExecutorIntegrationTests` (+1) — against real SQL Server: a pass that reads changes and then
+  fails to write them leaves the watermark where it was, and the next successful pass still delivers
+  those rows.
+- Dev harness, end to end and twice over. First: 305k rows seeded, a live workload, source and target
+  matching row by row. Then the round trip — froze the API mid-pass, the runner spilled 8 entries
+  (5 log lines, `CompleteRun` 2560/2560, `MarkDone`, `ReleaseLock`), reported the grace period expiring
+  and exited; on restart the API applied them, removed the file, said so at warning level, and the run
+  reads Succeeded with its log lines carrying the timestamps of the work.
+- Full .NET suite green: 531 tests. Playwright: 17 green.
+
+## Throughput
+
+`LogWriter` is the one write that got slower, and it is the highest-rate one — a line at a time.
+Measured over 20,000 lines: **15,700/s** writing directly, **12,900/s** through the endpoint over real
+Kestrel. An 18% cost, against a workload that logs a handful of lines per mapping per pass.
+
+Log lines are batched 200 to a request; a round trip each would have been the difference between
+hundreds a second and tens of thousands. The endpoint deliberately does *not* flush per arriving batch:
+`LogWriter` already batches on its own threshold and a two-second timer, which is exactly what a runner
+writing in-process used to get.
+
+## Open questions, two answered
+
+- ~~**Does the TaskRunner still need SQLite at all?**~~ It no longer opens the file, and the structural
+  test keeps it that way. It still *references* `DataSync.State` for the shared types (`RunKind`,
+  `WorkItem`, `IRunnerState`, `StateJournal`) and so still links `Microsoft.Data.Sqlite`. Splitting the
+  types out from the stores would drop the dependency; worth doing when something else needs it.
+- ~~**Should a spilled journal be applied by a *different* API instance?**~~ In practice it always is —
+  the instance that applies it is by definition a later one than the instance that went away. Nothing
+  in the journal identifies who wrote it, and nothing needs to on one host with one API. It becomes a
+  real question the day two APIs share a state file, which is the thing this phase forbids.
+- **How long is the grace period, really?** Still a guess at 60 seconds, and now measurable: an API
+  restart in the harness takes about 10, so 60 is generous. What it costs is a killed API leaving a
+  runner idle for up to a minute holding a lock. Worth revisiting with a real restart to measure.
+- **A worker left by a previous API instance** that has claimed work and not yet started it can have
+  that claim released underneath it. Narrow, and strictly better than a replication that never runs
+  again — but it is the residual case, and the honest fix is a worker heartbeat rather than process
+  liveness, which is the same follow-on phase 8 already names.
+
+## What this unblocks
+
+The state file has one writer, which is what phase 40's provisioning and phase 36's run metrics both
+assume when they add writes. And the analytics question that started this — DuckDB, Quack, a richer
+query surface over run history — is now a question about what the *owner* does with its own file,
+rather than a question about concurrent access.
