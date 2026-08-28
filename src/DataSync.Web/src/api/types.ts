@@ -215,6 +215,20 @@ export interface ScriptSlotInfo {
   description: string
 }
 
+/** Where a script is bound. `owner` is a connection, a replication, or "replication / mapping". */
+export interface ScriptUsage {
+  level: 'connection' | 'replication' | 'mapping'
+  owner: string
+  /** The script slot, or the hook point for a hook binding. */
+  slot: string
+}
+
+/** A script as the list shows it: its manifest, and every place it is bound. */
+export interface ScriptListItem {
+  manifest: ScriptConfig
+  usedBy: ScriptUsage[]
+}
+
 export interface ScriptDiagnostic {
   line: number
   column: number

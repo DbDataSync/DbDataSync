@@ -81,6 +81,7 @@ builder.Services.AddSingleton<ScriptedMetadata>();
 builder.Services.AddSingleton<DriverConnectionFactory>();
 builder.Services.AddSingleton<MetadataService>();
 builder.Services.AddSingleton<ProvisioningService>();
+builder.Services.AddSingleton<ScriptUsageScanner>();
 builder.Services.AddSingleton<ProcessSupervisor>();
 builder.Services.AddSingleton<BackfillService>();
 builder.Services.AddHostedService<SchedulerService>();

@@ -10,8 +10,8 @@ import type {
   DriverCapabilities,
   ProvisioningPlanReport,
   ScriptCompileResult,
-  ScriptConfig,
   ScriptDefinition,
+  ScriptListItem,
   ScriptSlotInfo,
   LogEntryRecord,
   ReplicationTaskConfig,
@@ -71,7 +71,7 @@ export const api = {
       request<CredentialSource>(`/api/connections/${encodeURIComponent(name)}/credential-source`),
   },
   scripts: {
-    list: () => request<ScriptConfig[]>('/api/scripts'),
+    list: () => request<ScriptListItem[]>('/api/scripts'),
     slots: () => request<ScriptSlotInfo[]>('/api/scripts/slots'),
     get: (name: string) => request<ScriptDefinition>(`/api/scripts/${encodeURIComponent(name)}`),
     upsert: (name: string, script: ScriptDefinition) =>

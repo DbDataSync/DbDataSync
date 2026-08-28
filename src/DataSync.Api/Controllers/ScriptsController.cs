@@ -1,3 +1,4 @@
+using DataSync.Api.Services;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Scripting;
@@ -16,11 +17,24 @@ namespace DataSync.Api.Controllers;
 public sealed class ScriptsController(
     ConfigRepository configRepository,
     ScriptHost scriptHost,
+    ScriptUsageScanner usageScanner,
     GitAuthor author) : ControllerBase
 {
+    /// <summary>
+    /// Every script with where it is bound. The binding sites come with the list rather than from a
+    /// per-script call because the list is where the question is asked — "which of these is actually
+    /// doing anything" is about all of them at once, and N+1 requests to answer it would be one
+    /// request per row.
+    /// </summary>
     [HttpGet]
-    public ActionResult<IReadOnlyList<ScriptConfig>> List() =>
-        Ok(configRepository.ListScripts().Select(n => configRepository.LoadScript(n).Manifest).ToList());
+    public ActionResult<IReadOnlyList<ScriptListItem>> List()
+    {
+        var usages = usageScanner.ScanAll();
+        return Ok(configRepository.ListScripts()
+            .Select(n => configRepository.LoadScript(n).Manifest)
+            .Select(m => new ScriptListItem(m, usages.GetValueOrDefault(m.Name, [])))
+            .ToList());
+    }
 
     /// <summary>
     /// The slots this build supports, each with the binding levels it may be bound at — so the SPA
@@ -131,6 +145,9 @@ public sealed class ScriptsController(
         return NoContent();
     }
 }
+
+/// <summary>A script as the list shows it: its manifest, and every place it is bound.</summary>
+public sealed record ScriptListItem(ScriptConfig Manifest, IReadOnlyList<ScriptUsage> UsedBy);
 
 public sealed record ScriptSlotInfo(string Slot, IReadOnlyList<string> Levels, string Label, string Description);
 

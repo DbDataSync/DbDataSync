@@ -80,7 +80,7 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
             description={description}
             binding={slot in bindings ? bindings[slot] : undefined}
             inherited={inherited[slot] ?? null}
-            available={(scripts ?? []).filter((s) => s.kind === slot && s.enabled).map((s) => s.name)}
+            available={(scripts ?? []).map((s) => s.manifest).filter((m) => m.kind === slot && m.enabled).map((m) => m.name)}
             onChange={(next) => {
               const copy = { ...bindings }
               if (next === undefined) delete copy[slot]

@@ -453,6 +453,36 @@ public sealed class ReverseName : ISqlColumnExpression
     expect(rows).toContain('tegdiW')
   })
 
+  test('15b - the Scripts list says whether a script is bound to anything', async ({ page }) => {
+    // The first question anyone has about a script they did not write, and the one thing a list of
+    // names, kinds and descriptions cannot answer.
+    await page.goto('/scripts')
+    await expect(page.getByTestId('script-usage-reverse-name')).toContainText(REPLICATION_NAME, { timeout: 15_000 })
+
+    // An unbound one says so, which is the answer worth showing: usually a mistake, or safe to delete.
+    await page.goto('/scripts/new')
+    await page.getByTestId('script-name-input').fill('never-bound')
+    await page.getByTestId('script-kind-select').selectOption('rowTransform')
+    await page.getByTestId('script-entry-type-input').fill('Unused')
+    await setCode(page, 'script-code-input', `using System.Threading;
+using System.Threading.Tasks;
+using DataSync.Drivers.Abstractions;
+using DataSync.Scripting.Abstractions;
+
+public sealed class Unused : IRowTransform
+{
+    public ChangeSchema DeclareSchema(ChangeSchema input, RowTransformContext c) => input;
+
+    public ValueTask<ChangeRow?> TransformAsync(ChangeRow row, RowTransformContext c, CancellationToken ct)
+        => ValueTask.FromResult<ChangeRow?>(row);
+}
+`)
+    await page.getByTestId('save-script-button').click()
+    await expect(page.getByTestId('scripts-table')).toContainText('never-bound', { timeout: 15_000 })
+
+    await expect(page.getByTestId('script-usage-never-bound')).toContainText('unused')
+  })
+
   test('16 - a C# row transform filters rows in process, between the reader and staging', async ({ page }) => {
     // The other half of the transform story. Phase 22's SQL runs at the source; this runs here, on the
     // stream, and can do the one thing SQL in a SELECT list cannot: drop the row entirely.
