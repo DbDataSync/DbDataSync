@@ -69,11 +69,14 @@ public static class RunnerStateEndpoints
             return Results.Ok();
         });
 
+        // Not flushed here. LogWriter already batches on its own threshold and a two-second timer,
+        // which is exactly what a runner writing in-process used to get; forcing a transaction per
+        // arriving batch would make a remote runner's logs several times more expensive than a local
+        // one's for no visible difference.
         group.MapPost("/log-batch", (LogBatchRequest r) =>
         {
             foreach (var entry in r.Entries)
                 state.Log(entry.RunId, entry.Level, entry.Message);
-            state.Flush();
             return Results.Ok();
         });
     }

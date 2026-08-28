@@ -65,6 +65,10 @@ public sealed class JournalRecovery(
         foreach (var entry in entries.OrderBy(e => e.Sequence))
             Apply(entry, taskName, runId);
 
+        // Once, not per line: a journal is replayed whole, and a transaction per recovered log line
+        // makes recovering a long-running run's output take minutes.
+        logs.Flush();
+
         // Only after everything applied. A crash part-way through replays the whole file, which is why
         // every operation below has to be idempotent.
         File.Delete(path);
@@ -79,7 +83,6 @@ public sealed class JournalRecovery(
                 // the moment of recovery says nothing about when anything happened. And keyed by
                 // journal and sequence, so replaying the file does not duplicate the line.
                 logs.Log(log.RunId, log.Level, log.Message, log.TimestampUtc, $"{runId}:{entry.Sequence}");
-                logs.Flush();
                 break;
 
             case JournalOperation.MarkRunning when StateJournal.PayloadOf<WorkItemRequest>(entry) is { } w:

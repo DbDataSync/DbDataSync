@@ -159,16 +159,34 @@ public sealed class ProcessSupervisor(
     /// (v1 limitation — see architecture/implementation/done/phase-005-api-orchestrator.md).</summary>
     public void ReconcileOrphanedRuns()
     {
+        var deadTasks = new HashSet<string>();
+        var liveTasks = new HashSet<string>();
+
         foreach (var run in taskRunStore.GetRunningRuns())
         {
             if (run.Pid is int pid && IsProcessAlive(pid))
+            {
+                liveTasks.Add(run.TaskName);
                 continue;
+            }
 
             taskRunStore.CompleteRun(run.RunId, RunStatus.Failed, 0, 0, "Orphaned: no live process found after API restart.");
             runLockStore.Release(run.TaskName, run.RunKind, run.MappingName);
-            workQueueStore.ReleaseClaimsForRun(run.RunId);
+            deadTasks.Add(run.TaskName);
+        }
+
+        // Per task, not per run: a worker claims ahead of its consumers, so it can die holding items
+        // it never started — which have no run to be found by, and would sit in-flight forever making
+        // their mapping un-enqueueable. Only for a replication with nothing alive working on it.
+        foreach (var taskName in deadTasks)
+        {
+            if (!liveTasks.Contains(taskName) && !HasLiveWorker(taskName))
+                workQueueStore.ReleaseClaimsForTask(taskName);
         }
     }
+
+    private bool HasLiveWorker(string taskName) =>
+        _workers.TryGetValue(taskName, out var worker) && !worker.HasExited;
 
     /// <summary>A worker process backs many concurrently-active RunIds, so its death (whether via
     /// CancelRun's kill or discovered later by ReconcileOrphanedRuns) invalidates its whole in-flight
@@ -180,8 +198,11 @@ public sealed class ProcessSupervisor(
         {
             taskRunStore.CompleteRun(run.RunId, RunStatus.Failed, 0, 0, "Worker process was stopped.");
             runLockStore.Release(run.TaskName, run.RunKind, run.MappingName);
-            workQueueStore.ReleaseClaimsForRun(run.RunId);
         }
+
+        // The worker is definitively gone — every item it held goes back, including any it claimed
+        // ahead and never started.
+        workQueueStore.ReleaseClaimsForTask(taskName);
     }
 
     private static bool IsProcessAlive(int pid)

@@ -207,8 +207,8 @@ public sealed class WorkQueueStore(StateDatabase database)
     public void MarkFailed(long id) => SetStatus(id, WorkItemStatus.Failed);
 
     /// <summary>
-    /// Returns every in-flight item of a run to the queue. For when the worker that held them died
-    /// without saying anything — a kill, a crash, an API restart that found no live process.
+    /// Returns every in-flight item of a replication to the queue. For when the worker holding them
+    /// died without saying anything — a kill, a crash, an API restart that found no live process.
     /// <para>
     /// Pending rather than Failed, for the same reason <see cref="ReleaseClaim"/> is: nobody observed
     /// an execution failure, only that the process holding the work is gone. And it has to happen at
@@ -216,7 +216,26 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// makes its mapping permanently un-enqueueable, so the replication silently stops rather than
     /// failing.
     /// </para>
+    /// <para>
+    /// Per replication rather than per run, because a worker claims ahead of its consumers and can die
+    /// holding items it never started, which have no started run to be found by. Only correct once the
+    /// caller knows the worker is gone — a live one legitimately holds unstarted claims.
+    /// </para>
     /// </summary>
+    public int ReleaseClaimsForTask(string taskName) =>
+        SqliteRetry.Execute(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                UPDATE WorkQueue
+                SET Status = 'Pending', ClaimedAtUtc = NULL, ClaimedByWorkerId = NULL
+                WHERE TaskName = $task AND Status IN ('Claimed','Running');
+                """;
+            cmd.Parameters.AddWithValue("$task", taskName);
+            return cmd.ExecuteNonQuery();
+        });
+
     public int ReleaseClaimsForRun(Guid runId) =>
         SqliteRetry.Execute(() =>
         {

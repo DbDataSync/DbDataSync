@@ -246,7 +246,7 @@ public sealed class WorkQueueStoreTests : IDisposable
     /// process gone.
     /// </summary>
     [Fact]
-    public void ReleaseClaimsForRun_ReturnsAnInFlightItemToTheQueueSoTheMappingCanRunAgain()
+    public void ReleaseClaimsForTask_ReturnsAnInFlightItemToTheQueueSoTheMappingCanRunAgain()
     {
         var runId = _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
         var claimed = _queue.TryClaimNext("crm-sync", "worker-that-died")!;
@@ -256,7 +256,7 @@ public sealed class WorkQueueStoreTests : IDisposable
         Assert.Equal(runId, _queue.Enqueue("crm-sync", RunKind.Primary, "orders"));
         Assert.Null(_queue.TryClaimNext("crm-sync", "worker-2"));
 
-        Assert.Equal(1, _queue.ReleaseClaimsForRun(runId));
+        Assert.Equal(1, _queue.ReleaseClaimsForTask("crm-sync"));
 
         var reclaimed = _queue.TryClaimNext("crm-sync", "worker-2");
         Assert.NotNull(reclaimed);
@@ -264,13 +264,26 @@ public sealed class WorkQueueStoreTests : IDisposable
     }
 
     [Fact]
-    public void ReleaseClaimsForRun_LeavesAFinishedItemAlone()
+    public void ReleaseClaimsForTask_LeavesAFinishedItemAlone()
     {
-        var runId = _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+        _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
         var claimed = _queue.TryClaimNext("crm-sync", "worker-1")!;
         _queue.MarkDone(claimed.Id);
 
-        Assert.Equal(0, _queue.ReleaseClaimsForRun(runId));
+        Assert.Equal(0, _queue.ReleaseClaimsForTask("crm-sync"));
         Assert.False(_queue.HasOutstandingWork("crm-sync"));
+    }
+
+    /// <summary>A worker claims ahead of its consumers, so it can die holding an item it never
+    /// started — which has no started run to be found by, and so has to be released by replication.</summary>
+    [Fact]
+    public void ReleaseClaimsForTask_AlsoReturnsAnItemThatWasClaimedButNeverStarted()
+    {
+        _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+        var claimed = _queue.TryClaimNext("crm-sync", "worker-that-died")!;
+        Assert.Equal(WorkItemStatus.Claimed, claimed.Status);
+
+        Assert.Equal(1, _queue.ReleaseClaimsForTask("crm-sync"));
+        Assert.Equal(claimed.Id, _queue.TryClaimNext("crm-sync", "worker-2")!.Id);
     }
 }
