@@ -39,37 +39,70 @@ access pattern.
 
 ---
 
-# Outcome — resolved 2026-08-28
+# Outcome — resolved 2026-08-28, and re-framed the same day
 
-The "next step" above was carried out, and it changed what the work is. Now
-`implementation/todo/phase-039-state-store-concurrency.md`.
+**The first outcome written here had the requirement wrong**, and is replaced. It read the motivation as
+"analytics reads contend with TaskRunner writes" and proposed measuring that contention, with WAL as the
+likely fix. The requirement is architectural and is not conditional on a measurement:
 
-**WAL is not enabled, and it is off on purpose.** `StateDatabase.OpenRawConnection` documents why: WAL
-needs a `-shm` file to coordinate processes, and that coordination "was observed to be unreliable" in
-this project's sandboxed dev environment, between the API and its spawned TaskRunner children. So the
-cheap first fix was already considered and rejected — for an environment-specific reason, dated, and
-worth re-testing rather than inheriting. Tested now: **WAL is accepted on this filesystem.**
+> There is no scenario where I want multiple processes trying to write to the same state tracking file.
+> They need to all go through a single process, with other processes applying state changes over a
+> network protocol.
 
-**But the motivation is narrower than it looks, and this is the important finding.** The concern was a
-metrics query stalling or being stalled by a TaskRunner mid-write. Measured directly with a writer
-holding an open transaction, in both modes:
+Contention is a symptom of multiple writers. Removing the writers is the fix, and measuring the symptom
+first would only have decided how urgent it was.
 
-```
-journal_mode=delete  -> analytics read during an open write: OK
-journal_mode=wal     -> analytics read during an open write: OK
-```
+The work is `implementation/todo/phase-039-state-store-single-writer.md`.
 
-Rollback-journal mode takes its EXCLUSIVE lock **at commit**, not for the life of the transaction — a
-writer mid-transaction holds RESERVED, which still permits readers. Readers are blocked only for each
-commit flush, and `busy_timeout` plus `SqliteRetry` already absorb that as latency rather than errors.
+## What was measured about DuckDB and Quack
 
-So there may be no problem to fix. The phase therefore **measures first** and stops there if the numbers
-say so — which is a result worth having, because it retires a question that would otherwise keep coming
-back.
+Investigated properly against `DuckDB.NET.Data.Full` 1.5.5, with a server process and three concurrent
+client processes.
 
-**DuckDB is not ruled out but nothing points at it**, for the reason this doc already identified: it is
-a columnar analytical engine and this is a write-mostly store of small rows, appended at rate. That is
-the shape SQLite is best at. A storage-engine swap is the largest available answer to a problem not yet
-shown to exist, and the third possibility this doc raised — that it is really phase 36's problem —
-resolves itself, since phase 36 lands first and its index is the cheaper change.
+**The architecture works today.** `CALL quack_serve('quack:localhost', token = …)` on the owner;
+`CREATE SECRET (TYPE quack, …)` + `ATTACH 'quack:localhost'` on each client. Three client processes
+attached with no file lock and performed **600 concurrent appends with zero conflicts** — matching
+DuckDB's documented model, where *"appends will never conflict, even on the same table"*.
+
+**Two of the premises hold.** DuckDB does *enforce* single-writer-process — a second process opening the
+file read-write is refused (`Could not set lock on file`), so the mistake the current design makes is
+not expressible. And the storage format really is separable: `INSTALL sqlite; ATTACH 'x.sqlite' (TYPE
+sqlite)` writes a genuine SQLite file with DuckDB's SQL over it, window functions included.
+
+**But three statements do not work over Quack**, and they are the ones this store lives on:
+
+| statement | over an attached Quack database |
+| --- | --- |
+| `INSERT`, `CREATE TABLE`, `BEGIN…COMMIT` | OK |
+| `UPDATE` | `Binder Error: Can only update base table` |
+| `DELETE` | `Binder Error: Can only delete from base table` |
+| `INSERT … ON CONFLICT DO UPDATE` | `Not implemented Error: GetStorageInfo not implemented yet` |
+
+Unimplemented rather than conflicting; qualifying the table or `USE remote` makes no difference. Four of
+the five stores — work queue, task runs, run locks, watermarks — need `UPDATE`, `DELETE` or upsert. Only
+`LogWriter` could move.
+
+**Throughput**: ~400 single-row inserts/sec per client (~1,100/sec across three) against **2,000 rows in
+one statement in 3 ms**. Three orders of magnitude, so the cost is the HTTP round trip rather than the
+engine — any design here wants batched writes.
+
+## Verdict
+
+**Not adoptable yet, for a specific and re-testable reason rather than a maturity worry.** Quack is beta,
+shipped in DuckDB 1.5.3 (May 2026), with **stable planned for September 2026** and the FAQ warning of
+breaking changes to the protocol, function names and defaults until then.
+
+So phase 39 builds the architecture the requirement asks for — the API as the single owner, TaskRunner
+applying changes over HTTP — behind an interface, which makes the engine a detail rather than a
+prerequisite. With one process owning the store, SQLite's multi-process problems disappear along with
+`busy_timeout`, `SqliteRetry` and the WAL question; and swapping in DuckDB later becomes a change behind
+one interface in one process.
+
+**Re-evaluate when Quack is stable** by re-running the statement table above. If `UPDATE`, `DELETE` and
+upsert work, the case for DuckDB's SQL over the analytics in phase 36 is worth making properly.
+
+Sources: [Concurrency](https://duckdb.org/docs/current/connect/concurrency),
+[Quack FAQ](https://duckdb.org/quack/faq),
+[Quack announcement](https://duckdb.org/2026/05/12/quack-remote-protocol),
+[Quack extension](https://duckdb.org/docs/current/core_extensions/quack).
 
