@@ -39,28 +39,7 @@ public sealed class ProcessSupervisor(
         if (_workers.TryGetValue(taskName, out var existing) && !existing.HasExited)
             return TriggerResult.Started([]);
 
-        var startInfo = new ProcessStartInfo { FileName = "dotnet", UseShellExecute = false };
-        startInfo.ArgumentList.Add("exec");
-        startInfo.ArgumentList.Add(options.TaskRunnerDllPath);
-        startInfo.ArgumentList.Add("--repo-root");
-        startInfo.ArgumentList.Add(options.RepoRoot);
-        startInfo.ArgumentList.Add("--state-db");
-        startInfo.ArgumentList.Add(options.StateDbPath);
-        startInfo.ArgumentList.Add("--replication");
-        startInfo.ArgumentList.Add(taskName);
-
-        // The endpoint and the token go in the *environment*, not in ArgumentList. On Linux a
-        // process's command line is world-readable (/proc/<pid>/cmdline) and its environment is not
-        // (/proc/<pid>/environ, mode 0400) — so a token in an argument would be visible to every local
-        // user through `ps`, which is precisely the threat it exists to answer. The same asymmetry
-        // holds on Windows, where Win32_Process exposes command lines and not environment blocks.
-        //
-        // UseShellExecute is already false above, which is what makes Environment usable at all.
-        // Asked of the running server rather than recomputed from configuration: a configured port
-        // of 0 is only a real one once it is bound, and the two can never disagree if only one of
-        // them exists.
-        startInfo.Environment[StateProtocol.EndpointEnvironmentVariable] = stateHost.BaseAddress;
-        startInfo.Environment[StateProtocol.TokenEnvironmentVariable] = runnerToken.Value;
+        var startInfo = BuildStartInfo(options, taskName, stateHost.BaseAddress, runnerToken.Value);
 
         // Anything this runner spilled while a previous incarnation could not reach us is applied
         // before it starts working again — so a re-run never races the record of the run before it.
@@ -79,6 +58,36 @@ public sealed class ProcessSupervisor(
 
         _workers[taskName] = process;
         return TriggerResult.Started([]);
+    }
+
+    /// <summary>
+    /// How a runner is launched, as a value rather than a side effect — so the one property that
+    /// cannot be checked by reading the code later (that no secret is on the command line) can be
+    /// asserted directly.
+    /// </summary>
+    public static ProcessStartInfo BuildStartInfo(ApiOptions options, string taskName, string stateEndpoint, string token)
+    {
+        var startInfo = new ProcessStartInfo { FileName = "dotnet", UseShellExecute = false };
+        startInfo.ArgumentList.Add("exec");
+        startInfo.ArgumentList.Add(options.TaskRunnerDllPath);
+        startInfo.ArgumentList.Add("--repo-root");
+        startInfo.ArgumentList.Add(options.RepoRoot);
+        startInfo.ArgumentList.Add("--state-db");
+        startInfo.ArgumentList.Add(options.StateDbPath);
+        startInfo.ArgumentList.Add("--replication");
+        startInfo.ArgumentList.Add(taskName);
+
+        // The endpoint and the token go in the *environment*, not in ArgumentList. On Linux a
+        // process's command line is world-readable (/proc/<pid>/cmdline) and its environment is not
+        // (/proc/<pid>/environ, mode 0400) — so a token in an argument would be visible to every local
+        // user through `ps`, which is precisely the threat it exists to answer. The same asymmetry
+        // holds on Windows, where Win32_Process exposes command lines and not environment blocks.
+        //
+        // UseShellExecute is already false above, which is what makes Environment usable at all.
+        startInfo.Environment[StateProtocol.EndpointEnvironmentVariable] = stateEndpoint;
+        startInfo.Environment[StateProtocol.TokenEnvironmentVariable] = token;
+
+        return startInfo;
     }
 
     /// <summary>The "Run Now" convenience: enqueues a Primary pass for every table mapping of a

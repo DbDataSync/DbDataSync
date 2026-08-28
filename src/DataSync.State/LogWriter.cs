@@ -16,7 +16,7 @@ public sealed class LogWriter : IDisposable
     private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(2);
 
     private readonly StateDatabase _database;
-    private readonly ConcurrentQueue<(Guid RunId, DateTimeOffset TimestampUtc, LogSeverity Level, string Message)> _buffer = new();
+    private readonly ConcurrentQueue<(Guid RunId, DateTimeOffset TimestampUtc, LogSeverity Level, string Message, string? SourceKey)> _buffer = new();
     private readonly PeriodicTimer _timer;
     private readonly Task _flushLoop;
     private readonly CancellationTokenSource _cts = new();
@@ -29,16 +29,29 @@ public sealed class LogWriter : IDisposable
         _flushLoop = RunFlushLoopAsync();
     }
 
-    public void Log(Guid runId, LogSeverity level, string message)
+    public void Log(Guid runId, LogSeverity level, string message) =>
+        Log(runId, level, message, DateTimeOffset.UtcNow, sourceKey: null);
+
+    /// <summary>
+    /// Records a line that happened somewhere else and arrived later — a runner's state journal,
+    /// replayed after the owner came back.
+    /// <para>
+    /// It carries its original timestamp, because a recovered run whose every line is stamped with
+    /// the moment of recovery is a run whose log says nothing about when anything happened. And it
+    /// carries a <paramref name="sourceKey"/>, which makes re-applying the same journal entry a no-op
+    /// rather than a second copy of the line.
+    /// </para>
+    /// </summary>
+    public void Log(Guid runId, LogSeverity level, string message, DateTimeOffset timestampUtc, string? sourceKey)
     {
-        _buffer.Enqueue((runId, DateTimeOffset.UtcNow, level, message));
+        _buffer.Enqueue((runId, timestampUtc, level, message, sourceKey));
         if (Interlocked.Increment(ref _pendingCount) >= FlushThreshold)
             Flush();
     }
 
     public void Flush()
     {
-        var batch = new List<(Guid RunId, DateTimeOffset TimestampUtc, LogSeverity Level, string Message)>();
+        var batch = new List<(Guid RunId, DateTimeOffset TimestampUtc, LogSeverity Level, string Message, string? SourceKey)>();
         while (_buffer.TryDequeue(out var entry))
         {
             batch.Add(entry);
@@ -54,11 +67,18 @@ public sealed class LogWriter : IDisposable
             using var transaction = connection.BeginTransaction();
             using var cmd = connection.CreateCommand();
             cmd.Transaction = transaction;
-            cmd.CommandText = "INSERT INTO Logs (RunId, TimestampUtc, Level, Message) VALUES ($runId, $ts, $level, $message);";
+            // ON CONFLICT DO NOTHING against UX_Logs_SourceKey: a replayed journal entry is dropped,
+            // a live line (SourceKey NULL) never conflicts.
+            cmd.CommandText = """
+                INSERT INTO Logs (RunId, TimestampUtc, Level, Message, SourceKey)
+                VALUES ($runId, $ts, $level, $message, $sourceKey)
+                ON CONFLICT DO NOTHING;
+                """;
             var runIdParam = cmd.Parameters.Add("$runId", SqliteType.Text);
             var tsParam = cmd.Parameters.Add("$ts", SqliteType.Text);
             var levelParam = cmd.Parameters.Add("$level", SqliteType.Text);
             var messageParam = cmd.Parameters.Add("$message", SqliteType.Text);
+            var sourceKeyParam = cmd.Parameters.Add("$sourceKey", SqliteType.Text);
 
             foreach (var entry in batch)
             {
@@ -66,6 +86,7 @@ public sealed class LogWriter : IDisposable
                 tsParam.Value = entry.TimestampUtc.ToString("O");
                 levelParam.Value = entry.Level.ToString();
                 messageParam.Value = entry.Message;
+                sourceKeyParam.Value = (object?)entry.SourceKey ?? DBNull.Value;
                 cmd.ExecuteNonQuery();
             }
 

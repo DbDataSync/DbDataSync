@@ -13,7 +13,8 @@ namespace DataSync.Api.State;
 /// </para>
 /// </summary>
 public sealed class JournalRecovery(
-    LocalRunnerState state, TaskRunStore taskRuns, ApiOptions options, ILogger<JournalRecovery> logger)
+    LocalRunnerState state, TaskRunStore taskRuns, LogWriter logs, ApiOptions options,
+    ILogger<JournalRecovery> logger)
 {
     /// <summary>
     /// Drains every journal for one replication. Called before the scheduler starts anything for it, so
@@ -74,8 +75,11 @@ public sealed class JournalRecovery(
         switch (entry.Operation)
         {
             case JournalOperation.Log when StateJournal.PayloadOf<LogRequest>(entry) is { } log:
-                state.Log(log.RunId, log.Level, log.Message);
-                state.Flush();
+                // Its original timestamp, not now — a recovered run whose every line is stamped with
+                // the moment of recovery says nothing about when anything happened. And keyed by
+                // journal and sequence, so replaying the file does not duplicate the line.
+                logs.Log(log.RunId, log.Level, log.Message, log.TimestampUtc, $"{runId}:{entry.Sequence}");
+                logs.Flush();
                 break;
 
             case JournalOperation.MarkRunning when StateJournal.PayloadOf<WorkItemRequest>(entry) is { } w:

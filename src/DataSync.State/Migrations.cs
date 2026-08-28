@@ -106,5 +106,19 @@ internal static class Migrations
         ALTER TABLE WorkQueue ADD COLUMN CacheKind TEXT NULL;
         ALTER TABLE WorkQueue ADD COLUMN WriterKind TEXT NULL;
         """,
+
+        """
+        -- Identifies a log line that arrived from a runner's state journal rather than live, as
+        -- '<runId>:<sequence>'. Recovery applies a journal and then deletes it, and a process that
+        -- dies between those two steps replays the whole file — so every operation recovery performs
+        -- has to be idempotent. Every other one already is (setting a status, an outcome or a
+        -- watermark is last-writer-wins); appending a log line is the exception, and this is what
+        -- makes it one too.
+        --
+        -- NULL for every live line, and NULL is distinct from NULL for uniqueness in SQLite, so two
+        -- genuinely identical lines logged in the same tick are still two lines. See phase 39.
+        ALTER TABLE Logs ADD COLUMN SourceKey TEXT NULL;
+        CREATE UNIQUE INDEX UX_Logs_SourceKey ON Logs(SourceKey) WHERE SourceKey IS NOT NULL;
+        """,
     ];
 }

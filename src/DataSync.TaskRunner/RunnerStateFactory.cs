@@ -4,8 +4,18 @@ using DataSync.State.Remote;
 namespace DataSync.TaskRunner;
 
 /// <summary>
-/// Builds the state surface this runner will use — remote when the API spawned it, direct when it was
-/// started standalone.
+/// Builds the state surface this runner will use. There is exactly one: over loopback, to the process
+/// that owns the state file.
+/// <para>
+/// There is deliberately no local fallback. A runner started without an endpoint would open the state
+/// file itself, and a runner started by hand while the API is up would then be a second writer to it —
+/// which is the thing phase 39 exists to make impossible. Refusing to start is the correct behaviour,
+/// and it fails at startup with a message rather than later with corruption.
+/// </para>
+/// <para>
+/// The runner still knows <c>StateDbPath</c> — its journal is written beside the state file, and the
+/// script cache lives next to it — but it never opens it.
+/// </para>
 /// </summary>
 internal static class RunnerStateFactory
 {
@@ -13,14 +23,10 @@ internal static class RunnerStateFactory
     {
         if (string.IsNullOrWhiteSpace(options.StateEndpoint))
         {
-            // Standalone: no owner to talk to, so this process is the owner. Kept for the dev harness
-            // and for running a worker by hand; the API never spawns a runner this way.
-            var database = new StateDatabase(options.StateDbPath);
-            var logs = new LogWriter(database);
-            var local = new LocalRunnerState(
-                new TaskRunStore(database), new WorkQueueStore(database), new RunLockStore(database),
-                new ChangeWatermarkStore(database), logs);
-            return (local, new Scope(logs.Dispose));
+            throw new InvalidOperationException(
+                $"No state endpoint was supplied. Set {StateProtocol.EndpointEnvironmentVariable} or pass " +
+                "--state-endpoint. A TaskRunner never opens the state file directly: the API owns it, and " +
+                "a second writer is what this refusal prevents.");
         }
 
         // The token arrives by environment, never as an argument: /proc/<pid>/cmdline is world-readable
