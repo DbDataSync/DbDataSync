@@ -19,6 +19,29 @@ committed — see "Workflow" below. Nothing is ever deleted; a phase whose plan 
 implementation gets its `todo/` file edited in place (with a note on what changed and why), not
 silently replaced.
 
+## Build order
+
+`todo/` is a set, not a queue — the filename's number records when a phase was *designed*, not when it
+will be built, and renumbering files to express priority would break every reference in git history and
+in the planning docs that point at them.
+
+So the order lives here, and is the one to work through:
+
+| | phase | why here |
+| --- | --- | --- |
+| 1 | **039** — one process owns the state store | High priority. Every TaskRunner writing the same SQLite file is a design decision three mitigations exist to paper over |
+| 2 | **040** — an editable target table | Phase 25's provisioning is built, tested, and unreachable from the screen where it is needed |
+| 3 | **037** — making the scripting features legible | Seven phases of scripting with no way to see what a pass will run |
+| 4 | **041** — testing a script before a run does | Follows 037: the preview says what will run, the test says whether it works |
+| 5 | **036** — run metrics | The data is already stored; this is an endpoint and a card |
+| 6 | **032** — SQL Server CDC | Change tracking starts here, per `planning/done/change-tracking-strategies.md` |
+| 7 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
+| 8 | **034** — PostgreSQL logical replication | |
+| 9 | **035** — config history diff and revert | |
+| 10 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Set 2026-08-28. A phase moving up or down is an ordinary decision and only this table changes.
+
 ## What counts as a phase
 
 A phase is a coherent, independently describable unit of delivered (or to-be-delivered) work — a
