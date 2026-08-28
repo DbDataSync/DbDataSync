@@ -687,6 +687,11 @@ public sealed class DropGadgets : IRowTransform
     // script that generates more of them, an in-process transform, four hook points and whatever the
     // reader, staging provider and writer build themselves — and none of it was visible without
     // running a pass and reading the log.
+    // Reachable from the pipeline card too, which is where the question "what will this actually
+    // run" occurs to someone reading which reader and writer are configured.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await expect(page.getByTestId('preview-from-pipeline-link')).toBeVisible({ timeout: 15_000 })
+
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
     await page.getByTestId('preview-mapping-link').click()
     await expect(page).toHaveURL(new RegExp(`/mappings/${MAPPING_NAME}/preview$`))

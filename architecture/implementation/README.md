@@ -29,16 +29,15 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **037** — making the scripting features legible | Seven phases of scripting with no way to see what a pass will run |
-| 2 | **041** — testing a script before a run does | Follows 037: the preview says what will run, the test says whether it works |
-| 3 | **036** — run metrics | The data is already stored; this is an endpoint and a card |
-| 4 | **032** — SQL Server CDC | Change tracking starts here, per `planning/done/change-tracking-strategies.md` |
-| 5 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
-| 6 | **034** — PostgreSQL logical replication | |
-| 7 | **035** — config history diff and revert | |
-| 8 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **041** — testing a script before a run does | Follows 037: the preview says what will run, the test says whether it works |
+| 2 | **036** — run metrics | The data is already stored; this is an endpoint and a card |
+| 3 | **032** — SQL Server CDC | Change tracking starts here, per `planning/done/change-tracking-strategies.md` |
+| 4 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
+| 5 | **034** — PostgreSQL logical replication | |
+| 6 | **035** — config history diff and revert | |
+| 7 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-28; 039 and 040 done and removed. A phase moving up or down is an ordinary decision and only this
+Set 2026-08-28; 039, 040 and 037 done and removed. A phase moving up or down is an ordinary decision and only this
 table changes.
 
 ## What counts as a phase

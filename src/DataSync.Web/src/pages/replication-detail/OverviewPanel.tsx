@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
+import { Link } from 'react-router-dom'
 import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
 import { EndpointsCard } from './EndpointsCard'
@@ -25,6 +26,7 @@ const STAGES: { id: Stage; label: string }[] = [
 export function OverviewPanel({ replicationName }: { replicationName: string }) {
   const { data: task, error } = useReplication(replicationName)
   const { data: mappings } = useTableMappings(replicationName)
+  const mappingsBase = `/replications/${encodeURIComponent(replicationName)}/mappings`
   const capabilities = useReplicationCapabilities(replicationName)
   const upsert = useUpsertReplication()
   // These slots are source-side, so what a replication inherits is whatever its *source* connection
@@ -137,6 +139,20 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
                   {upsert.isPending ? 'Saving…' : 'Save settings'}
                 </button>
                 <span className="hint">Saving commits to config history.</span>
+                {/* The pipeline card says which reader, cache and writer will run; this is where to
+                    find out what they will actually issue. Straight to the preview when there is only
+                    one mapping to preview, and to the list when the answer depends on which. */}
+                {mappings && mappings.length > 0 && (
+                  <Link
+                    className="btn-link spacer"
+                    to={mappings.length === 1
+                      ? `${mappingsBase}/${encodeURIComponent(mappings[0])}/preview`
+                      : mappingsBase}
+                    data-testid="preview-from-pipeline-link"
+                  >
+                    See the SQL this runs →
+                  </Link>
+                )}
               </div>
             </div>
           </div>

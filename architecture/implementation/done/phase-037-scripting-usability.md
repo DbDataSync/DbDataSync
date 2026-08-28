@@ -124,3 +124,111 @@ generator.
   operator would want to find that out.
 - **Segments.** A backfill's statements depend on the segment. Preview the unsegmented form, with a
   note, or let the operator supply one? The second is more useful and more UI.
+
+---
+
+# Retrospective
+
+All three parts built. The first was as cheap as the plan said; the second was as substantial, and
+the thing that made it work was a decision about *where the answer lives* rather than any of the code.
+
+## Ask the component, do not reconstruct it
+
+Every statement builder in this codebase is already a pure function, separated from execution — that
+separation was made deliberately and repeatedly, for testability. So the preview could have been
+assembled from outside by calling them, and that is exactly what the plan describes as "nearly free".
+
+It would also have been a **second place** deciding which builder to call with which arguments. The
+day those two disagree, the preview does not break: it keeps rendering something plausible and
+authoritative that is no longer what runs. That is worse than having no preview at all.
+
+`IStatementPreview` puts the answer inside the component, built from the same inputs the run gives it
+— `PreviewRequest` mirrors the run-time argument list on purpose. A component that does not implement
+it is reported as not describing itself, rather than omitted: silence would read as "this stage runs
+nothing", which is the one thing it definitely does not mean.
+
+## Previewing found three copies of the same SQL
+
+Writing the describers meant every statement had to come from a builder, and three did not:
+
+- The change-tracking full load was inline in the reader. It is `BuildFullLoad` now.
+- Both halves of each delete/insert writer were inline. They are builders now.
+- The MsSql reload reader had its own copy of the generic `BatchReloadStatement` — the same SELECT,
+  written twice. It uses the shared one; the two readers differ in how they discover columns and bind
+  segment values, not in what they select.
+
+Each was a place the preview and the run could have diverged. Being unable to write the preview
+without fixing them is the point.
+
+## The preview is dated, and has to be
+
+An incremental reader's statement depends on the stored watermark. A preview that always showed the
+first-pass form would be right exactly once and wrong for every pass after — so it reads the
+watermark and describes what the *next* pass would issue. `WatermarkKey` moved out of the TaskRunner
+into Core to make that possible: two spellings of that key would be two answers to "where did this
+replication get to".
+
+## The test that keeps it honest does not read the SQL
+
+Comparing the preview's text to an expected string would test that the preview matches itself.
+`PreviewIntegrationTests` **executes** the statement the preview showed against the real database and
+asserts the pass loads exactly the rows that statement returns. If the two ever diverge — whatever the
+text says — that fails.
+
+## And it immediately showed something invisible
+
+The Playwright test was written asserting the preview would show `UPPER({{column}})`, the transform
+test 05 writes by hand on `Name`. It does not. Test 15 binds a `sqlColumnExpression` script to the
+same mapping, the script wins, and what actually runs is `REVERSE(base.[Name])`.
+
+That is correct behaviour — a script binding replaces the literal, atomically, by design. It was also
+completely invisible: the only way to discover it was to run a pass and look at the data. The preview
+names the generated expression, the script that produced it and the level it is bound at, in one line.
+The test asserts that now, which is a better test than the one intended.
+
+## Collapsing by attribute does not collapse
+
+`hidden={!open}` on `.card-body` renders a fully visible card: `.card-body` sets `display: flex`, and
+a class rule beats the user agent's `[hidden]`. Not rendering the body is both simpler and impossible
+to override. Playwright caught it on the first run, which is the argument for asserting that a
+collapsed thing is *not visible* rather than that a toggle exists.
+
+## Hooks bind differently, and a naive scan would have lied
+
+The Used-by column scans slot bindings and hook lists separately, because a hook binds by name from a
+point's list rather than through the slot hierarchy. Scanning `Scripts` alone would have reported a
+reusable SQL hook in daily use as **unused** — precisely the wrong answer for the one thing that
+column exists to say, and one an operator might act on by deleting it.
+
+## Verification
+
+- `PreviewIntegrationTests` (3, `Category=Integration`) — the previewed read executed and matched
+  against what the pass loads; every stage present in run order with each statement's origin; and the
+  read switching from the full-load form to the incremental one once a watermark exists.
+- `ScriptUsageScannerTests` (4) — bindings found at all three levels, a hook bound by name counted, an
+  empty store, and a binding that names no script (explicit "none", inline SQL) not counted as a use.
+- `ScriptsControllerTests` — the list's new shape, an unbound script reporting so, and slots carrying
+  readable labels.
+- Playwright 04b — the Overview's first card is Endpoints, and the scripts card is one line until
+  something is bound.
+- Playwright 15b — a bound script names its binding site; an unbound one reads "unused".
+- Playwright 19 — the whole preview: stages in order, the generated expression attributed to its
+  script and level, the in-process transform named as having no SQL, the reader's own `CHANGETABLE`
+  statement, and the editor read-only.
+- Full .NET suite green: 540 tests. Playwright: 21 green. `tsc -b` clean, `oxlint` unchanged at four.
+
+## Open questions, both answered as the plan guessed
+
+- ~~**Preview for a mapping that cannot run.**~~ Shows what can be built and says plainly what could
+  not: a missing mapped column, a table without the primary key Change Tracking needs, a script that
+  will not run, a hook naming a script that is not there. A preview is exactly where an operator would
+  want to find that out, so those are surfaced rather than turned into a failed request.
+- ~~**Segments.**~~ Previewed in the unsegmented form, with a note saying a backfill supplies its own
+  and narrows it further. Letting the operator supply one is more useful and more UI; it belongs with
+  the backfill form rather than here.
+- **The mapping editor and the preview are separate screens**, and deliberately: the preview is about
+  the mapping *as saved*, which is not what an editor with unsaved changes is showing. It is reached
+  from the editor and from the pipeline card. Whether it should live as a tab within the editor is a
+  question for whoever finds the round trip annoying.
+- **A component that implements no describer** is reported honestly, and there are none today. That
+  line exists for a driver added later, and is the thing to check when one is.
