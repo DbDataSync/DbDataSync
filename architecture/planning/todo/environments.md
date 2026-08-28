@@ -1,5 +1,14 @@
 # Environments
 
+**Status: blocked on a product decision, not on engineering.** The doc's own first open question —
+*which reading is intended* — decides whether this is a UI convenience or a change to the shape of the
+config store, and the two differ by an order of magnitude. Its own warning is why nothing was picked
+for it: "the first is not a step towards the second — shipping a tag and later discovering the store
+needs restructuring would mean throwing the tag away."
+
+So no implementation phase was written. Answering the question below is the next step, and it is one
+for whoever owns the product direction rather than something to infer from the mockups.
+
 The phase 15 mockups show an environment pill (`prod`) in the breadcrumb of every screen, an
 **All environments** filter in the Explorer sidebar, an `Environment` field on a connection, and a
 **Diff vs production** action. No such concept exists, so all of it was omitted.

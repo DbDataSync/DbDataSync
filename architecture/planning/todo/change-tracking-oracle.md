@@ -1,6 +1,12 @@
 # Change tracking — Oracle
 
-**Status: proposal, not agreed.** Read `change-tracking-strategies.md` first. No Oracle driver exists
+**Status: proposal, not agreed — and blocked.** There is no Oracle driver. This cannot become an
+implementation phase until one exists; the driver is tracked in
+`planning/done/additional-database-drivers.md`'s table, where it is still marked *not yet written*.
+Phase 31 removed the connection-model blocker (EZConnect and TNS names now fit), so the driver phase itself is the only thing in the way.
+
+Left in `todo/` deliberately rather than turned into a phase that could not be built. The
+reasoning below stands and should be picked up when the driver lands. Read `change-tracking-strategies.md` first. No Oracle driver exists
 yet — `additional-database-drivers.md` puts it around phase 23–24 — so this is design ahead of the
 driver, deliberately, because *which* mechanism Oracle gets changes what the driver has to expose.
 

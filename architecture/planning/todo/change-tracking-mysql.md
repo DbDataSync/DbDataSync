@@ -1,6 +1,12 @@
 # Change tracking — MySQL / MariaDB
 
-**Status: proposal, not agreed.** Read `change-tracking-strategies.md` first. No MySQL driver exists
+**Status: proposal, not agreed — and blocked.** There is no MySQL / MariaDB driver. This cannot become an
+implementation phase until one exists; the driver is tracked in
+`planning/done/additional-database-drivers.md`'s table, where it is still marked *not yet written*.
+No MySQL driver phase has been written either; this doc argues triggers should come before the binlog, which would make phase 33 most of the answer once a driver exists.
+
+Left in `todo/` deliberately rather than turned into a phase that could not be built. The
+reasoning below stands and should be picked up when the driver lands. Read `change-tracking-strategies.md` first. No MySQL driver exists
 yet (`additional-database-drivers.md` puts it around phase 23).
 
 MySQL is the one engine in scope where the good mechanism is **not** a query, and that changes the

@@ -1,6 +1,6 @@
 # Script-generated source change-tracking queries
 
-**Status: proposal, not agreed.** The intersection of `csharp-scripting-host.md` and
+**Status: resolved 2026-08-27 — see Outcome at the end.** The intersection of `csharp-scripting-host.md` and
 `change-tracking-strategies.md`. Asked for as "for any of the drivers, but especially ODBC and JDBC,
 I'd also like to be able to use C# scripting to generate source change tracking queries".
 
@@ -164,3 +164,37 @@ offer beyond watermark mode on day one.
   anything else break? Probably not, but it has not been thought through.
 - **Stored procedures rather than statements.** `SourceQuery` carries `CommandText`; it would need a
   `CommandType` to call a procedure. Cheap to add, easy to forget.
+
+---
+
+# Outcome — resolved 2026-08-27: substantially built as phase 30
+
+This doc proposed a `ScriptedChangeQuery` reader Kind whose statement comes from a script.
+**`implementation/done/phase-030-scripted-source-queries.md` built it**, as `ScriptedQuery`, before this
+doc was revisited — the two were designed from the same reasoning and arrived at the same shape.
+
+What matched:
+
+- a **generic, unprefixed reader Kind** rather than a hook inside the existing readers
+- a script returning **text plus a typed parameter list**, never a spliced string, so parameter binding
+  stays in the host even when the SQL came from an operator
+- a `ChangeQueryShape`-equivalent describing how to read the result back — operation column, value map,
+  excluded bookkeeping columns — which is what makes one reader consume a shadow table, SQL Server CDC,
+  LogMiner output and a hand-rolled audit table alike
+
+What changed on contact:
+
+- **`WatermarkShape.WatermarkColumn` was dropped.** This doc proposed a per-row position column, "the
+  highest value seen wins". `ReadResult`'s own contract rules it out: the new watermark is "computed by
+  the reader up front … not derived from what was actually read". A per-row maximum cannot bound the
+  window, so rows arriving mid-read would extend it. `BuildWatermarkQuery` running first is the whole
+  mechanism.
+- **The host does not pre-render the segment.** A builder that owns the statement owns the scoping.
+
+What is still open, and now tracked elsewhere:
+
+- **the acknowledgement hook** this doc named as a fourth caller — built in phase 33 as
+  `IPositionAcknowledging`. A scripted builder gaining a `BuildAcknowledgeQuery` is a small follow-on
+  once that exists.
+- **positional parameters** for ODBC and JDBC — recorded in `change-tracking-odbc-jdbc.md`'s outcome.
+- **`CommandType`** for calling a stored procedure — recorded in phase 30's own open questions.

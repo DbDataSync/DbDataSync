@@ -1,6 +1,6 @@
 # Change tracking — ODBC and JDBC
 
-**Status: proposal, not agreed.** Read `change-tracking-strategies.md` and
+**Status: resolved 2026-08-27 — see Outcome at the end.** Read `change-tracking-strategies.md` and
 `script-generated-change-queries.md` first — the second one is most of the answer here, and this
 document is mainly about what is *left over* once scripting has covered the general case.
 
@@ -139,3 +139,33 @@ alternative shape. Nothing in this document can proceed far without that being s
 - **Does `ClrKernel.Database.Provider.Jdbc` surface `DatabaseMetaData`** through its ADO.NET wrapper, or
   only the `DbConnection` surface? If only the latter, the JDBC metadata advantage above evaporates and
   it needs the scripted provider like ODBC does. Worth checking early — it changes the plan.
+
+---
+
+# Outcome — resolved 2026-08-27, in two parts
+
+**The generic trigger-audit reader became `implementation/todo/phase-033-trigger-audit-change-tracking.md`.**
+This doc's own assessment — "the cheapest large win in the whole change-tracking set" — is why it was
+promoted ahead of the Postgres phase: the read side is engine-neutral, so one reader delivers delete
+detection to SQL Server, Postgres, MySQL, Oracle and anything behind ODBC or JDBC at once, with only
+the `CREATE TRIGGER` DDL per engine.
+
+The split it proposed is the shape the phase takes: generic reader, per-engine DDL through phase 25's
+provisioning flow, and script-supplied DDL for engines we cannot know.
+
+It also settled the product question this doc raised — *should DataSync create triggers on someone's
+source at all?* — by pointing at phase 25, which already answered it for the whole class of DDL:
+previewable, applied deliberately, never silent.
+
+**The ODBC and JDBC drivers themselves are still unwritten**, and are tracked in
+`planning/done/additional-database-drivers.md`'s table rather than here. Phase 31 removed their
+blocker — `ConnectionConfig` now takes a DSN or a URL, and `AuthMode` has `None` for DSN-stored
+credentials and wallets. What remains for them:
+
+- **dialect probing.** `SQLGetInfo`'s `SQL_IDENTIFIER_QUOTE_CHAR`, JDBC's `DatabaseMetaData`. This doc
+  observed that a `SqlDialect` would be *constructed at runtime* for the first time; phase 29's
+  `IDialectProvider` is now the seam, and a driver that names no dialect already declines it cleanly.
+- **positional parameters.** Still true that ordering is an accident rather than a contract, and still
+  worth a test before anything depends on it.
+- **metadata.** Phase 29's scripted metadata provider is the answer for a driver whose catalog does not
+  work, and it exists now.

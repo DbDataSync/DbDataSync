@@ -1,6 +1,6 @@
 # Change tracking — SQL Server CDC, alongside the Change Tracking we already have
 
-**Status: proposal, not agreed.** Read `change-tracking-strategies.md` first.
+**Status: resolved 2026-08-27 — see Outcome at the end.** Read `change-tracking-strategies.md` first.
 
 SQL Server is the only engine here that already has a change-tracking reader
 (`MsSqlChangeTrackingReader`, phase 3, hardened in phase 12). This document is about the *other*
@@ -137,3 +137,26 @@ the comparison already exist, rather than for the first time on Postgres.
 - **Does anyone need `'all update old'`?** Before-images are the thing CDC uniquely offers and nothing
   in DataSync consumes them today. They would be a row-transform input — which is a scripting question,
   and a reason to sequence this after the scripting host rather than before.
+
+---
+
+# Outcome — resolved 2026-08-27
+
+Agreed, as `implementation/todo/phase-032-mssql-cdc.md`, which also carries the shared
+`PositionExpiredException` and its recovery — placed here because this is the only engine where a
+second reader can be measured against an existing one.
+
+Two things this doc argued that the phase keeps verbatim, because both are easy to lose:
+
+- **CDC is not an upgrade to Change Tracking.** CT's net-change semantics are *better* for mirroring;
+  a row updated fifty times is one row from CT and fifty from CDC.
+- **The read-consistency argument is one only this codebase can make.** CDC has no base-table join, so
+  the race phase 12 paid for — 28,000 anomalous rows out of 312,000 — cannot happen. That is a
+  substantive reason to want it beyond the audit use case.
+
+The recommendation to prefer `fn_cdc_get_net_changes_*` where the capture instance supports it survived
+into the phase: CT's collapsing with CDC's join-free consistency is the best mode available on SQL
+Server for this tool's purpose, and it is not the one currently built.
+
+Not carried forward: `'all update old'` before-images, which nothing consumes and which are a
+row-transform input, so they want the scripting phases behind them rather than in front.

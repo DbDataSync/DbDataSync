@@ -1,6 +1,6 @@
 # Change tracking — the strategies, and how they meet `IChangeReader`
 
-**Status: proposal, not agreed.** The umbrella for the per-engine documents
+**Status: resolved 2026-08-27 — see Outcome at the end.** The umbrella for the per-engine documents
 (`change-tracking-postgres.md`, `change-tracking-mysql.md`, `change-tracking-oracle.md`,
 `change-tracking-mssql-cdc.md`, `change-tracking-odbc-jdbc.md`). Read this
 one first: everything below is common to all of them, and repeating it five times would guarantee the
@@ -172,3 +172,26 @@ Not the order of engine popularity — the order of what each one teaches:
 4. **`change-tracking-oracle.md`** — Flashback Version Query first, LogMiner later.
 5. **`change-tracking-mysql.md`** — last, because it is the only one needing a protocol client, and
    triggers may well be the right answer instead.
+
+---
+
+# Outcome — resolved 2026-08-27
+
+Agreed as the reference the per-engine phases are written against, rather than as a phase itself. Its
+three findings held up and are cited by all of them:
+
+- most mechanisms are a `SELECT` at read time, so they fit `IChangeReader` unchanged
+- the watermark is already the right abstraction for an LSN, GTID or SCN, so the state store does not
+  move
+- two opposite failure modes, one of which — an unconsumed replication slot pinning WAL — is this tool
+  taking a production database down
+
+The one piece of genuinely new shared machinery it identified, `PositionExpiredException` and its
+recovery, is built in **phase 32** on the engine where both sides of the comparison already exist. The
+post-write acknowledgement hook it left open is built in **phase 33**.
+
+| what | where |
+| --- | --- |
+| `PositionExpiredException` + Resync recovery | `implementation/todo/phase-032-mssql-cdc.md` |
+| `IPositionAcknowledging` | `implementation/todo/phase-033-trigger-audit-change-tracking.md` |
+| the suggested order (CDC → trigger audit → Postgres → Oracle → MySQL) | followed, with trigger audit promoted ahead of Postgres because it serves every engine at once |

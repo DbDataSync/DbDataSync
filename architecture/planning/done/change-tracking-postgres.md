@@ -1,6 +1,6 @@
 # Change tracking — PostgreSQL
 
-**Status: proposal, not agreed.** Read `change-tracking-strategies.md` first — the bounded-window
+**Status: resolved 2026-08-27 — see Outcome at the end.** Read `change-tracking-strategies.md` first — the bounded-window
 pattern, the position-expired rule and the peek-versus-consume trap are common to every engine and are
 not repeated here.
 
@@ -163,3 +163,30 @@ table. Needs no server configuration and no restart, which is why it is worth bu
   shape change against the mapping's columns and fail loudly rather than silently dropping the column.
 - **Is `wal2json` an acceptable prerequisite**, or does `pgoutput` have to come first? This is a
   product question about who the first Postgres CDC user is, not a technical one.
+
+---
+
+# Outcome — resolved 2026-08-27
+
+Agreed, as `implementation/todo/phase-034-postgres-logical-replication.md`.
+
+The open question this doc left — **advance-after-write versus advance-next-pass** — is answered in
+favour of the first, and by something outside this document: phase 33 builds `IPositionAcknowledging`
+for shadow-table pruning, which needs exactly the same post-write callback. With the interface existing
+for another reason, the argument for the cheaper next-pass workaround disappears, and the correct
+version releases WAL a pass sooner — which matters most precisely here, where retained WAL is the
+dangerous failure mode.
+
+Two decisions carried into the phase unchanged:
+
+- **peek, never get.** `pg_logical_slot_get_changes` consumes, and DataSync persists a watermark only
+  on success — so a consuming read whose write then fails loses those changes forever. The phase makes
+  "read a window, fail the write, read again, get the same changes" a required test rather than a note.
+- **one slot per replication.** A slot decodes the whole database and filters by table; per-mapping
+  multiplies slots for no gain.
+
+The `wal2json`-versus-`pgoutput` question stays open and is stated in the phase as a product question
+about who the first user is. `wal2json` goes first because it keeps the reader a query.
+
+The dev-container change (`wal_level = logical`, an image carrying `wal2json`) is part of the phase
+rather than a precondition someone discovers.
