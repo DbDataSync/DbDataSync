@@ -154,6 +154,15 @@ public sealed class ScriptCompiler(ScriptCacheDirectory cache)
         if (seen.Add(drivers.Location))
             references.Add(MetadataReference.CreateFromFile(drivers.Location));
 
+        // And the config types the contracts hand a script: ColumnMapping on every transform context,
+        // SourceTableRef and TableRef on a lifecycle hook's. Without this a script could implement the
+        // interfaces but not read half of what it was given — phase 27's own motivating example, "for
+        // each mapped column with no target column, emit ALTER TABLE", touches Target and so never
+        // compiled. Found by phase 41, which was the first thing to run one.
+        var config = typeof(DataSync.Core.Config.ColumnMapping).Assembly;
+        if (seen.Add(config.Location))
+            references.Add(MetadataReference.CreateFromFile(config.Location));
+
         return references;
     }
 

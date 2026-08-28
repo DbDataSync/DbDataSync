@@ -219,7 +219,77 @@ public sealed class ScriptTestServiceTests(TestApiFactory factory) : IClassFixtu
     }
 
     [Fact]
-    public async Task ASlotWithNoTesterYet_SaysSoRatherThanReturningAnEmptyResult()
+    public async Task ALifecycleHook_ShowsWhichPointsItWantsAndWhatItWouldEmitAtEach()
+    {
+        var result = await TestAsync("lifecycleHook", "Truncate", """
+            using System.Collections.Generic;
+            using DataSync.Drivers.Abstractions;
+            using DataSync.Scripting.Abstractions;
+
+            public sealed class Truncate : ILifecycleHook
+            {
+                public IReadOnlyList<string> DeclarePoints(LifecycleHookContext c) => ["beforeStage", "afterLoad"];
+
+                public IReadOnlyList<HookStatement> BuildStatements(string point, LifecycleHookContext c) =>
+                    point == "beforeStage"
+                        ? [new HookStatement($"TRUNCATE TABLE {c.TargetDialect.QuoteIdentifier(c.Target.Table)};", [])]
+                        : [];
+            }
+            """);
+
+        Assert.True(result.Error is null, result.Error);
+        var before = Assert.Single(result.Cases, c => c.Input == "beforeStage");
+        Assert.Contains("TRUNCATE TABLE", before.Output!);
+
+        // Declaring a point and emitting nothing for it is the portable spelling of "not this pass",
+        // and reads as that rather than as a blank row.
+        var after = Assert.Single(result.Cases, c => c.Input == "afterLoad");
+        Assert.Null(after.Output);
+        Assert.Contains("emits nothing", after.Note!);
+    }
+
+    [Fact]
+    public async Task ASourceQueryBuilder_ShowsBothStatementsAndHowItSaysToReadTheResult()
+    {
+        var result = await TestAsync("sourceQueryBuilder", "Audit", """
+            using DataSync.Scripting.Abstractions;
+
+            public sealed class Audit : ISourceQueryBuilder
+            {
+                public SourceQuery? BuildWatermarkQuery(SourceQueryContext c) =>
+                    SourceQuery.Text("SELECT MAX(seq) FROM Audit;");
+
+                public SourceQuery BuildReadQuery(SourceQueryContext c) =>
+                    new("SELECT * FROM Audit WHERE seq > @since AND seq <= @until;",
+                        [new ScriptQueryParameter("since", c.PreviousWatermark), new ScriptQueryParameter("until", c.EndWatermark)]);
+
+                public SourceQueryShape DescribeResult(SourceQueryContext c) =>
+                    new(OperationColumn: "op", ExcludeColumns: ["seq", "op"]);
+            }
+            """);
+
+        Assert.Null(result.Error);
+
+        var watermark = Assert.Single(result.Cases, c => c.Input == "Watermark query");
+        Assert.Equal("SELECT MAX(seq) FROM Audit;", watermark.Output);
+
+        // Shown with a previous watermark, because the statement that matters is the incremental one —
+        // a builder shown only its first-pass form is a builder half checked.
+        var read = Assert.Single(result.Cases, c => c.Input == "Read query");
+        Assert.Contains("seq > @since", read.Output!);
+        Assert.Contains("since='1000'", read.Note!);
+
+        var shape = Assert.Single(result.Cases, c => c.Input == "Result shape");
+        Assert.Contains("op", shape.Output!);
+        Assert.Contains("dropped before staging", shape.Note!);
+    }
+
+    /// <summary>
+    /// The one slot with no generated mode, and the refusal says why rather than producing something
+    /// meaningless: its contract hands the script a live connection, so testing it means choosing one.
+    /// </summary>
+    [Fact]
+    public async Task ACatalogProviderWithoutAConnection_SaysThatChoosingOneIsWhatTestingItMeans()
     {
         var name = $"test-{Guid.NewGuid():N}";
         var response = await _client.PostAsJsonAsync($"/api/scripts/{name}/test", new
@@ -227,11 +297,24 @@ public sealed class ScriptTestServiceTests(TestApiFactory factory) : IClassFixtu
             script = new ScriptDefinition
             {
                 Manifest = new ScriptConfig { Name = name, Kind = "metadataProvider", EntryType = "X" },
-                Code = "public sealed class X { }",
+                Code = """
+                    using System.Collections.Generic;
+                    using System.Threading;
+                    using System.Threading.Tasks;
+                    using DataSync.Drivers.Abstractions;
+                    using DataSync.Scripting.Abstractions;
+
+                    public sealed class X : IMetadataProvider
+                    {
+                        public Task<IReadOnlyList<string>> ListDatabasesAsync(MetadataContext c, CancellationToken ct) => c.DriverDatabases(ct);
+                        public Task<IReadOnlyList<TableMetadata>> ListTablesAsync(MetadataContext c, string d, CancellationToken ct) => c.DriverTables(d, ct);
+                        public Task<IReadOnlyList<ColumnMetadata>> ListColumnsAsync(MetadataContext c, string d, string s, string t, CancellationToken ct) => c.DriverColumns(d, s, t, ct);
+                    }
+                    """,
             },
         }, JsonOptions);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("not supported yet", await response.Content.ReadAsStringAsync());
+        Assert.Contains("choosing a connection", await response.Content.ReadAsStringAsync());
     }
 }

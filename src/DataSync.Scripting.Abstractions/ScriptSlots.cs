@@ -34,6 +34,20 @@ public static class ScriptSlots
     /// exists.</summary>
     public const string MetadataProvider = "metadataProvider";
 
+    /// <summary>
+    /// Builds a source read outright — see phase 30. Bound by **name**, from the <c>ScriptedQuery</c>
+    /// reader's own option, never from the hierarchy: which script owns a read is a property of the
+    /// reader an operator chose, not something to inherit from a connection.
+    /// <para>
+    /// Deliberately **not** in <see cref="All"/>, for the same reason <see cref="Hook"/> is not: that
+    /// list drives the SPA's per-slot binding card, and a script with no binding hierarchy has nothing
+    /// to show there. It is in <see cref="IsKnown"/> so a manifest can say what the script actually is
+    /// — before this existed, a query builder had to declare some other slot's kind, which made the
+    /// registry describe it as something it is not.
+    /// </para>
+    /// </summary>
+    public const string SourceQueryBuilder = "sourceQueryBuilder";
+
     /// <summary>C# that generates the SQL a lifecycle hook point runs — see phase 27. One slot for all
     /// four points: <see cref="ILifecycleHook.DeclarePoints"/> is how a binding says which ones it
     /// wants, not four separate bindings.</summary>
@@ -94,10 +108,15 @@ public static class ScriptSlots
         Hook => (
             "Lifecycle hook body",
             "Reusable SQL for a lifecycle hook point, selected by name rather than through the binding hierarchy."),
+        SourceQueryBuilder => (
+            "Source query builder",
+            "Owns a source read outright: the script supplies the statement, the host runs it. Selected by name from the ScriptedQuery reader."),
         _ => (slot, ""),
     };
 
-    /// <summary>Every <c>Kind</c> a script's manifest may declare — the four bindable slots in
-    /// <see cref="All"/> plus <see cref="Hook"/>, which is known but not one of them.</summary>
-    public static bool IsKnown(string slot) => slot == Hook || All.Contains(slot, StringComparer.Ordinal);
+    /// <summary>Every <c>Kind</c> a script's manifest may declare — the bindable slots in
+    /// <see cref="All"/>, plus <see cref="Hook"/> and <see cref="SourceQueryBuilder"/>, which are
+    /// known but bound by name rather than through the hierarchy.</summary>
+    public static bool IsKnown(string slot) =>
+        slot == Hook || slot == SourceQueryBuilder || All.Contains(slot, StringComparer.Ordinal);
 }

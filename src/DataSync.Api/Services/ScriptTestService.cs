@@ -80,8 +80,17 @@ public sealed class ScriptTestService(
                 ScriptSlots.RowTransform => await TestRowTransformAsync(
                     compiled.CreateInstance<IRowTransform>(manifest.Name),
                     mappings, columns, dialect, manifest, log, request, live, cancellationToken),
+                ScriptSlots.LifecycleHook => TestLifecycleHook(
+                    compiled.CreateInstance<ILifecycleHook>(manifest.Name),
+                    mappings, columns, dialect, manifest, log, request),
+                ScriptSlots.SourceQueryBuilder => TestSourceQueryBuilder(
+                    compiled.CreateInstance<ISourceQueryBuilder>(manifest.Name),
+                    mappings, columns, dialect, manifest, request),
+                ScriptSlots.MetadataProvider => await TestMetadataProviderAsync(
+                    compiled.CreateInstance<IMetadataProvider>(manifest.Name),
+                    dialect, manifest, request, live, cancellationToken),
                 _ => throw new ConfigValidationException(
-                    $"Testing a '{manifest.Kind}' script is not supported yet — see phase 41."),
+                    $"'{manifest.Kind}' is not a slot this build knows how to test."),
             };
 
             return new ScriptTestResult(live ? "live" : "generated", source, cases, log);
@@ -208,6 +217,173 @@ public sealed class ScriptTestService(
 
         return cases;
     }
+
+    /// <summary>
+    /// Which points the hook wants, and the statements it would emit at each. Nothing is executed —
+    /// a lifecycle hook returns a description and the host runs it, so the description *is* the thing
+    /// worth checking.
+    /// </summary>
+    private IReadOnlyList<ScriptTestCase> TestLifecycleHook(
+        ILifecycleHook script, IReadOnlyList<ColumnMapping> mappings, IReadOnlyList<ColumnMetadata> columns,
+        IScriptDialect dialect, ScriptConfig manifest, List<string> log, ScriptTestRequest request)
+    {
+        var (source, target) = ResolveTables(request);
+        var context = new LifecycleHookContext(
+            "(declare)",
+            source ?? SampleSource, target ?? SampleTarget, mappings, columns, columns,
+            dialect, dialect,
+            // The facts a pass would have. Nulls where a real pass has them before the work happens,
+            // because a hook that branches on RowsWritten needs to see that case too.
+            new HookRunFacts(
+                Guid.Empty, request.ReplicationName ?? "(replication)", request.MappingName ?? "(mapping)",
+                "Primary", Segment: null, SegmentIndex: 0, SegmentCount: 1, IsLastSegment: true,
+                RowsStaged: null, RowsWritten: null, StagingLocation: null, Watermark: null),
+            new ScriptParameters(DefaultParameters(manifest)), log.Add);
+
+        var points = script.DeclarePoints(context);
+        if (points.Count == 0)
+            return [new ScriptTestCase("(declares no points)", null, "This hook would never run as configured.")];
+
+        var cases = new List<ScriptTestCase>();
+        foreach (var point in points)
+        {
+            var statements = script.BuildStatements(point, context with { Point = point });
+            if (statements.Count == 0)
+            {
+                cases.Add(new ScriptTestCase(point, null, "declared, but emits nothing for these facts"));
+                continue;
+            }
+
+            foreach (var statement in statements)
+            {
+                var parameters = statement.Parameters.Count == 0
+                    ? null
+                    : string.Join(", ", statement.Parameters.Select(p => $"{p.Name}={Format(p.Value)}"));
+                cases.Add(new ScriptTestCase(point, statement.CommandText, parameters));
+            }
+        }
+        return cases;
+    }
+
+    /// <summary>
+    /// The statements a query builder would issue, and how it says to read the result back. Not
+    /// executed: this slot owns a source read outright, and running one to see what it does is the
+    /// thing an operator should choose deliberately rather than get from a button called Test.
+    /// </summary>
+    private IReadOnlyList<ScriptTestCase> TestSourceQueryBuilder(
+        ISourceQueryBuilder script, IReadOnlyList<ColumnMapping> mappings, IReadOnlyList<ColumnMetadata> columns,
+        IScriptDialect dialect, ScriptConfig manifest, ScriptTestRequest request)
+    {
+        var (source, _) = ResolveTables(request);
+        var parameters = new ScriptParameters(DefaultParameters(manifest));
+
+        // A previous watermark, because the statement that matters is the incremental one — a builder
+        // shown only its first-pass form is a builder half checked.
+        var context = new SourceQueryContext(
+            source ?? SampleSource, mappings, columns, PreviousWatermark: "1000", EndWatermark: null,
+            Segment: null, dialect, parameters);
+
+        var cases = new List<ScriptTestCase>();
+
+        var watermarkQuery = script.BuildWatermarkQuery(context);
+        cases.Add(new ScriptTestCase(
+            "Watermark query", watermarkQuery?.CommandText,
+            watermarkQuery is null
+                ? "none — the host echoes the previous watermark back rather than inventing one"
+                : Describe(watermarkQuery.Parameters)));
+
+        var readQuery = script.BuildReadQuery(context with { EndWatermark = "2000" });
+        cases.Add(new ScriptTestCase("Read query", readQuery.CommandText, Describe(readQuery.Parameters)));
+
+        var shape = script.DescribeResult(context);
+        cases.Add(new ScriptTestCase(
+            "Result shape",
+            shape.OperationColumn is null
+                ? $"every row is a {shape.DefaultOperation}"
+                : $"operation from '{shape.OperationColumn}'",
+            shape.ExcludeColumns is { Count: > 0 }
+                ? $"dropped before staging: {string.Join(", ", shape.ExcludeColumns)}"
+                : null));
+
+        return cases;
+
+        static string? Describe(IReadOnlyList<ScriptQueryParameter> parameters) =>
+            parameters.Count == 0 ? null : string.Join(", ", parameters.Select(p => $"{p.Name}={Format(p.Value)}"));
+    }
+
+    /// <summary>
+    /// The one slot whose contract hands the script a live <see cref="DbConnection"/>, because there
+    /// is no way to describe "ask the catalog" as data. So there is no generated mode for it: a
+    /// generated one would have to pass a connection that is not open, and a script doing the normal
+    /// thing with it would fail for a reason that has nothing to do with the script.
+    /// <para>
+    /// Testing it means choosing a connection, which is exactly what its own contract already means.
+    /// </para>
+    /// </summary>
+    private async Task<IReadOnlyList<ScriptTestCase>> TestMetadataProviderAsync(
+        IMetadataProvider script, IScriptDialect dialect, ScriptConfig manifest,
+        ScriptTestRequest request, bool live, CancellationToken cancellationToken)
+    {
+        if (!live)
+        {
+            throw new ConfigValidationException(
+                "A catalog provider is handed a live connection by contract, so testing one means " +
+                "choosing a connection — there is nothing to generate.");
+        }
+
+        var (connection, driver) = await connections.OpenAsync(request.ConnectionName!, cancellationToken);
+        try
+        {
+            var context = new MetadataContext(
+                connection, dialect, new ScriptParameters(DefaultParameters(manifest)),
+                ct => driver.ListDatabasesAsync(connection, ct),
+                (database, ct) => driver.ListTablesAsync(connection, database, ct),
+                (database, schema, table, ct) => driver.ListColumnsAsync(connection, database, schema, table, ct));
+
+            var databases = await script.ListDatabasesAsync(context, cancellationToken);
+            var cases = new List<ScriptTestCase>
+            {
+                new($"{databases.Count} database(s)", string.Join(", ", databases.Take(20)),
+                    databases.Count > 20 ? "first 20 shown" : null),
+            };
+
+            // One database deep, not all of them: the point is to see the script answer, not to walk
+            // a catalog that may be enormous.
+            if (databases.Count > 0)
+            {
+                var tables = await script.ListTablesAsync(context, databases[0], cancellationToken);
+                cases.Add(new ScriptTestCase(
+                    $"{tables.Count} table(s) in {databases[0]}",
+                    string.Join(", ", tables.Take(20).Select(t => $"{t.Schema}.{t.Table}")),
+                    tables.Count > 20 ? "first 20 shown" : null));
+
+                if (tables.Count > 0)
+                {
+                    var first = tables[0];
+                    var columns = await script.ListColumnsAsync(
+                        context, databases[0], first.Schema, first.Table, cancellationToken);
+                    cases.Add(new ScriptTestCase(
+                        $"{columns.Count} column(s) on {first.Schema}.{first.Table}",
+                        string.Join(", ", columns.Take(20).Select(c => $"{c.Name} {c.NativeType}")),
+                        columns.Count > 20 ? "first 20 shown" : null));
+                }
+            }
+
+            return cases;
+        }
+        finally
+        {
+            await connection.DisposeAsync();
+        }
+    }
+
+    /// <summary>Stand-ins for a script not yet bound to a mapping, so it can be tested the moment it
+    /// is written.</summary>
+    private static SourceTableRef SampleSource { get; } =
+        new() { ConnectionName = "(source)", Database = "(database)", Schema = "dbo", Table = "SampleTable" };
+
+    private static TableRef SampleTarget { get; } =
+        new() { ConnectionName = "(target)", Database = "(database)", Schema = "dbo", Table = "SampleTable" };
 
     // ---- Sample input ----
 

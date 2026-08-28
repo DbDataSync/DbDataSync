@@ -226,4 +226,45 @@ public sealed class ScriptCompilerTests : IDisposable
         public DataSync.Drivers.Abstractions.CanonicalType ToCanonicalType(string nativeType) => throw new NotSupportedException();
         public DataSync.Drivers.Abstractions.RenderedColumnType RenderColumnType(DataSync.Drivers.Abstractions.CanonicalType type) => throw new NotSupportedException();
     }
+
+    /// <summary>
+    /// A script must be able to read what its contract hands it. <c>ColumnMapping</c>,
+    /// <c>SourceTableRef</c> and <c>TableRef</c> live in DataSync.Core, and until phase 41 that
+    /// assembly was not in the reference set — so a lifecycle hook could implement the interface and
+    /// not touch <c>context.Target</c>, which is exactly what phase 27's motivating example does.
+    /// Nothing had run one, so nothing had found out.
+    /// </summary>
+    [Fact]
+    public void AScriptCanReadTheConfigTypesItsContractHandsIt()
+    {
+        var result = _compiler.Compile(new ScriptDefinition
+        {
+            Manifest = new ScriptConfig
+            {
+                Name = "reads-its-context", Kind = ScriptSlots.LifecycleHook, EntryType = "ReadsItsContext",
+            },
+            Code = """
+                using System.Collections.Generic;
+                using System.Linq;
+                using DataSync.Drivers.Abstractions;
+                using DataSync.Scripting.Abstractions;
+
+                public sealed class ReadsItsContext : ILifecycleHook
+                {
+                    public IReadOnlyList<string> DeclarePoints(LifecycleHookContext c) => ["beforeStage"];
+
+                    public IReadOnlyList<HookStatement> BuildStatements(string point, LifecycleHookContext c)
+                    {
+                        // Every config type a contract exposes: the mapping list, and both table refs.
+                        var mapped = c.ColumnMappings.Select(m => m.TargetColumn).ToList();
+                        var from = $"{c.Source.Schema}.{c.Source.Table}";
+                        var to = $"{c.Target.Schema}.{c.Target.Table}";
+                        return [new HookStatement($"-- {mapped.Count} column(s), {from} -> {to}", [])];
+                    }
+                }
+                """,
+        });
+
+        Assert.True(result.Success, string.Join("; ", result.Diagnostics.Select(d => d.Message)));
+    }
 }
