@@ -13,6 +13,15 @@ public sealed class ApiOptions
     public required string StateDbPath { get; init; }
     public required string TaskRunnerDllPath { get; init; }
 
+    /// <summary>Deliberately not adjacent to the API's own port: a state endpoint that looks like "the
+    /// API, plus one" invites someone to expose it by widening a firewall rule by a range.</summary>
+    public const int DefaultStatePort = 5891;
+
+    /// <summary>The loopback-only port the runner-state endpoint listens on (phase 39). 0 binds an
+    /// ephemeral port, which is what tests use to avoid colliding with each other and with a dev
+    /// instance — <c>StateHost.BaseAddress</c> reports whatever was actually bound.</summary>
+    public int StatePort { get; init; } = DefaultStatePort;
+
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection("DataSync");
@@ -21,7 +30,13 @@ public sealed class ApiOptions
         var stateDbPath = section["StateDbPath"] ?? Path.Combine(repoRoot, "state.db");
         var taskRunnerDllPath = section["TaskRunnerDllPath"] ?? ResolveDefaultTaskRunnerDllPath();
 
-        return new ApiOptions { RepoRoot = repoRoot, StateDbPath = stateDbPath, TaskRunnerDllPath = taskRunnerDllPath };
+        return new ApiOptions
+        {
+            RepoRoot = repoRoot,
+            StateDbPath = stateDbPath,
+            TaskRunnerDllPath = taskRunnerDllPath,
+            StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : DefaultStatePort,
+        };
     }
 
     private static string ResolveDefaultTaskRunnerDllPath()

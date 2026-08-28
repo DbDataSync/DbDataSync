@@ -2,7 +2,20 @@ namespace DataSync.TaskRunner;
 
 // No single --run-id anymore: work is claimed from the durable WorkQueue (one RunId minted per claimed
 // item, not supplied externally) — see architecture/implementation/done/phase-008-work-queue-schema.md.
-public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, string Replication, int DegreeOfParallelism = 4)
+/// <param name="StateEndpoint">
+/// The loopback address of the process that owns the state store. When absent this runner opens the
+/// state file directly, which is the pre-phase-39 behaviour and is kept only for tools that run a
+/// worker standalone — never for a runner the API spawned.
+/// </param>
+/// <param name="StateGraceSeconds">How long to keep retrying an unreachable owner before journalling
+/// and shutting down. The owner is this process's parent, so a restart should be far shorter.</param>
+public sealed record TaskRunnerOptions(
+    string RepoRoot,
+    string StateDbPath,
+    string Replication,
+    int DegreeOfParallelism = 4,
+    string? StateEndpoint = null,
+    int StateGraceSeconds = 60)
 {
     /// <summary>config/ lives at a fixed location under the git repo root — the same convention
     /// DataSync.Core.Config.ConfigPaths uses.</summary>
@@ -14,6 +27,8 @@ public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, stri
         string? stateDbPath = null;
         string? replication = null;
         int? degreeOfParallelism = null;
+        string? stateEndpoint = null;
+        int? graceSeconds = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -27,6 +42,18 @@ public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, stri
                     break;
                 case "--replication" when i + 1 < args.Length:
                     replication = args[++i];
+                    break;
+                case "--state-endpoint" when i + 1 < args.Length:
+                    stateEndpoint = args[++i];
+                    break;
+                case "--state-grace-seconds" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], out var parsedGrace) || parsedGrace < 0)
+                    {
+                        options = null;
+                        error = $"'--state-grace-seconds' value '{args[i]}' must be a non-negative integer.";
+                        return false;
+                    }
+                    graceSeconds = parsedGrace;
                     break;
                 case "--degree-of-parallelism" when i + 1 < args.Length:
                     if (!int.TryParse(args[++i], out var parsedDop) || parsedDop < 1)
@@ -55,7 +82,11 @@ public sealed record TaskRunnerOptions(string RepoRoot, string StateDbPath, stri
             return false;
         }
 
-        options = new TaskRunnerOptions(repoRoot!, stateDbPath!, replication!, degreeOfParallelism ?? 4);
+        options = new TaskRunnerOptions(
+            repoRoot!, stateDbPath!, replication!, degreeOfParallelism ?? 4,
+            // The endpoint may also arrive by environment, beside the token — see StateProtocol.
+            stateEndpoint ?? Environment.GetEnvironmentVariable(DataSync.State.Remote.StateProtocol.EndpointEnvironmentVariable),
+            graceSeconds ?? 60);
         error = null;
         return true;
     }

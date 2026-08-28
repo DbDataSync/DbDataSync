@@ -6,6 +6,7 @@ using DataSync.Drivers.MsSql;
 using DataSync.Drivers.Postgres;
 using DataSync.Scripting;
 using DataSync.State;
+using DataSync.State.Remote;
 using DataSync.TaskRunner;
 
 if (!TaskRunnerOptions.TryParse(args, out var options, out var parseError))
@@ -18,7 +19,6 @@ if (!TaskRunnerOptions.TryParse(args, out var options, out var parseError))
 
 var secretStore = new SecretStore(true);
 var configRepository = new ConfigRepository(options!.ConfigRoot, new GitCommitService(options.RepoRoot), secretStore);
-var stateDatabase = new StateDatabase(options.StateDbPath);
 
 // The cache is what makes scripting affordable here: this process is spawned per run, so without it
 // every pass would start a compiler before compiling anything of ours.
@@ -31,13 +31,10 @@ var driverRegistry = new DriverRegistry();
 driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
 
-using var logWriter = new LogWriter(stateDatabase);
-var state = new LocalRunnerState(
-    new TaskRunStore(stateDatabase),
-    new WorkQueueStore(stateDatabase),
-    new RunLockStore(stateDatabase),
-    new ChangeWatermarkStore(stateDatabase),
-    logWriter);
+// Phase 39: a runner spawned by the API never opens the state file. It applies its changes over
+// loopback to the process that owns it, and journals to disk if that process goes away mid-run.
+var (state, disposeState) = RunnerStateFactory.Create(options);
+using var _stateScope = disposeState;
 var executor = new RunExecutor(configRepository, driverRegistry, secretStore, state, scriptHost);
 
 using var cts = new CancellationTokenSource();
@@ -47,5 +44,27 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-var exitCode = await executor.ExecuteWorkerAsync(options.Replication, options.DegreeOfParallelism, cts.Token);
+ExitCode exitCode;
+try
+{
+    exitCode = await executor.ExecuteWorkerAsync(options.Replication, options.DegreeOfParallelism, cts.Token);
+}
+catch (StateOwnerUnavailableException ex)
+{
+    // Not a failure of the work — the owner went away. Whatever this run had already achieved is in a
+    // journal beside the state database, and the owner applies it before scheduling anything new for
+    // this replication.
+    Console.Error.WriteLine($"State owner unavailable: {ex.Message}");
+    exitCode = ExitCode.StateOwnerUnavailable;
+}
+
+// Flush before the process ends: buffered log lines either reach the owner or reach the journal, and
+// silently dropping them is the one outcome that leaves an operator with nothing.
+if (state is RemoteRunnerState remote)
+{
+    remote.Flush();
+    if (remote.OwnerLost)
+        exitCode = ExitCode.StateOwnerUnavailable;
+}
+
 return (int)exitCode;

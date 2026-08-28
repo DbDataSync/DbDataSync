@@ -27,6 +27,11 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>
                 ["DataSync:RepoRoot"] = RepoRoot,
                 ["DataSync:StateDbPath"] = Path.Combine(RepoRoot, "state.db"),
                 ["DataSync:TaskRunnerDllPath"] = ResolveTaskRunnerDllPathForTests(),
+                // An ephemeral port, so concurrent test classes and a dev instance on the default
+                // port do not collide. Unlike the main app — which WebApplicationFactory replaces
+                // with an in-memory server — StateHost is a real Kestrel server here, which is what
+                // lets the real child processes these tests spawn actually reach it.
+                ["DataSync:StatePort"] = "0",
             });
         });
 

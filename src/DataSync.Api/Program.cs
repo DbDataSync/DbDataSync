@@ -3,6 +3,8 @@ using ClrKernel.Core.Secrets;
 using DataSync.Api.Configuration;
 using DataSync.Api.Hubs;
 using DataSync.Api.Services;
+using DataSync.Api.State;
+using DataSync.State.Remote;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
@@ -44,6 +46,20 @@ builder.Services.AddSingleton(sp => new ChangeWatermarkStore(sp.GetRequiredServi
 builder.Services.AddSingleton(sp => new RunLockStore(sp.GetRequiredService<StateDatabase>()));
 builder.Services.AddSingleton(sp => new WorkQueueStore(sp.GetRequiredService<StateDatabase>()));
 builder.Services.AddSingleton(sp => new LogWriter(sp.GetRequiredService<StateDatabase>()));
+
+// This process owns the state file — LocalRunnerState is how it, and only it, writes to it. The
+// runners it spawns reach these same operations over loopback (RunnerStateController).
+builder.Services.AddSingleton<LocalRunnerState>();
+builder.Services.AddSingleton<RunnerToken>();
+builder.Services.AddSingleton<JournalRecovery>();
+
+// The state endpoint is a server of its own, listening on loopback only, so a remote connection is
+// refused by the OS and no application code has to be correct for that to hold — including when
+// someone puts the main API behind a reverse proxy or binds it to 0.0.0.0, which is how this would
+// realistically go wrong. RunnerStateGuard is the second defence, for when the binding is widened.
+// Started before the scheduler, because the scheduler spawns the children that need it.
+builder.Services.AddSingleton<StateHost>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StateHost>());
 
 builder.Services.AddSingleton(sp =>
     ScriptCacheDirectory.BesideStateDatabase(sp.GetRequiredService<ApiOptions>().StateDbPath));

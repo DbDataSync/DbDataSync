@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using DataSync.Api.Configuration;
+using DataSync.Api.State;
+using DataSync.State.Remote;
 using DataSync.Core.Config;
 using DataSync.State;
 
@@ -20,7 +22,10 @@ public sealed class ProcessSupervisor(
     ConfigRepository configRepository,
     TaskRunStore taskRunStore,
     RunLockStore runLockStore,
-    WorkQueueStore workQueueStore)
+    WorkQueueStore workQueueStore,
+    RunnerToken runnerToken,
+    StateHost stateHost,
+    JournalRecovery journalRecovery)
 {
     private readonly ConcurrentDictionary<string, Process> _workers = new();
 
@@ -43,6 +48,23 @@ public sealed class ProcessSupervisor(
         startInfo.ArgumentList.Add(options.StateDbPath);
         startInfo.ArgumentList.Add("--replication");
         startInfo.ArgumentList.Add(taskName);
+
+        // The endpoint and the token go in the *environment*, not in ArgumentList. On Linux a
+        // process's command line is world-readable (/proc/<pid>/cmdline) and its environment is not
+        // (/proc/<pid>/environ, mode 0400) — so a token in an argument would be visible to every local
+        // user through `ps`, which is precisely the threat it exists to answer. The same asymmetry
+        // holds on Windows, where Win32_Process exposes command lines and not environment blocks.
+        //
+        // UseShellExecute is already false above, which is what makes Environment usable at all.
+        // Asked of the running server rather than recomputed from configuration: a configured port
+        // of 0 is only a real one once it is bound, and the two can never disagree if only one of
+        // them exists.
+        startInfo.Environment[StateProtocol.EndpointEnvironmentVariable] = stateHost.BaseAddress;
+        startInfo.Environment[StateProtocol.TokenEnvironmentVariable] = runnerToken.Value;
+
+        // Anything this runner spilled while a previous incarnation could not reach us is applied
+        // before it starts working again — so a re-run never races the record of the run before it.
+        journalRecovery.Recover(taskName);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         try
