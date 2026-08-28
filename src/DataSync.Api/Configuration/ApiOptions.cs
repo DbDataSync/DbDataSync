@@ -13,14 +13,19 @@ public sealed class ApiOptions
     public required string StateDbPath { get; init; }
     public required string TaskRunnerDllPath { get; init; }
 
-    /// <summary>Deliberately not adjacent to the API's own port: a state endpoint that looks like "the
-    /// API, plus one" invites someone to expose it by widening a firewall rule by a range.</summary>
-    public const int DefaultStatePort = 5891;
-
-    /// <summary>The loopback-only port the runner-state endpoint listens on (phase 39). 0 binds an
-    /// ephemeral port, which is what tests use to avoid colliding with each other and with a dev
-    /// instance — <c>StateHost.BaseAddress</c> reports whatever was actually bound.</summary>
-    public int StatePort { get; init; } = DefaultStatePort;
+    /// <summary>
+    /// The loopback-only port the runner-state endpoint listens on (phase 39). 0 — the default — binds
+    /// an ephemeral one.
+    /// <para>
+    /// Ephemeral by default because nothing ever has to know this port in advance: the only clients are
+    /// children this process spawns, and it tells each one the address it actually bound
+    /// (<c>StateHost.BaseAddress</c>). A fixed default would buy nothing and cost a collision every
+    /// time two instances run on one host — a developer's own API and a test run, say. It is settable
+    /// for the one case that wants it: an operator who would rather firewall a known port than trust
+    /// the loopback binding.
+    /// </para>
+    /// </summary>
+    public int StatePort { get; init; }
 
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
@@ -35,7 +40,7 @@ public sealed class ApiOptions
             RepoRoot = repoRoot,
             StateDbPath = stateDbPath,
             TaskRunnerDllPath = taskRunnerDllPath,
-            StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : DefaultStatePort,
+            StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : 0,
         };
     }
 

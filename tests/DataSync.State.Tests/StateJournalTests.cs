@@ -70,6 +70,7 @@ public sealed class StateJournalTests : IDisposable
 
         Assert.False(journal.HasEntries);
         Assert.False(File.Exists(path));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(path)!));
     }
 
     [Fact]

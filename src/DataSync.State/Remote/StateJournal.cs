@@ -61,11 +61,7 @@ public sealed class StateJournal : IDisposable
     private StreamWriter? _writer;
     private long _sequence;
 
-    public StateJournal(string path)
-    {
-        _path = path;
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    }
+    public StateJournal(string path) => _path = path;
 
     /// <summary>Named FilePath, not Path: a member called Path shadows <see cref="System.IO.Path"/>
     /// inside this class and turns every static call into a compile error.</summary>
@@ -77,8 +73,9 @@ public sealed class StateJournal : IDisposable
 
     public void Append(JournalOperation operation, object? payload)
     {
-        // Opened lazily: the common case is a run that never loses its owner, and that run should not
-        // create a file at all.
+        // Opened lazily — directory included: the common case is a run that never loses its owner,
+        // and that run should leave nothing behind for the owner to find and report as an incident.
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         _writer ??= new StreamWriter(new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read))
         {
             AutoFlush = true,

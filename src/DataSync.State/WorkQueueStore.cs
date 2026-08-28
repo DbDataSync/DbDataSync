@@ -222,6 +222,22 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// caller knows the worker is gone — a live one legitimately holds unstarted claims.
     /// </para>
     /// </summary>
+    /// <summary>Replications holding Claimed or Running items. What reconciliation needs to ask, because
+    /// an item claimed by a worker that died before starting it has no run to be found by.</summary>
+    public IReadOnlyList<string> GetTasksWithInFlightWork() =>
+        SqliteRetry.Execute(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText =
+                "SELECT DISTINCT TaskName FROM WorkQueue WHERE Status IN ('Claimed','Running');";
+            using var reader = cmd.ExecuteReader();
+            var names = new List<string>();
+            while (reader.Read())
+                names.Add(reader.GetString(0));
+            return (IReadOnlyList<string>)names;
+        });
+
     public int ReleaseClaimsForTask(string taskName) =>
         SqliteRetry.Execute(() =>
         {

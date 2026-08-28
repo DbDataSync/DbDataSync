@@ -286,4 +286,16 @@ public sealed class WorkQueueStoreTests : IDisposable
         Assert.Equal(1, _queue.ReleaseClaimsForTask("crm-sync"));
         Assert.Equal(claimed.Id, _queue.TryClaimNext("crm-sync", "worker-2")!.Id);
     }
+
+    [Fact]
+    public void GetTasksWithInFlightWork_ReportsOnlyReplicationsHoldingAClaim()
+    {
+        _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+        _queue.Enqueue("other-sync", RunKind.Primary, "orders");
+        Assert.Empty(_queue.GetTasksWithInFlightWork());
+
+        _queue.TryClaimNext("crm-sync", "worker-1");
+
+        Assert.Equal(["crm-sync"], _queue.GetTasksWithInFlightWork());
+    }
 }

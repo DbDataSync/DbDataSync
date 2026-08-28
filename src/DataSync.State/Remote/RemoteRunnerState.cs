@@ -205,8 +205,11 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
         if (OwnerLost)
             return;
         OwnerLost = true;
+        // Deliberately "from here on", not "recorded": a runner that loses its owner while it has
+        // nothing outstanding writes no file at all, and a message claiming otherwise sends whoever
+        // reads it looking for one.
         _report($"The state owner is unreachable ({cause.GetType().Name}: {cause.Message}). " +
-                $"Recording outcomes to {_journal.FilePath} and shutting down.");
+                $"Any outcomes from here on go to {_journal.FilePath}; this run is shutting down.");
     }
 
     private void Send(string path, object? body) => Send<object?>(path, body);

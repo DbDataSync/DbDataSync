@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Collections.Immutable;
 using System.Data.Common;
 using System.Diagnostics;
@@ -11,6 +12,7 @@ using DataSync.Drivers.Postgres;
 using DataSync.Scripting;
 using DataSync.Scripting.Abstractions;
 using DataSync.State;
+using DataSync.State.Remote;
 
 namespace DataSync.TaskRunner;
 
@@ -73,9 +75,24 @@ public sealed class RunExecutor(
             .Select(_ => ConsumeAsync(channel.Reader, cancellationToken))
             .ToArray();
 
-        await producer;
+        // The producer can fail while consumers are mid-item, and the owner going away is exactly
+        // that case. Its finally completes the writer, so the consumers still drain what they already
+        // hold — but they have to be *awaited*, or this process returns from Main and takes them with
+        // it, along with the outcomes they were in the middle of recording. That is the whole
+        // difference between spilling to a journal and losing the work.
+        ExceptionDispatchInfo? producerFailure = null;
+        try
+        {
+            await producer;
+        }
+        catch (Exception ex)
+        {
+            producerFailure = ExceptionDispatchInfo.Capture(ex);
+        }
+
         await Task.WhenAll(consumers);
         state.Flush();
+        producerFailure?.Throw();
 
         return ExitCode.Success;
     }
@@ -132,7 +149,18 @@ public sealed class RunExecutor(
     private async Task ConsumeAsync(ChannelReader<WorkItem> reader, CancellationToken cancellationToken)
     {
         await foreach (var item in reader.ReadAllAsync(cancellationToken))
-            await ProcessWorkItemAsync(item, cancellationToken);
+        {
+            try
+            {
+                await ProcessWorkItemAsync(item, cancellationToken);
+            }
+            catch (StateOwnerUnavailableException)
+            {
+                // Stop taking work rather than starting what cannot be recorded. Whatever is still
+                // buffered stays claimed; the API releases it when it finds this process gone.
+                return;
+            }
+        }
     }
 
     private async Task ProcessWorkItemAsync(WorkItem item, CancellationToken cancellationToken)
@@ -186,7 +214,10 @@ public sealed class RunExecutor(
             state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
             state.MarkFailed(item.Id);
         }
-        catch (Exception ex)
+        // Deliberately not caught: the owner being gone is not this item failing. Recording it as
+        // Failed would be this process asserting an outcome it is in no position to observe — and it
+        // is the one exception that must reach ConsumeAsync, which stops rather than starting more.
+        catch (Exception ex) when (ex is not StateOwnerUnavailableException)
         {
             Log(item.RunId, LogSeverity.Error, $"Run failed: {ex.Message}");
             state.Flush();

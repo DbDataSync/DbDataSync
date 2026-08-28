@@ -25,7 +25,8 @@ public sealed class ProcessSupervisor(
     WorkQueueStore workQueueStore,
     RunnerToken runnerToken,
     StateHost stateHost,
-    JournalRecovery journalRecovery)
+    JournalRecovery journalRecovery,
+    ILogger<ProcessSupervisor> logger)
 {
     private readonly ConcurrentDictionary<string, Process> _workers = new();
 
@@ -159,7 +160,6 @@ public sealed class ProcessSupervisor(
     /// (v1 limitation — see architecture/implementation/done/phase-005-api-orchestrator.md).</summary>
     public void ReconcileOrphanedRuns()
     {
-        var deadTasks = new HashSet<string>();
         var liveTasks = new HashSet<string>();
 
         foreach (var run in taskRunStore.GetRunningRuns())
@@ -172,16 +172,29 @@ public sealed class ProcessSupervisor(
 
             taskRunStore.CompleteRun(run.RunId, RunStatus.Failed, 0, 0, "Orphaned: no live process found after API restart.");
             runLockStore.Release(run.TaskName, run.RunKind, run.MappingName);
-            deadTasks.Add(run.TaskName);
         }
 
-        // Per task, not per run: a worker claims ahead of its consumers, so it can die holding items
-        // it never started — which have no run to be found by, and would sit in-flight forever making
-        // their mapping un-enqueueable. Only for a replication with nothing alive working on it.
-        foreach (var taskName in deadTasks)
+        // Driven by what the queue holds, not by which runs started. A worker claims ahead of its
+        // consumers, so it can die holding items it never began — those have no run to be found by,
+        // and asking only about runs leaves them in-flight forever, which makes their mapping
+        // permanently un-enqueueable and stops the replication silently.
+        //
+        // Safe only where nothing is alive working on the replication. A worker this API spawned is
+        // in _workers; one still executing a run is caught by the pid check above. The gap is a worker
+        // left by a *previous* API instance that has claimed work and not yet started it — narrow, and
+        // a far better failure than a replication that never runs again.
+        foreach (var taskName in workQueueStore.GetTasksWithInFlightWork())
         {
-            if (!liveTasks.Contains(taskName) && !HasLiveWorker(taskName))
-                workQueueStore.ReleaseClaimsForTask(taskName);
+            if (liveTasks.Contains(taskName) || HasLiveWorker(taskName))
+                continue;
+
+            var released = workQueueStore.ReleaseClaimsForTask(taskName);
+            if (released > 0)
+            {
+                logger.LogWarning(
+                    "Returned {Count} in-flight work item(s) of '{Task}' to the queue: they were claimed by a " +
+                    "worker process that is no longer running.", released, taskName);
+            }
         }
     }
 
