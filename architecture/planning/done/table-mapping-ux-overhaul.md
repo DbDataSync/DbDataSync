@@ -160,6 +160,33 @@ metadata, say so explicitly (an empty/placeholder selection, or a visible "unkno
 of letting the select render as if the first item were chosen — which, left alone, an operator could
 resave without ever noticing the mapping actually changed.
 
+**New: the Setup card's SQL previews don't use Monaco.** `ProvisioningCard.tsx`'s `PlanPanel` renders
+each plan's SQL in a raw `<pre className="mono">`, not the `CodeEditor` (Monaco) component the mapping
+preview screen (`MappingPreview.tsx`) already uses for the same kind of read-only SQL display. Two
+consequences: no syntax highlighting, and — despite an inline `overflowX: 'auto'` on the `<pre>` — a long
+generated statement still widens the page and produces a horizontal scrollbar at the page level rather
+than staying contained inside its own card. Switching to `CodeEditor` (`readOnly`, same as
+`MappingPreview` already does) should fix both, since Monaco owns its own scroll container rather than
+depending on a `<pre>`'s box sizing inside a flex/grid parent.
+
+Separately, worth fixing regardless of the editor swap: `CreateTableStatement.Build`
+(`DataSync.Drivers.Generic`) renders every column definition on one line, comma-joined with a single
+space. Adding a newline (and indentation) between column definitions makes a several-column `CREATE
+TABLE` readable at a glance instead of one long wrapped line — real formatting, not just an editor's
+line-wrap.
+
+**New: an inheritable "alter target table columns if missing or changed" setting.** Same shape as
+`createTargetTableIfMissing` (§ above) — a replication-level default, overridable per mapping, same
+`INHERITED` badge/toggle treatment. Unlike table creation, this is genuine schema evolution — the target
+table already exists and this adds columns the mapping now needs (or widens/retypes a column that
+changed) rather than creating something from nothing. `IProvisioner`'s action set
+(`ProvisioningActions.EnableSourceChangeCapture`, `CreateTargetTable`) needs a third action for this —
+an `ALTER TABLE` plan, additive-and-modifying only, following `CreateTargetTable`'s own rule of never
+being destructive (`ProvisioningConfig`'s existing comment: "never ALTER" was true only because nothing
+needed to yet). **Not a new plan panel** — it stacks into the existing Target plan alongside
+`CreateTargetTable`'s own steps, since both describe the same side and Apply already runs a plan's steps
+as one unit.
+
 ---
 
 # Outcome

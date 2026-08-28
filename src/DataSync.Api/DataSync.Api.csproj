@@ -18,6 +18,7 @@
     <ProjectReference Include="..\DataSync.Drivers.MsSql\DataSync.Drivers.MsSql.csproj" />
     <ProjectReference Include="..\DataSync.Drivers.Postgres\DataSync.Drivers.Postgres.csproj" />
     <ProjectReference Include="..\DataSync.State\DataSync.State.csproj" />
+    <ProjectReference Include="..\DataSync.Verification\DataSync.Verification.csproj" />
   </ItemGroup>
 
 </Project>

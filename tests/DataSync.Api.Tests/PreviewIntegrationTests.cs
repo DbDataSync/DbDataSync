@@ -292,6 +292,159 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
     private sealed record ScriptTestResultDto(
         string Mode, string Source, List<ScriptTestCaseDto> Cases, List<string> Log, string? Statement, string? Error);
 
+    /// <summary>
+    /// A check, end to end: enqueued as a run, executed by a real TaskRunner process, compared against
+    /// a target the run itself populated, and read back out of the parquet the runner wrote.
+    /// </summary>
+    [Fact]
+    public async Task AVerificationCheck_RunsAgainstBothSides_AndItsResultIsReadableAfterwards()
+    {
+        // Group by a column the two sides spell differently, so the result proves the check named it
+        // once and each side's statement was derived — the whole point of naming by target column.
+        await ExecuteAsync(await OpenDatabaseAsync(),
+            $"ALTER TABLE dbo.[{_sourceTable}] ADD region NVARCHAR(20) NULL;");
+        await ExecuteAsync(await OpenDatabaseAsync(),
+            $"UPDATE dbo.[{_sourceTable}] SET region = CASE WHEN Id = 1 THEN 'north' ELSE 'south' END;");
+        await ExecuteAsync(await OpenDatabaseAsync(),
+            $"ALTER TABLE dbo.[{_targetTable}] ADD Region NVARCHAR(20) NULL;");
+
+        (await _client.PutAsJsonAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+            {
+                Name = "main",
+                Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
+                Targets = [new TableSpec { Schema = "dbo", Table = _targetTable }],
+                ColumnMappings =
+                [
+                    new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                    new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name", Transform = "UPPER({{column}})" },
+                    new ColumnMapping { SourceColumn = "region", TargetColumn = "Region" },
+                ],
+                Verification =
+                [
+                    new VerificationCheckConfig { Name = "rows-by-region", GroupBy = ["Region"] },
+                    new VerificationCheckConfig { Name = "total-rows" },
+                ],
+            }, JsonOptions)).EnsureSuccessStatusCode();
+
+        // Replicate first, so the two sides genuinely agree and a difference would mean something.
+        await TriggerAndWaitAsync();
+
+        var trigger = await _client.PostAsync(
+            $"/api/replications/{_replicationName}/mappings/main/verify", null);
+        trigger.EnsureSuccessStatusCode();
+
+        var results = await WaitForResultsAsync(expected: 2);
+
+        var grouped = Assert.Single(results, r => r.CheckName == "rows-by-region");
+        Assert.Equal(2, grouped.GroupsCompared);
+        Assert.Equal(0, grouped.DifferingGroups);
+
+        var total = Assert.Single(results, r => r.CheckName == "total-rows");
+        Assert.Equal(1, total.GroupsCompared);
+        Assert.Equal(0, total.DifferingGroups);
+
+        // The parquet the runner wrote, read back through the API — which is the only proof the file
+        // is where the index says and says what the run found.
+        var response = await _client.GetAsync(
+            $"/api/replications/{_replicationName}/verification-results/{grouped.Id}");
+        response.EnsureSuccessStatusCode();
+        var result = (await response.Content.ReadFromJsonAsync<VerificationResultDto>(JsonOptions))!;
+
+        Assert.Equal(["Region"], result.GroupColumns);
+        Assert.Equal(["north", "south"], result.Rows.Select(r => r.Group[0]));
+        Assert.All(result.Rows, r => Assert.Equal("Match", r.Status));
+
+        // Both sides' read times, separately — the gap is what a difference has to be weighed against.
+        Assert.NotEqual(default, result.SourceReadAtUtc);
+        Assert.NotEqual(default, result.TargetReadAtUtc);
+    }
+
+    /// <summary>The check that catches what a row count cannot: the right number of rows carrying the
+    /// wrong values.</summary>
+    [Fact]
+    public async Task ACheckFindsADifference_WhenTheTargetIsChangedBehindTheReplicationsBack()
+    {
+        (await _client.PutAsJsonAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+            {
+                Name = "main",
+                Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
+                Targets = [new TableSpec { Schema = "dbo", Table = _targetTable }],
+                ColumnMappings =
+                [
+                    new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                    new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name", Transform = "UPPER({{column}})" },
+                ],
+                Verification = [new VerificationCheckConfig { Name = "total-rows" }],
+            }, JsonOptions)).EnsureSuccessStatusCode();
+
+        await TriggerAndWaitAsync();
+
+        // A row nobody replicated — exactly what a verification check exists to notice.
+        await ExecuteAsync(await OpenDatabaseAsync(),
+            $"INSERT INTO dbo.[{_targetTable}] (Id, Name) VALUES (99, 'GHOST');");
+
+        (await _client.PostAsync($"/api/replications/{_replicationName}/mappings/main/verify", null))
+            .EnsureSuccessStatusCode();
+
+        var record = Assert.Single(await WaitForResultsAsync(expected: 1));
+        Assert.Equal(1, record.DifferingGroups);
+
+        var response = await _client.GetAsync(
+            $"/api/replications/{_replicationName}/verification-results/{record.Id}");
+        var result = (await response.Content.ReadFromJsonAsync<VerificationResultDto>(JsonOptions))!;
+
+        var row = Assert.Single(result.Rows);
+        Assert.Equal("Differs", row.Status);
+        Assert.Equal(1, row.Differences["__rows"]);
+    }
+
+    [Fact]
+    public async Task AMappingWithNoChecks_IsRefusedRatherThanQueueingARunThatDoesNothing()
+    {
+        var response = await _client.PostAsync(
+            $"/api/replications/{_replicationName}/mappings/main/verify", null);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("no verification checks", await response.Content.ReadAsStringAsync());
+    }
+
+    private sealed record VerificationResultRowDto(
+        List<string> Group, Dictionary<string, double>? Source, Dictionary<string, double>? Target,
+        Dictionary<string, double> Differences, string Status);
+
+    private sealed record VerificationResultDto(
+        string CheckName, List<string> GroupColumns, List<string> MeasureColumns,
+        double DifferenceThreshold, DateTimeOffset SourceReadAtUtc, DateTimeOffset TargetReadAtUtc,
+        List<VerificationResultRowDto> Rows);
+
+    private sealed record VerificationIndexDto(
+        long Id, string CheckName, int GroupsCompared, int DifferingGroups, string ResultPath);
+
+    private async Task<IReadOnlyList<VerificationIndexDto>> WaitForResultsAsync(int expected)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(45);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var results = await _client.GetFromJsonAsync<List<VerificationIndexDto>>(
+                $"/api/replications/{_replicationName}/verification-results", JsonOptions);
+            if (results!.Count >= expected)
+                return results;
+            await Task.Delay(250);
+        }
+
+        throw new TimeoutException($"Only saw fewer than {expected} verification result(s) within 45s.");
+    }
+
+    private async Task<SqlConnection> OpenDatabaseAsync()
+    {
+        var builder = new SqlConnectionStringBuilder(ServerConnectionString) { InitialCatalog = _databaseName };
+        var connection = new SqlConnection(builder.ConnectionString);
+        await connection.OpenAsync();
+        return connection;
+    }
+
     private sealed record PreviewStatementDto(string Stage, string Title, string? Sql, string Origin, string? Detail);
     private sealed record PreviewReportDto(List<PreviewStatementDto> Statements, List<string> Problems);
 

@@ -35,7 +35,7 @@ driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
 // loopback to the process that owns it, and journals to disk if that process goes away mid-run.
 var (state, disposeState) = RunnerStateFactory.Create(options);
 using var _stateScope = disposeState;
-var executor = new RunExecutor(configRepository, driverRegistry, secretStore, state, scriptHost);
+var executor = new RunExecutor(configRepository, driverRegistry, secretStore, state, scriptHost, options.StateDbPath);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>

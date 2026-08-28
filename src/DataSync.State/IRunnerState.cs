@@ -60,6 +60,12 @@ public interface IRunnerState
     /// </summary>
     void SetWatermark(string taskName, string sourceTable, string watermark);
 
+    /// <summary>
+    /// Where a verification result was written. An outcome like any other — the work is already done
+    /// and the file is already on disk, so losing this would leave a result nobody can find.
+    /// </summary>
+    void RecordVerificationResult(VerificationResultRecord result);
+
     void Log(Guid runId, LogSeverity level, string message);
 
     void Flush();

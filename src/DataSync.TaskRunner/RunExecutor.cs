@@ -13,6 +13,7 @@ using DataSync.Scripting;
 using DataSync.Scripting.Abstractions;
 using DataSync.State;
 using DataSync.State.Remote;
+using DataSync.Verification;
 
 namespace DataSync.TaskRunner;
 
@@ -37,7 +38,11 @@ public sealed class RunExecutor(
     DriverRegistry driverRegistry,
     SecretStore secretStore,
     IRunnerState state,
-    ScriptHost scriptHost)
+    ScriptHost scriptHost,
+    /// <summary>Not opened — this process never touches the state file (phase 39). It is here because
+    /// a verification result is written beside it, which is the one directory every process in a
+    /// deployment already agrees on.</summary>
+    string stateDbPath)
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
@@ -188,9 +193,13 @@ public sealed class RunExecutor(
                     $"{mapping.Targets.Count} target(s) — DataSync.TaskRunner only executes 1:1 " +
                     "mappings in v1 (the config schema allows more for future fan-in/fan-out).");
 
-            var (rowsRead, rowsWritten) = await RunMappingAsync(task, mapping, item, cancellationToken);
+            var (rowsRead, rowsWritten) = item.RunKind == RunKind.Verification
+                ? await RunVerificationAsync(task, mapping, item, cancellationToken)
+                : await RunMappingAsync(task, mapping, item, cancellationToken);
 
-            Log(item.RunId, LogSeverity.Info, $"Run succeeded: {rowsRead} row(s) read, {rowsWritten} row(s) written.");
+            Log(item.RunId, LogSeverity.Info, item.RunKind == RunKind.Verification
+                ? $"Verification finished: {rowsRead} group(s) compared."
+                : $"Run succeeded: {rowsRead} row(s) read, {rowsWritten} row(s) written.");
             // Flush before CompleteRun, not after: one worker process now handles many runs over its
             // lifetime, so a run's TaskRuns row can go terminal (and RunMonitorService stop watching
             // it) long before the process itself exits — unlike the old one-run-per-process model,
@@ -227,6 +236,91 @@ public sealed class RunExecutor(
         finally
         {
             state.ReleaseLock(item.TaskName, item.RunKind, item.MappingName);
+        }
+    }
+
+    /// <summary>
+    /// Compares this mapping's source and target and writes each check's result to disk.
+    /// <para>
+    /// The parquet goes **straight to the filesystem**, not through the state channel: a result is a
+    /// standalone artifact, possibly large, and phase 39's channel exists to serialise writes to
+    /// shared mutable state — which this is not. What goes through it is the index record saying where
+    /// the file is, reported as an outcome like any other.
+    /// </para>
+    /// <para>
+    /// A check that fails does not stop the others. An operator running five checks wants five
+    /// answers, and one unrunnable check is a fact about that check.
+    /// </para>
+    /// </summary>
+    private async Task<(long RowsRead, long RowsWritten)> RunVerificationAsync(
+        ReplicationTaskConfig task, TableMappingConfig mapping, WorkItem item, CancellationToken cancellationToken)
+    {
+        if (mapping.Verification.Count == 0)
+        {
+            Log(item.RunId, LogSeverity.Info, $"'{mapping.Name}' has no verification checks configured.");
+            return (0, 0);
+        }
+
+        var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
+        var target = EndpointResolution.ResolveTarget(task, mapping.Targets[0]);
+
+        DbConnection? sourceConnection = null;
+        DbConnection? targetConnection = null;
+        try
+        {
+            (sourceConnection, var sourceDriver) = await OpenConnectionAsync(source.ConnectionName, cancellationToken);
+            (targetConnection, var targetDriver) = await OpenConnectionAsync(target.ConnectionName, cancellationToken);
+
+            var sourceDialect = ResolveDialect(sourceDriver);
+            var targetDialect = ResolveDialect(targetDriver);
+            await sourceDialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
+            await targetDialect.UseDatabaseAsync(targetConnection, target.Database, cancellationToken);
+
+            long compared = 0;
+            long differing = 0;
+
+            foreach (var check in mapping.Verification)
+            {
+                try
+                {
+                    var result = await VerificationExecutor.RunAsync(
+                        check, mapping.ColumnMappings,
+                        new VerificationEndpoint(sourceConnection, sourceDialect, source.Schema, source.Table),
+                        new VerificationEndpoint(targetConnection, targetDialect, target.Schema, target.Table),
+                        cancellationToken);
+
+                    var path = VerificationPaths.For(stateDbPath, task.Name, item.RunId, check.Name);
+                    await VerificationResultFile.WriteAsync(path, result, cancellationToken);
+
+                    state.RecordVerificationResult(new VerificationResultRecord(
+                        Id: 0, item.RunId, task.Name, mapping.Name, check.Name,
+                        DateTimeOffset.UtcNow, result.SourceReadAtUtc, result.TargetReadAtUtc,
+                        result.Rows.Count, result.DifferingGroups, path));
+
+                    compared += result.Rows.Count;
+                    differing += result.DifferingGroups;
+
+                    Log(item.RunId, result.DifferingGroups == 0 ? LogSeverity.Info : LogSeverity.Warning,
+                        $"'{check.Name}': {result.Rows.Count} group(s) compared, {result.DifferingGroups} differing " +
+                        $"(the two sides were read {result.ReadGap.TotalSeconds:F1}s apart).");
+                }
+                catch (Exception ex) when (ex is DbException or ConfigValidationException)
+                {
+                    // Reported and moved past. Five checks should give five answers, and one that
+                    // cannot run is a fact about that check rather than about the run.
+                    Log(item.RunId, LogSeverity.Error, $"'{check.Name}' could not run: {ex.Message}");
+                }
+            }
+
+            if (differing > 0)
+                Log(item.RunId, LogSeverity.Warning, $"{differing} group(s) differ by more than their threshold.");
+
+            return (compared, 0);
+        }
+        finally
+        {
+            sourceConnection?.Dispose();
+            targetConnection?.Dispose();
         }
     }
 

@@ -109,6 +109,13 @@ public sealed class JournalRecovery(
                 ApplyRunOutcome(c, taskName, runId);
                 break;
 
+            case JournalOperation.RecordVerificationResult
+                when StateJournal.PayloadOf<RecordVerificationResultRequest>(entry) is { } v:
+                // The parquet is already on disk and the index is keyed on (run, check), so replaying
+                // this writes the same row rather than a second one.
+                state.RecordVerificationResult(v.Result);
+                break;
+
             case JournalOperation.SetWatermark when StateJournal.PayloadOf<SetWatermarkRequest>(entry) is { } s:
                 // Safe to replay by construction: a watermark only reaches a journal after the target
                 // write committed, so its presence here is the evidence that it did.

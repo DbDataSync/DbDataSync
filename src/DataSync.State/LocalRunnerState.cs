@@ -13,6 +13,7 @@ public sealed class LocalRunnerState(
     WorkQueueStore workQueue,
     RunLockStore runLocks,
     ChangeWatermarkStore watermarks,
+    VerificationResultStore verificationResults,
     LogWriter logs) : IRunnerState
 {
     public void UpsertTask(string taskName, bool enabled) => taskRuns.UpsertTask(taskName, enabled);
@@ -44,6 +45,8 @@ public sealed class LocalRunnerState(
 
     public void SetWatermark(string taskName, string sourceTable, string watermark) =>
         watermarks.SetWatermark(taskName, sourceTable, watermark);
+
+    public void RecordVerificationResult(VerificationResultRecord result) => verificationResults.Record(result);
 
     public void Log(Guid runId, LogSeverity level, string message) => logs.Log(runId, level, message);
 

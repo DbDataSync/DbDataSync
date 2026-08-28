@@ -82,8 +82,9 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
-                _watermarkStore, new LogWriter(stateDatabase)),
-            Scripting.ForTests(_configRepository, _repoRoot));
+                _watermarkStore, new VerificationResultStore(stateDatabase), new LogWriter(stateDatabase)),
+            Scripting.ForTests(_configRepository, _repoRoot),
+            Path.Combine(_repoRoot, "state.db"));
 
         SetUpConfig();
     }

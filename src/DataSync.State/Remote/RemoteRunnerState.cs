@@ -88,6 +88,10 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
     public void SetWatermark(string taskName, string sourceTable, string watermark) =>
         Outcome("set-watermark", new SetWatermarkRequest(taskName, sourceTable, watermark), JournalOperation.SetWatermark);
 
+    public void RecordVerificationResult(VerificationResultRecord result) =>
+        Outcome("record-verification-result", new RecordVerificationResultRequest(result),
+            JournalOperation.RecordVerificationResult);
+
     /// <summary>
     /// Buffered, not sent. Log lines are the highest-rate write here — one per line — and one HTTP
     /// round trip each is the difference between hundreds a second and tens of thousands.

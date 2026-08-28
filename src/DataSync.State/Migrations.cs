@@ -131,5 +131,31 @@ internal static class Migrations
         -- tools/benchmarks is where.
         CREATE INDEX IX_TaskRuns_TaskName_StartedAt ON TaskRuns(TaskName, StartedAtUtc);
         """,
+
+        """
+        -- Where a verification result is, not what it says (phase 43). The result itself is a parquet
+        -- file the TaskRunner writes straight to disk: it can be large, it is never updated, and
+        -- nothing reads it transactionally, so putting it behind the single writer would cost
+        -- responsiveness for nothing. This is the index that makes one findable.
+        CREATE TABLE VerificationResults (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            RunId TEXT NOT NULL,
+            TaskName TEXT NOT NULL,
+            MappingName TEXT NOT NULL,
+            CheckName TEXT NOT NULL,
+            CompletedAtUtc TEXT NOT NULL,
+            SourceReadAtUtc TEXT NOT NULL,
+            TargetReadAtUtc TEXT NOT NULL,
+            GroupsCompared INTEGER NOT NULL,
+            DifferingGroups INTEGER NOT NULL,
+            ResultPath TEXT NOT NULL
+        );
+        CREATE INDEX IX_VerificationResults_Task ON VerificationResults(TaskName, CompletedAtUtc);
+
+        -- One result per check per run. A run that is replayed from a journal after the owner came
+        -- back would otherwise index the same file twice — every recovery operation has to be
+        -- idempotent, and this is how this one is.
+        CREATE UNIQUE INDEX UX_VerificationResults_RunCheck ON VerificationResults(RunId, CheckName);
+        """,
     ];
 }

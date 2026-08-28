@@ -16,6 +16,8 @@ overridable — plus two bug fixes surfaced while designing this:
 5. Fix: schema/table names combined into one string and split back apart — a real bug, not a hypothetical.
 6. Fix: the auto-mapping editor silently showing the wrong source column for a row whose stored value
    isn't in the freshly loaded column list.
+7. Fix: the Setup card's SQL previews don't use Monaco, and the generated `CREATE TABLE` isn't formatted.
+8. A new inheritable "alter target table columns if missing or changed" setting.
 
 ## 1. Name inference and target autofill
 
@@ -133,14 +135,63 @@ Fix: stop relying on the browser's silent fallback. When a row's stored `sourceC
 selection or a visible "unknown column" marker — rather than letting the select render as if the first
 item were chosen. Left as-is, an operator can resave a mapping without ever noticing it silently changed.
 
+## 7. Fix: Setup card SQL previews need Monaco, and CREATE TABLE needs formatting
+
+`ProvisioningCard.tsx`'s `PlanPanel` renders plan SQL in a raw `<pre className="mono">` with an inline
+`overflowX: 'auto'` that doesn't actually contain a long statement — it still widens the page and
+produces a page-level horizontal scrollbar. `MappingPreview.tsx` already solved exactly this for the
+"SQL this runs" screen by using `CodeEditor` (Monaco, `readOnly`) instead of a `<pre>`. Swap `PlanPanel`
+to the same component, same props shape (`readOnly`, `language="sql"`).
+
+Separately, `CreateTableStatement.Build` (`DataSync.Drivers.Generic/CreateTableStatement.cs`) joins every
+column definition with `", "` onto one line:
+
+```csharp
+return $"CREATE TABLE {qualifiedTable} ({string.Join(", ", defs)}{primaryKeyClause});";
+```
+
+Change the join to a newline (plus indentation) between column definitions, so the generated DDL is
+actually formatted, independent of whatever editor displays it:
+
+```csharp
+var body = string.Join(",\n    ", defs) + primaryKeyClause;
+return $"CREATE TABLE {qualifiedTable} (\n    {body}\n);";
+```
+
+(exact formatting/indentation to taste during implementation — the point is newlines between columns,
+not a specific style).
+
+## 8. New setting: alter target table columns if missing or changed
+
+Same inheritance shape as §2's `createTargetTableIfMissing`: a new field on both `ReplicationTaskConfig`
+and `TableMappingConfig`'s provisioning block (`alterTargetTableColumnsIfMissingOrChanged` or similar),
+nullable on the mapping so absence inherits the replication's default, same `INHERITED` badge/override
+toggle in `ProvisioningCard.tsx`.
+
+Unlike `createTargetTableIfMissing`, this is real schema evolution — the target table already exists.
+Needs:
+
+- **A new `IProvisioner` action** (`ProvisioningActions.AlterTargetTable` or similar) alongside the
+  existing `EnableSourceChangeCapture`/`CreateTargetTable`.
+- **A planner** that compares the mapping's configured columns against the target's actual catalog
+  columns and emits `ALTER TABLE ADD COLUMN` for anything missing, and some form of type-change statement
+  for anything that changed — additive-and-modifying only, never `DROP COLUMN`, matching
+  `CreateTargetTable`'s own restraint (`ProvisioningConfig`'s doc comment: "additive only, never ALTER" —
+  true only because nothing needed to be yet).
+- **No new `PlanPanel`.** This stacks inside the existing **Target** plan panel, alongside the
+  `CreateTargetTable` steps it already shows — a target's plan can carry both "create if missing" and
+  "alter if present but out of shape" steps at once, gated independently by each setting's resolved
+  (inherited-or-overridden) value. One `ProvisioningPlan` per side stays the shape; this action just adds
+  more possible steps to the target side's plan, not a second side to show.
+
 ## What this phase does not build
 
-- Any change to how a mapping actually runs, or to the provisioning DDL itself.
+- Any change to how a mapping actually *runs* (the replication pipeline itself) — §7 and §8 touch
+  provisioning DDL generation specifically, not the pass that reads and writes rows.
 - A general "editable field with pencil" component library beyond what these three column-editor uses
   need — scoped to this editor first.
-- Renaming/retyping an *existing* target's real database column (schema evolution) — this is about what
-  gets written into the mapping/DDL before or at creation, same boundary phase 40 already drew for
-  editable target tables.
+- Dropping or destructively altering an existing target column — §8's `ALTER TABLE` planning is
+  additive-and-modifying only, the same restraint `CreateTargetTable` already follows.
 
 ## How to verify when built
 
@@ -165,6 +216,14 @@ item were chosen. Left as-is, an operator can resave a mapping without ever noti
   literal `.` — regression test specifically for the bug this phase fixes.
 - A mapping's row whose stored `sourceColumn` doesn't exist in freshly loaded source metadata renders as
   an explicit "unknown"/unselected state, never silently as the first column in the list.
+- Setup card SQL previews render via `CodeEditor` with syntax highlighting, and a long generated statement
+  stays contained inside its card — no page-level horizontal scrollbar.
+- A generated `CREATE TABLE` with multiple columns renders one column definition per line.
+- A replication with `alterTargetTableColumnsIfMissingOrChanged` set, and a mapping that does not override
+  it, resolves to the replication's value; a mapping that does override wins locally. A target missing a
+  mapped column, or with a mapped column whose type changed, produces non-destructive `ALTER TABLE` steps
+  stacked into the existing Target plan panel (alongside any `CreateTargetTable` steps); an
+  unmapped/removed column is never dropped.
 - Full suite green, including updated Playwright screenshots for the new landing page and the changed
   column mapping editor.
 
@@ -173,11 +232,15 @@ item were chosen. Left as-is, an operator can resave a mapping without ever noti
 - **The rename-cycle (swap) sequencing algorithm.** How provisioning safely applies a set of `renames`
   steps when two columns swap names, without double-applying or clobbering — needs real design attention,
   not just the `applied` flag's bookkeeping.
-- Exact shape/name of the new `ReplicationTaskConfig.provisioning` field.
+- Exact shape/name of the new `ReplicationTaskConfig.provisioning` field (now carrying two settings, not
+  one).
 - Whether reusing the SignalR live-run hub for bulk-create progress is a new hub or a channel on the
   existing one.
 - Whether `HookRenderer.QuoteMaybeQualified`'s free-text schema-qualified value can become a structured
   input instead of operator-typed text that gets split — or whether it stays text with clearer quoting
   rules documented instead.
+- The exact statement(s) a "changed" column type emits — a straight `ALTER COLUMN`/`MODIFY` differs enough
+  per dialect, and some type changes are not safely alterable in place at all (needs a per-dialect
+  `Unsupported` answer, the same way `CreateTargetTable` already reports one for an unmappable type).
 - Whether other combine-then-split instances exist beyond the two found by direct search — needs a
   broader audit pass, not just the two confirmed spots.

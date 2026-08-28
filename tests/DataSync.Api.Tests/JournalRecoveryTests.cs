@@ -31,7 +31,8 @@ public sealed class JournalRecoveryTests : IDisposable
         _workQueue = new WorkQueueStore(_database);
         _logs = new LogWriter(_database);
         _state = new LocalRunnerState(
-            _taskRuns, _workQueue, new RunLockStore(_database), new ChangeWatermarkStore(_database), _logs);
+            _taskRuns, _workQueue, new RunLockStore(_database), new ChangeWatermarkStore(_database),
+            new VerificationResultStore(_database), _logs);
 
         _recovery = new JournalRecovery(_state, _taskRuns, _logs, new ApiOptions
         {

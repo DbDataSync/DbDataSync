@@ -49,8 +49,9 @@ public sealed class RunExecutorTests : IDisposable
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, _runLockStore,
-                new ChangeWatermarkStore(_stateDatabase), _logWriter),
-            Scripting.ForTests(_configRepository, _repoRoot));
+                new ChangeWatermarkStore(_stateDatabase), new VerificationResultStore(_stateDatabase), _logWriter),
+            Scripting.ForTests(_configRepository, _repoRoot),
+            Path.Combine(_repoRoot, "state.db"));
     }
 
     public void Dispose()

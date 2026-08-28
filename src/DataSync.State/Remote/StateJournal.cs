@@ -34,6 +34,10 @@ public enum JournalOperation
     /// <summary>Only ever written after the target write committed, which is what makes replaying it
     /// safe: its presence is the evidence.</summary>
     SetWatermark,
+
+    /// <summary>Safe to replay for the same reason: the parquet is already on disk, and the index is
+    /// keyed on (run, check) so applying it twice writes the same row once.</summary>
+    RecordVerificationResult,
 }
 
 /// <summary>

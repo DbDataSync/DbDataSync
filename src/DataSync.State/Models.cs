@@ -20,6 +20,13 @@ public enum RunKind
 {
     Primary,
     Backfill,
+
+    /// <summary>
+    /// A comparison between a mapping's source and target — see phase 43. A run like any other, so it
+    /// gets the same queue, lock, logs and history; what it produces is a file rather than rows at the
+    /// target.
+    /// </summary>
+    Verification,
 }
 
 // Deliberately not named LogLevel — avoids ambiguity wherever this is used alongside
@@ -46,6 +53,22 @@ public sealed record TaskRunRecord(
     long RowsRead,
     long RowsWritten,
     string? ErrorSummary);
+
+/// <param name="ResultPath">Where the parquet is. The index says where; the file says what.</param>
+/// <param name="SourceReadAtUtc">When each side was read. The gap between them is what tells an
+/// operator whether a difference is drift or a defect.</param>
+public sealed record VerificationResultRecord(
+    long Id,
+    Guid RunId,
+    string TaskName,
+    string MappingName,
+    string CheckName,
+    DateTimeOffset CompletedAtUtc,
+    DateTimeOffset SourceReadAtUtc,
+    DateTimeOffset TargetReadAtUtc,
+    int GroupsCompared,
+    int DifferingGroups,
+    string ResultPath);
 
 public sealed record LogEntryRecord(
     long Id,

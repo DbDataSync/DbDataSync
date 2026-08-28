@@ -36,6 +36,7 @@ public sealed record BeginRunRequest(Guid RunId, int? Pid);
 public sealed record WorkItemRequest(long WorkItemId);
 public sealed record CompleteRunRequest(Guid RunId, RunStatus Status, long RowsRead, long RowsWritten, string? ErrorSummary);
 public sealed record SetWatermarkRequest(string TaskName, string SourceTable, string Watermark);
+public sealed record RecordVerificationResultRequest(VerificationResultRecord Result);
 public sealed record LogRequest(Guid RunId, LogSeverity Level, string Message, DateTimeOffset TimestampUtc);
 
 /// <summary>Log lines are batched: they are the highest-rate write here, and one HTTP round trip per
