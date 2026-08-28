@@ -29,13 +29,19 @@ public sealed class ProvisioningController(ProvisioningService provisioningServi
         }
     }
 
-    [HttpPost("{action}/apply")]
+    /// <summary>
+    /// Named <c>provisioningAction</c>, not <c>action</c>. <c>{action}</c> is a reserved token in an
+    /// MVC route template — it names the controller method rather than binding a segment — so a route
+    /// declaring it never matches, and this endpoint was unreachable until phase 40 tried to use it.
+    /// The URL is unchanged; only what the segment is called is.
+    /// </summary>
+    [HttpPost("{provisioningAction}/apply")]
     public async Task<ActionResult<ApplyResult>> Apply(
-        string replicationName, string mappingName, string action, CancellationToken cancellationToken)
+        string replicationName, string mappingName, string provisioningAction, CancellationToken cancellationToken)
     {
         try
         {
-            return Ok(await provisioningService.ApplyAsync(replicationName, mappingName, action, cancellationToken));
+            return Ok(await provisioningService.ApplyAsync(replicationName, mappingName, provisioningAction, cancellationToken));
         }
         catch (FileNotFoundException)
         {

@@ -113,7 +113,12 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await expect(page.getByTestId('source-side')).toContainText('INHERITED')
     await expect(page.getByTestId('source-connection-select')).toHaveCount(0)
     await selectWhenReady(page, 'source-table-select', `dbo.${SOURCE_TABLE}`)
-    await selectWhenReady(page, 'target-table-select', `dbo.${TARGET_TABLE}`)
+
+    // The target is a combobox, not a closed list — a name it does not have is a table to create
+    // (test 18). Naming one it does have works the same way.
+    await page.getByTestId('target-schema-input').fill('dbo')
+    await page.getByTestId('target-table-input').fill(TARGET_TABLE)
+    await expect(page.getByTestId('target-table-will-be-created')).toHaveCount(0)
 
     // Column mappings auto-suggest once both tables' columns load (same-name match: Id, Name).
     // The design renders rows as CSS-grid divs rather than a <table>, so count the row class.
@@ -523,5 +528,109 @@ public sealed class DropGadgets : IRowTransform
 
     await page.getByTestId('test-connection-button').click()
     await expect(page.getByTestId('connection-test-result')).toContainText('reachable', { timeout: 20_000 })
+  })
+
+  test('18 - a target table that does not exist is named, created from the plan, and replicated into', async ({ page }) => {
+    // The complaint phase 40 answers: provisioning was built, tested, and unreachable from the screen
+    // where an operator would want it, because the target was a closed list of tables that already
+    // existed.
+    // Provisioning, a save, an apply and a run in one test — more steps than any other here, and the
+    // default budget is one run's worth.
+    test.setTimeout(180_000)
+
+    const NEW_SOURCE = 'PwSrcOrders'
+    const NEW_TARGET = 'PwTgtOrders'
+    const NEW_MAPPING = 'orders'
+    // Its own replication, not the one the earlier tests build up: that one carries test 16's
+    // row-transform binding at the replication level, which every mapping under it inherits and
+    // which expects a column this source does not have.
+    const PROVISIONED_REPLICATION = 'playwright-provisioned'
+
+    // Its own source table, not the one test 05 uses: a Primary watermark is per source table, so
+    // sharing one would mean this mapping's first pass saw only changes since that watermark — no
+    // rows, and nothing to prove.
+    runSql(`
+      IF OBJECT_ID('dbo.${NEW_TARGET}', 'U') IS NOT NULL DROP TABLE dbo.${NEW_TARGET};
+      IF OBJECT_ID('dbo.${NEW_SOURCE}', 'U') IS NOT NULL DROP TABLE dbo.${NEW_SOURCE};
+      CREATE TABLE dbo.${NEW_SOURCE} (Id INT NOT NULL PRIMARY KEY, Description NVARCHAR(60) NOT NULL);
+      ALTER TABLE dbo.${NEW_SOURCE} ENABLE CHANGE_TRACKING;
+      INSERT INTO dbo.${NEW_SOURCE} (Id, Description) VALUES (1, 'first order'), (2, 'second order');
+    `, DB_NAME)
+
+    await page.goto('/replications')
+    await page.getByTestId('new-replication-button').click()
+    await page.getByTestId('replication-name-input').fill(PROVISIONED_REPLICATION)
+    await page.getByTestId('create-replication-button').click()
+    await expect(page).toHaveURL(new RegExp(`/replications/${PROVISIONED_REPLICATION}/overview$`))
+
+    await selectWhenReady(page, 'task-source-connection-select', SRC_CONNECTION_NAME)
+    await selectWhenReady(page, 'task-source-database-select', DB_NAME)
+    await selectWhenReady(page, 'task-target-connection-select', TGT_CONNECTION_NAME)
+    await selectWhenReady(page, 'task-target-database-select', DB_NAME)
+    await page.getByTestId('save-settings-button').click()
+
+    await page.getByTestId('tab-mappings').click()
+    await page.getByTestId('new-mapping-button').click()
+    await page.getByTestId('mapping-name-input').fill(NEW_MAPPING)
+
+    await selectWhenReady(page, 'source-table-select', `dbo.${NEW_SOURCE}`)
+
+    await page.getByTestId('target-schema-input').fill('dbo')
+    await page.getByTestId('target-table-input').fill(NEW_TARGET)
+    await expect(page.getByTestId('target-table-will-be-created')).toBeVisible({ timeout: 15_000 })
+
+    // The target has no catalog to read, so its columns are the source's — and this is not cosmetic:
+    // the CREATE TABLE is generated from the mapping's column mappings, so what is listed here is
+    // literally what gets created.
+    const rows = page.getByTestId('column-mappings-table').locator('.grid-row')
+    await expect(rows).toHaveCount(2, { timeout: 15_000 })
+    await expect(page.getByTestId('column-mappings-table')).toContainText("the source's columns")
+    await expect(page.getByTestId('provisioning-after-save-hint')).toBeVisible()
+    await shot(page, '23-new-target-table.png')
+
+    // Saving a mapping whose target does not exist stays possible — it is a legitimate intermediate
+    // state, and blocking it would force provisioning before the operator can describe what they want.
+    await page.getByTestId('save-mapping-button').click()
+    await expect(page).toHaveURL(new RegExp(`/replications/${PROVISIONED_REPLICATION}/mappings/${NEW_MAPPING}$`))
+
+    // Reopened, it still shows the name it was given and still says the table is not there.
+    await page.reload()
+    await expect(page.getByTestId('target-table-input')).toHaveValue(NEW_TARGET, { timeout: 15_000 })
+    await expect(page.getByTestId('target-table-will-be-created')).toBeVisible({ timeout: 15_000 })
+
+    // The Setup card now plans against it: the same code path an unattended run's
+    // CreateTargetTableIfMissing uses, so this DDL is the DDL that would have run anyway.
+    const targetPlan = page.getByTestId('provisioning-plan-target')
+    await expect(targetPlan).toContainText('missing', { timeout: 20_000 })
+    await expect(targetPlan).toContainText('CREATE TABLE')
+    await expect(targetPlan).toContainText('Description')
+    await shot(page, '24-create-table-plan.png')
+
+    page.once('dialog', (d) => d.accept())
+    await targetPlan.getByTestId('provisioning-plan-target-apply').click()
+
+    // Each step's outcome, not just the resulting state: a step can fail without the request failing.
+    await expect(targetPlan.getByTestId('provisioning-plan-target-result')).toContainText('✓', { timeout: 20_000 })
+    await expect(targetPlan).toContainText('satisfied', { timeout: 20_000 })
+
+    expect(querySql(`SELECT COUNT(*) FROM sys.tables WHERE name = '${NEW_TARGET}';`, DB_NAME)).toContain('1')
+
+    // And the loop closes: the mapping runs against the table it just described into existence.
+    // Asserted on this mapping's own runs, not the shared history — the replication is on a
+    // continuous schedule, so a pass that ran before Apply and failed for the very reason this test
+    // is about is expected, and a history row saying "succeeded" may be someone else's.
+    await page.getByTestId('tab-runs').click()
+    await page.getByTestId('trigger-run-button').click()
+
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/replications/${PROVISIONED_REPLICATION}/runs?limit=30`)
+      const runs: { mappingName: string; status: string; errorSummary: string | null }[] = await response.json()
+      return runs
+        .filter((r) => r.mappingName === NEW_MAPPING)
+        .map((r) => `${r.status}${r.errorSummary ? `: ${r.errorSummary}` : ''}`)
+    }, { timeout: 90_000 }).toContain('Succeeded')
+
+    expect(querySql(`SET NOCOUNT ON; SELECT Description FROM dbo.${NEW_TARGET} ORDER BY Id;`, DB_NAME))
+      .toContain('second order')
   })
 })

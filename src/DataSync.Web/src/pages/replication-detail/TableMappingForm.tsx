@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
-import { useConnections, useDeleteTableMapping, useReplication, useUpsertTableMapping } from '../../api/hooks'
+import { useConnections, useDeleteTableMapping, useReplication, useTables, useUpsertTableMapping } from '../../api/hooks'
+import { tableExists } from '../../api/tableExists'
 import type { ColumnMapping, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec } from '../../api/types'
 import { MappingSide } from './MappingSide'
 import { resolveSide } from '../../api/resolveEndpoint'
@@ -40,6 +41,18 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
   const resolvedSource = resolveSide(task?.endpoints?.source ?? null, source)
   const resolvedTarget = resolveSide(task?.endpoints?.target ?? null, target)
   const sourceConnection = connections?.find((c) => c.name === resolvedSource.connectionName)
+
+  // Whether the target names a table the database already has. Shared by the picker (which says so)
+  // and the column editor (which takes the source's columns when it does not). The same query the
+  // picker runs, so this costs nothing.
+  const { data: targetTables } = useTables(
+    resolvedTarget.connectionName || undefined, resolvedTarget.database || undefined)
+  const targetExists = tableExists(targetTables, resolvedTarget.schema, resolvedTarget.table)
+
+  // The Setup card plans against the mapping as *saved*, so a target retyped since then is not what
+  // it is describing.
+  const targetChangedSinceSave = !!existing
+    && (existing.targets[0]?.schema !== target.schema || existing.targets[0]?.table !== target.table)
 
   const canSave = name
     && resolvedSource.connectionName && resolvedSource.database && source.table
@@ -125,6 +138,7 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
           spec={target}
           onChange={setTarget}
           testIdPrefix="target"
+          allowNewTable
         />
       </div>
 
@@ -133,6 +147,7 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
         target={resolvedTarget}
         mappings={columnMappings}
         onChange={setColumnMappings}
+        targetExists={targetExists}
       />
 
       <ScriptBindingsCard
@@ -151,7 +166,19 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
           mappingName={existing.name}
           provisioning={provisioning}
           onChangeProvisioning={setProvisioning}
+          stale={targetChangedSinceSave}
         />
+      )}
+
+      {!existing && targetExists === false && target.table && (
+        <div className="card">
+          <div className="card-body">
+            <span className="hint" data-testid="provisioning-after-save-hint">
+              <strong>{target.schema || 'dbo'}.{target.table}</strong> does not exist yet. Save the
+              mapping and the Setup card below will show the <code>CREATE TABLE</code> it would run.
+            </span>
+          </div>
+        </div>
       )}
     </form>
   )

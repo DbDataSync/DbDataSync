@@ -1,5 +1,6 @@
 import { Field } from '../../components/Field'
 import { useConnections, useDatabases, useTables } from '../../api/hooks'
+import { tableExists } from '../../api/tableExists'
 import type { EndpointRef, TableSpec } from '../../api/types'
 
 interface Props {
@@ -9,6 +10,14 @@ interface Props {
   spec: TableSpec
   onChange: (next: TableSpec) => void
   testIdPrefix: string
+  /**
+   * Target side only. Lets the operator name a table the database does not have yet, so provisioning
+   * can create it — the reason this control exists at all.
+   *
+   * Not offered on the source, where a name that is not in the catalog is a typo rather than an
+   * intention: there is no such thing as creating a source table to read from.
+   */
+  allowNewTable?: boolean
 }
 
 /**
@@ -19,7 +28,7 @@ interface Props {
  * table picker cascades from the *resolved* endpoint either way, so choosing a table works the same
  * whichever side of that toggle you are on.
  */
-export function MappingSide({ label, inherited, spec, onChange, testIdPrefix }: Props) {
+export function MappingSide({ label, inherited, spec, onChange, testIdPrefix, allowNewTable = false }: Props) {
   const overriding = spec.connectionName !== null || spec.database !== null
 
   const connectionName = spec.connectionName ?? inherited?.connectionName ?? ''
@@ -30,6 +39,22 @@ export function MappingSide({ label, inherited, spec, onChange, testIdPrefix }: 
   const { data: tables } = useTables(connectionName || undefined, database || undefined)
 
   const selectedTableKey = spec.schema && spec.table ? `${spec.schema}.${spec.table}` : ''
+  const exists = tableExists(tables, spec.schema, spec.table)
+
+  const schemas = [...new Set((tables ?? []).map((t) => t.schema))]
+  const tablesInSchema = (tables ?? []).filter((t) => t.schema === spec.schema)
+
+  /**
+   * Picking a name out of the suggestions brings its schema with it, so choosing `Orders` from a list
+   * that shows it under `sales` does not silently leave the schema box pointing somewhere else.
+   * Only when the name is unambiguous — two schemas holding a table of the same name is exactly when
+   * guessing would be wrong.
+   */
+  const setTableName = (table: string) => {
+    const matches = (tables ?? []).filter((t) => t.table === table)
+    const schema = matches.length === 1 ? matches[0].schema : spec.schema
+    onChange({ ...spec, schema, table })
+  }
 
   // Turning the override on starts from whatever is currently in effect, so it is a starting point
   // rather than a blank form; turning it off drops back to inheriting.
@@ -95,23 +120,67 @@ export function MappingSide({ label, inherited, spec, onChange, testIdPrefix }: 
           </Field>
         </div>
 
-        <Field label="Table">
-          <select
-            className="select"
-            value={selectedTableKey}
-            disabled={!database}
-            onChange={(e) => {
-              const [schema, table] = e.target.value.split('.')
-              onChange({ ...spec, schema: schema ?? '', table: table ?? '' })
-            }}
-            data-testid={`${testIdPrefix}-table-select`}
-          >
-            <option value="">Select…</option>
-            {tables?.map((t) => (
-              <option key={`${t.schema}.${t.table}`} value={`${t.schema}.${t.table}`}>{t.schema}.{t.table}</option>
-            ))}
-          </select>
-        </Field>
+        {allowNewTable ? (
+          <>
+            {/* Schema and table stay two fields rather than one `dbo.Orders` box. Parsing that back
+                out is a guess about quoting, and it is wrong the moment a name contains a dot. */}
+            <div className="form-grid">
+              <Field label="Schema">
+                <input
+                  className="input"
+                  list={`${testIdPrefix}-schema-options`}
+                  value={spec.schema}
+                  disabled={!database}
+                  placeholder="dbo"
+                  onChange={(e) => onChange({ ...spec, schema: e.target.value })}
+                  data-testid={`${testIdPrefix}-schema-input`}
+                />
+                <datalist id={`${testIdPrefix}-schema-options`}>
+                  {schemas.map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </Field>
+
+              <Field label="Table">
+                <input
+                  className="input"
+                  list={`${testIdPrefix}-table-options`}
+                  value={spec.table}
+                  disabled={!database}
+                  onChange={(e) => setTableName(e.target.value)}
+                  data-testid={`${testIdPrefix}-table-input`}
+                />
+                <datalist id={`${testIdPrefix}-table-options`}>
+                  {tablesInSchema.map((t) => <option key={t.table} value={t.table} />)}
+                </datalist>
+              </Field>
+            </div>
+
+            {exists === false && (
+              <div className="hint" data-testid={`${testIdPrefix}-table-will-be-created`}>
+                <span className="badge badge-accent">NEW</span>{' '}
+                does not exist yet — save the mapping and apply the plan in Setup to create it
+              </div>
+            )}
+          </>
+        ) : (
+          <Field label="Table">
+            <select
+              className="select"
+              value={selectedTableKey}
+              disabled={!database}
+              onChange={(e) => {
+                const [schema, table] = e.target.value.split('.')
+                onChange({ ...spec, schema: schema ?? '', table: table ?? '' })
+              }}
+              data-testid={`${testIdPrefix}-table-select`}
+            >
+              <option value="">Select…</option>
+              {tables?.map((t) => (
+                <option key={`${t.schema}.${t.table}`} value={`${t.schema}.${t.table}`}>{t.schema}.{t.table}</option>
+              ))}
+            </select>
+          </Field>
+        )}
       </div>
     </div>
   )

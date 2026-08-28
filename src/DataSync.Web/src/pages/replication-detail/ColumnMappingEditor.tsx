@@ -7,6 +7,13 @@ interface Props {
   target: ResolvedRef
   mappings: ColumnMapping[]
   onChange: (mappings: ColumnMapping[]) => void
+  /**
+   * False when the target names a table provisioning has yet to create — see below. `undefined` while
+   * the catalog is still loading, which is neither: asking for the columns of a table that may not be
+   * there is a request that 404s, and assuming it is missing would flash the source's columns at
+   * someone who picked an existing table.
+   */
+  targetExists: boolean | undefined
 }
 
 const COLUMNS = '1fr 26px 1fr 1.3fr 80px'
@@ -21,10 +28,20 @@ const COLUMNS = '1fr 26px 1fr 1.3fr 80px'
  * this process and not by the target. `{{column}}` stands for the column being transformed, and has
  * to, because the reference is not spelled the same way in every reader's statement (the Change
  * Tracking reader joins the source table under an alias). See phase 22.
+ *
+ * **When the target does not exist yet, its columns are the source's.** There is no catalog to read,
+ * and inventing an empty list would leave the operator with nothing to map — but this is not merely a
+ * convenience to fill the screen. `ProvisioningService` builds the `CREATE TABLE` from the mapping's
+ * *column mappings*, so what is listed here is literally what gets created. Showing the source's
+ * columns is the only answer that makes the table that appears match the table that was described.
  */
-export function ColumnMappingEditor({ source, target, mappings, onChange }: Props) {
+export function ColumnMappingEditor({ source, target, mappings, onChange, targetExists }: Props) {
   const { data: sourceColumns } = useColumns(source.connectionName, source.database, source.schema, source.table)
-  const { data: targetColumns } = useColumns(target.connectionName, target.database, target.schema, target.table)
+  // Not asked for at all when the table is not there: the request would 404 and be retried, and the
+  // answer is already known.
+  const { data: catalogTargetColumns } = useColumns(
+    target.connectionName, target.database, target.schema, targetExists === true ? target.table : undefined)
+  const targetColumns = targetExists === false ? sourceColumns : catalogTargetColumns
   const [columnToAdd, setColumnToAdd] = useState('')
 
   useEffect(() => {
@@ -38,7 +55,9 @@ export function ColumnMappingEditor({ source, target, mappings, onChange }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceColumns, targetColumns])
 
-  if (!sourceColumns || !targetColumns) {
+  // target.table is checked separately: with no target chosen at all, targetColumns falls back to the
+  // source's and would otherwise render a full editor for a table nobody has named.
+  if (!sourceColumns || !targetColumns || !target.table) {
     return (
       <div className="card">
         <div className="card-head tight"><span className="card-title sm">Column mappings</span></div>
@@ -48,6 +67,8 @@ export function ColumnMappingEditor({ source, target, mappings, onChange }: Prop
   }
 
   const typeOf = (name: string) => sourceColumns.find((c) => c.name === name)?.nativeType
+  // For a table that does not exist yet this reads the source's key, which is what the generated
+  // CREATE TABLE will carry over.
   const isPk = (name: string) => targetColumns.find((c) => c.name === name)?.isPrimaryKey
   const mapped = new Set(mappings.map((m) => m.targetColumn))
   const unmapped = targetColumns.filter((tc) => !mapped.has(tc.name))
@@ -66,8 +87,10 @@ export function ColumnMappingEditor({ source, target, mappings, onChange }: Prop
       <div className="card-head tight">
         <span className="card-title sm">Column mappings</span>
         <span className="card-note">
-          {mappings.length} of {targetColumns.length} target columns mapped · transforms are SQL in the
-          source's dialect, with <code>{'{{column}}'}</code> for the column itself
+          {mappings.length} of {targetColumns.length} target columns mapped ·{' '}
+          {targetExists === false
+            ? <>the target does not exist yet, so these are the source's columns — they are what will be created</>
+            : <>transforms are SQL in the source's dialect, with <code>{'{{column}}'}</code> for the column itself</>}
         </span>
         <button type="button" className="btn btn-sm spacer" onClick={autoMap}>Auto-map by name</button>
       </div>

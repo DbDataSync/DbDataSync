@@ -45,5 +45,12 @@ public sealed class MetadataController(MetadataService metadataService) : Contro
         {
             return NotFound();
         }
+        catch (InvalidOperationException ex)
+        {
+            // A table that is not there is a 404, not a fault. The UI asks about tables that may not
+            // exist yet (phase 40), and a 500 there reads as "the server is broken" rather than
+            // "there is no such table".
+            return NotFound(new { error = ex.Message });
+        }
     }
 }
