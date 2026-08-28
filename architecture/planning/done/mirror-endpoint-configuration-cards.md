@@ -1,6 +1,6 @@
 # Mirror endpoint configuration between Overview and Mapping, and stop coupling table pickers to overrides
 
-**Status: resolved 2026-08-28 — arrived fully specified, no open questions to work through.**
+**Status: resolved 2026-08-28, refined same day with general UX items.**
 
 ## The note as given
 
@@ -53,6 +53,34 @@ Neither matches the target shape, and they don't match each other.
 - Table selection behavior itself — already correct, per above.
 - The override toggle on `MappingSide` — still governs connection/database only.
 - Anything about `EndpointFields`'s actual fields (Connection, Database) beyond their container.
+
+## Refinements (2026-08-28)
+
+**The "inherited by N mappings" note stays, and appears on both cards, not just one shared header.**
+The first pass suggested it needed a new single home once `EndpointsCard` splits in two. It doesn't need
+consolidating — Source and Target can each be overridden independently by a given mapping, so the note is
+genuinely per-side information (whether *this* side is inherited or overridden varies mapping to mapping),
+and belongs on both cards rather than being said once above the pair.
+
+**This becomes a shared component**, used by both `EndpointsCard` (Overview) and the Source/Target pair
+in `TableMappingForm` (Mapping) — not two implementations kept in sync by hand. This is the direct fix for
+"prevent future divergence": the reason the two screens drifted apart before is that there was never a
+single piece of code responsible for both.
+
+**Source and target each get a consistent accent color**, applied as a **top border accent** on their
+card, and used the same way everywhere else in the application a side is shown (not just this card pair)
+— so an operator builds an association between a color and "this is the source side" / "this is the
+target side" that holds regardless of which screen they're on. Picking the actual two colors is an
+implementation detail, not a planning one, but they need to be chosen once, centrally (a CSS
+variable/token pair), not per-component.
+
+**Remove the duplicated horizontal navigation.** `AppShell`'s vertical icon rail already links
+Replications, Connections and Scripts. `SectionTabs` — a horizontal tab bar repeating the same three
+destinations — is rendered by five separate pages (`ReplicationsPage`, `ConnectionsPage`, `ScriptsPage`,
+`ConnectionEditPage`, `ScriptEditPage`) via `AppShell`'s `tabs` prop. One nav already covers this; the
+second is pure duplication and should go. This is unrelated to the endpoint-card work itself but was
+raised alongside it as a general UX cleanup, and is small enough to fold into the same phase rather than
+spinning up a separate one.
 
 ---
 

@@ -1,9 +1,12 @@
 import { Field } from '../../components/Field'
+import { EndpointSideCard } from '../../components/EndpointSidePair'
 import { useConnections, useDatabases, useTables } from '../../api/hooks'
 import { tableExists } from '../../api/tableExists'
 import type { EndpointRef, TableSpec } from '../../api/types'
 
 interface Props {
+  /** Which side this is: the card's accent colour and its title come from it. */
+  side: 'source' | 'target'
   label: string
   /** The replication's endpoint for this side — what an un-overridden mapping uses. */
   inherited: EndpointRef | null
@@ -28,7 +31,7 @@ interface Props {
  * table picker cascades from the *resolved* endpoint either way, so choosing a table works the same
  * whichever side of that toggle you are on.
  */
-export function MappingSide({ label, inherited, spec, onChange, testIdPrefix, allowNewTable = false }: Props) {
+export function MappingSide({ side, label, inherited, spec, onChange, testIdPrefix, allowNewTable = false }: Props) {
   const overriding = spec.connectionName !== null || spec.database !== null
 
   const connectionName = spec.connectionName ?? inherited?.connectionName ?? ''
@@ -64,23 +67,26 @@ export function MappingSide({ label, inherited, spec, onChange, testIdPrefix, al
       : { ...spec, connectionName, database })
 
   return (
-    <div className="card" data-testid={`${testIdPrefix}-side`}>
-      <div className="card-head tight">
-        <span className="card-title sm">{label}</span>
-        {!overriding && <span className="badge">INHERITED</span>}
-        <span className="spacer row" style={{ gap: 7 }}>
-          <button
-            type="button"
-            className={`toggle ${overriding ? 'on' : ''}`}
-            onClick={toggleOverride}
-            aria-pressed={overriding}
-            data-testid={`${testIdPrefix}-override-toggle`}
-          />
-          <span style={{ font: '500 11.5px var(--ui)', color: 'var(--ink-4)' }}>Override for this table</span>
-        </span>
-      </div>
-
-      <div className="card-body">
+    <EndpointSideCard
+      side={side}
+      title={label}
+      testId={`${testIdPrefix}-side`}
+      head={
+        <>
+          {!overriding && <span className="badge">INHERITED</span>}
+          <span className="spacer row" style={{ gap: 7 }}>
+            <button
+              type="button"
+              className={`toggle ${overriding ? 'on' : ''}`}
+              onClick={toggleOverride}
+              aria-pressed={overriding}
+              data-testid={`${testIdPrefix}-override-toggle`}
+            />
+            <span style={{ font: '500 11.5px var(--ui)', color: 'var(--ink-4)' }}>Override for this table</span>
+          </span>
+        </>
+      }
+    >
         <div className="form-grid">
           <Field label="Connection">
             {overriding ? (
@@ -181,7 +187,6 @@ export function MappingSide({ label, inherited, spec, onChange, testIdPrefix, al
             </select>
           </Field>
         )}
-      </div>
-    </div>
+    </EndpointSideCard>
   )
 }

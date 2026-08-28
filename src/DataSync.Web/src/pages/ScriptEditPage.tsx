@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { AppShell, SectionTabs } from '../components/AppShell'
+import { AppShell } from '../components/AppShell'
 import { ScriptTestPanel } from './script-edit/ScriptTestPanel'
 import { CodeEditor } from '../components/CodeEditor'
 import { ErrorBanner } from '../components/ErrorBanner'
@@ -68,7 +68,7 @@ export function ScriptEditPage() {
 
   if (!draft) {
     return (
-      <AppShell crumbs={crumbs} tabs={<SectionTabs />}>
+      <AppShell crumbs={crumbs}>
         <div className="pane"><span className="hint">Loading…</span></div>
       </AppShell>
     )
@@ -108,7 +108,6 @@ export function ScriptEditPage() {
       crumbs={crumbs}
       tabs={
         <>
-          <SectionTabs />
           <div className="actions">
             <button
               className="btn btn-chrome"

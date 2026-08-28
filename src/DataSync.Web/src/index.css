@@ -43,6 +43,13 @@
   --accent-row: #f0f3f1;
   --accent-row-alt: #f7f9f8;
 
+  /* Which side of a mapping you are looking at, as a colour. Defined here rather than per component
+     so the association holds everywhere a side is shown — an operator who learns "teal is where it
+     comes from" should not have to relearn it on the next screen. Deliberately not the accent green,
+     which already means "this is the active thing". */
+  --accent-source: #2a6f97;
+  --accent-target: #8a5a2b;
+
   --ok: #12a06a;
   --warn: #d1912b;
   --bad: #c9522e;
@@ -202,6 +209,36 @@ button { font-family: inherit; }
   background: var(--surface);
 }
 .card.flush { overflow: hidden; }
+
+/* A source or target card, marked by a top border in its side's colour. A 2px border rather than a
+   tinted background: the cards sit beside each other and a wash of colour on a whole card competes
+   with the form controls inside it. */
+.card.side-source { border-top: 2px solid var(--accent-source); }
+.card.side-target { border-top: 2px solid var(--accent-target); }
+.card-title.side-source { color: var(--accent-source); }
+.card-title.side-target { color: var(--accent-target); }
+
+/* Source, arrow, target. The arrow is a grid column rather than a border or a pseudo-element so it
+   stays put when the two cards are different heights, which they are while one side is still being
+   filled in. */
+.side-pair {
+  display: grid;
+  grid-template-columns: 1fr 28px 1fr;
+  gap: 0;
+  align-items: stretch;
+}
+.side-pair > .side-arrow {
+  display: flex; align-items: center; justify-content: center;
+  font: 400 13px var(--ui); color: var(--ink-faint);
+}
+@media (max-width: 900px) {
+  /* Stacked, and the arrow turns to point down rather than disappearing — it is the thing that says
+     which way the data moves. */
+  .side-pair { grid-template-columns: 1fr; }
+  .side-pair > .side-arrow { height: 22px; }
+  .side-pair > .side-arrow::before { content: "↓"; }
+  .side-pair > .side-arrow > span { display: none; }
+}
 .card-head {
   min-height: 36px;
   display: flex; align-items: center; gap: 9px;

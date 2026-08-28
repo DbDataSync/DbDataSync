@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AppShell, SectionTabs } from '../components/AppShell'
+import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import {
@@ -81,7 +81,7 @@ export function ReplicationsPage() {
   }
 
   return (
-    <AppShell crumbs={[{ label: 'Replications' }]} tabs={<SectionTabs />}>
+    <AppShell crumbs={[{ label: 'Replications' }]}>
       <aside className="sidebar">
         <div className="sidebar-head"><span>Explorer</span></div>
         <div className="sidebar-list">

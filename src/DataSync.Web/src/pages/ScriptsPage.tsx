@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { AppShell, SectionTabs } from '../components/AppShell'
+import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { useScripts } from '../api/hooks'
 import type { ScriptUsage } from '../api/types'
@@ -15,7 +15,7 @@ export function ScriptsPage() {
   const navigate = useNavigate()
 
   return (
-    <AppShell crumbs={[{ label: 'Scripts' }]} tabs={<SectionTabs />}>
+    <AppShell crumbs={[{ label: 'Scripts' }]}>
       <div className="pane">
         <div className="page-head">
           <h1 className="page-title">Scripts</h1>

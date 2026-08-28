@@ -6,6 +6,7 @@ import { useConnections, useDeleteTableMapping, useReplication, useTables, useUp
 import { tableExists } from '../../api/tableExists'
 import type { ColumnMapping, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec } from '../../api/types'
 import { MappingSide } from './MappingSide'
+import { EndpointSidePair } from '../../components/EndpointSidePair'
 import { resolveSide } from '../../api/resolveEndpoint'
 import { CodeEditor } from '../../components/CodeEditor'
 import { ColumnMappingEditor } from './ColumnMappingEditor'
@@ -114,42 +115,49 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
         </div>
       )}
 
-      <div className="form-grid">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <EndpointSidePair
+        source={
           <MappingSide
+            side="source"
             label="Source"
             inherited={task?.endpoints?.source ?? null}
             spec={source}
             onChange={(v) => setSource({ ...v, filter: source.filter })}
             testIdPrefix="source"
           />
-          <div className="card">
-            <div className="card-body">
-              <Field label="Source filter — optional SQL predicate">
-                {/* An editor rather than an input: a predicate that narrows a real table outgrows forty
-                    visible characters quickly, and this one is spliced into the reader's WHERE clause
-                    verbatim. */}
-                <CodeEditor
-                  value={source.filter ?? ''}
-                  language="sql"
-                  onChange={(filter) => setSource({ ...source, filter: filter.trim() ? filter : null })}
-                  minLines={2}
-                  maxLines={8}
-                  testId="source-filter-editor"
-                />
-              </Field>
-            </div>
-          </div>
-        </div>
+        }
+        target={
+          <MappingSide
+            side="target"
+            label="Target"
+            inherited={task?.endpoints?.target ?? null}
+            spec={target}
+            onChange={setTarget}
+            testIdPrefix="target"
+            allowNewTable
+          />
+        }
+      />
 
-        <MappingSide
-          label="Target"
-          inherited={task?.endpoints?.target ?? null}
-          spec={target}
-          onChange={setTarget}
-          testIdPrefix="target"
-          allowNewTable
-        />
+      {/* Its own row beneath both sides rather than stacked under Source alone. It belongs to the
+          source, but hanging it off one card made the two sides different heights and stopped them
+          being comparable at a glance — which is the whole reason to put them next to each other. */}
+      <div className="card">
+        <div className="card-body">
+          <Field label="Source filter — optional SQL predicate">
+            {/* An editor rather than an input: a predicate that narrows a real table outgrows forty
+                visible characters quickly, and this one is spliced into the reader's WHERE clause
+                verbatim. */}
+            <CodeEditor
+              value={source.filter ?? ''}
+              language="sql"
+              onChange={(filter) => setSource({ ...source, filter: filter.trim() ? filter : null })}
+              minLines={2}
+              maxLines={8}
+              testId="source-filter-editor"
+            />
+          </Field>
+        </div>
       </div>
 
       <ColumnMappingEditor

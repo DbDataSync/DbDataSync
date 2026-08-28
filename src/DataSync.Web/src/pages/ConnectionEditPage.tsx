@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { AppShell, SectionTabs } from '../components/AppShell'
+import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import { KeyValueTable } from '../components/KeyValueTable'
@@ -80,7 +80,7 @@ export function ConnectionEditPage() {
 
   if (!draft) {
     return (
-      <AppShell crumbs={crumbs} tabs={<SectionTabs />}>
+      <AppShell crumbs={crumbs}>
         <div className="pane"><span className="hint">Loading…</span></div>
       </AppShell>
     )
@@ -91,7 +91,6 @@ export function ConnectionEditPage() {
       crumbs={crumbs}
       tabs={
         <>
-          <SectionTabs />
           <div className="actions">
             {canTest && (
               <button

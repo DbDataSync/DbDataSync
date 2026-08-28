@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { useApplyProvisioning, useProvisioning } from '../../api/hooks'
+import type { EndpointSide } from '../../components/EndpointSidePair'
 import type { ApplyResult, ProvisioningConfig, ProvisioningPlan, ProvisioningState } from '../../api/types'
 
 const dotByState: Record<ProvisioningState, string> = {
@@ -19,8 +20,12 @@ function ProvisioningStateBadge({ state }: { state: ProvisioningState }) {
   )
 }
 
-function PlanPanel({ label, testId, plan, onApply, applying, result }: {
+function PlanPanel({ label, side, testId, plan, onApply, applying, result }: {
   label: string
+  /** The same accent the endpoint cards use. The colour-to-side association is worth holding
+   * everywhere a side is shown; the arrow is not, because these two are setup steps rather than a
+   * flow from one to the other. */
+  side: EndpointSide
   testId: string
   plan: ProvisioningPlan
   onApply: () => void
@@ -45,9 +50,9 @@ function PlanPanel({ label, testId, plan, onApply, applying, result }: {
   }
 
   return (
-    <div className="card" data-testid={testId}>
+    <div className={`card side-${side}`} data-testid={testId} data-side={side}>
       <div className="card-head">
-        <span className="card-title">{label}</span>
+        <span className={`card-title side-${side}`}>{label}</span>
         <ProvisioningStateBadge state={plan.state} />
       </div>
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -153,6 +158,7 @@ export function ProvisioningCard({ replicationName, mappingName, provisioning, o
         <div className="form-grid">
           <PlanPanel
             label="Source"
+            side="source"
             testId="provisioning-plan-source"
             plan={plans.source}
             applying={applySource.isPending}
@@ -161,6 +167,7 @@ export function ProvisioningCard({ replicationName, mappingName, provisioning, o
           />
           <PlanPanel
             label="Target"
+            side="target"
             testId="provisioning-plan-target"
             plan={plans.target}
             applying={applyTarget.isPending}

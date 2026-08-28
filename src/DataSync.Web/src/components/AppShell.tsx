@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
-import { tabClass } from './tabClass'
 import { CodeIcon, DatabaseIcon, FlowIcon, GridIcon, LogoIcon } from './icons'
 
 /**
@@ -91,16 +90,4 @@ export interface Crumb {
    * none for anyone navigating by headings.
    */
   heading?: boolean
-}
-
-/** The two top-level sections, shown on the list screens. Which one is lit comes from the URL, so no
- * screen has to declare it. */
-export function SectionTabs() {
-  return (
-    <>
-      <NavLink to="/replications" className={tabClass} data-testid="tab-replications">Replications</NavLink>
-      <NavLink to="/connections" className={tabClass} data-testid="tab-connections">Connections</NavLink>
-      <NavLink to="/scripts" className={tabClass} data-testid="tab-scripts">Scripts</NavLink>
-    </>
-  )
 }

@@ -102,7 +102,8 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     // Phase 23 put the scripts card first because it was the new thing, which is the oldest reason to
     // get an ordering wrong. Endpoints are what a replication *is*.
     await page.goto(`/replications/${REPLICATION_NAME}/overview`)
-    await expect(page.locator('.card-title').first()).toContainText('Endpoints', { timeout: 15_000 })
+    // The endpoints pair is the first thing in the form; the scripts card is below the pipeline.
+    await expect(page.locator('form .card').first()).toHaveAttribute('data-side', 'source', { timeout: 15_000 })
 
     // And the scripts card is one line until it has something to say.
     await expect(page.getByTestId('script-bindings-toggle')).toContainText('Custom transforms and providers')
@@ -814,5 +815,74 @@ public sealed class Shout : IValueColumnExpression
     await expect(card).toContainText('Last 7d')
     await page.getByTestId('metrics-window-1h').click()
     await expect(card).toContainText('Last 1h')
+  })
+
+  test('22 - source and target are the same pair of cards on both screens that configure them', async ({ page }) => {
+    // Two screens answer "where does this read from and write to", and they had drifted into two
+    // unrelated layouts because nothing made them share anything.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+
+    const overviewPair = page.locator('[data-testid="endpoints-card"] .side-pair')
+    await expect(overviewPair).toBeVisible({ timeout: 15_000 })
+    await expect(overviewPair.locator('[data-side="source"]')).toBeVisible()
+    await expect(overviewPair.locator('[data-side="target"]')).toBeVisible()
+    await expect(overviewPair.locator('.side-arrow')).toBeVisible()
+
+    // The note is per side, not in a shared header: a mapping overrides source and target
+    // independently, so whether *this* side is the inherited one is per-side information.
+    await expect(overviewPair.locator('[data-side="source"]')).toContainText('inherited by')
+    await expect(overviewPair.locator('[data-side="target"]')).toContainText('inherited by')
+
+    // Each side's accent, from the tokens rather than from anything local.
+    const sourceBorder = await overviewPair.locator('[data-side="source"]')
+      .evaluate((el) => getComputedStyle(el).borderTopColor)
+    const targetBorder = await overviewPair.locator('[data-side="target"]')
+      .evaluate((el) => getComputedStyle(el).borderTopColor)
+    expect(sourceBorder).not.toBe(targetBorder)
+
+    await shot(page, '28-overview-endpoints.png')
+
+    // The same pair, from the same component, on the mapping editor.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    const mappingPair = page.locator('.side-pair')
+    await expect(mappingPair.locator('[data-testid="source-side"]')).toBeVisible({ timeout: 15_000 })
+    await expect(mappingPair.locator('[data-testid="target-side"]')).toBeVisible()
+    await expect(await mappingPair.locator('[data-side="source"]')
+      .evaluate((el) => getComputedStyle(el).borderTopColor)).toBe(sourceBorder)
+
+    // Equal height, which is what makes them comparable — the source filter used to hang off the
+    // Source card and made them different.
+    const sourceBox = (await mappingPair.locator('[data-testid="source-side"]').boundingBox())!
+    const targetBox = (await mappingPair.locator('[data-testid="target-side"]').boundingBox())!
+    expect(Math.abs(sourceBox.height - targetBox.height)).toBeLessThan(2)
+
+    // And the filter is its own row beneath both, not inside either card.
+    await expect(mappingPair.getByTestId('source-filter-editor')).toHaveCount(0)
+    await expect(page.getByTestId('source-filter-editor')).toBeVisible()
+    await shot(page, '29-mapping-endpoints.png')
+
+    // The invariant this phase must not disturb: the table picker works whether or not the side is
+    // overriding, because the picker cascades from the *resolved* endpoint either way.
+    await expect(page.getByTestId('source-side')).toContainText('INHERITED')
+    await expect(page.getByTestId('source-table-select')).toBeEnabled()
+    await page.getByTestId('source-override-toggle').click()
+    await expect(page.getByTestId('source-table-select')).toBeEnabled()
+    await page.getByTestId('source-override-toggle').click()
+
+    // And the association holds wherever a side is shown, not only on this pair: the Setup card's
+    // two plan panels carry the same colours.
+    await expect(await page.locator('[data-testid="provisioning-plan-source"]')
+      .evaluate((el) => getComputedStyle(el).borderTopColor)).toBe(sourceBorder)
+    await expect(await page.locator('[data-testid="provisioning-plan-target"]')
+      .evaluate((el) => getComputedStyle(el).borderTopColor)).toBe(targetBorder)
+
+    // The horizontal section bar is gone: the vertical rail is the only way between sections now.
+    for (const url of ['/replications', '/connections', '/scripts', `/connections/${SRC_CONNECTION_NAME}`]) {
+      await page.goto(url)
+      await expect(page.getByTestId('rail-replications')).toBeVisible()
+      await expect(page.getByTestId('tab-replications')).toHaveCount(0)
+      await expect(page.getByTestId('tab-connections')).toHaveCount(0)
+      await expect(page.getByTestId('tab-scripts')).toHaveCount(0)
+    }
   })
 })
