@@ -166,6 +166,7 @@ public sealed class ProcessSupervisor(
 
             taskRunStore.CompleteRun(run.RunId, RunStatus.Failed, 0, 0, "Orphaned: no live process found after API restart.");
             runLockStore.Release(run.TaskName, run.RunKind, run.MappingName);
+            workQueueStore.ReleaseClaimsForRun(run.RunId);
         }
     }
 
@@ -179,6 +180,7 @@ public sealed class ProcessSupervisor(
         {
             taskRunStore.CompleteRun(run.RunId, RunStatus.Failed, 0, 0, "Worker process was stopped.");
             runLockStore.Release(run.TaskName, run.RunKind, run.MappingName);
+            workQueueStore.ReleaseClaimsForRun(run.RunId);
         }
     }
 

@@ -204,6 +204,42 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             new SourceTableRef { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = table }))!;
 
     /// <summary>
+    /// The invariant the whole run model rests on: a watermark records "everything up to here is at
+    /// the target", so it may only advance once the target write has committed. A pass that read the
+    /// changes and then failed to write them must leave the watermark where it was — otherwise those
+    /// rows are skipped by every pass afterwards and the two sides silently diverge, with nothing
+    /// left to notice it by.
+    /// </summary>
+    [Fact]
+    public async Task AFailedWrite_LeavesTheWatermarkWhereItWas_SoTheChangesAreNotSkipped()
+    {
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+        Assert.Equal(RunStatus.Succeeded, (await EnqueueAndDrainAsync()).Status);
+        var watermarkBefore = WatermarkFor(_sourceTable);
+
+        // Changes the pass will read, and a target it cannot write them to. The read succeeds, so the
+        // watermark this pass *would* record is a real, later one.
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
+        await ExecuteAsync(_adminConnection, $"DROP TABLE dbo.[{_targetTable}];");
+
+        var failed = await EnqueueAndDrainAsync();
+
+        Assert.Equal(RunStatus.Failed, failed.Status);
+        Assert.Equal(watermarkBefore, WatermarkFor(_sourceTable));
+
+        // And the proof that it matters: with the target back, the next pass still sees Bob.
+        await ExecuteAsync(_adminConnection,
+            $"CREATE TABLE dbo.[{_targetTable}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+
+        Assert.Equal(RunStatus.Succeeded, (await EnqueueAndDrainAsync()).Status);
+
+        // Bob, and only Bob: Alice went with the dropped table, and the watermark correctly says she
+        // was already delivered, so an incremental pass has no reason to send her again. Bob is the
+        // change that the failed pass read — and that a wrongly-advanced watermark would have lost.
+        Assert.Equal(new Dictionary<int, string> { [2] = "Bob" }, await GetTargetRowsAsync());
+    }
+
+    /// <summary>
     /// The guarantee the whole per-mapping run model exists for: a backfill re-reads and re-applies
     /// data the incremental sync has already processed, using a completely different reader and
     /// writer, and the incremental sync's watermark comes out of it untouched. If it didn't, running

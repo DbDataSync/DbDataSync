@@ -206,6 +206,31 @@ public sealed class WorkQueueStore(StateDatabase database)
 
     public void MarkFailed(long id) => SetStatus(id, WorkItemStatus.Failed);
 
+    /// <summary>
+    /// Returns every in-flight item of a run to the queue. For when the worker that held them died
+    /// without saying anything — a kill, a crash, an API restart that found no live process.
+    /// <para>
+    /// Pending rather than Failed, for the same reason <see cref="ReleaseClaim"/> is: nobody observed
+    /// an execution failure, only that the process holding the work is gone. And it has to happen at
+    /// all, because UX_WorkQueue_InFlight covers Claimed and Running — an item left in either state
+    /// makes its mapping permanently un-enqueueable, so the replication silently stops rather than
+    /// failing.
+    /// </para>
+    /// </summary>
+    public int ReleaseClaimsForRun(Guid runId) =>
+        SqliteRetry.Execute(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                UPDATE WorkQueue
+                SET Status = 'Pending', ClaimedAtUtc = NULL, ClaimedByWorkerId = NULL
+                WHERE RunId = $runId AND Status IN ('Claimed','Running');
+                """;
+            cmd.Parameters.AddWithValue("$runId", runId.ToString());
+            return cmd.ExecuteNonQuery();
+        });
+
     /// <summary>Cancels a not-yet-claimed item directly — no process interaction needed. An
     /// already-Claimed/Running item can't be cancelled this way in v1 (see ProcessSupervisor.CancelRun's
     /// fallback to killing the whole worker process — an accepted, documented v1 limitation).</summary>

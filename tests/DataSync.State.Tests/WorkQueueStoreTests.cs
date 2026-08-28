@@ -238,4 +238,39 @@ public sealed class WorkQueueStoreTests : IDisposable
         _queue.MarkDone(claimed.Id);
         Assert.False(_queue.HasOutstandingWork("crm-sync"));
     }
+
+    /// <summary>
+    /// The failure that used to be permanent. UX_WorkQueue_InFlight covers Claimed and Running, so an
+    /// item whose worker died without releasing it made its mapping un-enqueueable forever — the
+    /// replication stopped silently rather than failing. The API releases them when it finds the
+    /// process gone.
+    /// </summary>
+    [Fact]
+    public void ReleaseClaimsForRun_ReturnsAnInFlightItemToTheQueueSoTheMappingCanRunAgain()
+    {
+        var runId = _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+        var claimed = _queue.TryClaimNext("crm-sync", "worker-that-died")!;
+        _queue.MarkRunning(claimed.Id);
+
+        // While it is in flight nothing else can be queued or claimed for that mapping.
+        Assert.Equal(runId, _queue.Enqueue("crm-sync", RunKind.Primary, "orders"));
+        Assert.Null(_queue.TryClaimNext("crm-sync", "worker-2"));
+
+        Assert.Equal(1, _queue.ReleaseClaimsForRun(runId));
+
+        var reclaimed = _queue.TryClaimNext("crm-sync", "worker-2");
+        Assert.NotNull(reclaimed);
+        Assert.Equal(claimed.Id, reclaimed.Id);
+    }
+
+    [Fact]
+    public void ReleaseClaimsForRun_LeavesAFinishedItemAlone()
+    {
+        var runId = _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+        var claimed = _queue.TryClaimNext("crm-sync", "worker-1")!;
+        _queue.MarkDone(claimed.Id);
+
+        Assert.Equal(0, _queue.ReleaseClaimsForRun(runId));
+        Assert.False(_queue.HasOutstandingWork("crm-sync"));
+    }
 }
