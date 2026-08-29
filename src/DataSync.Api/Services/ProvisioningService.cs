@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Diagnostics;
 using DataSync.Core.Config;
+using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.Generic;
 using DataSync.Drivers.MsSql;
@@ -20,7 +21,8 @@ namespace DataSync.Api.Services;
 /// would generate unattended — never a second implementation that could quietly disagree.
 /// </para>
 /// </summary>
-public sealed class ProvisioningService(ConfigRepository configRepository, DriverConnectionFactory connections)
+public sealed class ProvisioningService(
+    ConfigRepository configRepository, DriverConnectionFactory connections, GitAuthor author)
 {
     public async Task<ProvisioningPlanReport> GetPlansAsync(
         string replicationName, string mappingName, CancellationToken cancellationToken)
@@ -78,6 +80,10 @@ public sealed class ProvisioningService(ConfigRepository configRepository, Drive
             }
 
             var finalState = results.Count > 0 && results.All(r => r.Succeeded) ? ProvisioningState.Satisfied : plan.State;
+
+            if (finalState == ProvisioningState.Satisfied)
+                MarkRenamesApplied(replicationName, mapping);
+
             return new ApplyResult(results, finalState);
         }
         finally
@@ -236,6 +242,31 @@ public sealed class ProvisioningService(ConfigRepository configRepository, Drive
                 targetConnection, Request(ProvisioningActions.AlterTargetTable), cancellationToken);
 
         return (targetConnection, plan with { Warnings = [.. identityWarnings, .. plan.Warnings] });
+    }
+
+    /// <summary>
+    /// Records that the target has caught up with a mapping's pending renames.
+    /// <para>
+    /// Bookkeeping, not a latch. The planner reads the target's actual columns, so a step left
+    /// unapplied because this write did not happen plans nothing next time round — the rename has
+    /// already been done and the old name is gone. What it buys is a history that says what happened,
+    /// rather than one that says a rename is still outstanding forever.
+    /// </para>
+    /// <para>
+    /// Only after every step succeeded. A part-applied plan is exactly when the flags would be a lie,
+    /// and re-planning against the target tells the truth for free.
+    /// </para>
+    /// </summary>
+    private void MarkRenamesApplied(string replicationName, TableMappingConfig mapping)
+    {
+        var pending = mapping.ColumnMappings.SelectMany(c => c.Renames).Where(r => !r.Applied).ToList();
+        if (pending.Count == 0)
+            return;
+
+        foreach (var rename in pending)
+            rename.Applied = true;
+
+        configRepository.SaveTableMapping(replicationName, mapping, author);
     }
 
     private static ProvisioningPlan Unsupported(string action, ConnectionDriverType driverType) =>

@@ -34,9 +34,13 @@ So the order lives here, and is the one to work through:
 | 3 | **034** — PostgreSQL logical replication | |
 | 4 | **035** — config history diff and revert | |
 | 5 | **038** — Postgres COPY staging, and the columnar decision | |
+| 6 | **047** — grid and table row alignment | |
+| 7 | **048** — verification checks editor | The checks phase 43 added are still hand-written YAML |
+| 8 | **050** — connections dialog on the parameter system | Phase 42 built the system; the connections dialog is the last form not using it |
+| 9 | **049** — favicon matches the logo | Smallest thing here, and it does not block anything |
 
-Set 2026-08-28; 036, 037, 039, 040, 041, 042, 043 and 044 done and removed. A phase moving up or down is an ordinary decision and only this
-table changes.
+Set 2026-08-28; 036, 037, 039, 040, 041, 042, 043, 044, 045 and 046 done and removed. A phase moving up or
+down is an ordinary decision and only this table changes.
 
 ## What counts as a phase
 

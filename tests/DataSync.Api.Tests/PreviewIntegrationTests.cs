@@ -547,6 +547,13 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
 
         // And the plan goes quiet rather than planning the rename again on the next pass.
         Assert.Equal("Satisfied", (await GetTargetPlanAsync()).State);
+
+        // The rename is recorded as done. Bookkeeping rather than a latch — the planner reads the
+        // target either way — but a history that says a finished rename is still outstanding is a
+        // history nobody can read.
+        var saved = await _client.GetFromJsonAsync<TableMappingConfig>(
+            $"/api/replications/{_replicationName}/table-mappings/main", JsonOptions);
+        Assert.True(Assert.Single(saved!.ColumnMappings[1].Renames).Applied);
     }
 
     /// <summary>

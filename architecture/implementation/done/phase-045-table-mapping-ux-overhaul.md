@@ -1,6 +1,6 @@
-# Phase 45 — Table mapping UX overhaul (planned)
+# Phase 45 — Table mapping UX overhaul
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/table-mapping-ux-overhaul.md`
 
 ## What this covers
@@ -244,3 +244,154 @@ Needs:
   `Unsupported` answer, the same way `CreateTargetTable` already reports one for an unmappable type).
 - Whether other combine-then-split instances exist beyond the two found by direct search — needs a
   broader audit pass, not just the two confirmed spots.
+
+---
+
+# Retrospective
+
+Eight items, all built. Three of the eight were fixes the plan had already diagnosed, and the phase
+turned up four more bugs that were not in it — two of them years old.
+
+## The plan was wrong about `.` in a name, and the test is why
+
+§1 said to "confirm no client or server validation currently rejects `.`" and add a regression test
+"rather than a code change, since nothing appears to need fixing here". `ConfigValidation.ValidateName`
+rejected it outright. Writing the test first is what found that, in the ten seconds it took to run —
+whereas the plan's grounding (the input has no `pattern`, and the name goes into a filename) was
+checking the two places that happened to be fine.
+
+Allowing `.` brought `..` and leading/trailing dots with it, since the name does become a path segment.
+That is the cost of the feature, and it is paid in `ValidateName` rather than trusted to the filesystem.
+
+## The settings govern the pass, not the person
+
+Gating the Setup card's plan on `createTargetTableIfMissing` broke it, and correctly: the card started
+saying "Target provisioning is off for this mapping" where it used to show the DDL. The settings answer
+"what may a pass do unattended". The Setup card is where a person presses Apply deliberately, and
+refusing to show them the statement because automation is off answers a question nobody asked. The gate
+moved into `RunExecutor`, where the unattended pass actually is.
+
+## A rename is a rename, and a swap is refused
+
+The plan listed the swap-sequencing algorithm as open design work, and it stays open. Two columns
+renamed past each other are reported as `Unsupported` naming both, because untangling one needs a
+temporary name and an order that has to be right the first time — getting it wrong drops somebody's
+data — and applying the two renames in sequence already works today. Inventing that unreviewed inside a
+planner would have been the worst kind of progress.
+
+What did get built is the part that is not ambiguous: an unapplied rename whose old name is still on the
+target becomes one `RENAME`, a chain of them collapses to one statement, and the renamed column is then
+treated as present so the ordinary pass does not plan an `ADD` beside it. Both wrong answers — an add
+next to the old column, or a drop — leave a table that looks right in the catalog and is empty in the
+column that holds the data.
+
+`applied` is bookkeeping, not a latch. The planner reads the target's actual columns, so a flag left
+stale plans nothing and a flag wrongly set stops nothing. It is marked after a fully successful apply
+because a history that says a finished rename is still outstanding is a history nobody can read.
+
+## The inferred type is shown and never stored
+
+The canonical type system lives on the server, so the editor could not compute what a source column
+becomes on the target — and a form showing the source's type beside an empty box asks the operator to
+do that translation in their head. The new read path is the *same* translation the DDL uses, so what the
+editor shows and what `CREATE TABLE` says cannot drift.
+
+It stays a placeholder. Writing the inference into config would freeze today's answer against a source
+column that later changes, which is the failure that looks like nothing at all until a pass writes the
+wrong type.
+
+## Two config types that saved and never loaded
+
+`RenameStep` was written as a positional record and serialized perfectly well; YamlDotNet constructs
+through a parameterless constructor and setters, so it threw on the way back in. An integration test
+caught it within a minute.
+
+Which was worth checking against phase 42's `ParameterCardinality` and `ParameterLayout` — same shape,
+same fault. **A script declaring a vararg parameter could be saved and then never opened again.** Both
+now round-trip, and `[DefaultValue]` on the bounds means a `Min` of `0` — the thing that makes a
+parameter optional — is actually written down. That is the phase 46 `Enabled` bug for the third time,
+and the round-trip test that would have caught all three is new.
+
+## The combine-then-split audit found one in code written the same week
+
+§5's two known instances were fixed. `HookRenderer.QuoteMaybeQualified` was the open one: the plan
+preferred a structured schema-and-table pair, but a hook parameter's value is free text an operator
+types, so there is no pair to carry. That rules the preferred fix out and leaves stating the rule.
+`SqlDialect.SplitQualifiedName` splits on unquoted dots respecting the dialect's own quoting, so
+`[dbo].[My.Table]` keeps its dot and a bare `My.Table` keeps the reading it has always had.
+
+The broader audit the plan asked for found no remaining splits — and found the combine-*without*-a-split
+shape it warned about, in the mappings overview written the day before: the selection set was keyed by
+`${schema}.${table}`, so schema `dbo` + table `My.Table` and schema `dbo.My` + table `Table` were one
+key and ticking one ticked the other. Keyed by a real pair now.
+
+## The overview is the landing page because "first alphabetically" was never an answer
+
+`/mappings` used to open whichever mapping sorted first, which beat an empty pane and lost to an answer.
+The overview is equally right for a replication with forty mappings and one with none.
+
+Bulk creation is one request for the reasons the plan gave, plus one it did not: a failure names the
+table it failed on and reports what was created before it, which is the difference between "retry the
+rest" and "work out what happened". A table that already has a mapping is a **skip**, not an error —
+ticking every row on a replication that maps half of them means "map the rest".
+
+## A long-standing Playwright flake, and the wrong bug it nearly caused
+
+Test 06 asserted a triggered run read 2 rows. A replication that has never run is due immediately, so
+the scheduler could take the pass first and the triggered run then correctly read nothing. Touching the
+rows first narrowed the window without closing it — the scheduler can still slip in between the UPDATE
+and the click — so the test now repeats the whole gesture when a run reads nothing, which is the only
+honest way to assert something about a run rather than about who won a race.
+
+Worth recording: when this flake fired mid-suite it diverged the serial suite's state and surfaced as an
+unrelated-looking failure several tests later. That is a good argument for reading a serial suite's
+first failure rather than its loudest one.
+
+## Verification
+
+- `NameValidationTests` (17) — `.` allowed, `..` and leading/trailing dots rejected, plus the existing
+  rules unchanged.
+- `ProvisioningResolutionTests` (5) — each setting falling back independently, and where a resolved
+  value came from.
+- `AlterTargetTablePlannerTests` (17) — additive and modifying only, never `DROP`; a rename planned as
+  one statement, a chain collapsed, a rename already reflected on the target planning nothing, a swap
+  and a rename-onto-an-occupied-name both refused by name; a chosen target type used verbatim including
+  where no canonical mapping exists.
+- `MsSqlRenameColumnTests` (2) / `PostgresRenameColumnTests` (1) — `sp_rename`'s qualified-old,
+  bare-new argument shape and its literal escaping; Postgres keeping the ANSI spelling.
+- `QualifiedNameSplitTests` (7) — quoting respected, escaped closing brackets, and the ambiguous
+  unquoted case keeping its historical reading.
+- `ScriptParameterYamlRoundTripTests` (2) — a vararg parameter surviving a save and a load, and a plain
+  one staying plain.
+- `TableMappingsControllerTests` bulk region (6) — one mapping per table named after it, everything else
+  left inherited, existing mappings skipped rather than failing, a duplicate within one batch created
+  once, and the empty and missing-replication cases.
+- `PreviewIntegrationTests` additions (2) — a target column renamed against a real database keeping its
+  rows, the plan going quiet afterwards and the step marked applied; and inferred types answering every
+  source column with the same translation the DDL uses.
+- Playwright 26–30 — a dotted table name end to end, an unknown column shown as itself, Monaco DDL that
+  stays inside its card, name and target inference stopping once touched, provisioning inherited and
+  overridden, the pencil for type and rename with the resulting plan, and the overview's counts,
+  filtered select-all and single-request creation.
+- Playwright 15 updated: `/mappings` lands on the overview now. Test 06 made deterministic.
+- Full .NET suite green: 701 tests. Playwright: 32 green. `tsc -b` clean, `oxlint` unchanged at four.
+
+## Open questions
+
+- ~~**The rename-cycle (swap) sequencing algorithm.**~~ Still open, deliberately — but no longer
+  dangerous: a swap is refused by name rather than half-applied. Worth a phase of its own if anyone
+  ever needs it.
+- ~~**Shape of `ReplicationTaskConfig.provisioning`.**~~ The same `ProvisioningConfig` as the mapping's,
+  nullable at both levels, resolved by `ProvisioningResolution` — one type asked at two levels, the
+  shape phase 16 established for endpoints.
+- ~~**A new hub or a channel on the existing one.**~~ A channel: `bulkMappingProgress` on `RunHub`,
+  under a batch id the client owns and joins before the request leaves.
+- ~~**Whether `QuoteMaybeQualified`'s value can become structured.**~~ It cannot — it is operator-typed
+  free text. The quoting rule is stated and honoured instead.
+- ~~**The statement a changed column type emits.**~~ `RenderAlterColumnType`, virtual with an ANSI
+  default and a SQL Server override, returning null for an engine that cannot express the change — in
+  which case the plan warns and names the column rather than emitting something that might truncate.
+- ~~**Whether other combine-then-split instances exist.**~~ None remaining; the audit found one
+  combine-without-a-split instead, since fixed. `WatermarkKey`'s collision stays documented and
+  unchanged: changing the format would orphan every stored watermark and silently resync every
+  replication.

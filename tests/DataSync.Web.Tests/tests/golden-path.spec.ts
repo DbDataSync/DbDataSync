@@ -162,22 +162,31 @@ test.describe.serial('golden path: define, configure, and run a replication end-
   })
 
   test('06 - trigger a run and watch it complete live', async ({ page }) => {
-    // Touch both rows first. A replication that has never run is due immediately, so the scheduler can
-    // beat this test to the first pass — and then the triggered run correctly reads nothing, because
-    // there is nothing left to read. Making sure there are changes to find is what makes the
-    // assertion below about the run rather than about who got there first.
-    runSql(`UPDATE dbo.[${SOURCE_TABLE}] SET Name = Name;`, DB_NAME)
+    // Touch both rows before triggering. A replication that has never run is due immediately, so the
+    // scheduler can beat this test to the pass — and then the triggered run correctly reads nothing,
+    // because there is nothing left to read.
+    //
+    // Touching first narrows that window; it does not close it, because the scheduler can still take
+    // a pass between the UPDATE and the click. So a run that reads nothing is treated as "the
+    // scheduler got there first" and the whole gesture is repeated, rather than failing an assertion
+    // about who won a race the test was never about.
+    for (let attempt = 1; ; attempt++) {
+      runSql(`UPDATE dbo.[${SOURCE_TABLE}] SET Name = Name;`, DB_NAME)
 
-    await page.goto(`/replications/${REPLICATION_NAME}`)
-    await page.getByTestId('tab-runs').click()
-    await page.getByTestId('trigger-run-button').click()
+      await page.goto(`/replications/${REPLICATION_NAME}`)
+      await page.getByTestId('tab-runs').click()
+      await page.getByTestId('trigger-run-button').click()
 
-    await expect(page.getByTestId('live-run-panel')).toBeVisible()
-    await expect(page.getByTestId('live-log-viewer')).toContainText('Run started', { timeout: 15_000 })
-    await shot(page, '07-live-run-in-progress.png')
+      await expect(page.getByTestId('live-run-panel')).toBeVisible()
+      await expect(page.getByTestId('live-log-viewer')).toContainText('Run started', { timeout: 15_000 })
+      if (attempt === 1) await shot(page, '07-live-run-in-progress.png')
 
-    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
-    await expect(page.getByTestId('live-run-panel')).toContainText('2 row(s) read · 2 row(s) written')
+      await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
+      const reported = await page.getByTestId('live-run-panel').textContent()
+      if (reported?.includes('2 row(s) read · 2 row(s) written')) break
+
+      expect(attempt, 'the scheduler took the changes before every triggered run').toBeLessThan(3)
+    }
     await shot(page, '08-live-run-completed.png')
 
     // The live panel auto-clears a few seconds after completion, leaving the persisted history row.
