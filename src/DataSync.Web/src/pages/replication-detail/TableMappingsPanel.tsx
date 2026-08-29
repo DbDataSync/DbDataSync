@@ -25,6 +25,15 @@ export function TableMappingsPanel({ replicationName }: { replicationName: strin
           <NavLink to={`${base}/new`} className="btn-link" data-testid="new-mapping-button" title="New mapping">+</NavLink>
         </div>
         <div className="sidebar-list" data-testid="mappings-sidebar">
+          {/* A sibling of the list, not a replacement for it: picking one mapping is still how the
+              editor is reached, and this is where "which tables are mapped at all" is answered. */}
+          <NavLink
+            to={`${base}/overview`}
+            className={({ isActive }) => `sidebar-item strong ${isActive ? 'active' : ''}`}
+            data-testid="mappings-overview-link"
+          >
+            Overview
+          </NavLink>
           {(names ?? []).map((n) => (
             <MappingSidebarItem key={n} replicationName={replicationName} name={n} to={`${base}/${encodeURIComponent(n)}`} />
           ))}
@@ -71,17 +80,18 @@ function MappingSidebarItem({ replicationName, name, to }: { replicationName: st
 }
 
 /**
- * `/mappings` with nothing selected. Opens the first one — the list is the navigation, so landing on
- * an empty pane beside a populated sidebar would just be a click nobody wanted to make. `replace`, so
- * Back leaves the tab rather than bouncing off the redirect.
+ * `/mappings` with nothing selected lands on the overview.
+ *
+ * It used to open whichever mapping happened to be first, which was better than an empty pane beside
+ * a populated sidebar and worse than an answer: "the first one alphabetically" is not a thing anyone
+ * asked for. The overview is what the section is *about* — which tables are mapped and which are not
+ * — and it is equally right for a replication with forty mappings and one with none.
+ *
+ * `replace`, so Back leaves the tab rather than bouncing off the redirect.
  */
 export function MappingsIndex() {
-  const { names, base } = useOutletContext<MappingsOutletContext>()
-
-  if (names === undefined) return <div className="empty">Loading…</div>
-  if (names.length === 0) return <div className="empty">No mappings yet — add one.</div>
-
-  return <Navigate to={`${base}/${encodeURIComponent(names[0])}`} replace />
+  const { base } = useOutletContext<MappingsOutletContext>()
+  return <Navigate to={`${base}/overview`} replace />
 }
 
 /** The editor, for both `/mappings/new` and `/mappings/:mappingName`. */

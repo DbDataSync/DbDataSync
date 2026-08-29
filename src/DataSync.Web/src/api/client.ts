@@ -8,6 +8,8 @@ import type {
   ConnectionTestReport,
   CredentialSource,
   DriverCapabilities,
+  BulkCreateRequest,
+  BulkCreateResult,
   InferredColumnType,
   ProvisioningPlanReport,
   ScriptCompileResult,
@@ -131,6 +133,11 @@ export const api = {
     get: (replicationName: string, mappingName: string) =>
       request<TableMappingConfig>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}`,
+      ),
+    bulkCreate: (replicationName: string, body: BulkCreateRequest) =>
+      request<BulkCreateResult>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/bulk`,
+        { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
       ),
     upsert: (replicationName: string, mappingName: string, mapping: TableMappingConfig) =>
       put<TableMappingConfig>(

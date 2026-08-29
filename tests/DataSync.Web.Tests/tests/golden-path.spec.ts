@@ -382,11 +382,12 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.reload()
     await expect(page.getByRole('heading', { name: MAPPING_NAME })).toBeVisible({ timeout: 15_000 })
 
-    // /mappings with nothing chosen opens the first one rather than an empty pane beside a
-    // populated sidebar — and `replace`, so Back leaves the tab instead of bouncing off the redirect.
+    // /mappings with nothing chosen lands on the overview — which tables are mapped is what the
+    // section is about, and "whichever mapping sorts first" was never an answer anyone asked for.
+    // `replace`, so Back leaves the tab instead of bouncing off the redirect.
     await page.goto(`${base}/runs`)
     await page.getByTestId('tab-mappings').click()
-    await expect(page).toHaveURL(new RegExp(`${base}/mappings/${MAPPING_NAME}$`))
+    await expect(page).toHaveURL(new RegExp(`${base}/mappings/overview$`))
     await page.goBack()
     await expect(page).toHaveURL(new RegExp(`${base}/runs$`))
 
@@ -1258,5 +1259,62 @@ public sealed class Shout : IValueColumnExpression
     // break every pass after this one.
     expect((await page.request.put(
       `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: before })).ok()).toBeTruthy()
+  })
+
+  test('30 - the overview says which source tables are mapped, and maps the rest in one request', async ({ page }) => {
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/overview`)
+    const grid = page.getByTestId('mappings-overview')
+    await expect(grid).toBeVisible({ timeout: 20_000 })
+
+    // A table the replication already reads carries its count; one nothing reads says so. A count
+    // rather than a tick, because two mappings can legitimately read the same source and "mapped"
+    // would hide the second.
+    // Counted from the mappings themselves rather than pinned to a number: by this point in the
+    // suite more than one mapping reads the source table, which is exactly the fan-in the count is
+    // there to make visible.
+    const names: string[] = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings`)).json()
+    const reading = (await Promise.all(names.map(async (n) =>
+      (await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${n}`)).json()).sources)))
+      .flat()
+      .filter((spec: { schema: string; table: string }) => `${spec.schema}.${spec.table}` === `dbo.${SOURCE_TABLE}`)
+    expect(reading.length).toBeGreaterThan(0)
+
+    await expect(page.getByTestId(`table-mapping-count-dbo.${SOURCE_TABLE}`))
+      .toHaveText(String(reading.length), { timeout: 20_000 })
+    await expect(page.getByTestId(`table-mapping-count-dbo.${TARGET_TABLE}`)).toContainText('unmapped')
+
+    // Select-all acts on what the filter is showing, never on rows nobody has looked at.
+    await page.getByTestId('table-filter').fill(TARGET_TABLE)
+    await page.getByTestId('select-all-tables').check()
+    await expect(page.getByTestId(`select-table-dbo.${TARGET_TABLE}`)).toBeChecked()
+
+    await expect(page.getByTestId('create-mappings-button')).toContainText('Create 1 mapping')
+    await page.getByTestId('create-mappings-button').click()
+
+    // One request creates it, names it after the source, and lands on the editor for what was made.
+    await expect(page).toHaveURL(new RegExp(`/mappings/dbo.${TARGET_TABLE}$`), { timeout: 20_000 })
+    await shot(page, '39-mappings-overview.png')
+
+    const created = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/dbo.${TARGET_TABLE}`)).json()
+    expect(created.sources[0]).toMatchObject({ schema: 'dbo', table: TARGET_TABLE })
+    expect(created.targets[0]).toMatchObject({ schema: 'dbo', table: TARGET_TABLE })
+    // Everything else unset, so it inherits the replication rather than carrying its own copy of
+    // settings nobody chose — the whole reason bulk creation is worth having.
+    expect(created.sources[0].connectionName ?? null).toBeNull()
+    expect(created.sources[0].database ?? null).toBeNull()
+
+    // A second attempt at the same table is a skip, not a failure: ticking every row on a
+    // replication that already maps half of them means "map the rest".
+    const again = await (await page.request.post(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/bulk`,
+      { data: { tables: [{ schema: 'dbo', table: TARGET_TABLE }] } })).json()
+    expect(again).toEqual({ created: [], skipped: [`dbo.${TARGET_TABLE}`] })
+
+    // Put the sidebar back the way the rest of the suite left it.
+    expect((await page.request.delete(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/dbo.${TARGET_TABLE}`)).ok()).toBeTruthy()
   })
 })

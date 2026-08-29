@@ -1,7 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { api } from './client'
 import type {
+  BulkCreateRequest,
   ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
@@ -161,6 +162,35 @@ export function useColumns(
 
 export function useReplications() {
   return useQuery({ queryKey: keys.replications, queryFn: api.replications.list })
+}
+
+/**
+ * Every one of a replication's mappings, loaded in full.
+ *
+ * N requests, and deliberately so rather than a new endpoint: the mappings sidebar is mounted
+ * alongside every screen that wants this and already loads each mapping by name, so these come back
+ * from react-query's cache without a second request being made. An endpoint would be a new surface
+ * to keep correct in exchange for saving nothing.
+ */
+export function useTableMappingDetails(replicationName: string, names: string[] | undefined) {
+  return useQueries({
+    queries: (names ?? []).map((name) => ({
+      queryKey: keys.tableMapping(replicationName, name),
+      queryFn: () => api.tableMappings.get(replicationName, name),
+    })),
+  })
+}
+
+/**
+ * Creates one mapping per selected table in a single request, reporting progress over the run hub's
+ * push channel under a batch id the caller owns.
+ */
+export function useBulkCreateMappings(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (request: BulkCreateRequest) => api.tableMappings.bulkCreate(replicationName, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.tableMappings(replicationName) }),
+  })
 }
 
 export function useReplication(name: string | undefined) {

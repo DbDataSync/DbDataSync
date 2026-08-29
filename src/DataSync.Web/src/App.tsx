@@ -7,6 +7,7 @@ import { ScriptsPage } from './pages/ScriptsPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
+import { MappingsOverview } from './pages/replication-detail/MappingsOverview'
 import { MappingPreview } from './pages/replication-detail/MappingPreview'
 import { VerificationPanel } from './pages/replication-detail/VerificationPanel'
 
@@ -35,6 +36,9 @@ export default function App() {
         <Route path="overview" element={<OverviewTab />} />
         <Route path="mappings" element={<MappingsTab />}>
           <Route index element={<MappingsIndex />} />
+          {/* The section's landing page for "which of these tables are mapped", beside the
+              per-mapping editor rather than instead of it. */}
+          <Route path="overview" element={<MappingsOverview />} />
           {/* `new` before the parameter for readability; React Router ranks the static segment higher
               either way. It does mean a mapping literally named "new" is unreachable — the same
               sentinel this screen has always used, and worth revisiting only if anyone hits it. */}

@@ -507,3 +507,7 @@ select.select {
 }
 .grid-row:hover .pencil, .pencil:focus-visible, .pencil:hover { opacity: 1; }
 .pencil:hover { color: var(--accent); }
+
+/* The Overview entry is the section's landing page rather than one mapping among many, so it reads
+   as a heading in the list — the same weight the list's own header carries, not a bolder mapping. */
+.sidebar-item.strong { font-family: var(--ui); font-weight: 600; color: var(--ink); }

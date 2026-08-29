@@ -166,4 +166,135 @@ public sealed class TableMappingsControllerTests(TestApiFactory factory) : IClas
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    #region Bulk creation
+
+    /// <summary>A bulk-created mapping states only its tables, so the replication has to be the one
+    /// that says where they live — which is exactly the arrangement bulk creation assumes.</summary>
+    private static readonly TaskEndpoints Endpoints = new()
+    {
+        Source = new EndpointRef { ConnectionName = "prod-src", Database = "App" },
+        Target = new EndpointRef { ConnectionName = "warehouse", Database = "DW" },
+    };
+
+    /// <summary>
+    /// One call rather than N. Forty tables through the single-mapping endpoint is forty round trips,
+    /// forty git commits and forty chances to stop half way with no record of where.
+    /// </summary>
+    [Fact]
+    public async Task BulkCreate_CreatesOneMappingPerTable_NamedAfterIt()
+    {
+        var replicationName = await EnsureReplicationAsync(Endpoints);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/bulk",
+            new { tables = new[] { new { schema = "dbo", table = "Orders" }, new { schema = "sales", table = "Lines" } } },
+            JsonOptions);
+
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<BulkResultDto>(JsonOptions);
+
+        Assert.Equal(["dbo.Orders", "sales.Lines"], result!.Created);
+        Assert.Empty(result.Skipped);
+
+        var mapping = await _client.GetFromJsonAsync<TableMappingConfig>(
+            $"/api/replications/{replicationName}/table-mappings/sales.Lines", JsonOptions);
+        Assert.Equal("sales", mapping!.Sources[0].Schema);
+        Assert.Equal("Lines", mapping.Sources[0].Table);
+        Assert.Equal("sales", mapping.Targets[0].Schema);
+        Assert.Equal("Lines", mapping.Targets[0].Table);
+    }
+
+    /// <summary>
+    /// Everything not stated is left unset. That is the point of creating in bulk: forty mappings that
+    /// follow the replication, not forty copies of its settings that stop following it the day one is
+    /// changed.
+    /// </summary>
+    [Fact]
+    public async Task BulkCreate_LeavesEverythingElseInherited()
+    {
+        var replicationName = await EnsureReplicationAsync(Endpoints);
+
+        (await _client.PostAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/bulk",
+            new { tables = new[] { new { schema = "dbo", table = "Orders" } } }, JsonOptions))
+            .EnsureSuccessStatusCode();
+
+        var mapping = await _client.GetFromJsonAsync<TableMappingConfig>(
+            $"/api/replications/{replicationName}/table-mappings/dbo.Orders", JsonOptions);
+
+        Assert.Null(mapping!.Sources[0].ConnectionName);
+        Assert.Null(mapping.Sources[0].Database);
+        Assert.Null(mapping.Targets[0].ConnectionName);
+        Assert.Null(mapping.Targets[0].Database);
+        Assert.Null(mapping.Provisioning.CreateTargetTableIfMissing);
+        Assert.Empty(mapping.Scripts);
+    }
+
+    /// <summary>
+    /// Ticking every row on a replication that already maps half of them means "map the rest", so an
+    /// existing mapping is a skip and not a failure — and it is reported, so "create 40" answering
+    /// with 12 is explained rather than looking broken.
+    /// </summary>
+    [Fact]
+    public async Task BulkCreate_SkipsTablesThatAlreadyHaveAMapping_RatherThanFailing()
+    {
+        var replicationName = await EnsureReplicationAsync(Endpoints);
+        var tables = new { tables = new[] { new { schema = "dbo", table = "Orders" } } };
+
+        (await _client.PostAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/bulk", tables, JsonOptions))
+            .EnsureSuccessStatusCode();
+
+        var second = await _client.PostAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/bulk", tables, JsonOptions);
+
+        second.EnsureSuccessStatusCode();
+        var result = await second.Content.ReadFromJsonAsync<BulkResultDto>(JsonOptions);
+        Assert.Empty(result!.Created);
+        Assert.Equal(["dbo.Orders"], result.Skipped);
+    }
+
+    /// <summary>A batch that names the same table twice creates it once — the second occurrence is
+    /// the mapping the first one just made, not a second mapping of the same name overwriting it.</summary>
+    [Fact]
+    public async Task BulkCreate_DoesNotCreateTheSameTableTwiceWithinOneBatch()
+    {
+        var replicationName = await EnsureReplicationAsync(Endpoints);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/bulk",
+            new { tables = new[] { new { schema = "dbo", table = "Orders" }, new { schema = "dbo", table = "Orders" } } },
+            JsonOptions);
+
+        var result = await response.Content.ReadFromJsonAsync<BulkResultDto>(JsonOptions);
+        Assert.Equal(["dbo.Orders"], result!.Created);
+        Assert.Equal(["dbo.Orders"], result.Skipped);
+    }
+
+    [Fact]
+    public async Task BulkCreate_WithNoTables_IsABadRequest()
+    {
+        var replicationName = await EnsureReplicationAsync(Endpoints);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/bulk",
+            new { tables = Array.Empty<object>() }, JsonOptions);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task BulkCreate_AgainstAMissingReplication_IsNotFound()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/replications/no-such-replication/table-mappings/bulk",
+            new { tables = new[] { new { schema = "dbo", table = "Orders" } } }, JsonOptions);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    private sealed record BulkResultDto(List<string> Created, List<string> Skipped);
+
+    #endregion
 }

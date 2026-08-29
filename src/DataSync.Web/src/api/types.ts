@@ -622,3 +622,25 @@ export interface ApiErrorBody {
   error?: string
   title?: string
 }
+
+/**
+ * A request to create one mapping per named table. `batchId` is the SignalR group progress is
+ * reported on — optional, since the response carries the full result either way.
+ */
+export interface BulkCreateRequest {
+  tables: { schema: string; table: string }[]
+  batchId?: string
+}
+
+export interface BulkCreateResult {
+  created: string[]
+  /** Tables that already had a mapping — reported rather than dropped, so "create 40" answering with
+   * 12 is explained on screen instead of looking like a failure. */
+  skipped: string[]
+}
+
+export interface BulkCreateProgress {
+  done: number
+  total: number
+  name: string
+}
