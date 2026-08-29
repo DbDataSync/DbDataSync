@@ -124,9 +124,9 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         Table = _tableName,
     };
 
-    private Task<ReadResult> ReadAsync(string? watermark) =>
+    private Task<ReadResult> ReadAsync(string? watermark, SourceTableRef? source = null) =>
         _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, source ?? Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
 
     private static async Task<List<ChangeRow>> CollectAsync(IAsyncEnumerable<ChangeRow> rows)
     {
@@ -145,9 +145,9 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
     /// first and then make the change under test.
     /// </para>
     /// </summary>
-    private async Task<string> SettleAsync(string watermark)
+    private async Task<string> SettleAsync(string watermark, SourceTableRef? source = null)
     {
-        for (var attempt = 0; attempt < 10; attempt++)
+        for (var attempt = 0; attempt < 20; attempt++)
         {
             // Waiting first is the part that matters. A read taken before the capture job has scanned
             // past this position returns nothing — not because there is nothing, but because nothing
@@ -155,7 +155,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
             // in the middle of the assertion.
             watermark = await WaitForCaptureAsync(watermark);
 
-            var result = await ReadAsync(watermark);
+            var result = await ReadAsync(watermark, source);
             var rows = await CollectAsync(result.Rows);
             watermark = result.NewWatermark;
 
@@ -338,5 +338,44 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         });
 
         Assert.Contains("does not capture 'Region'", problem.Message);
+    }
+
+    /// <summary>
+    /// The fallback. A capture instance created without <c>@supports_net_changes</c> has no
+    /// net-changes function, so the reader reads every intermediate change instead — which is correct
+    /// and more work per pass, and is why it reports which shape it used rather than being silent.
+    /// </summary>
+    [Fact]
+    public async Task AnInstanceWithoutNetChanges_ReadsEveryIntermediateChange()
+    {
+        var table = $"CdcAll_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE TABLE dbo.[{table}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+        await ExecuteAsync($"""
+            EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'{table}',
+                 @role_name = NULL, @supports_net_changes = 0;
+            """);
+
+        var source = new SourceTableRef
+        {
+            ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = table,
+        };
+        var instance = await MsSqlCdcCatalog.FindCaptureInstanceAsync(
+            _connection, "dbo", table, CancellationToken.None);
+        Assert.False(instance!.SupportsNetChanges);
+
+        await ExecuteAsync($"INSERT INTO dbo.[{table}] (Id, Name) VALUES (1, 'a');");
+        var start = await SettleAsync((await ReadAsync(null, source)).NewWatermark, source);
+
+        await ExecuteAsync($"UPDATE dbo.[{table}] SET Name = 'b' WHERE Id = 1;");
+        await ExecuteAsync($"UPDATE dbo.[{table}] SET Name = 'c' WHERE Id = 1;");
+        await WaitForCaptureAsync(start);
+
+        var rows = await CollectAsync((await ReadAsync(start, source)).Rows);
+
+        // Two, where net changes would have collapsed them to one — the difference the reader's
+        // preference exists to buy.
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, r => Assert.Equal(ChangeOperation.Update, r.Operation));
+        Assert.Equal(["b", "c"], rows.Select(r => (string)r["Name"]!));
     }
 }

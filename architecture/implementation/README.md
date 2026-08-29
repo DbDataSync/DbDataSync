@@ -29,16 +29,15 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **032** — SQL Server CDC | Change tracking starts here, per `planning/done/change-tracking-strategies.md` |
-| 2 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
-| 3 | **034** — PostgreSQL logical replication | |
-| 4 | **035** — config history diff and revert | |
-| 5 | **038** — Postgres COPY staging, and the columnar decision | |
-| 6 | **051** — distribution: global tool, Windows service, container | Nobody outside this repo can install this yet |
-| 7 | **052** — identity, roles and Windows auth | Every endpoint is open to anything that can reach the port |
-| 8 | **053** — passkeys and invites | Needs 052's identity model; also the only way in on a non-Windows host |
+| 1 | **033** — generic trigger-audit change tracking | Delete detection for every engine at once |
+| 2 | **034** — PostgreSQL logical replication | |
+| 3 | **035** — config history diff and revert | |
+| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 5 | **051** — distribution: global tool, Windows service, container | Nobody outside this repo can install this yet |
+| 6 | **052** — identity, roles and Windows auth | Every endpoint is open to anything that can reach the port |
+| 7 | **053** — passkeys and invites | Needs 052's identity model; also the only way in on a non-Windows host |
 
-Set 2026-08-29; 036, 037 and 039–050 done and removed. A phase moving up or down is an ordinary
+Set 2026-08-29; 032, 036, 037 and 039–050 done and removed. A phase moving up or down is an ordinary
 decision and only this table changes.
 
 ## What counts as a phase

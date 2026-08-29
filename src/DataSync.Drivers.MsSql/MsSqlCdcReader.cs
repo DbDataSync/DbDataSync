@@ -68,26 +68,36 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
                 "source from here, so this is reported rather than read as 'no changes' — start the " +
                 "SQL Server Agent job 'cdc.<database>_capture'.");
 
-        var minLsn = await MsSqlCdcCatalog.GetMinLsnAsync(sourceConnection, instance.CaptureInstance, cancellationToken);
         var diagnostics = new ReadDiagnostics();
 
         if (previousWatermark is null)
         {
+            // The floor has to be known before a first pass can store a position, and it is not known
+            // the instant a table is enabled — the capture job records it when it processes the
+            // enable. A first pass that stored the database's max LSN instead would store a position
+            // *below* the instance's own floor, and every pass after it would read that as expired
+            // history when nothing had expired. So this waits for the floor rather than guessing at
+            // it, and says so if it never arrives.
+            var floor = await WaitForCaptureFloorAsync(sourceConnection, instance, cancellationToken)
+                ?? throw new InvalidOperationException(
+                    $"Change Data Capture has not started capturing '{source.Schema}.{source.Table}' yet " +
+                    $"(capture instance '{instance.CaptureInstance}' has no start position). This pass " +
+                    "will succeed once the capture job has processed the enable — check that SQL Server " +
+                    "Agent is running if it does not.");
+
             // CDC's change table only holds what has happened since capture was enabled, so a table
             // that already had rows would otherwise start half-replicated with nothing to say so.
             var rows = ReadFullLoadAsync(
                 sourceConnection, source, SourceProjection.Render(MsSqlDialect.Instance, columnMappings),
                 cancellationToken);
 
-            // The later of the two, and not simply the max. A capture instance's start LSN is set at
-            // enable time and the capture job reaches it a moment later, so right after enabling a
-            // table the database's max LSN is *below* the instance's start. Storing the max there
-            // would leave a watermark that every subsequent pass reads as expired — which is what it
-            // did, and what these tests caught.
-            var start = minLsn is not null && MsSqlCdcCatalog.Compare(minLsn, maxLsn) > 0 ? minLsn : maxLsn;
+            // The later of the two: the floor can be ahead of what the job has scanned, and the max
+            // can be ahead of the floor once the job has caught up.
+            var start = MsSqlCdcCatalog.Compare(floor, maxLsn) > 0 ? floor : maxLsn;
             return new ReadResult(rows, MsSqlCdcCatalog.ToWatermark(start), diagnostics);
         }
 
+        var minLsn = await MsSqlCdcCatalog.GetMinLsnAsync(sourceConnection, instance.CaptureInstance, cancellationToken);
         var storedLsn = MsSqlCdcCatalog.FromWatermark(previousWatermark);
         if (minLsn is not null && MsSqlCdcCatalog.Compare(storedLsn, minLsn) < 0)
         {
@@ -105,6 +115,30 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
             ReadIncrementalAsync(sourceConnection, instance, storedLsn, maxLsn, columnMappings, cancellationToken),
             MsSqlCdcCatalog.ToWatermark(maxLsn),
             diagnostics);
+    }
+
+    /// <summary>
+    /// The oldest position this capture instance can serve, waiting briefly for it to be established.
+    /// <para>
+    /// Bounded and short: this is the gap between <c>sp_cdc_enable_table</c> returning and the capture
+    /// job recording the instance's start, which is one scan interval. Waiting forever would turn a
+    /// stopped Agent into a hung pass, and that is a thing to report rather than to sit through.
+    /// </para>
+    /// </summary>
+    private static async Task<byte[]?> WaitForCaptureFloorAsync(
+        DbConnection connection, CdcCaptureInstance instance, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+        while (true)
+        {
+            if (await MsSqlCdcCatalog.GetMinLsnAsync(connection, instance.CaptureInstance, cancellationToken) is { } floor)
+                return floor;
+
+            if (DateTimeOffset.UtcNow >= deadline)
+                return null;
+
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+        }
     }
 
     /// <inheritdoc cref="MsSqlCdcStatement.CdcFunction"/>

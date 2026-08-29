@@ -119,4 +119,24 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         Assert.Empty(rows);
         Assert.Equal(baseline.NewWatermark, result.NewWatermark);
     }
+
+    /// <summary>
+    /// The same failure CDC raises, from the other mechanism — which is the whole reason
+    /// <see cref="PositionExpiredException"/> is shared rather than each reader wording its own. A
+    /// version below the table's minimum valid version is a position Change Tracking cannot serve.
+    /// </summary>
+    [Fact]
+    public async Task AVersionBelowTheMinimumValid_IsReportedAsExpired()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+
+        // -1 sorts below every version the source could still hold, which is what a version discarded
+        // by cleanup looks like from here.
+        var problem = await Assert.ThrowsAsync<PositionExpiredException>(() => _reader.ReadChangesAsync(
+            _connection, Source(), "-1", [], new Dictionary<string, string>(), CancellationToken.None));
+
+        Assert.Equal("Change Tracking", problem.Mechanism);
+        Assert.Equal("-1", problem.StoredPosition);
+        Assert.Contains("has to be reloaded", problem.Message);
+    }
 }

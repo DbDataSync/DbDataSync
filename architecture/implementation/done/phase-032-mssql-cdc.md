@@ -1,6 +1,6 @@
-# Phase 32 — SQL Server CDC, and position-expired recovery (planned)
+# Phase 32 — SQL Server CDC, and position-expired recovery
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/change-tracking-mssql-cdc.md`, and the shared machinery
 identified in `architecture/planning/done/change-tracking-strategies.md`.
 
@@ -136,3 +136,110 @@ default and stays better for the mirroring case.
   configuration time rather than failing at the first run.
 - **Capture-job health** is a second thing to surface next to reachability (phase 19). It may belong
   with `planning/todo/run-metrics-and-monitoring.md` rather than here.
+
+---
+
+# Retrospective
+
+Both parts built. The shared exception took an afternoon; the reader took the rest, and almost all of
+that was boundary conditions that no amount of reading the documentation would have produced.
+
+## The premise of the phase was half wrong
+
+"The Docker container has SQL Agent" is what put CDC first, and it is true in the sense that the image
+ships Agent — stopped. `sp_cdc_enable_table` succeeds without it, and then nothing is ever captured:
+`fn_cdc_get_max_lsn()` stays null forever. One environment variable in `docker-compose.yml` and CI, and
+worth recording because the failure is silent and looks like a quiet source.
+
+## Four boundary bugs, all found by running it
+
+The plan named one of these. The tests found four.
+
+- **`sys.fn_cdc_increment_lsn` on the lower bound** — the one the plan warned about. Pinned by reading
+  twice with no intervening change and asserting zero rows the second time.
+- **A fresh capture instance's floor can be *ahead* of the database's max LSN.** Max is what the
+  capture job has scanned; the floor is set when the job processes the enable. Storing the max as a
+  first pass's watermark left a position every later pass read as expired history — a replication that
+  reported data loss the moment it was set up. The full load now waits for the floor to exist and
+  stores the later of the two, and says so plainly if the floor never appears rather than storing a
+  position it will regret.
+- **`fn_cdc_get_min_lsn` answers with all zeroes, not null**, in the window between enabling a table
+  and the job reaching it. Read as a position it sorts below every real LSN, so every stored watermark
+  looked expired. Normalised to null in the catalog, so the one caller cannot get it wrong.
+- **`__$seqval` does not exist on net changes.** It orders changes within a transaction, and net
+  changes has already collapsed them. Ordering by it unconditionally was an "Invalid column name" on
+  the mode this reader *prefers* — so the preferred path was the broken one, which is the worst way
+  round for something a unit test cannot see.
+
+## A column, not a status
+
+`PositionExpiredException` needed a distinct run outcome. A new `RunStatus` member was the obvious
+shape and the wrong one: a position-expired run **is** a failed run, and giving it its own status
+would have quietly dropped it out of every "how many failed" count in the app — the metrics card, the
+Runs filter, the history query. What is different is the remedy, so a nullable `FailureKind` column
+names the remedy and leaves the status alone.
+
+## Resync does the half an operator would forget
+
+The plan said the Runs tab should offer the reload. It offers the reload *and* clears the stored
+watermark, because a reload against an expired position leaves the next incremental pass failing
+exactly as before — and clearing a watermark is not something anybody thinks of while looking at a
+failed run. Cleared first, so a crash in between leaves a replication that reads from the beginning
+(slow, correct) rather than one that reloads and then fails again.
+
+Offered, not performed, as the plan insisted: it is refused on any other failure, with a reason. A
+Resync button on every failed run makes a full reload the general-purpose retry.
+
+## A test-infrastructure bug that looked fixed once
+
+`sp_cdc_enable_table` deadlocks against the running capture job's own msdb work often enough to matter
+under a full suite run, and it **catches the 1205 and re-raises its own error with the original quoted
+in the text**. Matching on `SqlError.Number` therefore never retried, and the suite passed once by
+luck before failing again — which is exactly how a flake gets declared fixed. The fixture matches the
+message.
+
+The product deliberately does not retry: there the same failure reaches the operator with the server's
+own "Rerun the transaction", which is honest, and retrying a DDL apply on somebody's behalf is a
+separate decision from this phase.
+
+## Verification
+
+- `MsSqlCdcStatementTests` (11) — the incremented lower bound, both function names, the operation
+  ordinal, per-function ordering, transforms aliased back, and the three operation codes plus the two
+  that cannot arrive.
+- `MsSqlCdcProvisioningTests` (6) — a fresh database enabling in the right order, net changes asked
+  for when the table can support it, a table with no key enabled anyway with a warning rather than
+  refused, an existing instance without net changes reported rather than recreated, and a quote in a
+  name escaped for a string literal.
+- `MsSqlCdcReaderTests` (8, integration) — every operation as itself including a delete carrying its
+  values, the off-by-one, three updates collapsing to one row, the all-changes fallback returning both
+  intermediate updates, an expired position, a table nobody captured, and a column added after capture
+  reported against the mapping rather than the change table.
+- `MsSqlChangeTrackingReaderTests` gained the same expiry assertion, which is the point of the
+  exception being shared.
+- `ResyncTests` (5) — the endpoint accepting a position-expired run, clearing the watermark, refusing
+  an ordinary failure with a reason, 404 for an unknown run, and the failure kind reaching the client.
+- Playwright 37 — the affordance absent where nothing has expired, and the endpoint refusing an
+  ordinary failure. **The positive path is not covered end to end**: nothing in that suite can expire a
+  source position without waiting out a retention window, and faking one would be testing the fake.
+  The reader-side expiry is covered against a real capture instance instead.
+- Full suite green: 765 .NET tests, 39 Playwright.
+
+## What was not built, as planned
+
+`'all update old'` before-images, and any change to the Change Tracking reader beyond moving it onto
+the shared exception. CT stays the default and stays the better choice for mirroring.
+
+## Open questions
+
+- ~~**Azure SQL.**~~ Still open, and untestable here: neither Managed Instance nor Azure SQL Database
+  is available to this repo's test infrastructure. The reader degrades honestly — a table with no
+  capture instance says so at read time and at preview time — but "enablement must degrade honestly at
+  *configuration* time" is not proven for an engine nobody can point this at.
+- ~~**Capture-job health.**~~ Partly answered: a stopped capture job is reported at read time, with the
+  job name to start. Surfacing it *next to reachability* before a run fails is still the better place
+  for it, and still belongs with run monitoring rather than here.
+- **New**: the capture instance's floor being unknown for a window after enablement is handled by
+  waiting up to 30 seconds. That is right for a first pass and wrong for a pass that hits it under
+  load; if a deployment ever sees it, the answer is probably to fail fast and let the scheduler retry
+  rather than to hold a worker.
