@@ -9,6 +9,16 @@ import type { MappingsOutletContext } from './TableMappingsPanel'
 const COLUMNS = '26px 1fr 90px'
 
 /**
+ * A table's identity, for the selection set and the mapping counts.
+ *
+ * Not `${schema}.${table}`, readable as that is: schema `dbo` with table `My.Table` and schema
+ * `dbo.My` with table `Table` produce the same string, and two tables sharing a key means ticking one
+ * ticks the other. The label below is the combined form, which is only ever displayed.
+ */
+const keyOf = (t: { schema: string; table: string }) => JSON.stringify([t.schema, t.table])
+const labelOf = (t: { schema: string; table: string }) => `${t.schema}.${t.table}`
+
+/**
  * Every table in the replication's default source database, and how many mappings each already has.
  *
  * The screen this replaces is picking tables one at a time through a form: forty tables meant forty
@@ -43,8 +53,7 @@ export function MappingsOverview() {
     const counts = new Map<string, number>()
     for (const query of mappings) {
       for (const spec of query.data?.sources ?? []) {
-        const key = `${spec.schema}.${spec.table}`
-        counts.set(key, (counts.get(key) ?? 0) + 1)
+        counts.set(keyOf(spec), (counts.get(keyOf(spec)) ?? 0) + 1)
       }
     }
     return counts
@@ -52,7 +61,7 @@ export function MappingsOverview() {
 
   const needle = filter.trim().toLowerCase()
   const shown = (tables ?? []).filter(
-    (t) => needle === '' || `${t.schema}.${t.table}`.toLowerCase().includes(needle))
+    (t) => needle === '' || labelOf(t).toLowerCase().includes(needle))
 
   const toggle = (key: string) => setSelected((prev) => {
     const next = new Set(prev)
@@ -62,13 +71,11 @@ export function MappingsOverview() {
 
   // Select-all acts on what is *shown*, not on every table there is: a filtered list that quietly
   // ticked three hundred hidden rows would create three hundred mappings nobody looked at.
-  const allShownSelected = shown.length > 0 && shown.every((t) => selected.has(`${t.schema}.${t.table}`))
-  const toggleAll = () => setSelected(allShownSelected
-    ? new Set()
-    : new Set(shown.map((t) => `${t.schema}.${t.table}`)))
+  const allShownSelected = shown.length > 0 && shown.every((t) => selected.has(keyOf(t)))
+  const toggleAll = () => setSelected(allShownSelected ? new Set() : new Set(shown.map(keyOf)))
 
   const createSelected = async () => {
-    const chosen = shown.filter((t) => selected.has(`${t.schema}.${t.table}`))
+    const chosen = shown.filter((t) => selected.has(keyOf(t)))
     if (chosen.length === 0) return
 
     const batchId = crypto.randomUUID()
@@ -139,7 +146,8 @@ export function MappingsOverview() {
         </div>
 
         {shown.map((t) => {
-          const key = `${t.schema}.${t.table}`
+          const key = keyOf(t)
+          const label = labelOf(t)
           const count = mappedCounts.get(key) ?? 0
           return (
             <div key={key} className="grid-row" style={{ gridTemplateColumns: COLUMNS, gap: 0 }}>
@@ -147,11 +155,11 @@ export function MappingsOverview() {
                 type="checkbox"
                 checked={selected.has(key)}
                 onChange={() => toggle(key)}
-                aria-label={`Select ${key}`}
-                data-testid={`select-table-${key}`}
+                aria-label={`Select ${label}`}
+                data-testid={`select-table-${label}`}
               />
-              <span className="name">{key}</span>
-              <span data-testid={`table-mapping-count-${key}`}>
+              <span className="name">{label}</span>
+              <span data-testid={`table-mapping-count-${label}`}>
                 {count === 0
                   ? <span className="faint">unmapped</span>
                   : <span className="badge badge-accent">{count}</span>}

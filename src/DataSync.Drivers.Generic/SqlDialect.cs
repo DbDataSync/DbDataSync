@@ -33,6 +33,70 @@ public abstract class SqlDialect
     public virtual string QualifyTable(string schema, string table) =>
         string.IsNullOrEmpty(schema) ? QuoteIdentifier(table) : $"{QuoteIdentifier(schema)}.{QuoteIdentifier(table)}";
 
+    /// <summary>The characters this engine wraps an identifier in. ANSI double quotes by default;
+    /// SQL Server's brackets are the divergence.</summary>
+    protected virtual char IdentifierQuoteOpen => '"';
+
+    protected virtual char IdentifierQuoteClose => '"';
+
+    /// <summary>
+    /// Splits an operator-typed name into its parts on its **unquoted** dots, unwrapping each part.
+    /// <para>
+    /// <c>dbo.LoadControl</c> is two parts, and so is <c>[dbo].[LoadControl]</c>. A dot *inside* the
+    /// quoting is part of the name: <c>[dbo].[My.Table]</c> is still two parts, the second being
+    /// <c>My.Table</c>. That is the rule this method exists to state, because a bare
+    /// <c>My.Table</c> is genuinely ambiguous — it reads as schema <c>My</c>, table <c>Table</c>, and
+    /// no amount of cleverness here can tell it from a table whose name contains a dot. Quoting is
+    /// how the operator says which one they meant; splitting blindly on every dot took that away.
+    /// </para>
+    /// <para>
+    /// A doubled closing quote is an escaped one (<c>[a]]b]</c>, <c>"a""b"</c>), as in every engine
+    /// that quotes this way.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<string> SplitQualifiedName(string value)
+    {
+        var parts = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var quoted = false;
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+
+            if (!quoted && c == IdentifierQuoteOpen)
+            {
+                quoted = true;
+                continue;
+            }
+
+            if (quoted && c == IdentifierQuoteClose)
+            {
+                if (i + 1 < value.Length && value[i + 1] == IdentifierQuoteClose)
+                {
+                    current.Append(IdentifierQuoteClose);
+                    i++;
+                    continue;
+                }
+
+                quoted = false;
+                continue;
+            }
+
+            if (!quoted && c == '.')
+            {
+                parts.Add(current.ToString());
+                current.Clear();
+                continue;
+            }
+
+            current.Append(c);
+        }
+
+        parts.Add(current.ToString());
+        return parts;
+    }
+
     /// <summary>
     /// Points an open connection at <paramref name="database"/>. Virtual because "database" is not
     /// universal: engines where a connection cannot change database (Oracle, where the schema is the

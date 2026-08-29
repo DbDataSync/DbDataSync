@@ -63,6 +63,11 @@ public sealed class MsSqlDialect : SqlDialect
 
     private static string Literal(string value) => value.Replace("'", "''");
 
+    /// <summary>SQL Server wraps identifiers in brackets, not ANSI double quotes.</summary>
+    protected override char IdentifierQuoteOpen => '[';
+
+    protected override char IdentifierQuoteClose => ']';
+
     /// <summary>SQL Server has no LIMIT.</summary>
     public override string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT TOP ({rows}) * FROM {qualifiedTable};";

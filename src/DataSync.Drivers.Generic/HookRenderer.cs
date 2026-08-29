@@ -73,15 +73,30 @@ public static class HookRenderer
     /// <summary>
     /// A declared parameter is an identifier, but the value an operator supplies for one is sometimes a
     /// qualified name (phase 26's own example: <c>controlTable: dbo.LoadControl</c>) and sometimes a
-    /// bare one. Splitting on a single '.' and quoting each part is what makes both spellings work
-    /// without asking the operator to pre-quote anything themselves.
+    /// bare one. Both spellings work without the operator pre-quoting anything.
+    /// <para>
+    /// The split is <see cref="SqlDialect.SplitQualifiedName"/>'s, which respects the dialect's own
+    /// quoting rather than cutting on every dot. That matters because a hook parameter is free text —
+    /// there is no structured schema-and-table pair to carry instead, which is the fix the plan
+    /// preferred and this value's shape rules out. So the rule is stated instead: a name containing a
+    /// literal dot is written quoted (<c>[dbo].[My.Table]</c>), and an unquoted <c>My.Table</c> means
+    /// schema <c>My</c> — the reading it has always had, and the only one available without asking.
+    /// </para>
+    /// <para>
+    /// Three or more parts are quoted whole, unchanged from before: a cross-database reference is not
+    /// something this substitution has ever claimed to handle, and guessing which part is the database
+    /// would be inventing an answer rather than declining to.
+    /// </para>
     /// </summary>
     private static string QuoteMaybeQualified(SqlDialect dialect, string value)
     {
-        var parts = value.Split('.');
-        return parts.Length == 2
-            ? dialect.QualifyTable(parts[0], parts[1])
-            : dialect.QuoteIdentifier(value);
+        var parts = dialect.SplitQualifiedName(value);
+        return parts.Count switch
+        {
+            1 => dialect.QuoteIdentifier(parts[0]),
+            2 => dialect.QualifyTable(parts[0], parts[1]),
+            _ => dialect.QuoteIdentifier(value),
+        };
     }
 
     private static HookStatement SubstituteParameters(SqlDialect dialect, string text, HookRenderContext context)
