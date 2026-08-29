@@ -59,14 +59,21 @@ public sealed class TaskRunStore(StateDatabase database)
             cmd.ExecuteNonQuery();
         });
 
-    public void CompleteRun(Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary) =>
+    /// <param name="failureKind">
+    /// Why it failed, when that is something the product can act on — see <see cref="RunFailureKinds"/>.
+    /// Null for the ordinary case, which is nearly all of them.
+    /// </param>
+    public void CompleteRun(
+        Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
+        string? failureKind = null) =>
         SqliteRetry.Execute(() =>
         {
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 UPDATE TaskRuns
-                SET Status = $status, EndedAtUtc = $endedAt, RowsRead = $rowsRead, RowsWritten = $rowsWritten, ErrorSummary = $error
+                SET Status = $status, EndedAtUtc = $endedAt, RowsRead = $rowsRead, RowsWritten = $rowsWritten,
+                    ErrorSummary = $error, FailureKind = $failureKind
                 WHERE RunId = $runId;
                 """;
             cmd.Parameters.AddWithValue("$status", status.ToString());
@@ -74,6 +81,7 @@ public sealed class TaskRunStore(StateDatabase database)
             cmd.Parameters.AddWithValue("$rowsRead", rowsRead);
             cmd.Parameters.AddWithValue("$rowsWritten", rowsWritten);
             cmd.Parameters.AddWithValue("$error", (object?)errorSummary ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$failureKind", (object?)failureKind ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$runId", runId.ToString());
             cmd.ExecuteNonQuery();
         });
@@ -84,7 +92,7 @@ public sealed class TaskRunStore(StateDatabase database)
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind
                 FROM TaskRuns WHERE RunId = $runId;
                 """;
             cmd.Parameters.AddWithValue("$runId", runId.ToString());
@@ -102,7 +110,7 @@ public sealed class TaskRunStore(StateDatabase database)
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = $"""
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind
                 FROM TaskRuns WHERE TaskName = $taskName {(runKind is null ? "" : "AND RunKind = $runKind")}
                 ORDER BY StartedAtUtc DESC LIMIT $limit;
                 """;
@@ -125,7 +133,7 @@ public sealed class TaskRunStore(StateDatabase database)
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind
                 FROM TaskRuns WHERE TaskName = $taskName AND RunKind = $runKind AND MappingName = $mapping
                 ORDER BY StartedAtUtc DESC LIMIT $limit;
                 """;
@@ -148,7 +156,7 @@ public sealed class TaskRunStore(StateDatabase database)
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind
                 FROM TaskRuns WHERE Status = $status;
                 """;
             cmd.Parameters.AddWithValue("$status", RunStatus.Running.ToString());
@@ -171,7 +179,7 @@ public sealed class TaskRunStore(StateDatabase database)
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind
                 FROM TaskRuns WHERE EndedAtUtc IS NOT NULL AND EndedAtUtc >= $since;
                 """;
             cmd.Parameters.AddWithValue("$since", sinceUtc.ToString("O"));
@@ -191,7 +199,7 @@ public sealed class TaskRunStore(StateDatabase database)
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind
                 FROM TaskRuns WHERE Status IN ($queued, $running);
                 """;
             cmd.Parameters.AddWithValue("$queued", RunStatus.Queued.ToString());
@@ -215,5 +223,6 @@ public sealed class TaskRunStore(StateDatabase database)
         reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)),
         reader.GetInt64(9),
         reader.GetInt64(10),
-        reader.IsDBNull(11) ? null : reader.GetString(11));
+        reader.IsDBNull(11) ? null : reader.GetString(11),
+        reader.IsDBNull(12) ? null : reader.GetString(12));
 }

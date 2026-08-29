@@ -63,8 +63,11 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
             ["BatchReload", "MsSqlBatchReload"],
             capabilities.Readers.Where(r => r.SupportsSegmentation).Select(r => r.Kind).Order());
 
-        // Change Tracking is the only reader that can report a source delete as one.
-        Assert.Equal("MsSqlChangeTracking", Assert.Single(capabilities.Readers, r => r.DetectsDeletes).Kind);
+        // The two change-feed readers report a source delete as one; the scanning readers cannot see
+        // a row that is no longer there.
+        Assert.Equal(
+            ["MsSqlCdc", "MsSqlChangeTracking"],
+            capabilities.Readers.Where(r => r.DetectsDeletes).Select(r => r.Kind).Order());
 
         // The SPA decides whether to offer a Test action from this flag alone.
         Assert.True(capabilities.SupportsConnectionTest);

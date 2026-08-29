@@ -70,10 +70,12 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
             var minValidVersion = await GetMinValidVersionAsync(sourceConnection, source, cancellationToken);
             if (long.Parse(previousWatermark) < minValidVersion)
             {
-                throw new InvalidOperationException(
-                    $"Change Tracking history for '{source.Schema}.{source.Table}' no longer covers " +
-                    $"watermark '{previousWatermark}' (minimum valid version is {minValidVersion}). " +
-                    "A full resync is required — clear the stored watermark for this table.");
+                // Shared with every other log-based reader, rather than this reader's own wording.
+                // One situation, one message, one thing for the runner to recognise and offer a fix
+                // for — see PositionExpiredException.
+                throw new PositionExpiredException(
+                    $"{source.Schema}.{source.Table}", previousWatermark, minValidVersion.ToString(),
+                    "Change Tracking");
             }
         }
 

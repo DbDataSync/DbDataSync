@@ -29,6 +29,7 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
     public IReadOnlyList<IChangeReader> Readers { get; } =
     [
         new MsSqlChangeTrackingReader(),
+        new MsSqlCdcReader(),
         new WatermarkReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
         new MsSqlBatchReloadReader(),
         new BatchReloadReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),

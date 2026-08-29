@@ -10,6 +10,12 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: ${DATASYNC_MSSQL_SA_PASSWORD:-DataSync_Test_Pw1}
+      # CDC's capture is a SQL Server Agent job, so without Agent `sp_cdc_enable_table` succeeds and
+      # then nothing is ever captured — `fn_cdc_get_max_lsn()` stays null forever. The image ships
+      # Agent but leaves it stopped, which made "the container has Agent" true and useless. Source
+      # only: the target is written to, never captured from.
+      MSSQL_AGENT_ENABLED: "true"
+
     ports:
       - "14330:1433"
     volumes:

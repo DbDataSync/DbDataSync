@@ -59,7 +59,7 @@ public static class RunnerStateEndpoints
 
         group.MapPost("/complete-run", (CompleteRunRequest r) =>
         {
-            state.CompleteRun(r.RunId, r.Status, r.RowsRead, r.RowsWritten, r.ErrorSummary);
+            state.CompleteRun(r.RunId, r.Status, r.RowsRead, r.RowsWritten, r.ErrorSummary, r.FailureKind);
             return Results.Ok();
         });
 

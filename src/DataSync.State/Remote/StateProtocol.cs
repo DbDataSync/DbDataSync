@@ -34,7 +34,11 @@ public sealed record TryAcquireLockRequest(string TaskName, RunKind RunKind, str
 public sealed record ReleaseLockRequest(string TaskName, RunKind RunKind, string MappingName);
 public sealed record BeginRunRequest(Guid RunId, int? Pid);
 public sealed record WorkItemRequest(long WorkItemId);
-public sealed record CompleteRunRequest(Guid RunId, RunStatus Status, long RowsRead, long RowsWritten, string? ErrorSummary);
+public sealed record CompleteRunRequest(
+    Guid RunId, RunStatus Status, long RowsRead, long RowsWritten, string? ErrorSummary,
+    /// <summary>Why it failed, when the product can act on it. Defaulted, so a journal written by an
+    /// older runner still deserializes.</summary>
+    string? FailureKind = null);
 public sealed record SetWatermarkRequest(string TaskName, string SourceTable, string Watermark);
 public sealed record RecordVerificationResultRequest(VerificationResultRecord Result);
 public sealed record LogRequest(Guid RunId, LogSeverity Level, string Message, DateTimeOffset TimestampUtc);

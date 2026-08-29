@@ -40,8 +40,10 @@ public sealed class LocalRunnerState(
     public void ReleaseLock(string taskName, RunKind runKind, string mappingName) =>
         runLocks.Release(taskName, runKind, mappingName);
 
-    public void CompleteRun(Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary) =>
-        taskRuns.CompleteRun(runId, status, rowsRead, rowsWritten, errorSummary);
+    public void CompleteRun(
+        Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
+        string? failureKind = null) =>
+        taskRuns.CompleteRun(runId, status, rowsRead, rowsWritten, errorSummary, failureKind);
 
     public void SetWatermark(string taskName, string sourceTable, string watermark) =>
         watermarks.SetWatermark(taskName, sourceTable, watermark);

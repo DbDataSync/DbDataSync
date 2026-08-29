@@ -38,6 +38,9 @@ public static class MsSqlProvisioner
     {
         // What needs enabling depends on which reader is configured — a reader kind needing no source
         // cooperation at all (Watermark, BatchReload) is satisfied by construction.
+        if (request.ReaderKind == MsSqlDriverKinds.Cdc)
+            return await PlanEnableCdcAsync(connection, request, cancellationToken);
+
         if (request.ReaderKind != MsSqlDriverKinds.ChangeTracking)
             return new ProvisioningPlan(ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Satisfied, [], []);
 
@@ -109,6 +112,87 @@ public static class MsSqlProvisioner
             steps,
             []);
     }
+
+    private static async Task<ProvisioningPlan> PlanEnableCdcAsync(
+        DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)
+    {
+        var table = request.Table;
+        await MsSqlDialect.Instance.UseDatabaseAsync(connection, table.Database, cancellationToken);
+
+        var hasPrimaryKey = (await MsSqlSchemaQueries.GetPrimaryKeyColumnsAsync(
+            connection, table.Schema, table.Table, cancellationToken)).Count > 0;
+        var databaseLevel = await MsSqlCdcCatalog.CdcIsEnabledAsync(connection, cancellationToken);
+        var instance = databaseLevel
+            ? await MsSqlCdcCatalog.FindCaptureInstanceAsync(connection, table.Schema, table.Table, cancellationToken)
+            : null;
+
+        return BuildEnableCdcSteps(table.Database, table.Schema, table.Table, hasPrimaryKey, databaseLevel, instance);
+    }
+
+    /// <summary>
+    /// The decision logic in isolation, like <see cref="BuildEnableChangeCaptureSteps"/> — every branch
+    /// is a reason the plan can stop or a step it can emit, and none of it touches a connection.
+    /// </summary>
+    internal static ProvisioningPlan BuildEnableCdcSteps(
+        string database, string schema, string table, bool hasPrimaryKey, bool cdcEnabledAtDatabase,
+        CdcCaptureInstance? existingInstance)
+    {
+        var steps = new List<ProvisioningStep>();
+        var warnings = new List<string>();
+
+        if (!cdcEnabledAtDatabase)
+            steps.Add(new ProvisioningStep(
+                $"Enable Change Data Capture on database [{database}]",
+                $"USE [{database}];\nEXEC sys.sp_cdc_enable_db;",
+                "Database-scoped, and it creates the cdc schema, its tables, and two SQL Server Agent " +
+                "jobs. CDC does not work without Agent running — which is the thing to check first " +
+                "when a capture instance exists and no changes arrive.",
+                ProvisioningStepScope.Database));
+
+        if (existingInstance is null)
+        {
+            // @supports_net_changes needs a primary key. Without one CDC still works, but only in
+            // all-changes form — the reader falls back and says so, rather than refusing, because
+            // all-changes is a working configuration and not a broken one.
+            var netChanges = hasPrimaryKey ? 1 : 0;
+            if (!hasPrimaryKey)
+                warnings.Add(
+                    $"'{schema}.{table}' has no primary key, so this capture instance cannot support " +
+                    "net changes. The reader will fall back to reading every intermediate change, " +
+                    "which is correct and more work per pass.");
+
+            steps.Add(new ProvisioningStep(
+                $"Enable Change Data Capture on {MsSqlDialect.Instance.QualifyTable(schema, table)}",
+                $"USE [{database}];\n" +
+                $"EXEC sys.sp_cdc_enable_table @source_schema = N'{Literal(schema)}', " +
+                $"@source_name = N'{Literal(table)}', @role_name = NULL, " +
+                $"@supports_net_changes = {netChanges};",
+                "@role_name = NULL means no gating role, so reading is governed by ordinary table " +
+                "permissions. @supports_net_changes creates the function that collapses a key's " +
+                "changes to one row, which is what makes CDC usable for mirroring.",
+                ProvisioningStepScope.Table));
+        }
+        else if (!existingInstance.SupportsNetChanges && hasPrimaryKey)
+        {
+            // Not a step: changing it means dropping and recreating the capture instance, which
+            // discards captured history. That is a decision, not a repair.
+            warnings.Add(
+                $"Capture instance '{existingInstance.CaptureInstance}' was created without " +
+                "@supports_net_changes, so the reader reads every intermediate change. Changing that " +
+                "means disabling and re-enabling capture for this table, which discards the history " +
+                "captured so far — so it is left alone here.");
+        }
+
+        return new ProvisioningPlan(
+            ProvisioningActions.EnableSourceChangeCapture,
+            steps.Count == 0 ? ProvisioningState.Satisfied : ProvisioningState.Missing,
+            steps,
+            warnings);
+    }
+
+    /// <summary>A schema or table name inside a string literal, which is what sp_cdc_enable_table takes
+    /// — it names its arguments as sysname values, not as identifiers to be quoted.</summary>
+    private static string Literal(string value) => value.Replace("'", "''");
 
     private static async Task<ProvisioningPlan> PlanCreateTargetTableAsync(
         DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)

@@ -32,6 +32,8 @@ jobs:
           ACCEPT_EULA: "Y"
           MSSQL_PID: Developer
           MSSQL_SA_PASSWORD: DataSync_Test_Pw1
+          # CDC captures through a SQL Server Agent job — see docker-compose.yml.
+          MSSQL_AGENT_ENABLED: "true"
         ports:
           - 14330:1433
         options: >-

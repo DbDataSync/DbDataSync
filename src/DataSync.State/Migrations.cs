@@ -157,5 +157,16 @@ internal static class Migrations
         -- idempotent, and this is how this one is.
         CREATE UNIQUE INDEX UX_VerificationResults_RunCheck ON VerificationResults(RunId, CheckName);
         """,
+
+        """
+        -- Why a run failed, when the answer is something the product can act on rather than only
+        -- report. Null for the ordinary case.
+        --
+        -- A column rather than a new RunStatus: a position-expired run *is* a failed run — the pass
+        -- did not happen — and giving it its own status would have quietly dropped it out of every
+        -- "how many failed" count in the app. What is different is the remedy, and that is what this
+        -- names. See PositionExpiredException.
+        ALTER TABLE TaskRuns ADD COLUMN FailureKind TEXT NULL;
+        """,
     ];
 }

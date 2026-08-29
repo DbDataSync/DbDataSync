@@ -284,6 +284,18 @@ public sealed class RunExecutor(
             state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
             state.MarkFailed(item.Id);
         }
+        catch (PositionExpiredException ex)
+        {
+            // A failure with a known fix, so it is recorded as one. The status stays Failed — the pass
+            // did not happen, and a separate status would have dropped it out of every "how many
+            // failed" count — and FailureKind is what lets the Runs tab offer the reload instead of
+            // leaving an operator to work out that a reload is what this needs.
+            Log(item.RunId, LogSeverity.Error, ex.Message);
+            state.Flush();
+            state.CompleteRun(
+                item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.PositionExpired);
+            state.MarkFailed(item.Id);
+        }
         catch (ConnectivityException ex)
         {
             Log(item.RunId, LogSeverity.Error, $"Run failed: {ex.Message}");

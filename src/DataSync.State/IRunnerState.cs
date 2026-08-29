@@ -51,7 +51,9 @@ public interface IRunnerState
 
     void ReleaseLock(string taskName, RunKind runKind, string mappingName);
 
-    void CompleteRun(Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary);
+    void CompleteRun(
+        Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
+        string? failureKind = null);
 
     /// <summary>
     /// Only ever called after the target write has committed — the watermark-on-success-only rule the

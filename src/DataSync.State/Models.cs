@@ -52,7 +52,22 @@ public sealed record TaskRunRecord(
     DateTimeOffset? EndedAtUtc,
     long RowsRead,
     long RowsWritten,
-    string? ErrorSummary);
+    string? ErrorSummary,
+    /// <summary>Why it failed, when that is something the product can act on. Null for the ordinary
+    /// case — see <see cref="RunFailureKinds"/>.</summary>
+    string? FailureKind = null);
+
+/// <summary>
+/// Failures with a specific remedy, as opposed to failures an operator has to go and read logs about.
+/// Strings rather than an enum because this is stored and read back by clients that are not this
+/// assembly, and a number would be meaningless in the database.
+/// </summary>
+public static class RunFailureKinds
+{
+    /// <summary>The source discarded the history the reader needed. The fix is a reload, which the UI
+    /// offers as one click — see <c>PositionExpiredException</c>.</summary>
+    public const string PositionExpired = "PositionExpired";
+}
 
 /// <param name="ResultPath">Where the parquet is. The index says where; the file says what.</param>
 /// <param name="SourceReadAtUtc">When each side was read. The gap between them is what tells an
