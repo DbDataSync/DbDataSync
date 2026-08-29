@@ -1,6 +1,6 @@
-# Phase 49 — Favicon should match the in-app logo (planned)
+# Phase 49 — Favicon should match the in-app logo
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: none — small enough to skip a separate planning doc.
 
 ## The bug
@@ -45,3 +45,37 @@ this is worth generating from one source.
 - Whether to generate the favicon from `LogoIcon`'s JSX at build time (one source of truth) or keep it as
   a hand-maintained static SVG — the static file is simpler and this asset changes rarely, so hand-
   maintained is probably fine unless `LogoIcon` turns out to change often.
+
+---
+
+# Retrospective
+
+The favicon is now `LogoIcon`'s glyph on `.rail-mark`'s accent square — the same mark, the same colour,
+drawn the way the app draws it three centimetres away.
+
+Two small decisions.
+
+**The stroke is heavier than the rail's.** 2.6 rather than 2, on the same 24-unit glyph. A favicon is
+read at 16px, where a hairline stroke thins out into the tab bar and the glyph reads as a smudge.
+Rendered at 16, 24, 32 and 64 px against both a light and a dark tab bar before settling on it — the
+plan asked for that spot-check and it changed the answer.
+
+**Hand-maintained, with something watching.** The plan's open question was whether to generate the file
+from the JSX. Generating it would mean a build step for one asset that changes almost never. Playwright
+33 reads `LogoIcon`'s path data straight out of `icons.tsx` and asserts every path appears in the served
+favicon, and that the square uses the `--accent` token's value rather than a colour invented for this
+one file. Two hand-maintained copies of one glyph are fine as long as something notices when they stop
+matching, and now something does — which is a cheaper answer than a build step and catches the same
+mistake.
+
+## Verification
+
+- Playwright 33 — the served favicon carrying every one of `LogoIcon`'s paths, the accent square
+  matching the `--accent` token, and the document still linking `/favicon.svg`.
+- Rendered at four sizes on light and dark, as above.
+- Full .NET suite green: 711 tests. Playwright: 35 green.
+
+## Open questions
+
+- ~~**Generate from the JSX, or hand-maintain.**~~ Hand-maintained, with a test that fails when the two
+  drift.

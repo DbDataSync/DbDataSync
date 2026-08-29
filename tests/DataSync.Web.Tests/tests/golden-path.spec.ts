@@ -1425,4 +1425,26 @@ public sealed class Shout : IValueColumnExpression
     expect((await page.request.put(
       `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: before })).ok()).toBeTruthy()
   })
+
+  test('33 - the browser tab shows the same mark the app does', async ({ page }) => {
+    // Two hand-maintained copies of one glyph, which is fine only while something notices when they
+    // stop matching. The favicon used to be unrelated artwork, so the tab and the app advertised two
+    // different products.
+    const webRoot = path.join(__dirname, '..', '..', '..', 'src', 'DataSync.Web')
+    const logo = fs.readFileSync(path.join(webRoot, 'src', 'components', 'icons.tsx'), 'utf8')
+      .split('export function LogoIcon()')[1].split('export function')[0]
+    const paths = [...logo.matchAll(/d="([^"]+)"/g)].map((m) => m[1])
+    expect(paths.length).toBeGreaterThan(3)
+
+    const served = await (await page.request.get('/favicon.svg')).text()
+    for (const d of paths) expect(served, 'the favicon draws the same glyph as LogoIcon').toContain(d)
+
+    // On the accent square the rail draws around the same mark, not a colour invented for this asset.
+    const accent = fs.readFileSync(path.join(webRoot, 'src', 'index.css'), 'utf8')
+      .match(/--accent:\s*(#[0-9a-f]{6})/i)![1]
+    expect(served.toLowerCase()).toContain(accent.toLowerCase())
+
+    await page.goto('/replications')
+    await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/favicon.svg')
+  })
 })

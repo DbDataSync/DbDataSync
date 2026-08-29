@@ -6,6 +6,10 @@ const stroke = {
   strokeWidth: 1.4,
 } as const
 
+/**
+ * The app's mark. `public/favicon.svg` is the same glyph on the accent square the rail draws around
+ * this one — changing this without changing that leaves the browser tab showing a different product.
+ */
 export function LogoIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
