@@ -300,6 +300,28 @@ h1.crumb.mono { font-family: var(--mono); }
 button.grid-row { border-left: none; border-right: none; border-top: none; background: none; width: 100%; cursor: pointer; }
 button.grid-row:hover { background: var(--row-head); }
 button.grid-row.active { background: var(--accent-row-alt); box-shadow: inset 2px 0 0 var(--accent); }
+/* Every row is its own grid sharing one gridTemplateColumns string, not one grid and not a <table>.
+   Grid items default to `min-width: auto`, so a cell whose content is wider than its `fr` share grows
+   that track — and since each row is its own formatting context, only *that* row's columns move. The
+   result is a table whose rows stop lining up with the header as soon as one value is long.
+
+   `min-width: 0` is the fix; the truncation is what makes it look deliberate rather than clipped. An
+   inner flex container needs the same, because `overflow: hidden` on the outer cell does not stop a
+   flex child refusing to shrink below its content. */
+.grid-head > *, .grid-row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-head > * > .row, .grid-row > * > .row,
+.grid-head > .row, .grid-row > .row,
+.grid-row .editable-value { min-width: 0; }
+
+/* For the rare cell that should wrap rather than truncate — opt in, so nothing inherits wrapping by
+   accident and quietly makes rows different heights. */
+.grid-row > .wrap { overflow: visible; white-space: normal; text-overflow: clip; }
+
 .grid-row .name { font-weight: 500; color: var(--ink); }
 .grid-row .dim { color: var(--ink-4); }
 .grid-row .faint { color: var(--ink-10); }

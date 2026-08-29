@@ -1377,4 +1377,52 @@ public sealed class Shout : IValueColumnExpression
     await page.getByTestId('test-connection-button').click()
     await expect(page.getByTestId('connection-test-result')).toContainText('reachable', { timeout: 20_000 })
   })
+
+  test('32 - a long value truncates instead of knocking its own row out of alignment', async ({ page }) => {
+    // Every row is its own grid sharing one column template, not one grid and not a <table>. A cell
+    // wider than its share used to grow that row's track — and only that row's — so one long value
+    // was enough to stop a table lining up with its own header.
+    const LONG = 'ThisIsAnAbsurdlyLongTargetColumnNameThatNoOneWouldEverActuallyUse'
+    const before = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+
+    const widened = structuredClone(before)
+    widened.columnMappings[1].targetColumn = LONG
+    expect((await page.request.put(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: widened })).ok()).toBeTruthy()
+
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    const table = page.getByTestId('column-mappings-table')
+    await expect(table).toContainText('Target column', { timeout: 20_000 })
+    await expect(table.getByTestId('column-mapping-target-1-text')).toContainText(LONG.slice(0, 20))
+
+    // The resolved track widths, not the cells' own boxes: a cell can sit anywhere within its track
+    // (the Remove button is `justify-self: end`), and it is the *track* the bug widened.
+    const tracks = (row: Element) => getComputedStyle(row).gridTemplateColumns
+    const head = await table.locator('.grid-head').first().evaluate(tracks)
+    const rows = await table.locator('.grid-row').evaluateAll((all) =>
+      all.map((row) => getComputedStyle(row).gridTemplateColumns))
+
+    expect(rows.length).toBeGreaterThan(1)
+    for (const row of rows) expect(row).toEqual(head)
+
+    // And the long value is cut off rather than allowed to push, which is what makes the alignment
+    // above a deliberate answer instead of a clipped one.
+    const overflowed = await table.getByTestId('column-mapping-target-1-text').evaluate(
+      (el) => el.scrollWidth > el.clientWidth)
+    expect(overflowed, 'the long name is truncated inside its cell').toBeTruthy()
+    await shot(page, '41-long-value-truncates.png')
+
+    // The runs table is the one this was reported against, and shares the same CSS.
+    await page.goto(`/replications/${REPLICATION_NAME}/runs`)
+    const runs = page.getByTestId('run-history-table')
+    await expect(runs).toContainText('Mapping', { timeout: 20_000 })
+    const runHead = await runs.locator('.grid-head').first().evaluate(tracks)
+    const runRows = await runs.locator('.grid-row').evaluateAll((all) =>
+      all.map((row) => getComputedStyle(row).gridTemplateColumns))
+    for (const row of runRows) expect(row).toEqual(runHead)
+
+    expect((await page.request.put(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: before })).ok()).toBeTruthy()
+  })
 })
