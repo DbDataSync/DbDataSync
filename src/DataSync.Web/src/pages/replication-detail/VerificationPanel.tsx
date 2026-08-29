@@ -1,36 +1,23 @@
-import { useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import {
-  useRunVerification, useTableMapping, useUpsertTableMapping, useVerificationResult, useVerificationResults,
+  useDeleteVerificationResult, useRunVerification, useTableMapping, useUpsertTableMapping,
+  useVerificationResults,
 } from '../../api/hooks'
 import { ChecksCard } from './ChecksCard'
-import type {
-  VerificationCheckConfig, VerificationResult, VerificationResultRow, VerificationRowStatus,
-} from '../../api/types'
+import type { VerificationCheckConfig } from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
 
-const STATUS_LABEL: Record<VerificationRowStatus, string> = {
-  Match: 'match',
-  Differs: 'differs',
-  MissingFromTarget: 'not at target',
-  MissingFromSource: 'not at source',
-}
-
-const STATUS_DOT: Record<VerificationRowStatus, string> = {
-  Match: 'dot-ok',
-  Differs: 'dot-bad',
-  MissingFromTarget: 'dot-warn',
-  MissingFromSource: 'dot-warn',
-}
+const RESULT_COLUMNS = '1.2fr .8fr .8fr 1.2fr 150px'
 
 /**
- * What a mapping's checks found: groupings first, then each measure's two sides and the difference.
+ * A mapping's checks, and what past runs of them said.
  *
- * **Both read times are shown, and that is not decoration.** A replication is behind by design, so a
- * difference is only as meaningful as the gap between the two reads is small — without it an operator
- * is guessing whether they are looking at drift or a defect, which is the thing this screen exists to
- * stop them doing.
+ * **The results themselves are a click away, not rendered here.** A check over a large table produces
+ * a row per group — millions of them — and this screen used to render the newest result inline the
+ * moment it loaded. That locked the tab up for minutes and crashed some of them, on a screen whose
+ * actual job is managing checks. Opening a result is now a decision, and the result arrives a page at
+ * a time.
  */
 export function VerificationPanel() {
   const { replicationName, base } = useOutletContext<MappingsOutletContext>()
@@ -40,7 +27,7 @@ export function VerificationPanel() {
   const { data: mapping } = useTableMapping(replicationName, mappingName)
   const upsert = useUpsertTableMapping(replicationName)
   const run = useRunVerification(replicationName)
-  const [picked, setPicked] = useState<number | undefined>()
+  const remove = useDeleteVerificationResult(replicationName)
 
   // Saved through the mapping, because a check lives on the mapping. The whole config goes back, so
   // an edit here cannot quietly drop a field this screen does not render.
@@ -48,12 +35,6 @@ export function VerificationPanel() {
     if (!mapping) return
     await upsert.mutateAsync({ mappingName: mapping.name, mapping: { ...mapping, verification } })
   }
-
-  // The newest result until somebody picks another. Derived during render rather than set in an
-  // effect: the answer is a function of what came back, and an effect would render once with nothing
-  // selected before correcting itself.
-  const selected = picked ?? results?.[0]?.id
-  const { data: result } = useVerificationResult(replicationName, selected)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} data-testid="verification-panel">
@@ -74,23 +55,27 @@ export function VerificationPanel() {
         </div>
       </div>
 
-      <ErrorBanner error={error ?? run.error ?? upsert.error} />
+      <ErrorBanner error={error ?? run.error ?? upsert.error ?? remove.error} />
 
       {mapping && <ChecksCard mapping={mapping} onSave={saveChecks} saving={upsert.isPending} />}
 
       <div className="card flush" data-testid="verification-results-list">
-        <div className="grid-head" style={{ gridTemplateColumns: '1.2fr 1fr 1fr 1.4fr', gap: 14 }}>
-          <span>Check</span><span>Groups</span><span>Differing</span><span>Run</span>
+        <div className="card-head tight">
+          <span className="card-title sm">Results</span>
+          <span className="card-note">what past runs of these checks found</span>
+        </div>
+
+        <div className="grid-head" style={{ gridTemplateColumns: RESULT_COLUMNS, gap: 14, height: 29 }}>
+          <span>Check</span><span>Groups</span><span>Differing</span><span>Run</span><span />
         </div>
         {results?.length === 0 && (
           <div className="empty">No results yet — run the checks to produce one.</div>
         )}
         {(results ?? []).map((r) => (
-          <button
+          <div
             key={r.id}
-            className={`grid-row ${r.id === selected ? 'active' : ''}`}
-            style={{ gridTemplateColumns: '1.2fr 1fr 1fr 1.4fr', gap: 14 }}
-            onClick={() => setPicked(r.id)}
+            className="grid-row"
+            style={{ gridTemplateColumns: RESULT_COLUMNS, gap: 14 }}
             data-testid={`verification-result-${r.checkName}`}
           >
             <span className="name">{r.checkName}</span>
@@ -100,108 +85,29 @@ export function VerificationPanel() {
               {r.differingGroups.toLocaleString()}
             </span>
             <span className="dim">{new Date(r.completedAtUtc).toLocaleString()}</span>
-          </button>
+            <span className="row" style={{ gap: 10, justifySelf: 'end' }}>
+              <Link
+                className="btn-link"
+                to={`${base}/${encodeURIComponent(mappingName!)}/verification/${r.id}`}
+                data-testid={`open-result-${r.id}`}
+              >
+                Open
+              </Link>
+              {/* A result is an artifact on disk. Somebody who has read one, or ran the wrong check
+                  over a large table, needs a way to be rid of it that is not "find the file". */}
+              <button
+                type="button"
+                className="btn-link quiet"
+                disabled={remove.isPending}
+                onClick={() => remove.mutate(r.id)}
+                data-testid={`delete-result-${r.id}`}
+              >
+                Delete
+              </button>
+            </span>
+          </div>
         ))}
       </div>
-
-      {result && <ResultTable result={result} />}
     </div>
   )
-}
-
-function ResultTable({ result }: { result: VerificationResult }) {
-  const gap = Math.abs(
-    new Date(result.targetReadAtUtc).getTime() - new Date(result.sourceReadAtUtc).getTime()) / 1000
-
-  // Groupings first, then each measure's two sides and the difference between them. Built by joining
-  // rather than with repeat(): an ungrouped check has no grouping columns, and `repeat(0, …)` is
-  // invalid CSS — which invalidates the whole declaration and silently drops the layout.
-  const columns = [
-    ...result.groupColumns.map(() => 'minmax(80px, 1fr)'),
-    ...result.measureColumns.flatMap(() => ['minmax(70px, .8fr)', 'minmax(70px, .8fr)', 'minmax(60px, .6fr)']),
-    '110px',
-  ].join(' ')
-
-  return (
-    <div className="card flush" data-testid="verification-result">
-      <div className="card-head">
-        <span className="card-title">{result.checkName}</span>
-        <span className="card-note" data-testid="verification-read-gap">
-          {/* The number a difference has to be weighed against. */}
-          read {gap < 1 ? 'less than a second' : `${gap.toFixed(1)}s`} apart ·{' '}
-          {result.differenceThreshold > 0
-            ? `differences under ${(result.differenceThreshold * 100).toFixed(2)}% are not flagged`
-            : 'any difference is flagged'}
-        </span>
-      </div>
-
-      <div className="grid-head" style={{ gridTemplateColumns: columns, gap: 10 }}>
-        {result.groupColumns.map((c) => <span key={c}>{c}</span>)}
-        {result.measureColumns.map((m) => (
-          <span key={m} style={{ display: 'contents' }}>
-            <span>{label(m)} src</span><span>{label(m)} tgt</span><span>Δ</span>
-          </span>
-        ))}
-        <span />
-      </div>
-
-      {result.rows.length === 0 && <div className="empty">Nothing to compare.</div>}
-
-      {result.rows.map((row, i) => (
-        <Row key={i} row={row} result={result} columns={columns} />
-      ))}
-    </div>
-  )
-}
-
-function Row({ row, result, columns }: {
-  row: VerificationResultRow
-  result: VerificationResult
-  columns: string
-}) {
-  return (
-    <div
-      className="grid-row"
-      style={{ gridTemplateColumns: columns, gap: 10 }}
-      data-testid={`verification-row-${row.group.join('-') || 'total'}`}
-    >
-      {result.groupColumns.map((c, i) => <span key={c} className="mono">{row.group[i] ?? ''}</span>)}
-
-      {result.measureColumns.map((m) => (
-        <span key={m} style={{ display: 'contents' }}>
-          <span className="dim mono">{format(row.source?.[m])}</span>
-          <span className="dim mono">{format(row.target?.[m])}</span>
-          {/* Highlighted only when the row is over its threshold. A difference under it is still
-              shown as a number — an operator reads it to judge drift — but it is not painted red,
-              because a screen where everything is red teaches people to ignore red. */}
-          <span
-            className="mono"
-            style={{ color: row.status === 'Differs' ? 'var(--danger-ink)' : 'var(--ink-8)' }}
-          >
-            {formatDelta(row.differences[m])}
-          </span>
-        </span>
-      ))}
-
-      <span className="status">
-        <span className={`dot ${STATUS_DOT[row.status]}`} />
-        {STATUS_LABEL[row.status]}
-      </span>
-    </div>
-  )
-}
-
-/** A row count has no column to be named after, so it comes back under a fixed name. */
-function label(measure: string) {
-  return measure === '__rows' ? 'rows' : measure
-}
-
-function format(value: number | undefined) {
-  return value === undefined ? '—' : value.toLocaleString(undefined, { maximumFractionDigits: 4 })
-}
-
-function formatDelta(value: number | undefined) {
-  if (value === undefined) return '—'
-  if (value === 0) return '0'
-  return (value > 0 ? '+' : '') + value.toLocaleString(undefined, { maximumFractionDigits: 4 })
 }

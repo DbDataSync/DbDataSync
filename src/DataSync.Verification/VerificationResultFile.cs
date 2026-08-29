@@ -91,87 +91,27 @@ public static class VerificationResultFile
             rowGroup.WriteAsync<double>(target, values.ToArray().AsMemory(), null, null, cancellationToken);
     }
 
-    public static async Task<VerificationResult> ReadAsync(string path, CancellationToken cancellationToken)
+    /// <summary>
+    /// Everything about a result except its rows: the parquet footer, and nothing else.
+    /// <para>
+    /// There is deliberately no "read the whole thing" here any more. A check over a large table
+    /// produces a row per group, and a method whose only correct use is "when you know the file is
+    /// small" is a loaded gun — it was the one that locked the UI up. Rows come a page at a time,
+    /// through <see cref="VerificationResultQuery"/>.
+    /// </para>
+    /// </summary>
+    public static async Task<VerificationResultHeader> ReadHeaderAsync(string path, CancellationToken cancellationToken)
     {
         await using var reader = await ParquetReader.CreateAsync(path, cancellationToken: cancellationToken);
-
         var metadata = reader.CustomMetadata;
-        var groupColumns = Split(metadata.GetValueOrDefault(GroupColumnsKey));
-        var measureColumns = Split(metadata.GetValueOrDefault(MeasureColumnsKey));
-        var fields = reader.Schema.DataFields.ToDictionary(f => f.Name, StringComparer.Ordinal);
 
-        var groups = new List<IReadOnlyList<string>>();
-        var sources = new List<Dictionary<string, double>?>();
-        var targets = new List<Dictionary<string, double>?>();
-        var differences = new List<Dictionary<string, double>>();
-        var statuses = new List<VerificationRowStatus>();
-
-        for (var g = 0; g < reader.RowGroupCount; g++)
-        {
-            using var rowGroup = reader.OpenRowGroupReader(g);
-            var count = (int)rowGroup.RowCount;
-            if (count == 0)
-                continue;
-
-            var groupValues = new string[groupColumns.Count][];
-            for (var i = 0; i < groupColumns.Count; i++)
-            {
-                var column = new string[count];
-                await rowGroup.ReadAsync(fields[groupColumns[i]], column.AsMemory(), null, cancellationToken);
-                groupValues[i] = column;
-            }
-
-            var status = new string[count];
-            await rowGroup.ReadAsync(fields[StatusColumn], status.AsMemory(), null, cancellationToken);
-
-            var measures = new Dictionary<string, double?[]>(StringComparer.Ordinal);
-            foreach (var name in measureColumns.SelectMany(
-                         m => new[] { m + SourceSuffix, m + TargetSuffix, m + DifferenceSuffix }))
-            {
-                var column = new double?[count];
-                await rowGroup.ReadAsync(fields[name], column.AsMemory(), null, cancellationToken);
-                measures[name] = column;
-            }
-
-            for (var row = 0; row < count; row++)
-            {
-                var parsed = Enum.Parse<VerificationRowStatus>(status[row]);
-                statuses.Add(parsed);
-                groups.Add([.. groupValues.Select(v => v[row] ?? "")]);
-                sources.Add(parsed == VerificationRowStatus.MissingFromSource
-                    ? null
-                    : Collect(measures, measureColumns, SourceSuffix, row));
-                targets.Add(parsed == VerificationRowStatus.MissingFromTarget
-                    ? null
-                    : Collect(measures, measureColumns, TargetSuffix, row));
-                differences.Add(Collect(measures, measureColumns, DifferenceSuffix, row));
-            }
-        }
-
-        var rows = statuses
-            .Select((status, i) => new VerificationRow(groups[i], sources[i], targets[i], differences[i], status))
-            .ToList();
-
-        return new VerificationResult(
+        return new VerificationResultHeader(
             metadata.GetValueOrDefault(CheckNameKey) ?? "",
-            groupColumns,
-            measureColumns,
-            double.TryParse(metadata.GetValueOrDefault(ThresholdKey), out var threshold) ? threshold : 0,
+            Split(metadata.GetValueOrDefault(GroupColumnsKey)),
+            Split(metadata.GetValueOrDefault(MeasureColumnsKey)),
+            VerificationResultQuery.ParseThreshold(metadata.GetValueOrDefault(ThresholdKey)),
             ParseTime(metadata.GetValueOrDefault(SourceReadAtKey)),
-            ParseTime(metadata.GetValueOrDefault(TargetReadAtKey)),
-            rows);
-    }
-
-    private static Dictionary<string, double> Collect(
-        IReadOnlyDictionary<string, double?[]> columns, IReadOnlyList<string> measures, string suffix, int row)
-    {
-        var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        foreach (var measure in measures)
-        {
-            if (columns.TryGetValue(measure + suffix, out var column) && column[row] is { } value)
-                values[measure] = value;
-        }
-        return values;
+            ParseTime(metadata.GetValueOrDefault(TargetReadAtKey)));
     }
 
     private static string Value(IReadOnlyList<string> group, int ordinal) =>

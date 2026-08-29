@@ -423,14 +423,28 @@ export interface VerificationResultRow {
   status: VerificationRowStatus
 }
 
-export interface VerificationResult {
+/**
+ * One page of a check's result.
+ *
+ * A page, not the result. A check over a large table produces a row per group — millions of them —
+ * and this used to arrive whole: tens of megabytes of JSON and a DOM node per cell, to show a
+ * screenful. The counts describe the *file*, so the pager and the summary line have something to
+ * count against.
+ */
+export interface VerificationResultPage {
   checkName: string
   groupColumns: string[]
   measureColumns: string[]
   differenceThreshold: number
-  /** Each side's read time, separately: the gap is what a difference has to be weighed against. */
+  /** Each side's read time, separately: the gap is what a difference has to be weighed against.
+   * On every page, because page four needs it as much as page one. */
   sourceReadAtUtc: string
   targetReadAtUtc: string
+  /** Every compared group in the file, whatever the current filter is. */
+  totalRows: number
+  /** Groups the two sides disagreed on, or that only one side had. */
+  differingRows: number
+  offset: number
   rows: VerificationResultRow[]
 }
 

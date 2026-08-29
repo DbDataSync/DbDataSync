@@ -20,7 +20,7 @@ import type {
   PreviewReport,
   ReplicationStatus,
   RunMetrics,
-  VerificationResult,
+  VerificationResultPage,
   VerificationResultRecord,
   ScriptListItem,
   ScriptTestRequest,
@@ -205,9 +205,15 @@ export const api = {
         `/api/replications/${encodeURIComponent(replicationName)}/verification-results` +
           `?mappingName=${encodeURIComponent(mappingName)}`,
       ),
-    result: (replicationName: string, id: number) =>
-      request<VerificationResult>(
+    result: (replicationName: string, id: number, offset: number, limit: number, differingOnly: boolean) =>
+      request<VerificationResultPage>(
+        `/api/replications/${encodeURIComponent(replicationName)}/verification-results/${id}` +
+          `?offset=${offset}&limit=${limit}&differingOnly=${differingOnly}`,
+      ),
+    deleteResult: (replicationName: string, id: number) =>
+      request<void>(
         `/api/replications/${encodeURIComponent(replicationName)}/verification-results/${id}`,
+        { method: 'DELETE' },
       ),
   },
   runs: {

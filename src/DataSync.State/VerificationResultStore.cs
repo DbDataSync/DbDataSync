@@ -86,6 +86,22 @@ public sealed class VerificationResultStore(StateDatabase database)
             return reader.Read() ? Read(reader) : null;
         });
 
+    /// <summary>
+    /// Forgets one result. The caller deletes the file — this store owns the index, not the artifact,
+    /// and a store that reached out to the filesystem would be two responsibilities in one place.
+    /// </summary>
+    /// <returns>False when there was no such row, so a double-delete reads as "already gone" rather
+    /// than as a failure.</returns>
+    public bool Delete(long id) =>
+        SqliteRetry.Execute(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM VerificationResults WHERE Id = $id;";
+            cmd.Parameters.AddWithValue("$id", id);
+            return cmd.ExecuteNonQuery() == 1;
+        });
+
     private static VerificationResultRecord Read(SqliteDataReader reader) => new(
         reader.GetInt64(0),
         Guid.Parse(reader.GetString(1)),

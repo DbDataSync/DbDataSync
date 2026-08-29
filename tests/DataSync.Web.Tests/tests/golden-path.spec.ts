@@ -997,6 +997,16 @@ public sealed class Shout : IValueColumnExpression
     await runAndWait(1)
     await expect(page.getByTestId('verification-result-total-rows')).toBeVisible({ timeout: 30_000 })
 
+    // The result is a click away rather than rendered here — the checks screen manages checks, and
+    // rendering every group of a large one is what used to lock the tab up.
+    const openNewest = async () => {
+      const results = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/verification-results?mappingName=${MAPPING_NAME}`)).json()
+      await page.getByTestId(`open-result-${results[0].id}`).click()
+      await expect(page.getByTestId('verification-result')).toBeVisible({ timeout: 20_000 })
+    }
+    await openNewest()
+
     // A real difference, and an explainable one: test 16 bound a row transform that drops a row, so
     // the source has two rows where the target has one. The check finds it without being told.
     const result = page.getByTestId('verification-result')
@@ -1012,7 +1022,10 @@ public sealed class Shout : IValueColumnExpression
     // an operator reads it to judge drift — but no longer called a failure, because a replication
     // being behind is the premise of the feature rather than a fault.
     await setCheck(0.6)
+    await page.getByTestId('verify-mapping-link').isVisible().catch(() => {})
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/verification`)
     await runAndWait(2)
+    await openNewest()
 
     await expect(result).toContainText('match', { timeout: 30_000 })
     await expect(result).toContainText('are not flagged')
@@ -1491,8 +1504,13 @@ public sealed class Shout : IValueColumnExpression
     // And it runs, which is the only proof the editor wrote something the runner understands.
     await page.getByTestId('run-verification-button').click()
     await expect(page.getByTestId('verification-result-ui-rows-by-name')).toBeVisible({ timeout: 60_000 })
-    await page.getByTestId('verification-result-ui-rows-by-name').click()
+
+    const produced = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/verification-results?mappingName=${MAPPING_NAME}`)).json()
+    const mine = produced.find((r: { checkName: string }) => r.checkName === 'ui-rows-by-name')
+    await page.getByTestId(`open-result-${mine.id}`).click()
     await expect(page.getByTestId('verification-result')).toContainText('Name', { timeout: 20_000 })
+    await page.goBack()
 
     // Editing pre-fills from what was saved, and the threshold is entered as the percentage the
     // results card already speaks in rather than as the fraction it is stored as.
@@ -1544,5 +1562,98 @@ public sealed class Shout : IValueColumnExpression
     const rail = (await page.locator('.detail-rail').boundingBox())!
     expect(rail.x).toBeGreaterThan(pane.x)
     await shot(page, '43-detail-layout.png')
+  })
+
+  test('36 - a big result is paged rather than shipped whole, and can be thrown away', async ({ page }) => {
+    test.setTimeout(180_000)
+
+    // A check grouped by a column with many distinct values is what produced the lock-up: one row per
+    // group, every one of them rendered at once. 900 rows is plenty to prove the screen never asks
+    // for more than a page of them.
+    const GROUPS = 900
+    runSql(`
+      IF OBJECT_ID('dbo.PwWide', 'U') IS NOT NULL DROP TABLE dbo.PwWide;
+      CREATE TABLE dbo.PwWide (Id INT NOT NULL PRIMARY KEY, Bucket NVARCHAR(20) NOT NULL);
+      WITH n AS (SELECT TOP (${GROUPS}) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS i FROM sys.all_objects)
+      INSERT INTO dbo.PwWide (Id, Bucket) SELECT i, CONCAT('b', RIGHT('00000' + CAST(i AS VARCHAR(6)), 6)) FROM n;
+      ALTER TABLE dbo.PwWide ENABLE CHANGE_TRACKING;
+
+      IF OBJECT_ID('dbo.PwWideTgt', 'U') IS NOT NULL DROP TABLE dbo.PwWideTgt;
+      SELECT * INTO dbo.PwWideTgt FROM dbo.PwWide;
+      ALTER TABLE dbo.PwWideTgt ADD PRIMARY KEY (Id);
+    `, DB_NAME)
+
+    const mapping = {
+      name: 'wide',
+      sources: [{ schema: 'dbo', table: 'PwWide' }],
+      targets: [{ schema: 'dbo', table: 'PwWideTgt' }],
+      columnMappings: [
+        { sourceColumn: 'Id', targetColumn: 'Id', transform: null },
+        { sourceColumn: 'Bucket', targetColumn: 'Bucket', transform: null },
+      ],
+      verification: [{ name: 'by-bucket', kind: 'RowCount', groupBy: ['Bucket'], measures: [], differenceThreshold: 0 }],
+    }
+    expect((await page.request.put(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/wide`, { data: mapping })).ok()).toBeTruthy()
+
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/wide/verification`)
+    await page.getByTestId('run-verification-button').click()
+
+    let result: { id: number; groupsCompared: number } | undefined
+    await expect.poll(async () => {
+      const results = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/verification-results?mappingName=wide`)).json()
+      result = results[0]
+      return result?.groupsCompared ?? 0
+    }, { timeout: 90_000 }).toBe(GROUPS)
+
+    // The API hands back a page, not the file. This is the assertion that would have caught the bug:
+    // the old endpoint answered with every one of the 900 rows.
+    const firstPage = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/verification-results/${result!.id}?offset=0&limit=100`)).json()
+    expect(firstPage.rows).toHaveLength(100)
+    expect(firstPage.totalRows).toBe(GROUPS)
+
+    // A limit past the cap is capped rather than honoured — asking for a million rows is asking for
+    // the bug back.
+    const greedy = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/verification-results/${result!.id}?offset=0&limit=100000`)).json()
+    expect(greedy.rows.length).toBeLessThanOrEqual(500)
+
+    await page.getByTestId(`open-result-${result!.id}`).click()
+    await expect(page.getByTestId('verification-result')).toBeVisible({ timeout: 30_000 })
+
+    // The screen shows a page and says so, rather than 900 rows.
+    await expect(page.locator('[data-testid^="verification-row-"]')).toHaveCount(100)
+    await expect(page.getByTestId('verification-page-range')).toHaveText('1–100')
+    await expect(page.getByTestId('verification-result-counts')).toContainText('900')
+    await shot(page, '44-verification-paged.png')
+
+    await page.getByTestId('page-next').click()
+    await expect(page.getByTestId('verification-page-range')).toHaveText('101–200')
+    await page.getByTestId('page-last').click()
+    await expect(page.getByTestId('verification-page-range')).toHaveText('801–900')
+
+    // Nothing differs here, so filtering to the differences empties it — and says why rather than
+    // looking broken.
+    await page.getByTestId('differing-only-toggle').click()
+    await expect(page.getByTestId('verification-result')).toContainText('Nothing differs', { timeout: 20_000 })
+
+    // A result is an artifact on disk, and somebody who ran the wrong check over a large table needs
+    // to be rid of it without going looking for the file.
+    await page.getByTestId('verify-mapping-link').isVisible().catch(() => {})
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/wide/verification`)
+    await page.getByTestId(`delete-result-${result!.id}`).click()
+
+    await expect.poll(async () => (await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/verification-results?mappingName=wide`)).json()).length,
+      { timeout: 15_000 }).toBe(0)
+
+    expect((await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/verification-results/${result!.id}`)).status()).toBe(404)
+
+    expect((await page.request.delete(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/wide`)).ok()).toBeTruthy()
+    runSql('DROP TABLE dbo.PwWide; DROP TABLE dbo.PwWideTgt;', DB_NAME)
   })
 })

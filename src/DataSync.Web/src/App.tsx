@@ -10,6 +10,7 @@ import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/Ta
 import { MappingsOverview } from './pages/replication-detail/MappingsOverview'
 import { MappingPreview } from './pages/replication-detail/MappingPreview'
 import { VerificationPanel } from './pages/replication-detail/VerificationPanel'
+import { VerificationResultPage } from './pages/replication-detail/VerificationResultPage'
 
 /**
  * Every destination has a URL.
@@ -50,6 +51,10 @@ export default function App() {
           {/* Beside the editor for the same reason the preview is: a result is about the mapping as
               saved and as it stands in the two databases, not as an editor has it. */}
           <Route path=":mappingName/verification" element={<VerificationPanel />} />
+          {/* A result gets its own screen. Rendered inline it was every group at once — millions of
+              rows on a large check — which locked the tab up on a screen whose job is managing
+              checks, not reading one. */}
+          <Route path=":mappingName/verification/:resultId" element={<VerificationResultPage />} />
         </Route>
         <Route path="runs" element={<RunsTab />} />
         <Route path="history" element={<HistoryTab />} />

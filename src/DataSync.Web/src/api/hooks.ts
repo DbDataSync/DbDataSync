@@ -491,12 +491,33 @@ export function useVerificationResults(replicationName: string, mappingName: str
   })
 }
 
-/** One result, read back out of the parquet the runner wrote. */
-export function useVerificationResult(replicationName: string, id: number | undefined) {
+/**
+ * One page of a result, read back out of the parquet the runner wrote.
+ *
+ * `placeholderData` keeps the previous page on screen while the next one loads, so paging through a
+ * large result does not blink the table away and back on every click.
+ */
+export function useVerificationResult(
+  replicationName: string,
+  id: number | undefined,
+  offset: number,
+  limit: number,
+  differingOnly: boolean,
+) {
   return useQuery({
-    queryKey: keys.verificationResult(replicationName, id ?? 0),
-    queryFn: () => api.verification.result(replicationName, id!),
+    queryKey: [...keys.verificationResult(replicationName, id ?? 0), offset, limit, differingOnly] as const,
+    queryFn: () => api.verification.result(replicationName, id!, offset, limit, differingOnly),
     enabled: !!id,
+    placeholderData: (previous) => previous,
+  })
+}
+
+/** Throws away one result — its index row and its file. */
+export function useDeleteVerificationResult(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.verification.deleteResult(replicationName, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['replications', replicationName, 'verification-results'] }),
   })
 }
 

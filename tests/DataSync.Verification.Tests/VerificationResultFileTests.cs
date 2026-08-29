@@ -16,6 +16,30 @@ public sealed class VerificationResultFileTests : IDisposable
 
     private string Path(string name) => System.IO.Path.Combine(_root, name);
 
+    /// <summary>
+    /// The whole file, a page at a time — which is the only way to read one now. There is deliberately
+    /// no read-it-all method in production: a check over a large table produces millions of rows, and
+    /// a method whose only correct use is "when you know the file is small" is the one that locked the
+    /// UI up.
+    /// </summary>
+    private static async Task<VerificationResultPage> ReadAllAsync(string path, bool differingOnly = false)
+    {
+        var rows = new List<VerificationRow>();
+        VerificationResultPage page;
+        var offset = 0;
+
+        do
+        {
+            page = await VerificationResultQuery.ReadPageAsync(
+                path, offset, VerificationResultQuery.MaxPageSize, differingOnly, CancellationToken.None);
+            rows.AddRange(page.Rows);
+            offset += page.Rows.Count;
+        }
+        while (page.Rows.Count > 0);
+
+        return page with { Rows = rows };
+    }
+
     private static VerificationResult Result(params VerificationRow[] rows) => new(
         "rows-by-region",
         ["Region"],
@@ -45,7 +69,7 @@ public sealed class VerificationResultFileTests : IDisposable
             Row("south", 50, 47, VerificationRowStatus.Differs));
 
         await VerificationResultFile.WriteAsync(path, written, CancellationToken.None);
-        var read = await VerificationResultFile.ReadAsync(path, CancellationToken.None);
+        var read = await ReadAllAsync(path);
 
         Assert.Equal("rows-by-region", read.CheckName);
         Assert.Equal(["Region"], read.GroupColumns);
@@ -70,7 +94,7 @@ public sealed class VerificationResultFileTests : IDisposable
         var path = Path("times.parquet");
         await VerificationResultFile.WriteAsync(path, Result(Row("north", 1, 1, VerificationRowStatus.Match)), CancellationToken.None);
 
-        var read = await VerificationResultFile.ReadAsync(path, CancellationToken.None);
+        var read = await ReadAllAsync(path);
 
         Assert.Equal(new DateTimeOffset(2026, 8, 28, 12, 0, 0, TimeSpan.Zero), read.SourceReadAtUtc);
         Assert.Equal(new DateTimeOffset(2026, 8, 28, 12, 0, 4, TimeSpan.Zero), read.TargetReadAtUtc);
@@ -89,7 +113,7 @@ public sealed class VerificationResultFileTests : IDisposable
             Row("west", 5, null, VerificationRowStatus.MissingFromTarget),
             Row("east", null, 3, VerificationRowStatus.MissingFromSource)), CancellationToken.None);
 
-        var read = await VerificationResultFile.ReadAsync(path, CancellationToken.None);
+        var read = await ReadAllAsync(path);
 
         Assert.Null(read.Rows[0].Target);
         Assert.Equal(5, read.Rows[0].Source!["__rows"]);
@@ -112,7 +136,7 @@ public sealed class VerificationResultFileTests : IDisposable
                 VerificationRowStatus.Match)]);
 
         await VerificationResultFile.WriteAsync(path, written, CancellationToken.None);
-        var read = await VerificationResultFile.ReadAsync(path, CancellationToken.None);
+        var read = await ReadAllAsync(path);
 
         var row = Assert.Single(read.Rows);
         Assert.Empty(row.Group);
@@ -125,11 +149,11 @@ public sealed class VerificationResultFileTests : IDisposable
         var path = Path("empty.parquet");
         await VerificationResultFile.WriteAsync(path, Result(), CancellationToken.None);
 
-        var read = await VerificationResultFile.ReadAsync(path, CancellationToken.None);
+        var read = await ReadAllAsync(path);
 
         Assert.Empty(read.Rows);
         Assert.Equal("rows-by-region", read.CheckName);
-        Assert.Equal(0, read.DifferingGroups);
+        Assert.Equal(0, read.DifferingRows);
     }
 
     [Fact]
@@ -147,7 +171,7 @@ public sealed class VerificationResultFileTests : IDisposable
                 VerificationRowStatus.Differs)]);
 
         await VerificationResultFile.WriteAsync(path, written, CancellationToken.None);
-        var read = await VerificationResultFile.ReadAsync(path, CancellationToken.None);
+        var read = await ReadAllAsync(path);
 
         var row = Assert.Single(read.Rows);
         Assert.Equal(100.5, row.Source!["Amount"]);
@@ -164,8 +188,8 @@ public sealed class VerificationResultFileTests : IDisposable
             Row("south", 2, 3, VerificationRowStatus.Differs),
             Row("west", 5, null, VerificationRowStatus.MissingFromTarget)), CancellationToken.None);
 
-        var read = await VerificationResultFile.ReadAsync(path, CancellationToken.None);
+        var read = await ReadAllAsync(path);
 
-        Assert.Equal(2, read.DifferingGroups);
+        Assert.Equal(2, read.DifferingRows);
     }
 }
