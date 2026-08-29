@@ -213,6 +213,21 @@ export function useConnectionParameters(
   })
 }
 
+/**
+ * The recovery for a run whose source position expired: reload the table, and clear the watermark so
+ * the incremental pass can start again.
+ *
+ * A mutation and never a refetch side effect — a full reload of a table that fell behind can be hours
+ * of work, and it happens because somebody pressed the button.
+ */
+export function useResyncRun(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (runId: string) => api.runs.resync(runId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.replicationHistory(replicationName) }),
+  })
+}
+
 export function useReplication(name: string | undefined) {
   return useQuery({
     queryKey: keys.replication(name ?? ''),

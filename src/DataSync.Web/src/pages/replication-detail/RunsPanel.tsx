@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { RunKindBadge, StatusBadge } from '../../components/StatusBadge'
 import { BackfillForm } from './BackfillForm'
-import { useCancelRun, useInvalidateRunHistory, useRunHistory, useTriggerRun } from '../../api/hooks'
+import { useCancelRun, useInvalidateRunHistory, useRunHistory, useTriggerRun, useResyncRun } from '../../api/hooks'
 import { useRunHub } from '../../api/useRunHub'
 import type { TaskRunRecord } from '../../api/types'
 
@@ -12,7 +12,7 @@ export interface RunsCommand {
   nonce: number
 }
 
-const COLUMNS = '1.2fr .7fr .9fr .8fr .7fr .8fr .8fr 1fr'
+const COLUMNS = '1.2fr .7fr .9fr .8fr .6fr .7fr .7fr 1fr 78px'
 type Filter = 'all' | 'failed' | 'backfills'
 
 /** Real, unlike the mockup's lag and 24-hour counters: both timestamps are recorded. */
@@ -34,6 +34,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
   const { data: runs, error: historyError } = useRunHistory(replicationName, isWatching ? 1500 : undefined)
   const trigger = useTriggerRun(replicationName)
   const cancel = useCancelRun(replicationName)
+  const resync = useResyncRun(replicationName)
   const { logLines, completed } = useRunHub(activeRunId)
   const invalidateRunHistory = useInvalidateRunHistory(replicationName)
 
@@ -71,7 +72,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
 
   return (
     <div className="pane">
-      <ErrorBanner error={historyError ?? trigger.error ?? cancel.error} />
+      <ErrorBanner error={historyError ?? trigger.error ?? cancel.error ?? resync.error} />
 
       {(isWatching || showBackfill) && (
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
@@ -137,7 +138,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
 
         <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 12 }}>
           <span>Started</span><span>Kind</span><span>Mapping</span><span>Segment</span>
-          <span>Read</span><span>Written</span><span>Duration</span><span>Status</span>
+          <span>Read</span><span>Written</span><span>Duration</span><span>Status</span><span />
         </div>
 
         <div style={{ overflow: 'auto' }}>
@@ -155,6 +156,26 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
               <span>{r.rowsWritten.toLocaleString()}</span>
               <span className="dim">{duration(r)}</span>
               <span title={r.errorSummary ?? undefined}><StatusBadge status={r.status} /></span>
+              {/* Offered, not performed. A full reload of a table that fell behind can be hours of
+                  work, so a pass failing because its source dropped the history it needed reports
+                  that and puts the fix one click away — rather than starting it unasked. */}
+              <span style={{ justifySelf: 'end' }}>
+                {r.failureKind === 'PositionExpired' && (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={resync.isPending}
+                    title={
+                      'The source no longer holds the changes this pass needed. Resync reloads the ' +
+                      'table and clears the stored position, so incremental passes can start again.'
+                    }
+                    onClick={() => resync.mutate(r.runId)}
+                    data-testid={`resync-run-${r.runId}`}
+                  >
+                    Resync
+                  </button>
+                )}
+              </span>
             </div>
           ))}
         </div>

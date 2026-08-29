@@ -29,4 +29,25 @@ public sealed class ChangeWatermarkStore(StateDatabase database)
             cmd.Parameters.AddWithValue("$table", sourceTable);
             return cmd.ExecuteScalar() as string;
         });
+
+    /// <summary>
+    /// Forgets where a table got to, so the next pass reads it from the beginning.
+    /// <para>
+    /// The recovery for a position the source no longer retains — see
+    /// <c>PositionExpiredException</c>. Deleting the row rather than writing a sentinel, because every
+    /// reader already treats "no watermark" as "read everything and start tracking from here", and a
+    /// sentinel would be a second thing meaning the same.
+    /// </para>
+    /// </summary>
+    /// <returns>False when there was nothing stored, so a repeat reads as "already cleared".</returns>
+    public bool ClearWatermark(string taskName, string sourceTable) =>
+        SqliteRetry.Execute(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM ChangeWatermarks WHERE TaskName = $task AND SourceTable = $source;";
+            cmd.Parameters.AddWithValue("$task", taskName);
+            cmd.Parameters.AddWithValue("$source", sourceTable);
+            return cmd.ExecuteNonQuery() == 1;
+        });
 }

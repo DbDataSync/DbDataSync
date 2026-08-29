@@ -619,6 +619,10 @@ export interface TaskRunRecord {
   rowsRead: number
   rowsWritten: number
   errorSummary: string | null
+  /** Why it failed, when the product can act on it — `"PositionExpired"` means the source discarded
+   * the history this pass needed, and the fix is a resync rather than a retry. Null for the ordinary
+   * case, which is nearly all of them. */
+  failureKind: string | null
 }
 
 export type LogSeverity = 'Trace' | 'Debug' | 'Info' | 'Warning' | 'Error'

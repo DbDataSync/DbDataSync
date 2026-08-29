@@ -89,6 +89,7 @@ builder.Services.AddSingleton<PreviewService>();
 builder.Services.AddSingleton<ScriptTestService>();
 builder.Services.AddSingleton<ProcessSupervisor>();
 builder.Services.AddSingleton<BackfillService>();
+builder.Services.AddSingleton<ResyncService>();
 builder.Services.AddHostedService<SchedulerService>();
 builder.Services.AddHostedService<RunMonitorService>();
 

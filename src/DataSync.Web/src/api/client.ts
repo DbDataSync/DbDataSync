@@ -224,6 +224,9 @@ export const api = {
         `/api/replications/${encodeURIComponent(replicationName)}/runs?limit=${limit}`,
       ),
     get: (runId: string) => request<TaskRunRecord>(`/api/runs/${runId}`),
+    /** Reloads the table and clears the stored watermark, for a run whose source position expired. */
+    resync: (runId: string) =>
+      request<TriggerResponse>(`/api/runs/${runId}/resync`, { method: 'POST' }),
     logs: (runId: string, sinceId?: number) =>
       request<LogEntryRecord[]>(`/api/runs/${runId}/logs${sinceId ? `?sinceId=${sinceId}` : ''}`),
     cancel: (runId: string) => request<void>(`/api/runs/${runId}/cancel`, { method: 'POST' }),

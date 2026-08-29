@@ -33,16 +33,52 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         if (!await MsSqlCdcCatalog.CdcIsEnabledAsync(_connection, CancellationToken.None))
             await ExecuteAsync("EXEC sys.sp_cdc_enable_db;");
 
-        await ExecuteAsync($"""
-            EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'{_tableName}',
-                 @role_name = NULL, @supports_net_changes = 1;
-            """);
+        // Retried on 1205. Enabling capture registers the Agent jobs, which touches msdb — and so
+        // does the capture job that is already running for this database. SQL Server deadlocks the two
+        // occasionally and says "Rerun the transaction", which is what this does. Only in the fixture:
+        // in the product the same failure surfaces to the operator with the server's own message,
+        // which is honest, and retrying a DDL apply on their behalf is a separate decision.
+        await EnableCaptureWithRetryAsync();
 
         // sp_cdc_enable_db creates the Agent jobs; it does not wait for them to start scanning. Until
         // the first scan there is no max LSN, and the reader correctly reports that as "the capture
         // job has not run" — which is the right answer and not the one these tests are asking about.
         await WaitForCaptureStartedAsync();
     }
+
+    private async Task EnableCaptureWithRetryAsync()
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await ExecuteAsync($"""
+                    EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'{_tableName}',
+                         @role_name = NULL, @supports_net_changes = 1;
+                    """);
+                return;
+            }
+            catch (SqlException ex) when (IsDeadlock(ex) && attempt < 6)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(attempt));
+
+                // The failed attempt can still have registered the capture instance before deadlocking
+                // on the job registration, and re-running then fails with "already enabled" instead.
+                if (await MsSqlCdcCatalog.FindCaptureInstanceAsync(
+                        _connection, "dbo", _tableName, CancellationToken.None) is not null)
+                    return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>sp_cdc_enable_table</c> catches the deadlock and re-raises its own error with the original
+    /// quoted in the text, so the 1205 is in the message rather than in <c>Errors</c>. Matching the
+    /// number alone silently never retried — which is how this looked fixed for one run.
+    /// </summary>
+    private static bool IsDeadlock(SqlException ex) =>
+        ex.Errors.Cast<SqlError>().Any(e => e.Number == 1205)
+        || ex.Message.Contains("was deadlocked on lock resources", StringComparison.Ordinal);
 
     /// <summary>
     /// Waits until capture is actually established: a max LSN means the job has scanned, and a min

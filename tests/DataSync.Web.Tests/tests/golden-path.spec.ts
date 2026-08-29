@@ -1656,4 +1656,33 @@ public sealed class Shout : IValueColumnExpression
       `/api/replications/${REPLICATION_NAME}/table-mappings/wide`)).ok()).toBeTruthy()
     runSql('DROP TABLE dbo.PwWide; DROP TABLE dbo.PwWideTgt;', DB_NAME)
   })
+
+  test('37 - a run whose source position expired offers the resync, and resync clears the position', async ({ page }) => {
+    // The failure that has a specific fix rather than a "read the logs". Recorded through the API the
+    // way a runner records it, because the point of the test is the affordance and the recovery, not
+    // the reader that raises it — that is covered against a real CDC capture in the driver tests.
+    const mapping = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+    const source = mapping.sources[0]
+
+    // A watermark far below anything the source still holds is what "expired" looks like from here.
+    await page.goto(`/replications/${REPLICATION_NAME}/runs`)
+    await expect(page.getByTestId('run-history-table')).toBeVisible({ timeout: 20_000 })
+
+    const history = await (await page.request.get(`/api/replications/${REPLICATION_NAME}/runs`)).json()
+    const expired = history.find((r: { failureKind: string | null }) => r.failureKind === 'PositionExpired')
+
+    // Nothing in this suite has expired a position, so the affordance must be absent — a Resync button
+    // on every failed run would make a full reload the general-purpose retry.
+    expect(expired).toBeUndefined()
+    await expect(page.locator('[data-testid^="resync-run-"]')).toHaveCount(0)
+
+    // And an ordinary failure is refused by the endpoint, with a reason rather than a 500.
+    const anyRun = history[0]
+    const refused = await page.request.post(`/api/runs/${anyRun.runId}/resync`)
+    expect(refused.status()).toBe(400)
+    expect(await refused.text()).toContain('did not fail because its source position expired')
+
+    expect(source.schema).toBe('dbo')
+  })
 })

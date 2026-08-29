@@ -11,6 +11,7 @@ public sealed class RunsController(
     ProcessSupervisor supervisor,
     BackfillService backfillService,
     TaskRunStore taskRunStore,
+    ResyncService resyncService,
     LogWriter logWriter) : ControllerBase
 {
     [HttpPost("replications/{name}/runs")]
@@ -61,6 +62,28 @@ public sealed class RunsController(
     [HttpGet("runs/{runId:guid}/logs")]
     public ActionResult<IReadOnlyList<LogEntryRecord>> Logs(Guid runId, [FromQuery] long? sinceId = null) =>
         Ok(logWriter.GetLogs(runId, sinceId));
+
+    /// <summary>
+    /// The recovery for a run whose source position expired: reload the table, and clear the stored
+    /// watermark so the incremental pass can start again.
+    /// <para>
+    /// Offered rather than performed, which is why it is an endpoint and not something the runner does
+    /// on its own — a full reload of a table that fell behind can be hours of work, and nobody asked
+    /// for it just because a pass failed.
+    /// </para>
+    /// </summary>
+    [HttpPost("runs/{runId:guid}/resync")]
+    public async Task<IActionResult> Resync(Guid runId, CancellationToken cancellationToken)
+    {
+        var result = await resyncService.ResyncAsync(runId, cancellationToken);
+        return result.Outcome switch
+        {
+            TriggerOutcome.ReplicationNotFound => NotFound(),
+            TriggerOutcome.Invalid => BadRequest(new { error = result.Reason }),
+            TriggerOutcome.FailedToStart => StatusCode(500, new { error = result.Reason }),
+            _ => Accepted(new { runIds = result.RunIds }),
+        };
+    }
 
     [HttpPost("runs/{runId:guid}/cancel")]
     public IActionResult Cancel(Guid runId) =>
