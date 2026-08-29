@@ -43,4 +43,12 @@ public sealed class ReplicationTaskConfig
     /// <summary>Hooks bound at this level, keyed by point (see <c>HookPoints</c>). See
     /// <see cref="HookResolution"/>.</summary>
     public Dictionary<string, List<HookConfig>?> Hooks { get; set; } = new();
+
+    /// <summary>
+    /// What every table mapping under this replication may do to its target's shape, unless the
+    /// mapping says otherwise. Same type as the mapping's own, resolved by
+    /// <see cref="ProvisioningResolution"/> — one answer set in one place beats the same checkbox
+    /// ticked on forty mappings.
+    /// </summary>
+    public ProvisioningConfig Provisioning { get; set; } = new();
 }

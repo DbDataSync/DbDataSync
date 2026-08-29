@@ -1153,4 +1153,50 @@ public sealed class Shout : IValueColumnExpression
     await expect(page.getByTestId('mapping-name-input')).toHaveCount(0, { timeout: 15_000 })
     await expect(page.getByRole('heading', { name: `dbo.${SOURCE_TABLE}` })).toBeVisible()
   })
+
+  test('28 - provisioning is set once on the replication and overridden per mapping', async ({ page }) => {
+    // One answer in one place beats the same checkbox ticked on forty mappings.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    const replicationCreate = page.getByTestId('task-provisioning-create')
+    await expect(replicationCreate).toBeVisible({ timeout: 15_000 })
+
+    await replicationCreate.getByTestId('task-provisioning-create-override').click()
+    await replicationCreate.getByTestId('task-provisioning-create-checkbox').check()
+    await page.getByTestId('save-settings-button').click()
+
+    await expect.poll(async () => {
+      const task = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()
+      return task.provisioning?.createTargetTableIfMissing
+    }, { timeout: 15_000 }).toBe(true)
+
+    // A mapping that has never been asked inherits it — which is why the mapping's own value starts
+    // null rather than false: false would opt it out of a default it should pick up.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    const mappingCreate = page.getByTestId('provisioning-create')
+    await expect(mappingCreate).toContainText('INHERITED', { timeout: 20_000 })
+    await expect(mappingCreate.getByTestId('provisioning-create-checkbox')).toBeChecked()
+    await expect(mappingCreate.getByTestId('provisioning-create-checkbox')).toBeDisabled()
+    await shot(page, '36-inherited-provisioning.png')
+
+    // Overriding starts from what is in effect, so it is a starting point rather than a reset — then
+    // saying no here wins locally without touching the replication's answer.
+    await mappingCreate.getByTestId('provisioning-create-override').click()
+    await expect(mappingCreate).not.toContainText('INHERITED')
+    await mappingCreate.getByTestId('provisioning-create-checkbox').uncheck()
+    await page.getByTestId('save-mapping-button').click()
+
+    await expect.poll(async () => {
+      const mapping = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+      const task = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()
+      return {
+        mapping: mapping.provisioning?.createTargetTableIfMissing,
+        replication: task.provisioning?.createTargetTableIfMissing,
+      }
+    }, { timeout: 15_000 }).toEqual({ mapping: false, replication: true })
+
+    // The second setting is a separate question and falls back on its own — a mapping can override
+    // one and inherit the other.
+    await expect(page.getByTestId('provisioning-alter')).toContainText('INHERITED')
+  })
 })

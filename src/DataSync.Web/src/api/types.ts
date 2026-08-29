@@ -91,6 +91,8 @@ export interface ReplicationTaskConfig {
   endpoints: TaskEndpoints
   scripts?: ScriptBindings
   hooks?: Hooks
+  /** What every mapping under this replication may do to its target, unless the mapping overrides. */
+  provisioning?: ProvisioningConfig
 }
 
 /** One side of a table mapping as configured: null connection/database inherit the replication's
@@ -120,9 +122,17 @@ export interface ColumnMapping {
   transform: string | null
 }
 
+/**
+ * What DataSync may do to a target's shape without being asked.
+ *
+ * Null at either level means "nobody here has said": on a mapping that inherits the replication's
+ * answer, on a replication it resolves to off. Nullable is also what lets an explicit `false` survive
+ * being saved — see phase 46.
+ */
 export interface ProvisioningConfig {
-  /** Target-side, additive only, never ALTER, never source DDL. Off by default. */
-  createTargetTableIfMissing: boolean
+  createTargetTableIfMissing: boolean | null
+  /** Schema evolution for a table that already exists. Additive and modifying only, never DROP. */
+  alterTargetTableColumnsIfMissingOrChanged: boolean | null
 }
 
 export interface TableMappingConfig {

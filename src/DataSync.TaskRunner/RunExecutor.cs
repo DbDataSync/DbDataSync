@@ -405,7 +405,8 @@ public sealed class RunExecutor(
                 message => Log(item.RunId, LogSeverity.Info, $"[{mapping.Name}] {message}"));
 
             await EnsureTargetTableProvisionedAsync(
-                sourceDriver, sourceConnection, source, targetDriver, targetConnection, target, mapping, item.RunId, cancellationToken);
+                task, sourceDriver, sourceConnection, source, targetDriver, targetConnection, target,
+                mapping, item.RunId, cancellationToken);
 
             var segments = await ResolveSegmentsAsync(reader, sourceConnection, source, item, processing.Reader.Options, cancellationToken);
             if (segments.Count > 1)
@@ -606,11 +607,14 @@ public sealed class RunExecutor(
     /// mapped column missing from an existing table still fails with the ordinary staging error.
     /// </summary>
     private async Task EnsureTargetTableProvisionedAsync(
+        ReplicationTaskConfig task,
         IDriver sourceDriver, DbConnection sourceConnection, SourceTableRef source,
         IDriver targetDriver, DbConnection targetConnection, TableRef target,
         TableMappingConfig mapping, Guid runId, CancellationToken cancellationToken)
     {
-        if (!mapping.Provisioning.CreateTargetTableIfMissing || targetDriver is not IProvisioner provisioner)
+        var mayCreate = ProvisioningResolution.CreateTargetTableIfMissing(task, mapping);
+        var mayAlter = ProvisioningResolution.AlterTargetTableColumns(task, mapping);
+        if ((!mayCreate && !mayAlter) || targetDriver is not IProvisioner provisioner)
             return;
 
         var sourceColumns = await sourceDriver.ListColumnsAsync(
@@ -618,15 +622,31 @@ public sealed class RunExecutor(
         var (columns, identityWarnings) = ProvisioningColumnBuilder.Build(
             ResolveDialect(sourceDriver), sourceColumns, mapping.ColumnMappings);
 
-        var request = new ProvisioningRequest(
-            ProvisioningActions.CreateTargetTable, target, ReaderKind: null,
-            ReaderOptions: new Dictionary<string, string>(), columns);
-        var plan = await provisioner.PlanAsync(targetConnection, request, cancellationToken);
+        ProvisioningRequest Request(string action) => new(
+            action, target, ReaderKind: null, ReaderOptions: new Dictionary<string, string>(), columns);
+
+        // Create if the table is missing, alter if it is there and out of shape — the two are mutually
+        // exclusive, and each is gated by its own resolved setting. A replication that creates missing
+        // tables but does not want columns changed underneath it gets exactly that.
+        var create = mayCreate
+            ? await provisioner.PlanAsync(targetConnection, Request(ProvisioningActions.CreateTargetTable), cancellationToken)
+            : null;
+
+        var plan = create is { State: ProvisioningState.Missing or ProvisioningState.Unsupported }
+            ? create
+            : mayAlter
+                ? await provisioner.PlanAsync(targetConnection, Request(ProvisioningActions.AlterTargetTable), cancellationToken)
+                : null;
+
+        if (plan is null)
+            return;
+
+        var what = plan.Action == ProvisioningActions.CreateTargetTable ? "created" : "altered";
 
         if (plan.State == ProvisioningState.Unsupported)
         {
             foreach (var warning in plan.Warnings)
-                Log(runId, LogSeverity.Warning, $"'{mapping.Name}': target table cannot be auto-created — {warning}");
+                Log(runId, LogSeverity.Warning, $"'{mapping.Name}': target table cannot be auto-{what} — {warning}");
             return;
         }
 
@@ -641,7 +661,7 @@ public sealed class RunExecutor(
             using var cmd = targetConnection.CreateCommand();
             cmd.CommandText = step.CommandText;
             await cmd.ExecuteNonQueryAsync(cancellationToken);
-            Log(runId, LogSeverity.Info, $"'{mapping.Name}': target table created — {step.CommandText}");
+            Log(runId, LogSeverity.Info, $"'{mapping.Name}': target table {what} — {step.CommandText}");
         }
     }
 

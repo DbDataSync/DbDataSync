@@ -124,14 +124,64 @@ public sealed class TableMappingConfig
     public List<VerificationCheckConfig> Verification { get; set; } = new();
 }
 
-/// <summary>See phase 25 §5 — the one provisioning action DataSync ever runs unattended, and why it is
-/// safe to: additive-only, and only when the table is absent entirely.</summary>
+/// <summary>
+/// What DataSync is allowed to do to the target's shape without being asked.
+/// <para>
+/// The same type at both levels, and **nullable at both**: on a table mapping null means "inherit the
+/// replication's answer", and on the replication it means "nobody has said", which resolves to off.
+/// One type rather than two, because "the replication's default" and "this mapping's override" are the
+/// same question asked at two levels — the shape phase 16 established for endpoints.
+/// </para>
+/// <para>
+/// Nullable is also what makes <c>false</c> survive being written down: a non-nullable <c>bool</c>
+/// whose default is <c>false</c> is omitted by the YAML serializer, which is the bug phase 46 found in
+/// <c>Enabled</c>. Here <c>default(bool?)</c> is null, so an explicit <c>false</c> is written and means
+/// what it says — "this mapping overrides the replication and says no".
+/// </para>
+/// </summary>
 public sealed class ProvisioningConfig
 {
-    /// <summary>Target-side, additive only, never ALTER, never source DDL. Off by default. Checked once
-    /// per pass, before the segment loop: if set and the target table is absent, the mapping's
-    /// <c>createTargetTable</c> plan is applied and every statement it ran is logged at Info. If the
-    /// table exists, nothing happens — no ALTER, no column reconciliation; a missing mapped column still
-    /// fails with the existing staging error.</summary>
-    public bool CreateTargetTableIfMissing { get; set; }
+    /// <summary>Target-side, and only when the table is absent entirely. Checked once per pass, before
+    /// the segment loop: if resolved on and the target table is absent, the mapping's
+    /// <c>createTargetTable</c> plan is applied and every statement it ran is logged at Info.</summary>
+    public bool? CreateTargetTableIfMissing { get; set; }
+
+    /// <summary>
+    /// Target-side schema evolution, for a table that already exists: add a mapped column the target
+    /// lacks, and change one whose type no longer matches.
+    /// <para>
+    /// **Additive and modifying only, never <c>DROP</c>** — the same restraint
+    /// <see cref="CreateTargetTableIfMissing"/> follows. A column the mapping stopped writing is a
+    /// column something else may still be reading, and DataSync is not the thing that should decide
+    /// otherwise.
+    /// </para>
+    /// </summary>
+    public bool? AlterTargetTableColumnsIfMissingOrChanged { get; set; }
+}
+
+/// <summary>
+/// What a mapping's provisioning settings actually resolve to, once the replication's defaults are
+/// applied. Mirrors <see cref="EndpointResolution"/>: each setting falls back independently, so a
+/// mapping can override one and inherit the other.
+/// </summary>
+public static class ProvisioningResolution
+{
+    public static bool CreateTargetTableIfMissing(ReplicationTaskConfig? task, TableMappingConfig? mapping) =>
+        mapping?.Provisioning.CreateTargetTableIfMissing
+        ?? task?.Provisioning.CreateTargetTableIfMissing
+        ?? false;
+
+    public static bool AlterTargetTableColumns(ReplicationTaskConfig? task, TableMappingConfig? mapping) =>
+        mapping?.Provisioning.AlterTargetTableColumnsIfMissingOrChanged
+        ?? task?.Provisioning.AlterTargetTableColumnsIfMissingOrChanged
+        ?? false;
+
+    /// <summary>Where a resolved value came from, for a UI that wants to show INHERITED.</summary>
+    public static BindingLevel LevelOfCreate(TableMappingConfig? mapping) =>
+        mapping?.Provisioning.CreateTargetTableIfMissing is null ? BindingLevel.Replication : BindingLevel.Mapping;
+
+    public static BindingLevel LevelOfAlter(TableMappingConfig? mapping) =>
+        mapping?.Provisioning.AlterTargetTableColumnsIfMissingOrChanged is null
+            ? BindingLevel.Replication
+            : BindingLevel.Mapping;
 }

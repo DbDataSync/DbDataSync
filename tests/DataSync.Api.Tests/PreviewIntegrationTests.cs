@@ -445,6 +445,86 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         return connection;
     }
 
+    /// <summary>
+    /// Schema evolution against a real target: a mapped column the table lacks becomes an ALTER, and
+    /// applying it makes the next plan quiet. The restraint is asserted too — a column the mapping no
+    /// longer writes is never dropped.
+    /// </summary>
+    [Fact]
+    public async Task AMappedColumnTheTargetLacks_IsPlannedAsAnAlterAndCanBeApplied()
+    {
+        await ExecuteAsync(await OpenDatabaseAsync(),
+            $"ALTER TABLE dbo.[{_sourceTable}] ADD note NVARCHAR(30) NULL;");
+        await ExecuteAsync(await OpenDatabaseAsync(),
+            $"ALTER TABLE dbo.[{_targetTable}] ADD Retired NVARCHAR(10) NULL;");
+
+        (await _client.PutAsJsonAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+            {
+                Name = "main",
+                Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
+                Targets = [new TableSpec { Schema = "dbo", Table = _targetTable }],
+                ColumnMappings =
+                [
+                    new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                    new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
+                    // On the source, absent from the target: the case this action exists for.
+                    new ColumnMapping { SourceColumn = "note", TargetColumn = "Note" },
+                ],
+            }, JsonOptions)).EnsureSuccessStatusCode();
+
+        var plan = await GetTargetPlanAsync();
+
+        Assert.Equal("alterTargetTable", plan.Action);
+        Assert.Equal("Missing", plan.State);
+        var step = Assert.Single(plan.Steps);
+        Assert.Contains("Add column Note", step.Title);
+        Assert.Contains("ALTER TABLE", step.CommandText);
+
+        // Never DROP. The target's own Retired column is not mapped and is left exactly alone — it is
+        // a column something else may still be reading.
+        Assert.DoesNotContain(plan.Steps, s => s.CommandText.Contains("DROP", StringComparison.OrdinalIgnoreCase));
+
+        var applied = await _client.PostAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main/provisioning/alterTargetTable/apply", null);
+        applied.EnsureSuccessStatusCode();
+
+        // And the plan goes quiet, which is the only proof the statement did what it said.
+        Assert.Equal("Satisfied", (await GetTargetPlanAsync()).State);
+
+        var columns = await QueryColumnsAsync(_targetTable);
+        Assert.Contains("Note", columns);
+        Assert.Contains("Retired", columns);
+    }
+
+    private sealed record ProvisioningStepDto(string Title, string CommandText);
+    private sealed record ProvisioningPlanDto(
+        string Action, string State, List<ProvisioningStepDto> Steps, List<string> Warnings);
+    private sealed record ProvisioningPlanReportDto(ProvisioningPlanDto Source, ProvisioningPlanDto Target);
+
+    private async Task<ProvisioningPlanDto> GetTargetPlanAsync()
+    {
+        var response = await _client.GetAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main/provisioning");
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<ProvisioningPlanReportDto>(JsonOptions))!.Target;
+    }
+
+    private async Task<List<string>> QueryColumnsAsync(string table)
+    {
+        await using var connection = OpenDatabase();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(@t) ORDER BY name;";
+        cmd.Parameters.AddWithValue("@t", $"[dbo].[{table}]");
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var names = new List<string>();
+        while (await reader.ReadAsync())
+            names.Add(reader.GetString(0));
+        return names;
+    }
+
     private sealed record PreviewStatementDto(string Stage, string Title, string? Sql, string Origin, string? Detail);
     private sealed record PreviewReportDto(List<PreviewStatementDto> Statements, List<string> Problems);
 

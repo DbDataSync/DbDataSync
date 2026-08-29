@@ -31,7 +31,7 @@ public sealed class ProvisioningService(ConfigRepository configRepository, Drive
         if (sourceConnection is not null)
             await sourceConnection.DisposeAsync();
 
-        var (targetConnection, targetPlan) = await PlanCreateTargetTableAsync(mapping, source, target, cancellationToken);
+        var (targetConnection, targetPlan) = await PlanTargetAsync(task, mapping, source, target, cancellationToken);
         if (targetConnection is not null)
             await targetConnection.DisposeAsync();
 
@@ -46,7 +46,8 @@ public sealed class ProvisioningService(ConfigRepository configRepository, Drive
         var (connection, plan) = action switch
         {
             ProvisioningActions.EnableSourceChangeCapture => await PlanEnableSourceChangeCaptureAsync(task, source, cancellationToken),
-            ProvisioningActions.CreateTargetTable => await PlanCreateTargetTableAsync(mapping, source, target, cancellationToken),
+            ProvisioningActions.CreateTargetTable or ProvisioningActions.AlterTargetTable =>
+                await PlanTargetAsync(task, mapping, source, target, cancellationToken),
             _ => throw new ConfigValidationException($"Unknown provisioning action '{action}'."),
         };
 
@@ -117,8 +118,23 @@ public sealed class ProvisioningService(ConfigRepository configRepository, Drive
         return (connection, plan);
     }
 
-    private async Task<(DbConnection? Connection, ProvisioningPlan Plan)> PlanCreateTargetTableAsync(
-        TableMappingConfig mapping, SourceTableRef source, TableRef target, CancellationToken cancellationToken)
+    /// <summary>
+    /// The target side's one plan.
+    /// <para>
+    /// "Create it" and "fix it" are two answers to one question — make the target fit — and which one
+    /// applies is decided by whether the table exists, not by the operator. So this asks the driver for
+    /// whichever is applicable and returns a single plan, which is why the card shows one Target panel
+    /// rather than two that are never both relevant.
+    /// </para>
+    /// <para>
+    /// **Not gated by the provisioning settings.** Those govern what a *pass* may do unattended; this
+    /// card is where a person presses Apply deliberately, and refusing to show them what the change
+    /// would be because automation is switched off would answer a question nobody asked.
+    /// </para>
+    /// </summary>
+    private async Task<(DbConnection? Connection, ProvisioningPlan Plan)> PlanTargetAsync(
+        ReplicationTaskConfig task, TableMappingConfig mapping, SourceTableRef source, TableRef target,
+        CancellationToken cancellationToken)
     {
         var (sourceConnection, sourceDriver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);
         IReadOnlyList<ColumnMetadata> sourceColumns;
@@ -142,9 +158,20 @@ public sealed class ProvisioningService(ConfigRepository configRepository, Drive
         var (columns, identityWarnings) = ProvisioningColumnBuilder.Build(
             ResolveDialect(sourceDriver.DriverType), sourceColumns, mapping.ColumnMappings);
 
-        var request = new ProvisioningRequest(
-            ProvisioningActions.CreateTargetTable, target, ReaderKind: null, ReaderOptions: new Dictionary<string, string>(), columns);
-        var plan = await provisioner.PlanAsync(targetConnection, request, cancellationToken);
+        ProvisioningRequest Request(string action) => new(
+            action, target, ReaderKind: null, ReaderOptions: new Dictionary<string, string>(), columns);
+
+        // Create first: its plan comes back Satisfied when the table already exists, which is exactly
+        // when the alter plan is the one with something to say. The two are mutually exclusive, which
+        // is why one panel is the right shape rather than two that are never both relevant.
+        var create = await provisioner.PlanAsync(
+            targetConnection, Request(ProvisioningActions.CreateTargetTable), cancellationToken);
+
+        var plan = create.State is ProvisioningState.Missing or ProvisioningState.Unsupported
+            ? create
+            : await provisioner.PlanAsync(
+                targetConnection, Request(ProvisioningActions.AlterTargetTable), cancellationToken);
+
         return (targetConnection, plan with { Warnings = [.. identityWarnings, .. plan.Warnings] });
     }
 

@@ -13,7 +13,8 @@ namespace DataSync.Drivers.MsSql;
 public static class MsSqlProvisioner
 {
     public static IReadOnlyList<string> SupportedActions { get; } =
-        [ProvisioningActions.EnableSourceChangeCapture, ProvisioningActions.CreateTargetTable];
+        [ProvisioningActions.EnableSourceChangeCapture, ProvisioningActions.CreateTargetTable,
+         ProvisioningActions.AlterTargetTable];
 
     /// <summary>
     /// A placeholder, not a considered answer — see phase 25's open question on retention. The harness
@@ -27,6 +28,7 @@ public static class MsSqlProvisioner
     {
         ProvisioningActions.EnableSourceChangeCapture => PlanEnableSourceChangeCaptureAsync(connection, request, cancellationToken),
         ProvisioningActions.CreateTargetTable => PlanCreateTargetTableAsync(connection, request, cancellationToken),
+        ProvisioningActions.AlterTargetTable => PlanAlterTargetTableAsync(connection, request, cancellationToken),
         _ => Task.FromResult(new ProvisioningPlan(
             request.Action, ProvisioningState.Unknown, [], [$"MsSql does not implement provisioning action '{request.Action}'."])),
     };
@@ -118,6 +120,24 @@ public static class MsSqlProvisioner
             return new ProvisioningPlan(ProvisioningActions.CreateTargetTable, ProvisioningState.Satisfied, [], []);
 
         return CreateTargetTablePlanner.Plan(MsSqlDialect.Instance, table, request.Columns);
+    }
+
+    /// <summary>
+    /// What an existing target is missing or has wrong. A table that is not there at all is not this
+    /// action's business — that is <see cref="ProvisioningActions.CreateTargetTable"/>, and the two
+    /// are mutually exclusive by construction.
+    /// </summary>
+    private static async Task<ProvisioningPlan> PlanAlterTargetTableAsync(
+        DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)
+    {
+        var table = request.Table;
+        await MsSqlDialect.Instance.UseDatabaseAsync(connection, table.Database, cancellationToken);
+
+        if (!await TableExistsAsync(connection, table.Schema, table.Table, cancellationToken))
+            return new ProvisioningPlan(ProvisioningActions.AlterTargetTable, ProvisioningState.Satisfied, [], []);
+
+        var existing = await MsSqlSchemaQueries.GetColumnsAsync(connection, table.Schema, table.Table, cancellationToken);
+        return AlterTargetTablePlanner.Plan(MsSqlDialect.Instance, table, request.Columns, existing);
     }
 
     private static bool IsSnapshotIsolationRequested(IReadOnlyDictionary<string, string> readerOptions) =>

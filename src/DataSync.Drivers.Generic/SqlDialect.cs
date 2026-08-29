@@ -75,6 +75,26 @@ public abstract class SqlDialect
     /// would mean choosing a column and paying for a sort against a table that may be enormous.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Add a column to an existing table. <c>ADD</c> on most engines; SQL Server spells it
+    /// <c>ADD</c> too but without the <c>COLUMN</c> keyword, so this is virtual rather than shared.
+    /// <para>
+    /// The column is added nullable regardless of what the mapping says, and that is not laziness: a
+    /// table with rows in it cannot gain a <c>NOT NULL</c> column without a default, and inventing a
+    /// default for somebody's data is exactly the kind of decision this system does not make.
+    /// </para>
+    /// </summary>
+    public virtual string RenderAddColumn(string qualifiedTable, string column, string type) =>
+        $"ALTER TABLE {qualifiedTable} ADD COLUMN {QuoteIdentifier(column)} {type} NULL;";
+
+    /// <summary>
+    /// Change an existing column's type, or null when this engine cannot express the change as a
+    /// single statement — in which case the plan reports it as unsupported and names the column,
+    /// rather than emitting something that might silently truncate.
+    /// </summary>
+    public virtual string? RenderAlterColumnType(string qualifiedTable, string column, string type) =>
+        $"ALTER TABLE {qualifiedTable} ALTER COLUMN {QuoteIdentifier(column)} TYPE {type};";
+
     public virtual string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT * FROM {qualifiedTable} LIMIT {rows};";
 

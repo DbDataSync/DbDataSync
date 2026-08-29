@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { CodeEditor } from '../../components/CodeEditor'
+import { InheritableToggle } from '../../components/InheritableToggle'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { useApplyProvisioning, useProvisioning } from '../../api/hooks'
 import type { EndpointSide } from '../../components/EndpointSidePair'
@@ -124,6 +125,8 @@ interface Props {
   replicationName: string
   mappingName: string
   provisioning: ProvisioningConfig
+  /** The replication's answer, shown while this mapping inherits it. */
+  inherited: ProvisioningConfig | undefined
   onChangeProvisioning: (value: ProvisioningConfig) => void
   /** The target has been retyped since the last save, so these plans describe the previous one. */
   stale?: boolean
@@ -132,7 +135,9 @@ interface Props {
 /** The Setup card: both sides' provisioning plans for a saved table mapping, previewed and applied
  * live against the database — separate from the mapping's own Save, since Apply runs DDL immediately
  * rather than writing config. See phase 25 §7. */
-export function ProvisioningCard({ replicationName, mappingName, provisioning, onChangeProvisioning, stale = false }: Props) {
+export function ProvisioningCard({
+  replicationName, mappingName, provisioning, inherited, onChangeProvisioning, stale = false,
+}: Props) {
   const { data: plans, error, isLoading } = useProvisioning(replicationName, mappingName)
   const applySource = useApplyProvisioning(replicationName, mappingName)
   const applyTarget = useApplyProvisioning(replicationName, mappingName)
@@ -186,18 +191,29 @@ export function ProvisioningCard({ replicationName, mappingName, provisioning, o
       )}
 
       <div className="card">
-        <div className="card-body">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={provisioning.createTargetTableIfMissing}
-              onChange={(e) => onChangeProvisioning({ ...provisioning, createTargetTableIfMissing: e.target.checked })}
-            />
-            Create target table if missing
-          </label>
-          <div style={{ color: 'var(--ink-4)', fontSize: 12, marginTop: 4 }}>
-            Creates the table only if it does not exist; never alters an existing one.
-          </div>
+        <div className="card-head">
+          <span className="card-title">Provisioning</span>
+          <span className="card-note">inherited from the replication unless overridden here</span>
+        </div>
+        <div className="card-body" style={{ gap: 14 }}>
+          <InheritableToggle
+            label="Create target table if missing"
+            description="Creates the table only when it does not exist. Never alters one that does."
+            value={provisioning.createTargetTableIfMissing}
+            inherited={inherited?.createTargetTableIfMissing ?? false}
+            onChange={(next) => onChangeProvisioning({ ...provisioning, createTargetTableIfMissing: next })}
+            testId="provisioning-create"
+          />
+          <div className="divider" />
+          <InheritableToggle
+            label="Alter target columns if missing or changed"
+            description="Adds a mapped column the target lacks and changes one whose type no longer matches. Never drops a column."
+            value={provisioning.alterTargetTableColumnsIfMissingOrChanged}
+            inherited={inherited?.alterTargetTableColumnsIfMissingOrChanged ?? false}
+            onChange={(next) =>
+              onChangeProvisioning({ ...provisioning, alterTargetTableColumnsIfMissingOrChanged: next })}
+            testId="provisioning-alter"
+          />
         </div>
       </div>
     </div>

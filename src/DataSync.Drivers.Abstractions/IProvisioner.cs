@@ -41,6 +41,19 @@ public static class ProvisioningActions
 {
     public const string EnableSourceChangeCapture = "enableSourceChangeCapture";
     public const string CreateTargetTable = "createTargetTable";
+
+    /// <summary>
+    /// Bring an **existing** target table's columns in line with the mapping: add what is missing,
+    /// change what no longer matches. Never <c>DROP</c> — see
+    /// <c>ProvisioningConfig.AlterTargetTableColumnsIfMissingOrChanged</c>.
+    /// <para>
+    /// Distinct from <see cref="CreateTargetTable"/> because the two are mutually exclusive: the table
+    /// either exists or it does not, and the plan for one situation is never the plan for the other.
+    /// They share a panel because they are the same question — "make the target fit" — asked of two
+    /// different starting states.
+    /// </para>
+    /// </summary>
+    public const string AlterTargetTable = "alterTargetTable";
 }
 
 public enum ProvisioningState

@@ -5,10 +5,11 @@ import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
 import { ParameterForm } from '../../components/ParameterForm'
 import { EndpointsCard } from './EndpointsCard'
+import { InheritableToggle } from '../../components/InheritableToggle'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { readerNotes } from '../../api/readerNotes'
 import { useConnections, useReplication, useReplicationCapabilities, useScripts, useTableMappings } from '../../api/hooks'
-import type { ParameterDescriptor, ReplicationTaskConfig } from '../../api/types'
+import type { ParameterDescriptor, ProvisioningConfig, ReplicationTaskConfig } from '../../api/types'
 
 type Stage = 'reader' | 'cache' | 'writer'
 
@@ -42,6 +43,11 @@ export function OverviewPanel({ replicationName, draft, setDraft }: {
   const sourceConnection = connections?.find((c) => c.name === task?.endpoints?.source?.connectionName)
 
   const [stage, setStage] = useState<Stage>('reader')
+
+  // A replication that has never been asked has no provisioning block at all, and both settings read
+  // as "nobody has said" — which resolves to off, and is not the same as having said no.
+  const provisioningDraft: ProvisioningConfig = draft.provisioning
+    ?? { createTargetTableIfMissing: null, alterTargetTableColumnsIfMissingOrChanged: null }
 
   const setStageValue = (id: Stage, patch: object) =>
     setDraft({ ...draft, changeProcessing: { ...draft.changeProcessing, [id]: { ...draft.changeProcessing[id], ...patch } } })
@@ -158,6 +164,41 @@ export function OverviewPanel({ replicationName, draft, setDraft }: {
                   </Link>
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* The default every mapping under this replication takes unless it says otherwise —
+              parallel to how the endpoints card sets the replication-level endpoints. One answer here
+              beats the same checkbox ticked on forty mappings. */}
+          <div className="card">
+            <div className="card-head">
+              <span className="card-title">Target provisioning</span>
+              <span className="card-note">the default for every table mapping in this replication</span>
+            </div>
+            <div className="card-body" style={{ gap: 14 }}>
+              <InheritableToggle
+                label="Create target table if missing"
+                description="Creates the table only when it does not exist. Never alters one that does."
+                value={draft.provisioning?.createTargetTableIfMissing ?? null}
+                inherited={false}
+                onChange={(next) => setDraft({
+                  ...draft,
+                  provisioning: { ...provisioningDraft, createTargetTableIfMissing: next },
+                })}
+                testId="task-provisioning-create"
+              />
+              <div className="divider" />
+              <InheritableToggle
+                label="Alter target columns if missing or changed"
+                description="Adds a mapped column the target lacks and changes one whose type no longer matches. Never drops a column."
+                value={draft.provisioning?.alterTargetTableColumnsIfMissingOrChanged ?? null}
+                inherited={false}
+                onChange={(next) => setDraft({
+                  ...draft,
+                  provisioning: { ...provisioningDraft, alterTargetTableColumnsIfMissingOrChanged: next },
+                })}
+                testId="task-provisioning-alter"
+              />
             </div>
           </div>
 

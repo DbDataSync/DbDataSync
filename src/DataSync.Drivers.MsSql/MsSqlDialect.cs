@@ -43,6 +43,15 @@ public sealed class MsSqlDialect : SqlDialect
     /// <summary>See the type-mapping table in phase 25 §2 — the pairs listed there are what the tests
     /// pin. <c>sql_variant</c>, <c>hierarchyid</c> and geospatial types fall through to
     /// <see cref="CanonicalTypeKind.Unmappable"/>: nothing here guesses a rendering for them.</summary>
+    /// <summary>SQL Server's ADD takes no COLUMN keyword.</summary>
+    public override string RenderAddColumn(string qualifiedTable, string column, string type) =>
+        $"ALTER TABLE {qualifiedTable} ADD {QuoteIdentifier(column)} {type} NULL;";
+
+    /// <summary>SQL Server spells the type change ALTER COLUMN &lt;name&gt; &lt;type&gt;, with no TYPE
+    /// keyword.</summary>
+    public override string? RenderAlterColumnType(string qualifiedTable, string column, string type) =>
+        $"ALTER TABLE {qualifiedTable} ALTER COLUMN {QuoteIdentifier(column)} {type} NULL;";
+
     /// <summary>SQL Server has no LIMIT.</summary>
     public override string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT TOP ({rows}) * FROM {qualifiedTable};";

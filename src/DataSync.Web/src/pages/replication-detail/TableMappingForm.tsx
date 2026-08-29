@@ -4,7 +4,9 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import { useConnections, useDeleteTableMapping, useReplication, useTables, useUpsertTableMapping } from '../../api/hooks'
 import { tableExists } from '../../api/tableExists'
-import type { ColumnMapping, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec } from '../../api/types'
+import type {
+  ColumnMapping, ProvisioningConfig, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
+} from '../../api/types'
 import { MappingSide } from './MappingSide'
 import { EndpointSidePair } from '../../components/EndpointSidePair'
 import { resolveSide } from '../../api/resolveEndpoint'
@@ -39,8 +41,12 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
   const [target, setTarget] = useState<TableSpec>(existing?.targets[0] ?? { ...emptySpec })
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(existing?.columnMappings ?? [])
   const [scripts, setScripts] = useState<ScriptBindings>(structuredClone(existing?.scripts ?? {}))
-  const [provisioning, setProvisioning] = useState(
-    existing?.provisioning ?? { createTargetTableIfMissing: false },
+  const [provisioning, setProvisioning] = useState<ProvisioningConfig>(
+    existing?.provisioning
+      // Null, not false: a mapping that has never been asked inherits, and a mapping that was asked
+      // and said no does not. Starting a new one at false would opt it out of a replication-level
+      // default it should have picked up.
+      ?? { createTargetTableIfMissing: null, alterTargetTableColumnsIfMissingOrChanged: null },
   )
 
   /**
@@ -219,6 +225,7 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
           replicationName={replicationName}
           mappingName={existing.name}
           provisioning={provisioning}
+          inherited={task?.provisioning}
           onChangeProvisioning={setProvisioning}
           stale={targetChangedSinceSave}
         />

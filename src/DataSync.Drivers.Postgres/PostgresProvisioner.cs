@@ -15,7 +15,8 @@ namespace DataSync.Drivers.Postgres;
 public static class PostgresProvisioner
 {
     public static IReadOnlyList<string> SupportedActions { get; } =
-        [ProvisioningActions.EnableSourceChangeCapture, ProvisioningActions.CreateTargetTable];
+        [ProvisioningActions.EnableSourceChangeCapture, ProvisioningActions.CreateTargetTable,
+         ProvisioningActions.AlterTargetTable];
 
     public static Task<ProvisioningPlan> PlanAsync(
         DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken) => request.Action switch
@@ -23,9 +24,25 @@ public static class PostgresProvisioner
         ProvisioningActions.EnableSourceChangeCapture => Task.FromResult(
             new ProvisioningPlan(ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Satisfied, [], [])),
         ProvisioningActions.CreateTargetTable => PlanCreateTargetTableAsync(connection, request, cancellationToken),
+        ProvisioningActions.AlterTargetTable => PlanAlterTargetTableAsync(connection, request, cancellationToken),
         _ => Task.FromResult(new ProvisioningPlan(
             request.Action, ProvisioningState.Unknown, [], [$"Postgres does not implement provisioning action '{request.Action}'."])),
     };
+
+    /// <inheritdoc cref="MsSqlProvisioner"/>
+    private static async Task<ProvisioningPlan> PlanAlterTargetTableAsync(
+        DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)
+    {
+        var table = request.Table;
+        await PostgresDialect.Instance.UseDatabaseAsync(connection, table.Database, cancellationToken);
+
+        if (!await TableExistsAsync(connection, table.Schema, table.Table, cancellationToken))
+            return new ProvisioningPlan(ProvisioningActions.AlterTargetTable, ProvisioningState.Satisfied, [], []);
+
+        var existing = await PostgresCatalog.Instance.GetColumnsAsync(
+            connection, table.Schema, table.Table, cancellationToken);
+        return AlterTargetTablePlanner.Plan(PostgresDialect.Instance, table, request.Columns, existing);
+    }
 
     private static async Task<ProvisioningPlan> PlanCreateTargetTableAsync(
         DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)
