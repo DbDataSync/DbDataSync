@@ -13,6 +13,7 @@ import type {
   ScriptDefinition,
   MetricsWindow,
   PreviewReport,
+  ReplicationStatus,
   RunMetrics,
   VerificationResult,
   VerificationResultRecord,
@@ -158,6 +159,12 @@ export const api = {
       request<PreviewReport>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/preview`,
       ),
+  },
+  replicationStatus: {
+    get: (name: string) =>
+      request<ReplicationStatus>(`/api/replications/${encodeURIComponent(name)}/status`),
+    setEnabled: (name: string, enabled: boolean) =>
+      put<ReplicationTaskConfig>(`/api/replications/${encodeURIComponent(name)}/enabled`, { enabled }),
   },
   metrics: {
     get: (replicationName: string, window: MetricsWindow) =>

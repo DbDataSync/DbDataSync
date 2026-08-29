@@ -102,8 +102,9 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     // Phase 23 put the scripts card first because it was the new thing, which is the oldest reason to
     // get an ordering wrong. Endpoints are what a replication *is*.
     await page.goto(`/replications/${REPLICATION_NAME}/overview`)
-    // The endpoints pair is the first thing in the form; the scripts card is below the pipeline.
-    await expect(page.locator('form .card').first()).toHaveAttribute('data-side', 'source', { timeout: 15_000 })
+    // The endpoints pair is the first thing in the pane; the scripts card is below the pipeline.
+    // (The Status/Schedule rail is chrome now, outside the pane — see phase 46.)
+    await expect(page.locator('.pane .card').first()).toHaveAttribute('data-side', 'source', { timeout: 15_000 })
 
     // And the scripts card is one line until it has something to say.
     await expect(page.getByTestId('script-bindings-toggle')).toContainText('Custom transforms and providers')
@@ -990,5 +991,64 @@ public sealed class Shout : IValueColumnExpression
     await expect(result).toContainText('are not flagged')
     await expect(page.getByTestId('verification-row-total')).toContainText('-1')
     await shot(page, '32-verification-within-threshold.png')
+  })
+
+  test('25 - status and schedule are chrome, the draft survives the tabs, and Enabled saves itself', async ({ page }) => {
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+
+    // Save moved out of the Pipeline card and into the toolbar, because it commits endpoints,
+    // pipeline *and* script bindings — not the one card it used to sit inside.
+    await expect(page.getByTestId('save-settings-button')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.pane').getByTestId('save-settings-button')).toHaveCount(0)
+
+    // Status and Schedule are the same cards on every tab, not four mounts of them on one.
+    for (const tab of ['tab-overview', 'tab-mappings', 'tab-runs', 'tab-history']) {
+      await page.getByTestId(tab).click()
+      await expect(page.getByTestId('replication-status-card')).toBeVisible()
+      await expect(page.getByTestId('replication-schedule-card')).toBeVisible()
+      await expect(page.getByTestId('enabled-toggle')).toBeVisible()
+    }
+
+    // A worker drains its queue and exits, so between passes there is no process — and the card says
+    // that rather than leaving an idle healthy replication looking broken.
+    await expect(page.getByTestId('replication-status-state')).toContainText('not running')
+    await expect(page.getByTestId('replication-status-card')).toContainText('usual state between')
+
+    // The draft used to live in the Overview panel, which unmounts the moment you click Runs — so a
+    // half-finished edit was lost by looking at something else. It is held in the chrome now.
+    await page.getByTestId('tab-overview').click()
+    await page.getByTestId('stage-reader').click()
+    await page.getByTestId('reader-options-snapshotIsolation').click()
+    await expect(page.getByTestId('reader-options-snapshotIsolation')).toHaveAttribute('aria-pressed', 'true')
+
+    await page.getByTestId('tab-runs').click()
+    await page.getByTestId('tab-overview').click()
+    await page.getByTestId('stage-reader').click()
+    await expect(page.getByTestId('reader-options-snapshotIsolation')).toHaveAttribute('aria-pressed', 'true')
+
+    // Enabled commits on its own, from any tab, and carries nothing else with it. Toggled here with
+    // that unsaved edit still pending — which is exactly the case its own endpoint exists for.
+    await page.getByTestId('tab-history').click()
+    await expect(page.getByTestId('replication-schedule-card')).toHaveClass(/enabled/)
+    await page.getByTestId('enabled-toggle').click()
+
+    await expect.poll(async () => {
+      const task = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()
+      return { enabled: task.enabled, snapshot: task.changeProcessing.reader.options.snapshotIsolation }
+    }, { timeout: 15_000 }).toEqual({ enabled: false, snapshot: 'false' })
+
+    // The accent follows, on both cards, without a Save.
+    await expect(page.getByTestId('replication-schedule-card')).toHaveClass(/disabled/)
+    await expect(page.getByTestId('replication-status-card')).toHaveClass(/disabled/)
+    await shot(page, '33-replication-chrome-disabled.png')
+
+    // And it survives a reload, which is the only proof it reached the config repo — this is the
+    // field that silently reverted before phase 46, because the serializer omitted `false`.
+    await page.reload()
+    await expect(page.getByTestId('enabled-toggle')).toHaveAttribute('aria-pressed', 'false', { timeout: 15_000 })
+
+    // Put it back, so the rest of the suite runs against an enabled replication.
+    await page.getByTestId('enabled-toggle').click()
+    await expect(page.getByTestId('enabled-toggle')).toHaveAttribute('aria-pressed', 'true')
   })
 })

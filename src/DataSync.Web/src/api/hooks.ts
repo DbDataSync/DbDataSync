@@ -29,6 +29,8 @@ const keys = {
     ['replications', replicationName, 'table-mappings', mappingName, 'provisioning'] as const,
   preview: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'preview'] as const,
+  replicationStatus: (replicationName: string) =>
+    ['replications', replicationName, 'status'] as const,
   metrics: (replicationName: string, window: string) =>
     ['replications', replicationName, 'metrics', window] as const,
   verificationResults: (replicationName: string, mappingName: string) =>
@@ -164,6 +166,40 @@ export function useReplication(name: string | undefined) {
     queryKey: keys.replication(name ?? ''),
     queryFn: () => api.replications.get(name!),
     enabled: !!name,
+  })
+}
+
+/**
+ * What the worker is doing, polled.
+ *
+ * Pulled rather than pushed, on run-metrics' call — and at five seconds rather than thirty, because a
+ * worker's whole life is measured in seconds: a card that refreshed twice a minute would mostly show
+ * a process that has already exited.
+ */
+export function useReplicationStatus(replicationName: string | undefined) {
+  return useQuery({
+    queryKey: keys.replicationStatus(replicationName ?? ''),
+    queryFn: () => api.replicationStatus.get(replicationName!),
+    enabled: !!replicationName,
+    refetchInterval: 5_000,
+  })
+}
+
+/**
+ * Turns a replication on or off, on its own.
+ *
+ * Deliberately not the upsert: this commits immediately from any tab, and it must not carry along
+ * whatever unsaved edit is sitting in the Overview's draft. The replication query is invalidated so
+ * the accent that reflects enabled/disabled follows.
+ */
+export function useSetReplicationEnabled(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) => api.replicationStatus.setEnabled(replicationName, enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.replication(replicationName) })
+      queryClient.invalidateQueries({ queryKey: keys.replications })
+    },
   })
 }
 

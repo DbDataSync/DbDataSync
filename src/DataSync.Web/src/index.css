@@ -50,6 +50,12 @@
   --accent-source: #2a6f97;
   --accent-target: #8a5a2b;
 
+  /* Whether a replication is running at all, as a colour. Same mechanism as the source/target accents
+     above — a coloured top border means something about this card — so the visual language stays one
+     idea rather than each screen inventing its own. */
+  --accent-enabled: #12a06a;
+  --accent-disabled: #d1912b;
+
   --ok: #12a06a;
   --warn: #d1912b;
   --bad: #c9522e;
@@ -213,6 +219,9 @@ button { font-family: inherit; }
 /* A source or target card, marked by a top border in its side's colour. A 2px border rather than a
    tinted background: the cards sit beside each other and a wash of colour on a whole card competes
    with the form controls inside it. */
+.card.enabled { border-top: 2px solid var(--accent-enabled); }
+.card.disabled { border-top: 2px solid var(--accent-disabled); }
+
 .card.side-source { border-top: 2px solid var(--accent-source); }
 .card.side-target { border-top: 2px solid var(--accent-target); }
 .card-title.side-source { color: var(--accent-source); }

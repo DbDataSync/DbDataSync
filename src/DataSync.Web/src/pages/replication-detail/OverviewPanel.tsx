@@ -1,15 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Link } from 'react-router-dom'
 import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
 import { ParameterForm } from '../../components/ParameterForm'
 import { EndpointsCard } from './EndpointsCard'
-import { MetricsCard } from './MetricsCard'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { readerNotes } from '../../api/readerNotes'
-import { useConnections, useReplication, useReplicationCapabilities, useScripts, useTableMappings, useUpsertReplication } from '../../api/hooks'
-import type { ParameterDescriptor, ReplicationTaskConfig, ScheduleMode } from '../../api/types'
+import { useConnections, useReplication, useReplicationCapabilities, useScripts, useTableMappings } from '../../api/hooks'
+import type { ParameterDescriptor, ReplicationTaskConfig } from '../../api/types'
 
 type Stage = 'reader' | 'cache' | 'writer'
 
@@ -25,34 +24,24 @@ const STAGES: { id: Stage; label: string }[] = [
  * three stacked Kind pickers plus raw-JSON textareas it replaces: a stage's Kind and its options
  * belong together, and the options are a string dictionary, which a two-column table states plainly.
  */
-export function OverviewPanel({ replicationName }: { replicationName: string }) {
+export function OverviewPanel({ replicationName, draft, setDraft }: {
+  replicationName: string
+  /** Owned by the layout route since phase 46, so an edit survives a look at another tab. */
+  draft: ReplicationTaskConfig
+  setDraft: (next: ReplicationTaskConfig) => void
+}) {
   const { data: task, error } = useReplication(replicationName)
   const { data: mappings } = useTableMappings(replicationName)
   const { data: scripts } = useScripts()
   const mappingsBase = `/replications/${encodeURIComponent(replicationName)}/mappings`
   const capabilities = useReplicationCapabilities(replicationName)
-  const upsert = useUpsertReplication()
   // These slots are source-side, so what a replication inherits is whatever its *source* connection
   // binds. Read from the saved task rather than the draft: changing the endpoint mid-edit should not
   // silently repoint what the INHERITED badge is describing.
   const { data: connections } = useConnections()
   const sourceConnection = connections?.find((c) => c.name === task?.endpoints?.source?.connectionName)
 
-  const [draft, setDraft] = useState<ReplicationTaskConfig | null>(null)
   const [stage, setStage] = useState<Stage>('reader')
-
-  useEffect(() => {
-    if (task && !draft) setDraft(task)
-  }, [task, draft])
-
-  if (!draft) {
-    return (
-      <div className="pane">
-        <ErrorBanner error={error} />
-        <span className="hint">Loading…</span>
-      </div>
-    )
-  }
 
   const setStageValue = (id: Stage, patch: object) =>
     setDraft({ ...draft, changeProcessing: { ...draft.changeProcessing, [id]: { ...draft.changeProcessing[id], ...patch } } })
@@ -74,17 +63,11 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
   const known = options.some((o) => o.kind === current.kind)
   const stageLabel = STAGES.find((s) => s.id === stage)!.label
 
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault()
-    await upsert.mutateAsync({ name: replicationName, task: draft })
-  }
-
   return (
     <div className="pane">
-      <ErrorBanner error={upsert.error ?? capabilities.error} />
+      <ErrorBanner error={error ?? capabilities.error} />
 
-      <form onSubmit={save} style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <EndpointsCard
             endpoints={draft.endpoints ?? { source: null, target: null }}
             mappingCount={mappings?.length}
@@ -157,10 +140,9 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
               )}
 
               <div className="row">
-                <button type="submit" className="btn btn-primary" disabled={upsert.isPending} data-testid="save-settings-button">
-                  {upsert.isPending ? 'Saving…' : 'Save settings'}
-                </button>
-                <span className="hint">Saving commits to config history.</span>
+                {/* Save lives in the toolbar since phase 46: it commits endpoints, pipeline *and*
+                    script bindings, and a button inside one of those three cards said otherwise. */}
+                <span className="hint">Save settings, in the toolbar, commits to config history.</span>
                 {/* The pipeline card says which reader, cache and writer will run; this is where to
                     find out what they will actually issue. Straight to the preview when there is only
                     one mapping to preview, and to the list when the answer depends on which. */}
@@ -187,65 +169,7 @@ export function OverviewPanel({ replicationName }: { replicationName: string }) 
             level="replication"
             onChange={(scripts) => setDraft({ ...draft, scripts })}
           />
-        </div>
-
-        <div style={{ width: 288, flex: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <MetricsCard replicationName={replicationName} />
-
-          <div className="card">
-            <div className="card-head"><span className="card-title">Schedule</span></div>
-            <div className="card-body">
-              <div className="row">
-                <button
-                  type="button"
-                  className={`toggle ${draft.enabled ? 'on' : ''}`}
-                  onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
-                  aria-pressed={draft.enabled}
-                  data-testid="enabled-toggle"
-                />
-                <span style={{ font: '500 12px var(--ui)', color: 'var(--ink)' }}>
-                  {draft.enabled ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
-              <div className="divider" />
-              <Field label="Schedule mode">
-                <select
-                  className="select"
-                  value={draft.scheduling.mode}
-                  onChange={(e) => setDraft({ ...draft, scheduling: { ...draft.scheduling, mode: e.target.value as ScheduleMode } })}
-                >
-                  <option value="Continuous">Continuous</option>
-                  <option value="Periodic">Periodic (cron)</option>
-                </select>
-              </Field>
-              {draft.scheduling.mode === 'Continuous' ? (
-                <Field label="Frequency (seconds)">
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    value={draft.scheduling.frequencySeconds ?? 60}
-                    onChange={(e) => setDraft({ ...draft, scheduling: { ...draft.scheduling, frequencySeconds: Number(e.target.value) } })}
-                  />
-                </Field>
-              ) : (
-                <Field label="Cron expression">
-                  <input
-                    className="input"
-                    value={draft.scheduling.cronExpression ?? ''}
-                    onChange={(e) => setDraft({ ...draft, scheduling: { ...draft.scheduling, cronExpression: e.target.value } })}
-                  />
-                </Field>
-              )}
-              <span className="hint">
-                {draft.scheduling.mode === 'Continuous'
-                  ? 'Continuous mode re-reads changes on every interval.'
-                  : 'Periodic mode runs on the cron expression above.'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </form>
+      </div>
     </div>
   )
 }

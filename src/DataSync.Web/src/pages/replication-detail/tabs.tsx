@@ -11,7 +11,10 @@ import { HistoryPanel } from './HistoryPanel'
  * components — testable, and reusable if a screen ever composes more than one.
  */
 export function OverviewTab() {
-  return <OverviewPanel replicationName={useReplicationName()} />
+  const { replicationName, draft, setDraft } = useOutletContext<ReplicationOutletContext>()
+  // The layout route seeds the draft from the first load; until then there is nothing to edit.
+  if (!draft) return <div className="pane"><span className="hint">Loading…</span></div>
+  return <OverviewPanel replicationName={replicationName} draft={draft} setDraft={setDraft} />
 }
 
 /** A layout in its own right — the mapping routes nest inside it. */

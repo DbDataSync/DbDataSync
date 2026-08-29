@@ -388,6 +388,18 @@ export interface VerificationResultRecord {
   resultPath: string
 }
 
+/** What a replication's worker process is doing right now. Live only — phase 36 answers "what has
+ * been happening", which is a different question. */
+export interface ReplicationStatus {
+  /** False is the common state, not a fault: a worker drains its queue and exits, so a replication
+   * that is caught up has no process between cycles. */
+  running: boolean
+  pid: number | null
+  memoryBytes: number | null
+  cpuMilliseconds: number | null
+  startedAtUtc: string | null
+}
+
 export interface ScriptDiagnostic {
   line: number
   column: number

@@ -117,3 +117,86 @@ Both cards should say plainly that they describe *the replication* (e.g. "Replic
   the toolbar's `actions` area) — a layout detail for implementation, not a design question.
 - Whether "no process tracked" needs to distinguish "idle between scheduled runs" from any other reason
   a worker isn't currently alive, or whether one "not running" state is enough for the first cut.
+
+---
+
+# Retrospective
+
+Built as planned. The layout move was mechanical; what it exposed was not.
+
+## Disabling a replication has never worked
+
+Writing the test for the Enabled endpoint found it. The YAML serializer omits defaults and compares
+against `default(T)`; `false` is `default(bool)`, so it was never written, and
+`ReplicationTaskConfig.Enabled`'s own `= true` initializer set it straight back on load. The Overview's
+Enabled toggle has been decorative since it existed. `ScriptConfig.Enabled` had the same bug — a
+disabled script reloaded enabled.
+
+Nothing caught it because every test that had ever written one of these left it on. `[DefaultValue(true)]`
+is the fix, and it is load-bearing rather than documentation: it makes the comparison against `true`,
+so `false` is written and `true` is omitted, which is the right way round and keeps a committed config
+from spelling out defaults nobody changed.
+
+`Schema = "dbo"` and `Parallelism = 1` have the same *shape* and are not bugs: `default(string)` is
+null and `default(int)` is 0, and neither is a value anybody sets. It is specifically a `bool` whose
+initializer is `true` that cannot express its other state.
+
+## The draft was being lost by looking at something else
+
+`OverviewPanel` owned the draft, and it unmounts the moment somebody clicks Runs — so a half-finished
+pipeline edit was discarded by a tab change, silently. Lifting it into the layout route fixes that
+because that component does not unmount until the replication does.
+
+The seeding effect deliberately does **not** re-seed when `task` changes. It cannot: the Enabled
+toggle invalidates that query on every click, and re-seeding there would throw away whatever was being
+edited — which is the bug this move exists to fix, reintroduced from the other end.
+
+## Enabled saves alone, and lives somewhere else because of it
+
+Its own endpoint, not a mode of the upsert. Routing it through the full save would mean toggling
+Enabled from the Runs tab quietly committed whatever unfinished edit was sitting in the Overview's
+draft — a change nobody asked for, made by a control that says nothing about it. The Playwright test
+toggles it with exactly that edit pending and asserts only the toggle landed.
+
+And it sits in the header rather than in the Schedule card for the same reason stated visually: two
+controls that save differently should not sit next to each other looking alike. `enabled` is read from
+the **saved** task everywhere, never from the draft, so the accent cannot flicker on save.
+
+## Not running is the answer, not an error
+
+A worker drains its queue and exits, so a replication that is caught up has no process between passes
+— which is most of the time for most of them. The card says that in words. Left unexplained, this
+would be a status card that taught operators to worry about a healthy idle replication.
+
+Polled at five seconds rather than the metrics card's thirty, because a worker's whole life is
+measured in seconds: a card refreshing twice a minute would mostly show a process that had already
+exited.
+
+## Verification
+
+- `ReplicationChromeTests` (6) — not running reported as a state rather than an error, a missing
+  replication as a 404, Enabled committing on its own in both directions, every other field left
+  exactly as saved, and a missing replication refused.
+- `DisablingRoundTripTests` (5) — a disabled replication and a disabled script reloading disabled, the
+  other direction so the fix cannot be "always write false", disable-then-enable, and the default
+  still omitted from the file.
+- Playwright 25 — Save in the toolbar and gone from the pane; Status, Schedule and Enabled present on
+  all four tabs; the "not running" explanation; a draft surviving a trip to Runs and back; Enabled
+  toggled from Version Control with that draft still unsaved, committing only itself; both accents
+  following without a Save; and the new state surviving a reload — which is the assertion that would
+  have caught the serializer bug years earlier.
+- Playwright 04b updated: it selected `form .card`, and the Overview is no longer a form.
+- Full .NET suite green: 641 tests. Playwright: 27 green. `tsc -b` clean, `oxlint` unchanged at four.
+
+## Open questions, all four answered
+
+- ~~**`ReplicationOutletContext`'s shape.**~~ `{ replicationName, command, draft, setDraft, saving, save }`.
+- ~~**The Enabled mutation's shape.**~~ A dedicated `PUT /api/replications/{name}/enabled`, for the
+  reason above — a narrow existing one would have been the upsert, which is precisely what it must not
+  be.
+- ~~**Where Enabled sits.**~~ In the toolbar, left of the run controls: reachable from all four tabs
+  and visibly not part of the Schedule card's batched fields.
+- ~~**Whether "no process" needs to distinguish idle from anything else.**~~ One state is enough for
+  now, and the card explains it. `ProcessSupervisor` tracks a handle per replication and nothing else,
+  so any finer answer would be inferred rather than observed — and an inferred status is the kind of
+  thing that is wrong exactly when it matters.
