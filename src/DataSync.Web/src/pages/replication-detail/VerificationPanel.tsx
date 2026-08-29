@@ -1,8 +1,13 @@
 import { useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
-import { useRunVerification, useVerificationResult, useVerificationResults } from '../../api/hooks'
-import type { VerificationResult, VerificationResultRow, VerificationRowStatus } from '../../api/types'
+import {
+  useRunVerification, useTableMapping, useUpsertTableMapping, useVerificationResult, useVerificationResults,
+} from '../../api/hooks'
+import { ChecksCard } from './ChecksCard'
+import type {
+  VerificationCheckConfig, VerificationResult, VerificationResultRow, VerificationRowStatus,
+} from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
 
 const STATUS_LABEL: Record<VerificationRowStatus, string> = {
@@ -32,8 +37,17 @@ export function VerificationPanel() {
   const { mappingName } = useParams<{ mappingName: string }>()
 
   const { data: results, error } = useVerificationResults(replicationName, mappingName)
+  const { data: mapping } = useTableMapping(replicationName, mappingName)
+  const upsert = useUpsertTableMapping(replicationName)
   const run = useRunVerification(replicationName)
   const [picked, setPicked] = useState<number | undefined>()
+
+  // Saved through the mapping, because a check lives on the mapping. The whole config goes back, so
+  // an edit here cannot quietly drop a field this screen does not render.
+  const saveChecks = async (verification: VerificationCheckConfig[]) => {
+    if (!mapping) return
+    await upsert.mutateAsync({ mappingName: mapping.name, mapping: { ...mapping, verification } })
+  }
 
   // The newest result until somebody picks another. Derived during render rather than set in an
   // effect: the answer is a function of what came back, and an effect would render once with nothing
@@ -60,7 +74,9 @@ export function VerificationPanel() {
         </div>
       </div>
 
-      <ErrorBanner error={error ?? run.error} />
+      <ErrorBanner error={error ?? run.error ?? upsert.error} />
+
+      {mapping && <ChecksCard mapping={mapping} onSave={saveChecks} saving={upsert.isPending} />}
 
       <div className="card flush" data-testid="verification-results-list">
         <div className="grid-head" style={{ gridTemplateColumns: '1.2fr 1fr 1fr 1.4fr', gap: 14 }}>

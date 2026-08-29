@@ -969,8 +969,8 @@ public sealed class Shout : IValueColumnExpression
   test('24 - a mapping can be checked against its target, and the threshold decides what is flagged', async ({ page }) => {
     test.setTimeout(180_000)
 
-    // Checks live on the mapping; the API is the honest way to add them, since there is no editor for
-    // them yet and this test is about running and reading them.
+    // Set through the API here on purpose: this test is about running and reading a check. Test 34
+    // configures one through the editor phase 48 added, which is the other half.
     const setCheck = async (differenceThreshold: number) => {
       const mapping = await (await page.request.get(
         `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
@@ -1446,5 +1446,67 @@ public sealed class Shout : IValueColumnExpression
 
     await page.goto('/replications')
     await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/favicon.svg')
+  })
+
+  test('34 - a check can be configured, run and removed without leaving the screen', async ({ page }) => {
+    test.setTimeout(180_000)
+
+    // Phase 43 built everything a check does and left it settable only by API call — so the screen
+    // that shows results could not produce one. This is that gap closed, end to end.
+    const before = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/verification`)
+    await expect(page.getByTestId('verification-checks')).toBeVisible({ timeout: 20_000 })
+
+    await page.getByTestId('add-check-button').click()
+    await page.getByTestId('check-name-input').fill('ui-rows-by-name')
+
+    // Row count takes a grouping and nothing else; switching to Sum is what asks for measures. The
+    // form follows the kind rather than showing every field a check could ever have.
+    await expect(page.getByTestId('check-measures')).toHaveCount(0)
+    await page.getByTestId('check-kind-select').selectOption('Sum')
+    await expect(page.getByTestId('check-measures')).toBeVisible()
+    await page.getByTestId('check-kind-select').selectOption('RowCount')
+    await expect(page.getByTestId('check-measures')).toHaveCount(0)
+
+    // Columns are picked by their target names, as chips — what is selected has to be readable
+    // without opening anything, because it decides what the result's rows mean.
+    await page.getByTestId(`check-groupby-${SOURCE_NAME_COLUMN}`).click()
+    await shot(page, '42-check-editor.png')
+    await page.getByTestId('save-check-button').click()
+
+    await expect(page.getByTestId('verification-checks')).toContainText('by Name', { timeout: 15_000 })
+    const saved = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+    expect(saved.verification).toContainEqual(expect.objectContaining({
+      name: 'ui-rows-by-name', kind: 'RowCount', groupBy: [SOURCE_NAME_COLUMN],
+    }))
+
+    // And it runs, which is the only proof the editor wrote something the runner understands.
+    await page.getByTestId('run-verification-button').click()
+    await expect(page.getByTestId('verification-result-ui-rows-by-name')).toBeVisible({ timeout: 60_000 })
+    await page.getByTestId('verification-result-ui-rows-by-name').click()
+    await expect(page.getByTestId('verification-result')).toContainText('Name', { timeout: 20_000 })
+
+    // Editing pre-fills from what was saved, and the threshold is entered as the percentage the
+    // results card already speaks in rather than as the fraction it is stored as.
+    await page.getByTestId('edit-check-ui-rows-by-name').click()
+    await expect(page.getByTestId('check-name-input')).toHaveValue('ui-rows-by-name')
+    await expect(page.getByTestId(`check-groupby-${SOURCE_NAME_COLUMN}`)).toHaveAttribute('aria-pressed', 'true')
+    await page.getByTestId('check-threshold-input').fill('25')
+    await page.getByTestId('save-check-button').click()
+
+    await expect.poll(async () => {
+      const mapping = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+      return mapping.verification.find((c: { name: string }) => c.name === 'ui-rows-by-name')?.differenceThreshold
+    }, { timeout: 15_000 }).toBeCloseTo(0.25)
+
+    await page.getByTestId('remove-check-ui-rows-by-name').click()
+    await expect(page.getByTestId('verification-checks')).not.toContainText('ui-rows-by-name', { timeout: 15_000 })
+
+    expect((await page.request.put(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: before })).ok()).toBeTruthy()
   })
 })

@@ -1,6 +1,6 @@
-# Phase 48 — A Checks editor for the Verify page (planned)
+# Phase 48 — A Checks editor for the Verify page
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/verification-checks-editor.md`
 
 ## The gap
@@ -76,3 +76,64 @@ routed through `ParameterForm`/`ParameterDescriptor` — `groupBy`/`measures` ar
   this.
 - Exact UI for the column-multi-picker (a dropdown with checkboxes, a tag-style multi-select, etc.) — an
   implementation detail.
+
+---
+
+# Retrospective
+
+Phase 43 built everything a check does and left it settable only by API call, so the screen that shows
+results could not produce one. That is closed: the Verify page now adds, edits and removes checks, and
+Playwright 34 configures one through the form, runs it, and reads the result — which is the assertion
+phase 43's own test could not make, because it configured through the API.
+
+## Chips, not a multi-select
+
+The plan left the column picker's shape open. It is a row of toggle chips, because what is selected has
+to be readable without opening anything: these choices decide what a result's rows *mean*, and a
+`<select multiple>` shows a scrolling box where two of eleven items happen to be highlighted — the least
+legible way to say "these two". A column the mapping no longer has is kept and marked rather than
+dropped, the same rule the column mapping editor follows: it is what the check says, and losing it on
+the next save would be a change nobody made.
+
+## The threshold is entered as a percentage
+
+Stored as a fraction, entered and displayed as a percent, because the results card already says
+"differences under 60.00% are not flagged". Two spellings of the same number on one screen is worse than
+a conversion in one place.
+
+## No Test button, and why
+
+The plan's other open question. A Test button for a `Sql` check would need a new endpoint that runs one
+*unsaved* check against both databases — a second path into the verification executor, with its own
+answer about what an unsaved, unnamed check is. The Run checks button already runs the saved checks and
+shows the result, which is the same information one save away, and saving a check is not a
+consequential act. Not built, and not because it was hard.
+
+## The screen's own save, not a new endpoint
+
+A check lives on the mapping, so the ordinary mapping upsert is what saves it — the whole config goes
+back, so an edit here cannot quietly drop a field this screen does not render. The plan called this and
+it held.
+
+## A real bug found on the way out
+
+The first full run of the new suite failed in test 25 with `Unexpected end of JSON input`. That was not
+a flake: `ConfigRepository` wrote with `File.WriteAllText`, which truncates and then writes, while the
+API serves reads straight off disk. A GET landing inside that window gets a fragment — and two operators
+on one replication hit the same race, not just a test. Fixed by writing to a sibling temp file and
+renaming, in its own commit, with a test that fails in under 200ms without it.
+
+## Verification
+
+- Playwright 34 — adding a check through the form, the fields following the kind (Sum asks for measures,
+  Row count does not), grouping picked as chips, the saved config matching what was entered, the check
+  actually running and producing a result, editing pre-filling from what was saved, the threshold
+  round-tripping through its percentage, and removal persisting.
+- Test 24's comment updated: it configures through the API deliberately, and now says which half of the
+  pair it is.
+- Full .NET suite green: 712 tests. Playwright: 36 green. `tsc -b` clean, `oxlint` unchanged at four.
+
+## Open questions
+
+- ~~**A Test button for `Sql` checks.**~~ Not built, for the reason above.
+- ~~**The column-multi-picker's UI.**~~ Toggle chips.
