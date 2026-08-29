@@ -74,7 +74,7 @@ public sealed class ConfigRepository
 
         var path = ConfigPaths.ConnectionFile(_configRoot, input.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, YamlConfigSerializer.Serialize(config));
+        WriteAtomically(path, YamlConfigSerializer.Serialize(config));
         _git.CommitChanges([path], $"Save connection '{input.Name}'", author);
 
         return config;
@@ -120,8 +120,8 @@ public sealed class ConfigRepository
         var codePath = ConfigPaths.ScriptCodeFile(_configRoot, script.Manifest.Name, script.Manifest.Language);
         Directory.CreateDirectory(ConfigPaths.ScriptsDir(_configRoot));
 
-        File.WriteAllText(manifestPath, YamlConfigSerializer.Serialize(script.Manifest));
-        File.WriteAllText(codePath, script.Code);
+        WriteAtomically(manifestPath, YamlConfigSerializer.Serialize(script.Manifest));
+        WriteAtomically(codePath, script.Code);
 
         // A script whose Language changed leaves its old code file behind under the other extension —
         // clean it up so a stale .cs doesn't linger beside a script that is now SQL, or vice versa.
@@ -181,7 +181,7 @@ public sealed class ConfigRepository
 
         var path = ConfigPaths.TaskFile(_configRoot, task.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, YamlConfigSerializer.Serialize(task));
+        WriteAtomically(path, YamlConfigSerializer.Serialize(task));
         _git.CommitChanges([path], $"Save replication task '{task.Name}'", author);
 
         return task;
@@ -241,7 +241,7 @@ public sealed class ConfigRepository
 
         var path = ConfigPaths.TableMappingFile(_configRoot, replicationName, mapping.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, YamlConfigSerializer.Serialize(mapping));
+        WriteAtomically(path, YamlConfigSerializer.Serialize(mapping));
         _git.CommitChanges([path], $"Save table mapping '{mapping.Name}' on replication '{replicationName}'", author);
 
         return mapping;
@@ -354,5 +354,23 @@ public sealed class ConfigRepository
             if (!declaredNames.Contains(suppliedName, StringComparer.Ordinal))
                 throw new ConfigValidationException(
                     $"Hook '{label}' at '{point}' supplies parameter '{suppliedName}', which '{hook.Hook}' does not declare.");
+    }
+
+    /// <summary>
+    /// Writes a config file so a concurrent reader sees either the old contents or the new, never a
+    /// half-written file.
+    /// <para>
+    /// <see cref="File.WriteAllText(string, string?)"/> truncates and then writes, and this API serves
+    /// reads straight off disk while other requests write — a GET landing inside that window returns
+    /// an empty or truncated document. It is a small window and it is real: a Playwright poll caught
+    /// one as <c>Unexpected end of JSON input</c>. Writing to a sibling temp file and renaming makes
+    /// the swap atomic, because a rename within one directory is.
+    /// </para>
+    /// </summary>
+    private static void WriteAtomically(string path, string contents)
+    {
+        var temporary = path + ".tmp";
+        File.WriteAllText(temporary, contents);
+        File.Move(temporary, path, overwrite: true);
     }
 }
