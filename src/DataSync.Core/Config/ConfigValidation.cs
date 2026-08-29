@@ -4,14 +4,36 @@ public sealed class ConfigValidationException(string message) : Exception(messag
 
 public static class ConfigValidation
 {
+    /// <summary>
+    /// A name that is safe to use as a file or directory name, because it becomes one.
+    /// <para>
+    /// <c>.</c> is allowed, and deliberately: phase 45 infers a table mapping's name from its source as
+    /// <c>schema.table</c>, which is what an operator would have typed anyway. It costs the two checks
+    /// below — a dot is the one permitted character that can mean "somewhere else" rather than "part of
+    /// a name".
+    /// </para>
+    /// </summary>
     public static void ValidateName(string name, string paramName)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ConfigValidationException($"{paramName} must not be empty.");
 
-        if (name.Any(c => !char.IsLetterOrDigit(c) && c != '-' && c != '_'))
+        if (name.Any(c => !char.IsLetterOrDigit(c) && c != '-' && c != '_' && c != '.'))
             throw new ConfigValidationException(
-                $"{paramName} '{name}' may only contain letters, digits, '-', and '_' (it becomes a file/directory name).");
+                $"{paramName} '{name}' may only contain letters, digits, '-', '_', and '.' " +
+                "(it becomes a file/directory name).");
+
+        // The traversal check, which is why allowing '.' is not free. '/' and '\' are already
+        // excluded above, so ".." cannot walk anywhere on its own — but a path built from a name that
+        // *is* ".." resolves to the parent directory on every platform, and there is no reason to find
+        // out which caller composes paths carelessly.
+        if (name.Contains("..", StringComparison.Ordinal))
+            throw new ConfigValidationException($"{paramName} '{name}' must not contain '..'.");
+
+        // A leading dot is a hidden file on Unix and a trailing one is invalid on Windows. Neither is
+        // a name anybody means.
+        if (name.StartsWith('.') || name.EndsWith('.'))
+            throw new ConfigValidationException($"{paramName} '{name}' must not start or end with '.'.");
     }
 
     /// <summary>

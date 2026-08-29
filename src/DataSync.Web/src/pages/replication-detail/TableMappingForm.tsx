@@ -31,6 +31,10 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
   const { data: task } = useReplication(replicationName)
   const { data: connections } = useConnections()
   const [name, setName] = useState(existing?.name ?? '')
+  // Stop inferring the moment somebody types their own. An existing mapping counts as touched: its
+  // name is already whatever it is, and rewriting it because the source was adjusted would rename a
+  // mapping nobody asked to rename. Same shape as MappingSide's schema-follows-the-pick.
+  const [nameTouched, setNameTouched] = useState(existing !== undefined)
   const [source, setSource] = useState<SourceTableSpec>(existing?.sources[0] ?? { ...emptySpec, filter: null })
   const [target, setTarget] = useState<TableSpec>(existing?.targets[0] ?? { ...emptySpec })
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(existing?.columnMappings ?? [])
@@ -38,6 +42,23 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
   const [provisioning, setProvisioning] = useState(
     existing?.provisioning ?? { createTargetTableIfMissing: false },
   )
+
+  /**
+   * Choosing a source fills in the two things that follow from it.
+   *
+   * The name becomes `schema.table` while it is still untouched, and an **empty** target table becomes
+   * the source's table name. Only empty: a target somebody typed is an answer, and overwriting it
+   * because the source changed would discard the more deliberate of the two.
+   */
+  const setSourceSpec = (next: SourceTableSpec) => {
+    setSource(next)
+
+    if (!nameTouched && next.schema && next.table)
+      setName(`${next.schema}.${next.table}`)
+
+    if (next.table && !target.table)
+      setTarget((current) => (current.table ? current : { ...current, table: next.table }))
+  }
 
   // What each side actually points at once the replication's endpoints are applied.
   const resolvedSource = resolveSide(task?.endpoints?.source ?? null, source)
@@ -118,7 +139,13 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
           <div className="card-head"><span className="card-title">Mapping</span></div>
           <div className="card-body">
             <Field label="Name">
-              <input className="input" required value={name} onChange={(e) => setName(e.target.value)} data-testid="mapping-name-input" />
+                <input
+                className="input"
+                required
+                value={name}
+                onChange={(e) => { setName(e.target.value); setNameTouched(true) }}
+                data-testid="mapping-name-input"
+              />
             </Field>
           </div>
         </div>
@@ -131,7 +158,7 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
             label="Source"
             inherited={task?.endpoints?.source ?? null}
             spec={source}
-            onChange={(v) => setSource({ ...v, filter: source.filter })}
+            onChange={(v) => setSourceSpec({ ...v, filter: source.filter })}
             testIdPrefix="source"
           />
         }

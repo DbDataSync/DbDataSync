@@ -159,6 +159,12 @@ test.describe.serial('golden path: define, configure, and run a replication end-
   })
 
   test('06 - trigger a run and watch it complete live', async ({ page }) => {
+    // Touch both rows first. A replication that has never run is due immediately, so the scheduler can
+    // beat this test to the first pass — and then the triggered run correctly reads nothing, because
+    // there is nothing left to read. Making sure there are changes to find is what makes the
+    // assertion below about the run rather than about who got there first.
+    runSql(`UPDATE dbo.[${SOURCE_TABLE}] SET Name = Name;`, DB_NAME)
+
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('tab-runs').click()
     await page.getByTestId('trigger-run-button').click()
@@ -1111,5 +1117,40 @@ public sealed class Shout : IValueColumnExpression
     await expect(page.getByTestId('column-mapping-source-0')).toHaveValue('gone_away', { timeout: 20_000 })
     await expect(page.getByTestId('column-mapping-source-0')).toContainText('not on the source')
     await shot(page, '34-unknown-source-column.png')
+  })
+
+  test('27 - naming a mapping and its target follow from the source, until somebody says otherwise', async ({ page }) => {
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/new`)
+
+    // Pick a source and the two things that follow from it fill themselves in.
+    await selectWhenReady(page, 'source-table-select', `dbo.${SOURCE_TABLE}`)
+    await expect(page.getByTestId('mapping-name-input')).toHaveValue(`dbo.${SOURCE_TABLE}`)
+    await expect(page.getByTestId('target-table-input')).toHaveValue(SOURCE_TABLE)
+
+    // A name somebody typed stops being inferred — picking a different source must not rewrite it.
+    await page.getByTestId('mapping-name-input').fill('mine')
+    await selectWhenReady(page, 'source-table-select', 'dbo.Pw.Dotted.Table')
+    await expect(page.getByTestId('mapping-name-input')).toHaveValue('mine')
+
+    // And a target somebody typed is an answer, not a placeholder: the autofill only ever fills an
+    // empty field, because overwriting it would discard the more deliberate of the two.
+    await page.getByTestId('target-table-input').fill('SomewhereElse')
+    await selectWhenReady(page, 'source-table-select', `dbo.${SOURCE_TABLE}`)
+    await expect(page.getByTestId('target-table-input')).toHaveValue('SomewhereElse')
+
+    // The inferred name contains a dot, which config validation used to reject outright — the plan for
+    // this phase assumed it did not. It saves, loads, and its own route works.
+    await page.getByTestId('mapping-name-input').fill(`dbo.${SOURCE_TABLE}`)
+    await page.getByTestId('target-schema-input').fill('dbo')
+    await page.getByTestId('target-table-input').fill(TARGET_TABLE)
+    await expect(page.getByTestId('save-mapping-button')).toBeEnabled()
+    await page.getByTestId('save-mapping-button').click()
+
+    await expect(page.getByTestId(`mapping-item-dbo.${SOURCE_TABLE}`)).toBeVisible({ timeout: 15_000 })
+    await expect(page).toHaveURL(new RegExp(`/mappings/dbo.${SOURCE_TABLE}$`))
+
+    await page.reload()
+    await expect(page.getByTestId('mapping-name-input')).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByRole('heading', { name: `dbo.${SOURCE_TABLE}` })).toBeVisible()
   })
 })
