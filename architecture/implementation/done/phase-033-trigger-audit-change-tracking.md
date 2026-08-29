@@ -1,6 +1,6 @@
-# Phase 33 — Generic trigger-audit change tracking (planned)
+# Phase 33 — Generic trigger-audit change tracking
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/change-tracking-odbc-jdbc.md`, which identifies this as
 "the cheapest large win in the whole change-tracking set", and
 `architecture/planning/done/change-tracking-strategies.md` for the strategy taxonomy.
@@ -131,3 +131,83 @@ DataSync would have to own.
 - **Truncate.** `TRUNCATE TABLE` fires no row triggers on any engine here, so a truncated source
   silently produces no deletes. Nothing can fix that from inside a trigger; it is worth *saying* at
   the point the operator turns triggers on.
+
+---
+
+# Retrospective
+
+The plan's central claim held: the read side really is generic, and the Postgres integration tests are
+the SQL Server ones with different quoting. One reader, two engines, delete detection on both.
+
+## The split is visible in the file list, which is the point
+
+`TriggerAuditReader` and `TriggerAuditStatement` know nothing about an engine beyond what
+`SqlDialect` tells them. `MsSqlTriggerAudit` and `PostgresTriggerAudit` share not one line, and could
+not: T-SQL's trigger is statement-level over `inserted`/`deleted` pseudo-tables, and Postgres has no
+inline trigger body at all — it needs a plpgsql function and a trigger that calls it. Anyone tempted to
+unify them later can read the two files and see why not.
+
+The T-SQL trigger is written set-based on purpose. A row-by-row trigger is the classic way to make a
+bulk update take minutes, and this one goes on somebody's write path forever.
+
+## Both traps were already paid for, so both are pinned twice
+
+The key coming from the shadow row rather than the joined base row is the phase 12 bug in a new place,
+and the assertion exists at both levels: a statement test that fails if `base.[Id]` ever appears in the
+select list, and an integration test on each engine that deletes a row and reads its key back. Net
+collapsing is the same — asserted in the SQL, and asserted by writing fifty updates and getting one
+row out of fifty-one shadow rows.
+
+## `IPositionAcknowledging` was worth building here
+
+Three planned phases want it — Postgres slot advance, MySQL binlog pruning, and script-generated
+queries all named it — so building it against the first real caller rather than the first speculative
+one is what the plan asked for and it fitted in one interface and one call site.
+
+The ordering is the whole of it: after the write commits **and** after the watermark is stored. The
+negative case is the one that matters, and it is tested against a real failing pass rather than a
+mock — the target table does not exist, the write fails, and the shadow rows and the absent watermark
+are both still there afterwards. Acknowledging early would let a source discard changes this
+replication has not written, which turns a retryable failure into permanent data loss.
+
+An acknowledgement that *fails* is logged and does not fail the run. The rows are at the target and the
+watermark is stored; unpruned history is a disk-space problem, and reporting it as a failed pass would
+be reporting a successful replication as broken.
+
+## Two tests that were wrong before they were right
+
+The keyless-table test failed twice, and both times the reader was correct and the test was not: a
+table with no key also has no shadow table, so the first error is "capture is not enabled here" — and
+once given a shadow table, an *empty* one means "nothing to do", which is also right. The test now
+gives it a shadow table with a row in it, so the failure under test is the one the name claims.
+
+Worth recording because the instinct on a red test is to change the code.
+
+## Verification
+
+- `TriggerAuditStatementTests` (10) — collapsing, the key's source, composite keys, the bounded
+  window, the missing-base marker tested against a key column, transforms aliased back, a keyless
+  table refused with a reason, pruning's boundary, and the same read through a second dialect, which
+  is what stops "engine-neutral" being a hardcoded quote character.
+- `TriggerAuditReaderTests` on **SQL Server** (9) and on **Postgres** (6), same reader, same body:
+  every operation as itself, a delete keeping its key, fifty updates collapsing to one row, a bounded
+  window, pruning off by default and on when asked, and — on Postgres — a composite key surviving a
+  delete on both halves, which a single-column test cannot say.
+- `RunExecutorIntegrationTests` (2) — a successful pass acknowledging and pruning, and a failed pass
+  doing neither.
+- Full suite green: 792 .NET tests, 39 Playwright.
+
+## Open questions
+
+- ~~**Where the shadow table lives.**~~ Beside the source table, in its schema: it is where an operator
+  will look for it and where the rights that let them create a trigger already reach.
+- ~~**Composite and non-integer keys.**~~ They fall out, as the plan suspected, and there is now a test
+  saying so rather than an assumption.
+- ~~**Truncate.**~~ Unfixable from inside a trigger and therefore *said* — it is one of the two costs
+  the enablement plan states where the operator turns capture on.
+- **New**: nothing prunes a shadow table for a replication that has been deleted or disabled. The
+  trigger keeps writing and nothing reads it, which is a table growing on somebody's source with no
+  owner. Disabling capture is not built and should be, next to enabling it.
+- **New**: the reader takes the source's primary key from the catalog on every incremental pass. That
+  is one round trip per pass against a value that changes about never; the Change Tracking reader does
+  the same, so this is a shared cost worth measuring before it is worth fixing.
