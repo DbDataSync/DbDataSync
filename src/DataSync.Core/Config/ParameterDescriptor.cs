@@ -35,6 +35,14 @@ public enum ParameterType
     /// <summary>A key and a value. A connection's free-form properties bag is a vararg of these,
     /// declared by the driver like anything else rather than assumed by the screen.</summary>
     Property,
+
+    /// <summary>
+    /// A credential. Rendered masked, and — the part that matters — **never sent back to the client**:
+    /// a form loads with it blank, and blank on save means "keep what is stored". The connection
+    /// password has worked that way since phase 3; naming it as a type is what stops the next secret
+    /// parameter reinventing the contract, or forgetting it.
+    /// </summary>
+    Secret,
 }
 
 /// <summary>
@@ -158,6 +166,18 @@ public sealed class ParameterDescriptor
     /// <summary>The choices, for <see cref="ParameterType.Dropdown"/>. Ignored otherwise.</summary>
     public List<string>? DropdownOptions { get; set; }
 
+    /// <summary>
+    /// How to write each option for a person, keyed by the value that gets stored. Optional, and
+    /// absent for the many cases where the stored value already reads as itself.
+    /// <para>
+    /// A map rather than a parallel list of labels, because a parallel list is one edit away from
+    /// being off by one and labelling the wrong option — a mistake that looks like working software.
+    /// The values in <see cref="DropdownOptions"/> stay the single source of truth for what is
+    /// allowed; this only changes how they are spelled on screen.
+    /// </para>
+    /// </summary>
+    public Dictionary<string, string>? DropdownLabels { get; set; }
+
     /// <summary>What the form pre-fills. Null means empty — distinct from an empty string, which is a
     /// value somebody chose.</summary>
     public string? Default { get; set; }
@@ -165,6 +185,35 @@ public sealed class ParameterDescriptor
     /// <summary>Null means the form's own defaults. Nullable for the same reason
     /// <see cref="Cardinality"/> is; read it through <see cref="Placement"/>.</summary>
     public ParameterLayout? Layout { get; set; }
+
+    /// <summary>
+    /// Whether this parameter applies at all, given the other values. Computed by whoever declares it
+    /// — a driver deciding that Host is beside the point once the operator picked connection-string
+    /// addressing — and the form simply renders what it is told.
+    /// <para>
+    /// Server-side rather than a condition expression the client evaluates, because the rule belongs
+    /// to the thing that owns the setting. A client-side condition language would be a second place
+    /// that has to agree about what "SqlAuth" implies, and it would be the place that is wrong.
+    /// </para>
+    /// <para>
+    /// <see cref="DefaultValueAttribute"/> is load-bearing: the serializer omits values equal to
+    /// <c>default(T)</c>, so without it a deliberate <c>false</c> is the one thing that never gets
+    /// written down. Same trap as <c>ReplicationTaskConfig.Enabled</c>.
+    /// </para>
+    /// </summary>
+    [DefaultValue(true)]
+    public bool Visible { get; set; } = true;
+
+    /// <summary>
+    /// Whether changing this value changes the answer to "what does this thing take?" — and therefore
+    /// whether the client has to ask again.
+    /// <para>
+    /// Declared rather than inferred, so a form refetches on the two dropdowns that matter instead of
+    /// on every keystroke in a host field. A parameter nothing depends on says nothing and costs
+    /// nothing.
+    /// </para>
+    /// </summary>
+    public bool Recalc { get; set; }
 
     // Computed, and on neither wire. Serialized they would be written into every manifest — and then
     // fail to load, because a computed property has no setter to read them back into.

@@ -63,13 +63,8 @@ public sealed class ParameterCheckTests(TestApiFactory factory) : IClassFixture<
         var capabilities = await _client.GetFromJsonAsync<DriverCapabilities>(
             "/api/drivers/MsSql/capabilities", JsonOptions);
 
-        // The free-form properties bag is declared, not assumed by the connection screen.
-        var properties = Assert.Single(capabilities!.ConnectionParameters, p => p.Name == "properties");
-        Assert.Equal(ParameterType.Property, properties.Type);
-        Assert.True(properties.Occurrences.IsVararg);
-
-        // And the settings a reader reads are declared beside the code that reads them.
-        var changeTracking = Assert.Single(capabilities.Readers, r => r.Kind == "MsSqlChangeTracking");
+        // The settings a reader reads are declared beside the code that reads them.
+        var changeTracking = Assert.Single(capabilities!.Readers, r => r.Kind == "MsSqlChangeTracking");
         Assert.Single(changeTracking.Parameters, p => p.Name == "snapshotIsolation" && p.Type == ParameterType.Bool);
 
         var watermark = Assert.Single(capabilities.Readers, r => r.Kind == "Watermark");

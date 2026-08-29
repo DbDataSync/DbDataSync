@@ -11,6 +11,8 @@ import type {
   BulkCreateRequest,
   BulkCreateResult,
   InferredColumnType,
+  DriverType,
+  ParameterDescriptor,
   ProvisioningPlanReport,
   ScriptCompileResult,
   ScriptDefinition,
@@ -76,9 +78,6 @@ export const api = {
     delete: (name: string) => request<void>(`/api/connections/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     capabilities: (name: string) =>
       request<DriverCapabilities>(`/api/connections/${encodeURIComponent(name)}/capabilities`),
-    /** For a connection being created, which has no name to ask about yet. */
-    capabilitiesForDriver: (driverType: string) =>
-      request<DriverCapabilities>(`/api/drivers/${encodeURIComponent(driverType)}/capabilities`),
     test: (name: string) =>
       request<ConnectionTestReport>(`/api/connections/${encodeURIComponent(name)}/test`, { method: 'POST' }),
     credentialSource: (name: string) =>
@@ -165,6 +164,16 @@ export const api = {
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}` +
           `/provisioning/${encodeURIComponent(action)}/apply`,
         { method: 'POST' },
+      ),
+  },
+  drivers: {
+    /** What a connection of this driver takes, given what it has been given so far. A POST because
+     * the answer depends on the values — Host is not a setting in connection-string mode — and those
+     * are an arbitrary operator-typed bag that does not belong in a query string. */
+    connectionParameters: (driverType: DriverType, values: Record<string, string>) =>
+      request<ParameterDescriptor[]>(
+        `/api/drivers/${encodeURIComponent(driverType)}/connection-parameters`,
+        { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(values) },
       ),
   },
   preview: {

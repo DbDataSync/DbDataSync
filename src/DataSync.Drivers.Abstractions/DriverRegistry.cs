@@ -76,7 +76,6 @@ public sealed class DriverRegistry
                 driver.StagingProviders.Select(p => new StagingCapability(p.Kind, p.Parameters)).ToList(),
                 driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation, w.Parameters)).ToList(),
                 driver is IConnectionTester,
-                driver is IProvisioner provisioner ? provisioner.SupportedActions : [],
-                driver.ConnectionParameters)
+                driver is IProvisioner provisioner ? provisioner.SupportedActions : [])
             : null;
 }

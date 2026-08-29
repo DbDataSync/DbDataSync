@@ -4,38 +4,82 @@ import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import { ParameterForm } from '../components/ParameterForm'
-import { useCapabilities, useDriverCapabilities, useConnections, useDeleteConnection, useTestConnection, useUpsertConnection } from '../api/hooks'
+import { useCapabilities, useConnectionParameters, useConnections, useDeleteConnection, useTestConnection, useUpsertConnection } from '../api/hooks'
 import { ConnectionTestCard } from './connection-edit/ConnectionTestCard'
 import { ScriptBindingsCard } from '../components/ScriptBindings'
-import type { AuthMode, ConnectionInput, DriverType } from '../api/types'
+import type { AuthMode, ConnectionInput, DriverType, ParameterDescriptor } from '../api/types'
 
 /**
- * A connection's properties bag as the vararg values a `ParameterForm` expects, and back again.
+ * A connection as the flat values bag a `ParameterForm` reads, and back again.
  *
- * The persisted shape is unchanged — a flat `Record<string, string>` on `ConnectionInput` — because
- * every connection already on disk has one and a new shape would be a migration. This is purely about
- * what the form is handed.
+ * The persisted shape is unchanged — `ConnectionInput`'s own top-level fields plus a flat properties
+ * dictionary — because every connection already on disk has one and a new shape would be a migration.
+ * This is purely about what the form is handed.
+ *
+ * An empty field is **left out** rather than sent as `''`, so the driver's declared default applies:
+ * that is how a new connection's Port arrives pre-filled with 1433 or 5432 without this file holding
+ * a table of ports that a third driver would make stale.
  */
 const PROPERTIES = 'properties'
 
-function flattenProperties(properties: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(properties).map(([k, v]) => [`${PROPERTIES}.${k}`, v]))
+function toValues(draft: ConnectionInput): Record<string, string> {
+  const values: Record<string, string> = {
+    addressMode: draft.connectionString === null || draft.connectionString === undefined ? 'host' : 'connectionString',
+    authMode: draft.authMode,
+    ...Object.fromEntries(
+      Object.entries(draft.properties ?? {}).map(([k, v]) => [`${PROPERTIES}.${k}`, v])),
+  }
+
+  const set = (name: string, value: string | number | null | undefined) => {
+    if (value !== null && value !== undefined && value !== '') values[name] = String(value)
+  }
+
+  set('host', draft.host)
+  set('port', draft.port)
+  set('connectionString', draft.connectionString)
+  set('database', draft.database)
+  set('userId', draft.userId)
+
+  // The password is deliberately absent. These values go to the server to ask what a connection
+  // takes, and only the two `recalc` settings change that answer — a bag carrying a plaintext
+  // credential is a bag that ends up in a log line eventually. The form is handed it separately.
+  return values
 }
 
-function unflattenProperties(values: Record<string, string>): Record<string, string> {
-  const prefix = `${PROPERTIES}.`
-  return Object.fromEntries(
-    Object.entries(values).filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k.slice(prefix.length), v]),
-  )
-}
+function fromValues(
+  draft: ConnectionInput, values: Record<string, string>, parameters: ParameterDescriptor[],
+): ConnectionInput {
+  // The same fallback the form itself displays, so a field left untouched saves as what it showed.
+  // Without this, a new connection whose Port reads 1433 would save with no port at all.
+  const shown = (name: string) =>
+    values[name] ?? parameters.find((p) => p.name === name)?.default ?? ''
 
-/** Each engine's default listening port, so switching the driver does not leave the other's behind. */
-const DEFAULT_PORTS: Record<DriverType, number> = { MsSql: 1433, Postgres: 5432 }
+  const byHost = shown('addressMode') !== 'connectionString'
+
+  return {
+    ...draft,
+    // One mode or the other, never both — the server rejects a connection that sets a host and a
+    // connection string, because nothing decides which one is used. Clearing the other side here is
+    // what makes switching the dropdown mean that.
+    host: byHost ? shown('host') : null,
+    port: byHost ? (shown('port') ? Number(shown('port')) : null) : null,
+    connectionString: byHost ? null : shown('connectionString'),
+    database: shown('database'),
+    authMode: shown('authMode') as AuthMode,
+    userId: shown('userId'),
+    password: values.password ?? '',
+    properties: Object.fromEntries(
+      Object.entries(values)
+        .filter(([k]) => k.startsWith(`${PROPERTIES}.`))
+        .map(([k, v]) => [k.slice(PROPERTIES.length + 1), v])),
+  }
+}
 
 // `connectionString: null` rather than absent: null is what "this connection uses host mode" looks
-// like, and the toggle reads exactly that.
+// like, and the address dropdown reads exactly that. `port: null` rather than a number, so the
+// driver's declared default is what fills it in.
 const empty: ConnectionInput = {
-  name: '', driverType: 'MsSql', host: '', port: 1433, connectionString: null, database: '',
+  name: '', driverType: 'MsSql', host: '', port: null, connectionString: null, database: '',
   authMode: 'SqlAuth', userId: '', password: '', properties: {},
 }
 
@@ -64,17 +108,39 @@ export function ConnectionEditPage() {
   const capabilities = useCapabilities(isNew ? undefined : name)
   const canTest = !isNew && capabilities.data?.supportsConnectionTest === true
   const [draft, setDraft] = useState<ConnectionInput | null>(isNew ? { ...empty } : null)
-  // A connection being created has no name to ask about, so it asks about its driver instead —
-  // and re-asks when the driver picker changes, which is the moment the settings on offer change.
-  const driverCapabilities = useDriverCapabilities(isNew ? draft?.driverType : undefined)
-  const declaredParameters =
-    (isNew ? driverCapabilities.data : capabilities.data)?.connectionParameters ?? []
+
+  const values = draft ? toValues(draft) : {}
+
+  /**
+   * The values the currently-displayed answer was computed from.
+   *
+   * Kept separately from the draft so the question is only re-asked when it has a different answer: a
+   * parameter the server marked `recalc` changing. Updated from the change event rather than from an
+   * effect watching the draft, which would fire on every keystroke and then have to work out whether
+   * it mattered.
+   */
+  const [askedWith, setAskedWith] = useState<Record<string, string>>({})
+
+  // What this connection takes, asked of the driver with the values it has so far — which is what
+  // decides whether Host or Connection string is a setting at all.
+  const { data: declaredParameters = [] } = useConnectionParameters(draft?.driverType, values, askedWith)
 
   const existing = connections?.find((c) => c.name === name)
 
+  /** Applies what the form reports, and re-asks the driver only if a `recalc` setting moved. */
+  const applyValues = (next: Record<string, string>) => {
+    if (!draft) return
+    const updated = fromValues(draft, next, declaredParameters)
+    setDraft(updated)
+
+    const moved = declaredParameters.some(
+      (p) => p.recalc && (next[p.name] ?? p.default ?? '') !== (askedWith[p.name] ?? p.default ?? ''))
+    if (moved) setAskedWith(toValues(updated))
+  }
+
   useEffect(() => {
     if (isNew || draft || !existing) return
-    setDraft({
+    const seeded: ConnectionInput = {
       name: existing.name,
       driverType: existing.driverType,
       host: existing.host,
@@ -83,13 +149,17 @@ export function ConnectionEditPage() {
       database: existing.database,
       authMode: existing.authMode,
       userId: existing.userId ?? '',
-      password: '', // never pre-filled — blank keeps the stored credential
+      // Never pre-filled, because the server never sends one back — blank keeps the stored credential.
+      // That is the Secret parameter type's contract now, not this screen's special case.
+      password: '',
       properties: { ...existing.properties },
       scripts: structuredClone(existing.scripts ?? {}),
-    })
+    }
+    setDraft(seeded)
+    // Seeded together, so the first answer is computed from this connection's real values and a
+    // connection-string connection never flashes a Host field it does not have.
+    setAskedWith(toValues(seeded))
   }, [isNew, draft, existing])
-
-  const usesConnectionString = draft?.connectionString !== null && draft?.connectionString !== undefined
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -161,8 +231,15 @@ export function ConnectionEditPage() {
         <form id="connection-form" onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="form-grid">
             <div className="card">
-              <div className="card-head"><span className="card-title">Connection</span></div>
+              <div className="card-head">
+                <span className="card-title">Connection</span>
+                <span className="card-note">declared by the {draft.driverType} driver</span>
+              </div>
               <div className="card-body">
+                {/* Name and Driver are not settings and never come from the driver. A connection's
+                    name is its identity, and its driver is the selector that decides which set of
+                    settings applies — it cannot be declared by the thing it selects. Both are also
+                    the two fields that are fixed after creation, which nothing declared is. */}
                 <Field label="Name">
                   <input
                     className="input"
@@ -173,59 +250,6 @@ export function ConnectionEditPage() {
                     data-testid="connection-name-input"
                   />
                 </Field>
-                <Field label="Address">
-                  {/* One mode or the other, never both — the server rejects a connection that sets a
-                      host and a connection string, because nothing decides which one is used. */}
-                  <select
-                    className="select"
-                    value={usesConnectionString ? 'connectionString' : 'host'}
-                    onChange={(e) => setDraft(e.target.value === 'connectionString'
-                      ? { ...draft, host: null, port: null, connectionString: '' }
-                      : { ...draft, connectionString: null, host: '', port: DEFAULT_PORTS[draft.driverType] })}
-                    data-testid="connection-address-mode-select"
-                  >
-                    <option value="host">Host &amp; port</option>
-                    <option value="connectionString">Connection string</option>
-                  </select>
-                </Field>
-
-                {usesConnectionString ? (
-                  <Field label="Connection string">
-                    {/* Hidden rather than disabled in the other mode: a greyed-out Host beside a
-                        connection string invites the question of which one is being used. */}
-                    <input
-                      className="input mono"
-                      required
-                      placeholder="Server=sql01;Failover Partner=sql02"
-                      value={draft.connectionString ?? ''}
-                      onChange={(e) => setDraft({ ...draft, connectionString: e.target.value })}
-                      data-testid="connection-string-input"
-                    />
-                    <span className="hint">
-                      The credential is never part of this — it is kept in the secret store and applied
-                      when connecting, because config is committed to git.
-                    </span>
-                  </Field>
-                ) : (
-                  <div className="form-row">
-                    <Field label="Host">
-                      <input
-                        className="input" required value={draft.host ?? ''}
-                        onChange={(e) => setDraft({ ...draft, host: e.target.value })}
-                        data-testid="connection-host-input"
-                      />
-                    </Field>
-                    <Field label="Port" alignLabel="right" style={{ width: 92, flex: 'none' }}>
-                      <input
-                        id="conn-port"
-                        className="input"
-                        type="number"
-                        value={draft.port ?? ''}
-                        onChange={(e) => setDraft({ ...draft, port: e.target.value ? Number(e.target.value) : null })}
-                      />
-                    </Field>
-                  </div>
-                )}
                 <Field label="Driver">
                   {/* Fixed after creation: the driver decides how every existing mapping's SQL is
                       built, so changing it under a live replication would silently repoint it at an
@@ -234,64 +258,29 @@ export function ConnectionEditPage() {
                     className="select"
                     value={draft.driverType}
                     disabled={!isNew}
-                    onChange={(e) => setDraft({
-                      ...draft,
-                      driverType: e.target.value as DriverType,
-                      port: usesConnectionString ? null : DEFAULT_PORTS[e.target.value as DriverType],
-                    })}
+                    onChange={(e) => {
+                      // Port is cleared rather than converted: the new driver declares its own
+                      // default, and carrying 1433 over to Postgres would be this screen guessing.
+                      const updated = { ...draft, driverType: e.target.value as DriverType, port: null }
+                      setDraft(updated)
+                      setAskedWith(toValues(updated))
+                    }}
                     data-testid="connection-driver-select"
                   >
                     <option value="MsSql">MsSql</option>
                     <option value="Postgres">Postgres</option>
                   </select>
                 </Field>
-                <Field label="Database">
-                  <input
-                    className="input"
-                    value={draft.database ?? ''}
-                    onChange={(e) => setDraft({ ...draft, database: e.target.value })}
-                    data-testid="connection-database-input"
-                  />
-                </Field>
-              </div>
-            </div>
 
-            <div className="card">
-              <div className="card-head"><span className="card-title">Authentication</span></div>
-              <div className="card-body">
-                <Field label="Auth mode">
-                  <select
-                    className="select"
-                    value={draft.authMode}
-                    onChange={(e) => setDraft({ ...draft, authMode: e.target.value as AuthMode })}
-                  >
-                    <option value="SqlAuth">SQL Auth</option>
-                    <option value="IntegratedAuth">Integrated Auth</option>
-                    <option value="None">None — supplied by the address or environment</option>
-                  </select>
-                </Field>
-                {draft.authMode === 'SqlAuth' && (
-                  <>
-                    <Field label="User ID">
-                      <input
-                        className="input"
-                        value={draft.userId ?? ''}
-                        onChange={(e) => setDraft({ ...draft, userId: e.target.value })}
-                        data-testid="connection-userid-input"
-                      />
-                    </Field>
-                    <Field label="Password">
-                      <input
-                        className="input"
-                        type="password"
-                        placeholder="Leave blank to keep existing"
-                        value={draft.password ?? ''}
-                        onChange={(e) => setDraft({ ...draft, password: e.target.value })}
-                        data-testid="connection-password-input"
-                      />
-                    </Field>
-                  </>
-                )}
+                {/* Everything else — addressing, database, authentication, and the driver's own
+                    settings — is declared, laid out and made conditional by the driver. This screen
+                    holds no rule about what depends on what. */}
+                <ParameterForm
+                  parameters={declaredParameters}
+                  values={{ ...values, password: draft.password ?? '' }}
+                  onChange={applyValues}
+                  testIdPrefix="connection-parameters"
+                />
               </div>
             </div>
 
@@ -303,24 +292,6 @@ export function ConnectionEditPage() {
                 error={test.error}
               />
             )}
-          </div>
-
-          {/* What this driver says its connections take beyond the fields every connection has. The
-              free-form properties bag is one of these now — declared by the driver rather than
-              assumed by this screen, which is what lets a driver narrow or replace it later. */}
-          <div className="card">
-            <div className="card-head">
-              <span className="card-title">Driver settings</span>
-              <span className="card-note">declared by the {draft.driverType} driver</span>
-            </div>
-            <div className="card-body">
-              <ParameterForm
-                parameters={declaredParameters}
-                values={flattenProperties(draft.properties ?? {})}
-                onChange={(next) => setDraft({ ...draft, properties: unflattenProperties(next) })}
-                testIdPrefix="connection-parameters"
-              />
-            </div>
           </div>
 
             {!isNew && (

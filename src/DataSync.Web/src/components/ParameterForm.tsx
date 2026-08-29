@@ -24,19 +24,24 @@ export function ParameterForm({ parameters, values, onChange, options, testIdPre
   options?: Record<string, string[]>
   testIdPrefix: string
 }) {
-  if (parameters.length === 0)
+  // What the declarer currently says applies. No condition logic here and no expression language:
+  // the rule belongs to whoever owns the setting, and a second copy of it in this file would be the
+  // copy that disagrees.
+  const shown = parameters.filter((p) => p.visible !== false)
+
+  if (shown.length === 0)
     return <span className="hint" data-testid={`${testIdPrefix}-none`}>This choice has no settings.</span>
 
   // Cards keep their declared order — first mention wins — so an author can lay a form out by
   // declaring in the order they want it read.
-  const cards = [...new Set(parameters.map((p) => p.layout?.card ?? ''))]
+  const cards = [...new Set(shown.map((p) => p.layout?.card ?? ''))]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }} data-testid={testIdPrefix}>
       {cards.map((card) => (
         <div key={card} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {card && <span className="card-title sm">{card}</span>}
-          {groupsIn(parameters, card).map((group, i) => (
+          {groupsIn(shown, card).map((group, i) => (
             <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
               {group.map((parameter) => (
                 <div key={parameter.name} style={{ flex: parameter.layout?.size ?? 1, minWidth: 0 }}>
@@ -159,8 +164,25 @@ function Control({ parameter, value, set, options, testId }: {
           {/* A value the choices no longer offer is kept and labelled, not silently dropped: it is
               what the config says, and losing it on the next save would be a change nobody made. */}
           {value && !(choices ?? []).includes(value) && <option value={value}>{value} — not offered</option>}
-          {(choices ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+          {(choices ?? []).map((c) => (
+            <option key={c} value={c}>{parameter.dropdownLabels?.[c] ?? c}</option>
+          ))}
         </select>
+      )
+
+    case 'Secret':
+      return (
+        <input
+          className="input"
+          type="password"
+          // Never pre-filled, because the server never sends one back. Blank therefore means "keep
+          // what is stored" — the contract the connection password has had since phase 3, now
+          // belonging to the type instead of to one hand-written field.
+          placeholder="Leave blank to keep existing"
+          value={value}
+          onChange={(e) => set(e.target.value)}
+          data-testid={testId}
+        />
       )
 
     case 'Number':

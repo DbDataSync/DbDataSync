@@ -80,6 +80,32 @@ public sealed class ConnectionsController(
     }
 
     /// <summary>
+    /// What a connection of this driver takes, given what it has been given so far.
+    /// <para>
+    /// A POST, and separate from capabilities, because the answer depends on the values: Host is not a
+    /// setting once the operator picks connection-string addressing. Capabilities stays a cacheable GET
+    /// that the Kind pickers read — nothing about a reader's options changes when somebody edits a
+    /// host field, and making the whole response values-dependent would refetch all of it on every
+    /// dropdown change.
+    /// </para>
+    /// <para>
+    /// A body rather than a query string because this is an arbitrary bag of operator-typed values,
+    /// including a properties vararg whose keys nobody here chose. Nothing sent here is stored, and a
+    /// credential is deliberately not among the values the client sends: only the two settings marked
+    /// <c>recalc</c> change the answer.
+    /// </para>
+    /// </summary>
+    [HttpPost("~/api/drivers/{driverType}/connection-parameters")]
+    public ActionResult<IReadOnlyList<ParameterDescriptor>> ConnectionParameters(
+        ConnectionDriverType driverType, [FromBody] Dictionary<string, string>? values)
+    {
+        if (!driverRegistry.TryGet(driverType, out var driver))
+            return NotFound(new { error = $"No driver is registered for '{driverType}'." });
+
+        return Ok(driver.ConnectionParameters(values ?? []));
+    }
+
+    /// <summary>
     /// Opens the connection and runs the driver's probe.
     /// <para>
     /// A failure is reported as <c>succeeded: false</c> with the provider's message, not as a 500: an

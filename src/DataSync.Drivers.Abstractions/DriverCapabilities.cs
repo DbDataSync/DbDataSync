@@ -19,19 +19,14 @@ public sealed record DriverCapabilities(
     bool SupportsConnectionTest,
     /// <summary>Which provisioning actions (<see cref="ProvisioningActions"/>) this driver can plan
     /// (<see cref="IProvisioner"/>). Empty for a driver that implements no provisioning at all.</summary>
-    IReadOnlyList<string> SupportedProvisioningActions,
-    /// <summary>
-    /// What this driver's connections take beyond the fields every connection has. A driver declares
-    /// its free-form properties bag here as one vararg <c>Property</c> parameter, rather than the SPA
-    /// assuming every connection has one.
-    /// <para>
-    /// Host, port, database, auth mode, user and credential are deliberately **not** here. They are
-    /// the shape of <c>ConnectionConfig</c> itself, validated at save, and one of them is a secret
-    /// that must never travel through a generic string bag — see phase 31. This is for what a driver
-    /// needs *in addition*.
-    /// </para>
-    /// </summary>
-    IReadOnlyList<ParameterDescriptor> ConnectionParameters);
+    IReadOnlyList<string> SupportedProvisioningActions);
+// Connection parameters used to be a field here. They moved out in phase 50, when they stopped being
+// a fixed list: what a connection takes now depends on what it has been given so far — Host is not a
+// setting once the operator picks connection-string addressing — and an answer that depends on values
+// cannot live in a response that carries none. See POST /api/drivers/{type}/connection-parameters.
+//
+// Which also keeps this response cacheable. The Kind pickers read it and nothing about a reader's
+// options changes when somebody edits a host field.
 
 /// <param name="Parameters">
 /// The settings this Kind reads out of its options bag. Declared so the SPA can offer them instead of

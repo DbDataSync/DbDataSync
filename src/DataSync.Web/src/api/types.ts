@@ -228,7 +228,7 @@ export type Hooks = Record<string, HookConfig[] | null>
 /** What kind of value a parameter takes, and therefore what control it gets. A closed set: the point
  * of declaring a parameter is that this app can render it without knowing what it is for. */
 export type ParameterType =
-  | 'Text' | 'Number' | 'Bool' | 'Date' | 'DateTime' | 'Dropdown' | 'ColumnPicker' | 'Property'
+  | 'Text' | 'Number' | 'Bool' | 'Date' | 'DateTime' | 'Dropdown' | 'ColumnPicker' | 'Property' | 'Secret'
 
 export interface ParameterCardinality {
   min: number
@@ -255,9 +255,21 @@ export interface ParameterDescriptor {
   /** Null — the common case — means a single value. */
   cardinality: ParameterCardinality | null
   dropdownOptions: string[] | null
+  /** How to spell each option for a person, keyed by the stored value. Null where the value already
+   * reads as itself, which is most of them. */
+  dropdownLabels: Record<string, string> | null
   /** What the form pre-fills. Null means empty, which is distinct from an empty string. */
   default: string | null
   layout: ParameterLayout | null
+
+  /** Whether this parameter applies at all, given the other values. Decided by whoever declared it —
+   * a driver knows that Host is beside the point in connection-string mode — so this app renders
+   * what it is told rather than holding a second copy of the rule that could disagree. */
+  visible: boolean
+
+  /** Whether changing this value changes what the thing takes, and so whether the form has to ask
+   * again. Declared, so a form refetches on the dropdown that matters and not on every keystroke. */
+  recalc: boolean
 }
 
 export type ScriptLanguage = 'CSharp' | 'Sql'
@@ -511,9 +523,6 @@ export interface DriverCapabilities {
    * driver reaching an arbitrary engine may have no probe it can name — so the UI hides the Test
    * affordance rather than offering one that could never work. */
   supportsConnectionTest: boolean
-  /** What this driver's connections take beyond the fields every connection has — its free-form
-   * properties bag is one of these, declared rather than assumed. */
-  connectionParameters: ParameterDescriptor[]
   /** Which provisioning actions (see ProvisioningPlan) this driver can plan. Empty for a driver that
    * implements no provisioning at all. */
   supportedProvisioningActions: string[]

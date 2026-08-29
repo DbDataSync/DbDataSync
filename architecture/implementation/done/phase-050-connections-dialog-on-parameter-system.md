@@ -1,6 +1,6 @@
-# Phase 50 — Rebuild the connections dialog on the parameter system (planned)
+# Phase 50 — Rebuild the connections dialog on the parameter system
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/connections-dialog-on-parameter-system.md`
 
 ## What this covers
@@ -105,3 +105,96 @@ Both keep their current bespoke `<Field>` treatment, including "disabled after c
   parameter is a free-text field.
 - Whether the capabilities endpoint takes values via query string or a small POST body — GET-with-query
   is more cacheable but a values dictionary doesn't fit a query string as cleanly as a POST body would.
+
+---
+
+# Retrospective
+
+The connection screen no longer knows what a connection is. It renders a name, a driver picker, and
+whatever the driver says — which is the point: adding a driver that addresses its engine differently
+now needs no change here at all.
+
+## The capabilities endpoint did not become values-aware
+
+The plan said to teach `GET /api/{...}/capabilities` to take the current values. It became a separate
+`POST /api/drivers/{type}/connection-parameters` instead.
+
+Capabilities is mostly static — reader, staging and writer Kinds with their own parameters — and the
+Kind pickers read it and cache it. Nothing about a reader's options changes when somebody edits a host
+field, so making the whole response depend on live draft values would have refetched all of it on every
+dropdown change and dropped its `staleTime` for the callers that were right to have one. Connection
+parameters moved *out* of `DriverCapabilities` entirely: an answer that depends on values cannot live
+in a response that carries none.
+
+POST rather than GET-with-query, the plan's other open question: these are an arbitrary bag of
+operator-typed values including a properties vararg whose keys nobody here chose, and caching is moot
+when the answer is per-draft anyway.
+
+## The refetch is keyed on what actually changes the answer
+
+`recalc` is declared, not inferred, so the form asks again on the two dropdowns and never on a
+keystroke. The plan's debounce question turns out not to need answering: nothing needs debouncing when
+nothing refetches while you type. A future free-text `recalc` parameter would need it, and the place to
+put it is this hook.
+
+The key is the values the *current* answer was computed from, held beside the draft and updated from
+the change event — not from an effect watching the draft, which would fire on every keystroke and then
+have to work out whether it mattered. It is seeded together with the draft, so a connection-string
+connection never flashes a Host field it does not have.
+
+## The password contract belongs to a type now
+
+`Secret` renders masked, is never pre-filled, and blank means "keep the stored one". That is what the
+connection password has done since phase 3 as a hand-written special case; naming it as a type is what
+stops the next secret parameter reinventing it, or forgetting it. The values bag sent to the server
+excludes it on both sides — `DriverParameters.ValuesOf` leaves it out too — because only the two
+`recalc` settings change the answer, and a bag carrying a plaintext credential ends up in a log line
+eventually.
+
+## The screenshot found two things the tests could not
+
+Both were caught by looking at the rendered page, which is now twice in three phases that this has paid
+for itself:
+
+- **"Connection" appeared twice** — once as the card's title and once as a declared layout card
+  underneath it. Two headings saying the same thing, which is the mistake phase 42 removed from this
+  same screen. The connection fields declare no card and sit directly under the card that already names
+  them; Authentication and Driver settings are the two that earn a sub-heading.
+- **Dropdowns showed raw stored values** — `host`, `IntegratedAuth` — where the hand-written form had
+  said "Host & port" and "Integrated Auth". `ParameterDescriptor` gained `DropdownLabels`, a map from
+  stored value to how it is written, rather than a parallel list of labels: a parallel list is one edit
+  away from labelling the wrong option, and that mistake looks like working software.
+
+## Two things deleted
+
+`DEFAULT_PORTS` — a table of ports in the SPA that a third driver would have made stale on the day it
+was added. Each driver declares its own `DefaultPort` and the form pre-fills from the descriptor, which
+also means an untouched Port saves as what it displayed rather than as null.
+
+`useDriverCapabilities` — added in phase 42 for exactly this screen's declared settings, and with no
+caller once those come from the values-aware endpoint. The endpoint stays; a hook with no caller does
+not.
+
+## Verification
+
+- `ConnectionParametersTests` (10) — defaults applying to an empty bag, connection-string addressing
+  hiding host and port, both credential-less auth modes hiding user and password, only the two
+  depended-on settings marked `recalc`, each driver's own default port, the password declared `Secret`,
+  name and driver absent from the declared set, and an unknown driver refused.
+- `ParameterValidation` skips a parameter the declarer says does not apply — requiring an unanswerable
+  question would make a valid connection unsaveable.
+- Playwright 31 — the driver's default port following a driver change, host and port sharing a row by
+  declared layout, auth mode hiding and showing user and password, the password masked and blank on
+  load, name and driver still fixed after creation, and a save that touches nothing still leaving the
+  connection reachable.
+- Playwright 02 and 17 rewritten onto the declared testids, covering both addressing modes end to end.
+- Full .NET suite green: 711 tests. Playwright: 33 green. `tsc -b` clean, `oxlint` unchanged at four.
+
+## Open questions
+
+- ~~**The layout breakdown.**~~ One card, with the driver's own sub-headings. Two cards would have
+  meant the screen deciding where a declared setting goes, which is the thing this phase removed.
+- ~~**Whether the recalc refetch should debounce.**~~ Not needed: keyed on the recalc values only, so
+  typing costs nothing. A free-text `recalc` parameter would need it, and `useConnectionParameters` is
+  where it goes.
+- ~~**Query string or POST body.**~~ POST body, for the reason above.

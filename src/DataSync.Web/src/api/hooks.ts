@@ -3,6 +3,7 @@ import { useCallback } from 'react'
 import { api } from './client'
 import type {
   BulkCreateRequest,
+  DriverType,
   ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
@@ -117,14 +118,10 @@ export function useReplicationCapabilities(replicationName: string | undefined) 
  * connection: with one registered driver that is the same answer, and it is a far better default than
  * a list of Kind strings compiled into this app, which would be a guess about the server's drivers.
  */
-/** Capabilities for a driver type — what a connection being created can ask, having no name yet. */
-export function useDriverCapabilities(driverType: string | undefined) {
-  return useQuery({
-    queryKey: ['drivers', driverType ?? '', 'capabilities'] as const,
-    queryFn: () => api.connections.capabilitiesForDriver(driverType!),
-    enabled: !!driverType,
-  })
-}
+// A by-driver-type capabilities hook lived here from phase 42 until phase 50, for the connection
+// form's declared settings. Those now come from POST /api/drivers/{type}/connection-parameters, which
+// is the same question asked with the values that decide the answer — so nothing in this app asks the
+// valueless version any more. The endpoint stays; a hook with no caller does not.
 
 export function useDefaultCapabilities() {
   const { data: connections } = useConnections()
@@ -190,6 +187,29 @@ export function useBulkCreateMappings(replicationName: string) {
   return useMutation({
     mutationFn: (request: BulkCreateRequest) => api.tableMappings.bulkCreate(replicationName, request),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.tableMappings(replicationName) }),
+  })
+}
+
+/**
+ * What a connection of this driver takes, given the values it has so far.
+ *
+ * Keyed on the driver and on the values of the parameters the *server* marked `recalc`, so typing in
+ * a host field costs nothing and switching address mode asks again. The request body carries the live
+ * values rather than the key, because the key is only the subset that changes the answer.
+ *
+ * The first render has no descriptors yet and so an empty recalc key; the body still carries the real
+ * draft, so that first answer is correct and the one refetch that follows changes nothing on screen.
+ */
+export function useConnectionParameters(
+  driverType: DriverType | undefined,
+  values: Record<string, string>,
+  recalcKey: Record<string, string>,
+) {
+  return useQuery({
+    queryKey: ['drivers', driverType ?? '', 'connection-parameters', recalcKey] as const,
+    queryFn: () => api.drivers.connectionParameters(driverType!, values),
+    enabled: !!driverType,
+    placeholderData: (previous) => previous,
   })
 }
 

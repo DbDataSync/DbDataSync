@@ -21,6 +21,11 @@ public static class ParameterValidation
 
         foreach (var parameter in declared)
         {
+            // A parameter the declarer says does not apply is not one the operator can fill in.
+            // Requiring an unanswerable question would make a valid connection unsaveable.
+            if (!parameter.Visible)
+                continue;
+
             if (parameter.Occurrences.IsVararg)
             {
                 ValidateVararg(parameter, values, what, problems);

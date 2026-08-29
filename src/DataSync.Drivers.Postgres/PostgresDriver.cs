@@ -28,6 +28,10 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
 
     public ConnectionDriverType DriverType => ConnectionDriverType.Postgres;
 
+    /// <summary>Postgres's default listening port, pre-filled on a new connection. Declared here
+    /// rather than in the SPA, which had a table of these that a third driver would have made stale.</summary>
+    public int? DefaultPort => 5432;
+
     public IReadOnlyList<IChangeReader> Readers { get; } =
     [
         new WatermarkReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),

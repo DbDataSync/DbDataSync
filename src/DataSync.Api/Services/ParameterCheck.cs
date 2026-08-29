@@ -18,12 +18,17 @@ public sealed class ParameterCheck(DriverRegistry driverRegistry, ConfigReposito
 {
     public void ThrowIfInvalid(ConnectionInput input)
     {
-        var capabilities = driverRegistry.Describe(input.DriverType);
-        if (capabilities is null)
+        if (!driverRegistry.TryGet(input.DriverType, out var driver))
             return;
 
+        var values = DriverParameters.ValuesOf(input);
+
+        // Checked against the declarations *as they apply to this connection*: a host that is not a
+        // setting in connection-string mode is not one this can complain about either. Which of the
+        // two addressing modes is filled in is `ConfigValidation.ValidateAddressing`'s question, and
+        // it asks it with a better message than a generic "required" would.
         Throw(ParameterValidation.Validate(
-            capabilities.ConnectionParameters, Flatten("properties", input.Properties), $"Connection '{input.Name}'"));
+            driver.ConnectionParameters(values), values, $"Connection '{input.Name}'"));
     }
 
     /// <summary>

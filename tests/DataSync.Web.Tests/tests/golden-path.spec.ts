@@ -61,11 +61,11 @@ test.describe.serial('golden path: define, configure, and run a replication end-
       await page.getByTestId('new-connection-button').click()
       await expect(page).toHaveURL(/\/connections\/new$/)
       await page.getByTestId('connection-name-input').fill(name)
-      await page.getByTestId('connection-host-input').fill('localhost')
-      await page.locator('#conn-port').fill('14330')
-      await page.getByTestId('connection-database-input').fill(DB_NAME)
-      await page.getByTestId('connection-userid-input').fill('sa')
-      await page.getByTestId('connection-password-input').fill(SA_PASSWORD)
+      await page.getByTestId('connection-parameters-host').fill('localhost')
+      await page.getByTestId('connection-parameters-port').fill('14330')
+      await page.getByTestId('connection-parameters-database').fill(DB_NAME)
+      await page.getByTestId('connection-parameters-userId').fill('sa')
+      await page.getByTestId('connection-parameters-password').fill(SA_PASSWORD)
       if (name === SRC_CONNECTION_NAME) await shot(page, '02-connection-form.png')
       await page.getByTestId('save-connection-button').click()
       await expect(page.getByTestId('connections-table')).toContainText(name)
@@ -593,16 +593,16 @@ public sealed class DropGadgets : IRowTransform
 
     await page.goto('/connections/new')
     await page.getByTestId('connection-name-input').fill(NAME)
-    await page.getByTestId('connection-address-mode-select').selectOption('connectionString')
+    await page.getByTestId('connection-parameters-addressMode').selectOption('connectionString')
 
     // Host and port are gone rather than greyed out: a disabled Host beside a connection string
     // invites the question of which one is being used.
-    await expect(page.getByTestId('connection-host-input')).toHaveCount(0)
+    await expect(page.getByTestId('connection-parameters-host')).toHaveCount(0)
 
-    await page.getByTestId('connection-string-input').fill('Server=localhost,14330;TrustServerCertificate=True')
-    await page.getByTestId('connection-database-input').fill(DB_NAME)
-    await page.getByTestId('connection-userid-input').fill('sa')
-    await page.getByTestId('connection-password-input').fill(SA_PASSWORD)
+    await page.getByTestId('connection-parameters-connectionString').fill('Server=localhost,14330;TrustServerCertificate=True')
+    await page.getByTestId('connection-parameters-database').fill(DB_NAME)
+    await page.getByTestId('connection-parameters-userId').fill('sa')
+    await page.getByTestId('connection-parameters-password').fill(SA_PASSWORD)
     await shot(page, '22-connection-string.png')
 
     await page.getByTestId('save-connection-button').click()
@@ -610,8 +610,8 @@ public sealed class DropGadgets : IRowTransform
 
     // It survives a reload in the mode it was saved in, and it actually connects.
     await page.goto(`/connections/${NAME}`)
-    await expect(page.getByTestId('connection-address-mode-select')).toHaveValue('connectionString', { timeout: 15_000 })
-    await expect(page.getByTestId('connection-string-input')).toHaveValue(/Server=localhost,14330/)
+    await expect(page.getByTestId('connection-parameters-addressMode')).toHaveValue('connectionString', { timeout: 15_000 })
+    await expect(page.getByTestId('connection-parameters-connectionString')).toHaveValue(/Server=localhost,14330/)
 
     await page.getByTestId('test-connection-button').click()
     await expect(page.getByTestId('connection-test-result')).toContainText('reachable', { timeout: 20_000 })
@@ -1325,5 +1325,56 @@ public sealed class Shout : IValueColumnExpression
     // Put the sidebar back the way the rest of the suite left it.
     expect((await page.request.delete(
       `/api/replications/${REPLICATION_NAME}/table-mappings/dbo.${TARGET_TABLE}`)).ok()).toBeTruthy()
+  })
+
+  test('31 - the connection form is declared by the driver, not written into the screen', async ({ page }) => {
+    await page.goto('/connections/new')
+    await expect(page.getByTestId('connection-parameters-host')).toBeVisible({ timeout: 20_000 })
+
+    // The port comes from the driver. This screen used to hold a table of default ports, which a
+    // third driver would have made stale the day it was added.
+    await expect(page.getByTestId('connection-parameters-port')).toHaveValue('1433')
+    await page.getByTestId('connection-driver-select').selectOption('Postgres')
+    await expect(page.getByTestId('connection-parameters-port')).toHaveValue('5432', { timeout: 15_000 })
+    await page.getByTestId('connection-driver-select').selectOption('MsSql')
+
+    // Host and port share a row; the address dropdown and database each get their own. That layout
+    // is declared by the driver too — the screen renders what it is told.
+    const host = await page.getByTestId('connection-parameters-host').boundingBox()
+    const port = await page.getByTestId('connection-parameters-port').boundingBox()
+    expect(Math.abs(host!.y - port!.y), 'host and port share a row').toBeLessThan(4)
+    expect(port!.x, 'port sits to the right of host').toBeGreaterThan(host!.x)
+
+    // Auth mode decides whether a user and a password are settings at all, and the driver is what
+    // decides that — no condition logic in the SPA, which would be the copy that disagrees.
+    await expect(page.getByTestId('connection-parameters-userId')).toBeVisible()
+    await page.getByTestId('connection-parameters-authMode').selectOption('IntegratedAuth')
+    await expect(page.getByTestId('connection-parameters-userId')).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByTestId('connection-parameters-password')).toHaveCount(0)
+    await shot(page, '40-declared-connection-form.png')
+
+    // A setting nothing depends on never asks the driver again, and is always there.
+    await page.getByTestId('connection-parameters-authMode').selectOption('SqlAuth')
+    await expect(page.getByTestId('connection-parameters-database')).toBeVisible({ timeout: 15_000 })
+
+    // The password is masked, and blank on load: the server never sends one back, so blank means
+    // "keep the stored one" rather than "clear it".
+    await expect(page.getByTestId('connection-parameters-password')).toHaveAttribute('type', 'password')
+
+    await page.goto(`/connections/${SRC_CONNECTION_NAME}`)
+    await expect(page.getByTestId('connection-parameters-password')).toHaveValue('', { timeout: 20_000 })
+    await expect(page.getByTestId('connection-parameters-host')).toHaveValue('localhost')
+
+    // Name and driver stay fixed after creation — neither is a setting, and both decide things every
+    // existing mapping already depends on.
+    await expect(page.getByTestId('connection-name-input')).toBeDisabled()
+    await expect(page.getByTestId('connection-driver-select')).toBeDisabled()
+
+    // Saving without touching the password keeps the connection working, which is the whole contract.
+    await page.getByTestId('save-connection-button').click()
+    await expect(page.getByTestId('connections-table')).toContainText(SRC_CONNECTION_NAME, { timeout: 15_000 })
+    await page.goto(`/connections/${SRC_CONNECTION_NAME}`)
+    await page.getByTestId('test-connection-button').click()
+    await expect(page.getByTestId('connection-test-result')).toContainText('reachable', { timeout: 20_000 })
   })
 })

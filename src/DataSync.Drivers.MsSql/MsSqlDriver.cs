@@ -18,6 +18,10 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
 
     public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
 
+    /// <summary>SQL Server's default listening port, pre-filled on a new connection. Declared here
+    /// rather than in the SPA, which had a table of these that a third driver would have made stale.</summary>
+    public int? DefaultPort => 1433;
+
     // The generic implementations are registered alongside this driver's own, not instead of them.
     // SQL Server's prefixed ones are faster (SqlBulkCopy, MERGE) and stay the default; the portable
     // ones are what proves the generic pipeline against a working engine, and are a real fallback on
