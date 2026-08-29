@@ -81,6 +81,25 @@ public sealed class ColumnMapping
     public string? Transform { get; set; }
 
     /// <summary>
+    /// The target column's type, when the operator has chosen one. **Null is the normal case** — the
+    /// type is inferred from the source's through the canonical system, and writing that inference
+    /// into config would freeze today's answer against a source whose column later changes.
+    /// <para>
+    /// Written in the *target's* dialect, since that is where it is used.
+    /// </para>
+    /// </summary>
+    public string? TargetType { get; set; }
+
+    /// <summary>
+    /// Every rename this column has been through, oldest first.
+    /// <para>
+    /// A list rather than a "renamed from", because an operator can rename a column more than once
+    /// before anything is applied, and provisioning needs the history rather than the latest edit.
+    /// </para>
+    /// </summary>
+    public List<RenameStep> Renames { get; set; } = new();
+
+    /// <summary>
     /// The placeholder a transform uses for its own column, substituted by the reader with a reference
     /// that is correct for the statement being built.
     /// <para>
@@ -184,4 +203,35 @@ public static class ProvisioningResolution
         mapping?.Provisioning.AlterTargetTableColumnsIfMissingOrChanged is null
             ? BindingLevel.Replication
             : BindingLevel.Mapping;
+}
+
+/// <summary>
+/// One rename of a target column, and whether the target has caught up with it.
+/// <para>
+/// A class with settable properties rather than a positional record, like every other persisted
+/// config type here: the YAML deserializer constructs through a parameterless constructor and
+/// property setters, so a record round-trips out to disk and then throws on the way back in.
+/// </para>
+/// </summary>
+public sealed class RenameStep
+{
+    public RenameStep() { }
+
+    public RenameStep(string from, string to, bool applied = false)
+    {
+        From = from;
+        To = to;
+        Applied = applied;
+    }
+
+    public string From { get; set; } = "";
+    public string To { get; set; } = "";
+
+    /// <summary>
+    /// False until provisioning has run the <c>RENAME</c>. A record of what happened rather than a
+    /// latch: the planner reads the target's actual columns, so a step left <c>false</c> after
+    /// somebody renamed the column by hand plans nothing, and one wrongly marked <c>true</c> does not
+    /// stop the rename being planned. What it buys is a history an operator can read.
+    /// </summary>
+    public bool Applied { get; set; }
 }

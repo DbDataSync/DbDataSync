@@ -203,6 +203,10 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
       </div>
 
       <ColumnMappingEditor
+        replicationName={replicationName}
+        // The saved name, not the draft one: the inferred-type endpoint reads config off disk, and a
+        // mapping being renamed in this form does not exist under its new name until it is saved.
+        mappingName={existing?.name}
         source={resolvedSource}
         target={resolvedTarget}
         mappings={columnMappings}

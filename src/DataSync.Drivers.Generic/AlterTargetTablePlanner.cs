@@ -22,7 +22,9 @@ public static class AlterTargetTablePlanner
         IReadOnlyList<ProvisioningColumn> wanted,
         IReadOnlyList<ColumnMetadata> existing)
     {
-        var unmappable = wanted.Where(c => c.Type.Kind == CanonicalTypeKind.Unmappable).ToList();
+        var unmappable = wanted
+            .Where(c => c.TypeOverride is null && c.Type.Kind == CanonicalTypeKind.Unmappable)
+            .ToList();
         if (unmappable.Count > 0)
         {
             return new ProvisioningPlan(
@@ -37,9 +39,35 @@ public static class AlterTargetTablePlanner
         var steps = new List<ProvisioningStep>();
         var warnings = new List<string>();
 
+        var renames = PendingRenames(wanted, byName);
+        if (Collisions(renames, byName) is { Count: > 0 } collisions)
+        {
+            return new ProvisioningPlan(
+                ProvisioningActions.AlterTargetTable,
+                ProvisioningState.Unsupported,
+                [],
+                [.. collisions]);
+        }
+
+        foreach (var (column, from) in renames)
+        {
+            steps.Add(new ProvisioningStep(
+                $"Rename {from} to {column.Name} on {qualifiedTable}",
+                targetDialect.RenderRenameColumn(qualifiedTable, from, column.Name),
+                "Renamed rather than added, so the column's existing rows keep their values. Anything " +
+                "outside DataSync that reads this table by the old name stops working the moment this runs.",
+                ProvisioningStepScope.Table));
+
+            // Renamed, so the type comparison below is against the column this used to be — not against
+            // a column that does not exist yet, which would plan a redundant ADD for one already there.
+            byName[column.Name] = byName[from] with { Name = column.Name };
+        }
+
         foreach (var column in wanted)
         {
-            var rendered = targetDialect.RenderColumnType(column.Type);
+            var rendered = column.TypeOverride is { } chosen
+                ? new RenderedColumnType(chosen, null)
+                : targetDialect.RenderColumnType(column.Type);
             if (rendered.Fidelity is not null)
                 warnings.Add($"Column '{column.Name}': {rendered.Fidelity}");
 
@@ -82,6 +110,82 @@ public static class AlterTargetTablePlanner
             steps.Count == 0 ? ProvisioningState.Satisfied : ProvisioningState.Missing,
             steps,
             warnings);
+    }
+
+    /// <summary>
+    /// The renames that still have to happen on the target, as (column, name it currently has).
+    /// <para>
+    /// A column's whole unapplied chain collapses to one rename: the intermediate names were never
+    /// written to the target, so renaming <c>A</c> to <c>B</c> to <c>C</c> against a target still
+    /// holding <c>A</c> is one statement, not two. A step whose old name is absent from the target is
+    /// not a rename at all — the column was renamed by hand, or never existed — and falls through to
+    /// the ordinary add-or-alter path.
+    /// </para>
+    /// </summary>
+    private static List<(ProvisioningColumn Column, string From)> PendingRenames(
+        IReadOnlyList<ProvisioningColumn> wanted, Dictionary<string, ColumnMetadata> byName)
+    {
+        var pending = new List<(ProvisioningColumn, string)>();
+
+        foreach (var column in wanted)
+        {
+            var unapplied = (column.Renames ?? []).Where(r => !r.Applied).ToList();
+            if (unapplied.Count == 0)
+                continue;
+
+            var from = unapplied[0].From;
+            if (!string.Equals(from, column.Name, StringComparison.OrdinalIgnoreCase) && byName.ContainsKey(from))
+                pending.Add((column, from));
+        }
+
+        return pending;
+    }
+
+    /// <summary>
+    /// Renames that cannot be run in any order without one clobbering another: a **swap** (<c>A</c> to
+    /// <c>B</c> while <c>B</c> goes to <c>A</c>), or a rename onto a name the table already uses.
+    /// <para>
+    /// Reported as <see cref="ProvisioningState.Unsupported"/> naming the columns, rather than solved.
+    /// Untangling one needs a temporary name and an order chosen so no intermediate state loses a
+    /// column — that is a real algorithm, it has to be right the first time because getting it wrong
+    /// drops somebody's data, and it is <b>not</b> something to invent unreviewed inside a planner.
+    /// Renaming the columns in two passes, applying between them, does the same job today.
+    /// </para>
+    /// </summary>
+    private static List<string> Collisions(
+        List<(ProvisioningColumn Column, string From)> renames, Dictionary<string, ColumnMetadata> byName)
+    {
+        var problems = new List<string>();
+
+        foreach (var (column, from) in renames)
+        {
+            if (!byName.ContainsKey(column.Name))
+                continue;
+
+            var occupant = renames.FirstOrDefault(r =>
+                string.Equals(r.From, column.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (occupant.Column is null)
+            {
+                problems.Add(
+                    $"Column '{from}' is being renamed to '{column.Name}', which the target already uses. " +
+                    "Rename or remove the existing column first — DataSync will not overwrite it.");
+                continue;
+            }
+
+            // Both halves of a swap collide, and reporting it twice from each side's point of view
+            // reads as two problems when it is one.
+            var pair = string.CompareOrdinal(from, column.Name) < 0
+                ? $"'{from}' and '{column.Name}'"
+                : $"'{column.Name}' and '{from}'";
+            var message =
+                $"Columns {pair} are being renamed past each other. Apply one rename, then the other: " +
+                "doing both at once needs a temporary name, and DataSync does not pick one on your behalf.";
+            if (!problems.Contains(message))
+                problems.Add(message);
+        }
+
+        return problems;
     }
 
     /// <summary>

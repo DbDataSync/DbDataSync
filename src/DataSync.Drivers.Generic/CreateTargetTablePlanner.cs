@@ -13,7 +13,12 @@ public static class CreateTargetTablePlanner
 {
     public static ProvisioningPlan Plan(SqlDialect targetDialect, TableRef target, IReadOnlyList<ProvisioningColumn> columns)
     {
-        var unmappable = columns.Where(c => c.Type.Kind == CanonicalTypeKind.Unmappable).ToList();
+        // A column whose type the operator chose needs no cross-engine translation — they have already
+        // said what it should be, and refusing on the grounds that we could not have guessed it would
+        // be refusing to honour the answer.
+        var unmappable = columns
+            .Where(c => c.TypeOverride is null && c.Type.Kind == CanonicalTypeKind.Unmappable)
+            .ToList();
         if (unmappable.Count > 0)
             return new ProvisioningPlan(
                 ProvisioningActions.CreateTargetTable,
@@ -25,7 +30,9 @@ public static class CreateTargetTablePlanner
         var rendered = new List<CreateTableColumn>();
         foreach (var column in columns)
         {
-            var renderedType = targetDialect.RenderColumnType(column.Type);
+            var renderedType = column.TypeOverride is { } chosen
+                ? new RenderedColumnType(chosen, null)
+                : targetDialect.RenderColumnType(column.Type);
             if (renderedType.Fidelity is not null)
                 warnings.Add($"Column '{column.Name}': {renderedType.Fidelity}");
             rendered.Add(new CreateTableColumn(column.Name, renderedType, column.IsNullable, column.IsPrimaryKey));

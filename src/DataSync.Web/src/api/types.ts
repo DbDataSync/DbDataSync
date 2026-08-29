@@ -120,6 +120,41 @@ export interface ColumnMapping {
   sourceColumn: string
   targetColumn: string
   transform: string | null
+
+  /**
+   * The target type an operator chose, in the target's own dialect. **Null is the normal case** —
+   * the type is inferred from the source's, and writing that inference down would freeze today's
+   * answer against a source column that later changes. See `InferredColumnType`.
+   */
+  targetType?: string | null
+
+  /**
+   * Every rename this target column has been through, oldest first. Absent for the columns nobody
+   * has renamed, which is nearly all of them.
+   */
+  renames?: RenameStep[]
+}
+
+/** One rename of a target column. `applied` records whether provisioning has run it. */
+export interface RenameStep {
+  from: string
+  to: string
+  applied: boolean
+}
+
+/**
+ * What a source column would become on the target if nobody overrode it. Computed server-side
+ * because the canonical type system lives there: the SPA has no way to know that a SQL Server
+ * `nvarchar(50)` lands as a Postgres `varchar(50)`.
+ */
+export interface InferredColumnType {
+  sourceColumn: string
+  sourceType: string
+  targetType: string | null
+  /** What the translation approximates, when it does. */
+  fidelity: string | null
+  /** Why there is no inferred type. Never set alongside `targetType`. */
+  problem: string | null
 }
 
 /**

@@ -8,6 +8,7 @@ import type {
   ConnectionTestReport,
   CredentialSource,
   DriverCapabilities,
+  InferredColumnType,
   ProvisioningPlanReport,
   ScriptCompileResult,
   ScriptDefinition,
@@ -146,6 +147,11 @@ export const api = {
     get: (replicationName: string, mappingName: string) =>
       request<ProvisioningPlanReport>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/provisioning`,
+      ),
+    inferredColumnTypes: (replicationName: string, mappingName: string) =>
+      request<InferredColumnType[]>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}` +
+          `/provisioning/inferred-column-types`,
       ),
     apply: (replicationName: string, mappingName: string, action: string) =>
       request<ApplyResult>(

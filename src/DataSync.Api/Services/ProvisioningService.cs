@@ -86,6 +86,69 @@ public sealed class ProvisioningService(ConfigRepository configRepository, Drive
         }
     }
 
+    /// <summary>
+    /// What each of the source's columns would become on the target, if nobody overrode it.
+    /// <para>
+    /// The column mapping editor needs this because the canonical type system lives entirely on this
+    /// side: the SPA has no way to work out that a SQL Server <c>nvarchar(50)</c> lands as a Postgres
+    /// <c>varchar(50)</c>, and an editor that showed the source's type and an empty box would be
+    /// asking the operator to do that translation in their head. Every source column is answered, not
+    /// just the mapped ones, so adding a mapping shows its type immediately.
+    /// </para>
+    /// <para>
+    /// Deliberately the same translation <see cref="PlanTargetAsync"/> uses rather than a second one,
+    /// so what the editor shows and what the DDL says cannot drift apart.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<InferredColumnType>> GetInferredTargetTypesAsync(
+        string replicationName, string mappingName, CancellationToken cancellationToken)
+    {
+        var (_, _, source, target) = LoadMapping(replicationName, mappingName);
+
+        var (sourceConnection, sourceDriver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);
+        IReadOnlyList<ColumnMetadata> sourceColumns;
+        try
+        {
+            sourceColumns = await sourceDriver.ListColumnsAsync(
+                sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
+        }
+        finally
+        {
+            await sourceConnection.DisposeAsync();
+        }
+
+        var sourceDialect = ResolveDialect(sourceDriver.DriverType);
+        var targetDialect = ResolveDialect(configRepository.LoadConnection(target.ConnectionName).DriverType);
+
+        return [.. sourceColumns.Select(column => Infer(sourceDialect, targetDialect, column))];
+    }
+
+    /// <summary>
+    /// One column's inference, or a null <c>TargetType</c> with the reason.
+    /// <para>
+    /// A type with no cross-engine equivalent is reported as such rather than thrown, because one
+    /// unmappable column should not stop the editor showing the other forty — and the operator's
+    /// answer to it is to type a target type of their own, which is exactly what the editor offers.
+    /// </para>
+    /// </summary>
+    private static InferredColumnType Infer(SqlDialect sourceDialect, SqlDialect targetDialect, ColumnMetadata column)
+    {
+        try
+        {
+            var canonical = sourceDialect.ToCanonicalType(column.NativeType);
+            if (canonical.Kind == CanonicalTypeKind.Unmappable)
+                return new InferredColumnType(column.Name, column.NativeType, null, null,
+                    $"'{column.NativeType}' has no cross-engine equivalent — set a target type by hand.");
+
+            var rendered = targetDialect.RenderColumnType(canonical);
+            return new InferredColumnType(column.Name, column.NativeType, rendered.Sql, rendered.Fidelity, null);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or FormatException)
+        {
+            return new InferredColumnType(column.Name, column.NativeType, null, null, ex.Message);
+        }
+    }
+
     private (ReplicationTaskConfig Task, TableMappingConfig Mapping, SourceTableRef Source, TableRef Target) LoadMapping(
         string replicationName, string mappingName)
     {
@@ -190,6 +253,13 @@ public sealed class ProvisioningService(ConfigRepository configRepository, Drive
 }
 
 public sealed record ProvisioningPlanReport(ProvisioningPlan Source, ProvisioningPlan Target);
+
+/// <param name="Fidelity">What the translation loses or approximates, when it does — the same note
+/// the generated DDL carries as a warning, shown next to the type rather than only after a plan.</param>
+/// <param name="Problem">Why there is no inferred type, when there isn't. Null and
+/// <paramref name="TargetType"/> are never both set.</param>
+public sealed record InferredColumnType(
+    string SourceColumn, string SourceType, string? TargetType, string? Fidelity, string? Problem);
 
 public sealed record ApplyStepResult(string Title, bool Succeeded, string? Error, double ElapsedMs);
 

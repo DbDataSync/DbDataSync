@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useColumns } from '../../api/hooks'
+import { useColumns, useInferredColumnTypes } from '../../api/hooks'
+import { EditableValue } from '../../components/EditableValue'
 import type { ColumnMapping, ResolvedRef } from '../../api/types'
 
 interface Props {
+  replicationName: string
+  /** Undefined for a mapping that has not been saved yet — there is nothing on disk to infer from. */
+  mappingName: string | undefined
   source: ResolvedRef
   target: ResolvedRef
   mappings: ColumnMapping[]
@@ -16,7 +20,7 @@ interface Props {
   targetExists: boolean | undefined
 }
 
-const COLUMNS = '1fr 26px 1fr 1.3fr 80px'
+const COLUMNS = '1fr 22px 1fr 0.95fr 1.15fr 74px'
 
 /**
  * Once both sides have a table, lists the target's columns and lets each be fed from a source column,
@@ -35,13 +39,16 @@ const COLUMNS = '1fr 26px 1fr 1.3fr 80px'
  * *column mappings*, so what is listed here is literally what gets created. Showing the source's
  * columns is the only answer that makes the table that appears match the table that was described.
  */
-export function ColumnMappingEditor({ source, target, mappings, onChange, targetExists }: Props) {
+export function ColumnMappingEditor({
+  replicationName, mappingName, source, target, mappings, onChange, targetExists,
+}: Props) {
   const { data: sourceColumns } = useColumns(source.connectionName, source.database, source.schema, source.table)
   // Not asked for at all when the table is not there: the request would 404 and be retried, and the
   // answer is already known.
   const { data: catalogTargetColumns } = useColumns(
     target.connectionName, target.database, target.schema, targetExists === true ? target.table : undefined)
   const targetColumns = targetExists === false ? sourceColumns : catalogTargetColumns
+  const { data: inferred } = useInferredColumnTypes(replicationName, mappingName)
   const [columnToAdd, setColumnToAdd] = useState('')
 
   useEffect(() => {
@@ -67,6 +74,7 @@ export function ColumnMappingEditor({ source, target, mappings, onChange, target
   }
 
   const typeOf = (name: string) => sourceColumns.find((c) => c.name === name)?.nativeType
+  const inferenceFor = (sourceColumn: string) => inferred?.find((i) => i.sourceColumn === sourceColumn)
   // For a table that does not exist yet this reads the source's key, which is what the generated
   // CREATE TABLE will carry over.
   const isPk = (name: string) => targetColumns.find((c) => c.name === name)?.isPrimaryKey
@@ -75,6 +83,28 @@ export function ColumnMappingEditor({ source, target, mappings, onChange, target
 
   const updateRow = (index: number, patch: Partial<ColumnMapping>) =>
     onChange(mappings.map((m, i) => (i === index ? { ...m, ...patch } : m)))
+
+  /**
+   * Renaming a target column is not the same edit as correcting a typo in one, and which of the two
+   * it is depends entirely on whether the target already has a column under the old name.
+   *
+   * If it does, the rename is recorded so provisioning can `RENAME` it and the existing rows keep
+   * their values — dropping and re-adding would silently empty the column. If it does not (a target
+   * table that has yet to be created, or a column only ever named in config), there is nothing to
+   * rename and recording a step would ask provisioning to rename a column that was never there.
+   */
+  const renameTarget = (index: number, next: string | null) => {
+    const from = mappings[index].targetColumn
+    if (!next || next === from) return
+
+    const onTarget = targetExists === true && targetColumns.some((c) => c.name === from)
+    updateRow(index, {
+      targetColumn: next,
+      renames: onTarget
+        ? [...(mappings[index].renames ?? []), { from, to: next, applied: false }]
+        : mappings[index].renames,
+    })
+  }
 
   const autoMap = () => {
     const sourceNames = new Set(sourceColumns.map((c) => c.name))
@@ -96,11 +126,12 @@ export function ColumnMappingEditor({ source, target, mappings, onChange, target
       </div>
 
       <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 0, height: 29 }}>
-        <span>Source column</span><span /><span>Target column</span><span>Transform</span><span />
+        <span>Source column</span><span /><span>Target column</span><span>Target type</span>
+        <span>Transform</span><span />
       </div>
 
       {mappings.map((m, i) => (
-        <div key={m.targetColumn} className="grid-row" style={{ gridTemplateColumns: COLUMNS, gap: 0 }}>
+        <div key={i} className="grid-row" style={{ gridTemplateColumns: COLUMNS, gap: 0 }}>
           <span className="row" style={{ gap: 7 }}>
             <select
               className="select sm"
@@ -123,23 +154,49 @@ export function ColumnMappingEditor({ source, target, mappings, onChange, target
             <span className="faint">{typeOf(m.sourceColumn)}</span>
           </span>
           <span className="faint">→</span>
-          <span className="row" style={{ gap: 7 }}>
-            {m.targetColumn}
+          <span className="row" style={{ gap: 7, minWidth: 0 }}>
+            <EditableValue
+              value={m.targetColumn}
+              label={`${m.targetColumn} target column name`}
+              onChange={(next) => renameTarget(i, next)}
+              testId={`column-mapping-target-${i}`}
+            />
             {isPk(m.targetColumn) && <span className="badge badge-accent">PK</span>}
+            {(m.renames?.some((r) => !r.applied) ?? false) && (
+              <span
+                className="badge"
+                title={`Will be renamed from ${m.renames![0].from} when provisioning is applied.`}
+              >
+                RENAMED
+              </span>
+            )}
             {/* Same honesty on the other side: a target column the catalog does not have is a mapping
                 that will fail at staging, and saying so here beats finding out on the next pass. */}
             {targetExists === true && !targetColumns.some((c) => c.name === m.targetColumn) && (
               <span className="badge" title="This column is not on the target table.">MISSING</span>
             )}
           </span>
-          <span>
-            <input
-              className="input sm mono"
-              placeholder="UPPER({{column}})"
-              value={m.transform ?? ''}
-              onChange={(e) => updateRow(i, { transform: e.target.value || null })}
-              aria-label={`${m.targetColumn} transform`}
-              data-testid={`column-mapping-transform-${m.targetColumn}`}
+          <span title={inferenceFor(m.sourceColumn)?.fidelity ?? inferenceFor(m.sourceColumn)?.problem ?? undefined}>
+            <EditableValue
+              value={m.targetType}
+              // Empty means "whatever the source's type maps to", so the inference is the placeholder
+              // rather than a prefilled value: prefilling it would turn every row into an override and
+              // freeze today's answer against a source column that later changes.
+              placeholder={inferenceFor(m.sourceColumn)?.targetType ?? 'inferred'}
+              label={`${m.targetColumn} target type`}
+              onChange={(next) => updateRow(i, { targetType: next })}
+              monospace
+              testId={`column-mapping-type-${i}`}
+            />
+          </span>
+          <span style={{ minWidth: 0 }}>
+            <EditableValue
+              value={m.transform}
+              placeholder="none"
+              label={`${m.targetColumn} transform`}
+              onChange={(next) => updateRow(i, { transform: next })}
+              monospace
+              testId={`column-mapping-transform-${m.targetColumn}`}
             />
           </span>
           <button

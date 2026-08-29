@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using YamlDotNet.Serialization;
 
@@ -39,9 +40,37 @@ public enum ParameterType
 /// <summary>
 /// How many values a parameter takes. <c>1..1</c> is a single value, which is nearly everything;
 /// anything else is a vararg and the form renders a list.
+/// <para>
+/// A <c>record</c> for its value equality, but with a parameterless constructor and settable
+/// properties rather than a positional one: the YAML deserializer constructs through exactly those,
+/// and a positional record serializes out to disk perfectly well and then throws on the way back in.
+/// The bug that shape caused was invisible until a script declaring a vararg parameter was saved and
+/// then reopened, which no test had done.
+/// </para>
 /// </summary>
-public sealed record ParameterCardinality(int Min, int Max)
+public sealed record ParameterCardinality
 {
+    public ParameterCardinality() { }
+
+    public ParameterCardinality(int min, int max)
+    {
+        Min = min;
+        Max = max;
+    }
+
+    /// <summary>
+    /// <see cref="DefaultValueAttribute"/> is load-bearing here, exactly as it is on
+    /// <c>ReplicationTaskConfig.Enabled</c>: the serializer omits defaults by comparing against
+    /// <c>default(T)</c>, so a <c>Min</c> of <c>0</c> — the thing that makes a parameter optional —
+    /// was omitted and the initializer put <c>1</c> back on load. Comparing against <c>1</c> instead
+    /// writes the interesting value and omits the boring one, which is the right way round.
+    /// </summary>
+    [DefaultValue(1)]
+    public int Min { get; set; } = 1;
+
+    [DefaultValue(1)]
+    public int Max { get; set; } = 1;
+
     [YamlIgnore, JsonIgnore]
     public static ParameterCardinality Single { get; } = new(1, 1);
 
@@ -65,11 +94,30 @@ public sealed record ParameterCardinality(int Min, int Max)
 /// Where a parameter goes on screen. Hints, not layout: the form decides how to honour them, and a
 /// declaration that says nothing still renders.
 /// </summary>
-/// <param name="Card">Groups parameters into cards. Empty means the form's own default card.</param>
-/// <param name="Group">Groups within a card — a row of related fields.</param>
-/// <param name="Size">Relative width within its group, in flex units. 1 is the default.</param>
-public sealed record ParameterLayout(string Card = "", string Group = "", double Size = 1)
+/// <remarks>Same shape as <see cref="ParameterCardinality"/>, for the same round-trip reason.</remarks>
+public sealed record ParameterLayout
 {
+    public ParameterLayout() { }
+
+    public ParameterLayout(string card = "", string group = "", double size = 1)
+    {
+        Card = card;
+        Group = group;
+        Size = size;
+    }
+
+    /// <summary>Groups parameters into cards. Empty means the form's own default card.</summary>
+    [DefaultValue("")]
+    public string Card { get; set; } = "";
+
+    /// <summary>Groups within a card — a row of related fields.</summary>
+    [DefaultValue("")]
+    public string Group { get; set; } = "";
+
+    /// <summary>Relative width within its group, in flex units. 1 is the default.</summary>
+    [DefaultValue(1d)]
+    public double Size { get; set; } = 1;
+
     [YamlIgnore, JsonIgnore]
     public static ParameterLayout Default { get; } = new();
 }

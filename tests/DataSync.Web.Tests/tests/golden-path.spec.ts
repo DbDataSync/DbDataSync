@@ -148,7 +148,10 @@ test.describe.serial('golden path: define, configure, and run a replication end-
 
     // A transform is SQL in the source's own dialect, evaluated by the source engine. {{column}} is
     // substituted with whatever reference is correct for the reader's statement.
+    // Text with a pencil, not an open input: click to edit, Enter to commit.
+    await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}-edit`).click()
     await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}`).fill('UPPER({{column}})')
+    await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}`).press('Enter')
 
     await page.getByTestId('save-mapping-button').click()
     // The mappings list is the sidebar now, not a table below the form, and saving puts the mapping
@@ -459,7 +462,9 @@ public sealed class ReverseName : ISqlColumnExpression
     // transform beats a script — so the script's REVERSE has to lose. Clearing the literal is what
     // lets it win, and proves the precedence rule rather than assuming it.
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}-edit`).click()
     await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}`).fill('')
+    await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}`).press('Enter')
     await page.getByTestId('save-mapping-button').click()
 
     // Touch the source so Change Tracking has something to report. Without this the next pass reads
@@ -1198,5 +1203,60 @@ public sealed class Shout : IValueColumnExpression
     // The second setting is a separate question and falls back on its own — a mapping can override
     // one and inherit the other.
     await expect(page.getByTestId('provisioning-alter')).toContainText('INHERITED')
+  })
+
+  test('29 - a column\'s target type is inferred until overridden, and a rename is recorded as one', async ({ page }) => {
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    const before = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+
+    // The inferred type is shown for every row without being stored. The SPA cannot work this out —
+    // the canonical type system lives on the server — so an empty box here would be asking the
+    // operator to translate types in their head.
+    const type = page.getByTestId('column-mapping-type-1-text')
+    await expect(type).toBeVisible({ timeout: 20_000 })
+    await expect(type).toContainText(/varchar|char|text/i)
+    await shot(page, '37-inferred-target-type.png')
+
+    // And it stays out of the saved config: writing the inference down would freeze today's answer
+    // against a source column that later changes.
+    expect(before.columnMappings[1].targetType ?? null).toBeNull()
+
+    // Overriding it is a pencil, not a permanently-open input: these are fields that are usually
+    // right and occasionally disagreed with, and forty open inputs read as a form to fill in.
+    await page.getByTestId('column-mapping-type-1-edit').click()
+    await page.getByTestId('column-mapping-type-1').fill('nvarchar(200)')
+    await page.getByTestId('column-mapping-type-1').press('Enter')
+    await expect(page.getByTestId('column-mapping-type-1-text')).toHaveText('nvarchar(200)')
+
+    // Renaming the target column records a rename rather than quietly becoming a different column:
+    // the target has one under the old name, and dropping and re-adding would empty it.
+    const renamedFrom = before.columnMappings[1].targetColumn
+    await page.getByTestId('column-mapping-target-1-edit').click()
+    await page.getByTestId('column-mapping-target-1').fill('RenamedByTest')
+    await page.getByTestId('column-mapping-target-1').press('Enter')
+    await expect(page.getByTestId('column-mappings-table')).toContainText('RENAMED')
+
+    await page.getByTestId('save-mapping-button').click()
+    await expect.poll(async () => {
+      const mapping = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+      return mapping.columnMappings[1]
+    }, { timeout: 15_000 }).toMatchObject({
+      targetColumn: 'RenamedByTest',
+      targetType: 'nvarchar(200)',
+      renames: [{ from: renamedFrom, to: 'RenamedByTest', applied: false }],
+    })
+
+    // Which the Setup card then plans as a RENAME — never an ADD beside the old column, and never a
+    // DROP. Both of those leave a table that looks right and is empty in the column that matters.
+    await expect(page.getByTestId('provisioning-plan-target')).toContainText('Rename', { timeout: 20_000 })
+    await expect(page.getByTestId('provisioning-plan-target')).not.toContainText('DROP')
+    await shot(page, '38-planned-rename.png')
+
+    // Put the mapping back: the suite is serial, and a renamed column the target does not have would
+    // break every pass after this one.
+    expect((await page.request.put(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: before })).ok()).toBeTruthy()
   })
 })

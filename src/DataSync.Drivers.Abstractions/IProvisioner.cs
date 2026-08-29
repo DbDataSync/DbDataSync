@@ -104,7 +104,22 @@ public sealed record ProvisioningPlan(
 /// provisioner, which belongs to the *target* driver, only ever has to call its own
 /// <c>RenderColumnType</c> and never needs to know what dialect produced the column it was handed.</summary>
 /// <param name="Name">The target column name.</param>
-public sealed record ProvisioningColumn(string Name, CanonicalType Type, bool IsNullable, bool IsPrimaryKey);
+/// <param name="TypeOverride">
+/// The target type an operator chose, in the target's own dialect, or null to use whatever
+/// <paramref name="Type"/> renders to. Set only when somebody actually edited it — an inference
+/// written into config would freeze today's answer against a source column that later changes.
+/// </param>
+/// <param name="Renames">
+/// This column's rename history, oldest first, so a planner can work out which name the target
+/// currently uses. Empty for a column nobody has renamed, which is nearly all of them.
+/// </param>
+public sealed record ProvisioningColumn(
+    string Name,
+    CanonicalType Type,
+    bool IsNullable,
+    bool IsPrimaryKey,
+    string? TypeOverride = null,
+    IReadOnlyList<RenameStep>? Renames = null);
 
 /// <param name="Table">The table this call is about: the source table for
 /// <see cref="ProvisioningActions.EnableSourceChangeCapture"/>, the target table for

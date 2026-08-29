@@ -492,3 +492,18 @@ select.select {
 /* Monaco draws its own focus affordance inside; the border tracks it so the control reads like every
    other input on the page. */
 .code-editor:focus-within { border-color: var(--accent); }
+
+/* --- Editable value (see EditableValue.tsx) ------------------------------------------------- */
+/* The pencil stays out of the way until the row is hovered: a table of forty columns with forty
+   permanently-visible edit buttons reads as a form, which is the opposite of what text-until-clicked
+   is for. It is always in the layout, never display:none, so nothing reflows on hover — and it stays
+   visible on :focus-visible, so the keyboard path is not the one that disappears. */
+.editable-value { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.editable-value > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pencil {
+  border: none; background: none; padding: 0; line-height: 1;
+  font-size: 11px; color: var(--ink-10); cursor: pointer;
+  opacity: 0; transition: opacity 90ms ease;
+}
+.grid-row:hover .pencil, .pencil:focus-visible, .pencil:hover { opacity: 1; }
+.pencil:hover { color: var(--accent); }

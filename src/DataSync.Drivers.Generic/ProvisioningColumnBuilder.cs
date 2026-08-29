@@ -37,7 +37,9 @@ public static class ProvisioningColumnBuilder
                     "plain — DataSync writes explicit values into the target.");
 
             var canonical = sourceDialect.ToCanonicalType(sourceColumn.NativeType);
-            columns.Add(new ProvisioningColumn(mapping.TargetColumn, canonical, sourceColumn.IsNullable, sourceColumn.IsPrimaryKey));
+            columns.Add(new ProvisioningColumn(
+                mapping.TargetColumn, canonical, sourceColumn.IsNullable, sourceColumn.IsPrimaryKey,
+                mapping.TargetType, mapping.Renames));
         }
 
         return (columns, warnings);

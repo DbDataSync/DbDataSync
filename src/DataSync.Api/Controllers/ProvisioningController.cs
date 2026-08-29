@@ -29,6 +29,32 @@ public sealed class ProvisioningController(ProvisioningService provisioningServi
         }
     }
 
+    /// <summary>What each source column would become on the target — the column mapping editor's
+    /// read path for the inferred type it shows on every row (phase 45 §3).</summary>
+    [HttpGet("inferred-column-types")]
+    public async Task<ActionResult<IReadOnlyList<InferredColumnType>>> GetInferredColumnTypes(
+        string replicationName, string mappingName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await provisioningService.GetInferredTargetTypesAsync(replicationName, mappingName, cancellationToken));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ConfigValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The source table not being there yet is normal while a mapping is being set up, and a
+            // 500 would read as a broken server rather than "nothing to infer from".
+            return NotFound(new { error = ex.Message });
+        }
+    }
+
     /// <summary>
     /// Named <c>provisioningAction</c>, not <c>action</c>. <c>{action}</c> is a reserved token in an
     /// MVC route template — it names the controller method rather than binding a segment — so a route

@@ -27,6 +27,8 @@ const keys = {
   run: (runId: string) => ['runs', runId] as const,
   provisioning: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'provisioning'] as const,
+  inferredColumnTypes: (replicationName: string, mappingName: string) =>
+    ['replications', replicationName, 'table-mappings', mappingName, 'inferred-column-types'] as const,
   preview: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'preview'] as const,
   replicationStatus: (replicationName: string) =>
@@ -465,6 +467,24 @@ export function useProvisioning(replicationName: string | undefined, mappingName
     queryKey: keys.provisioning(replicationName ?? '', mappingName ?? ''),
     queryFn: () => api.provisioning.get(replicationName!, mappingName!),
     enabled: !!replicationName && !!mappingName,
+  })
+}
+
+/**
+ * What each source column would become on the target — the type the column mapping editor shows on
+ * every row before anyone overrides it.
+ *
+ * A separate query from `useProvisioning` rather than a field on the plan: the editor needs it while
+ * the operator is still choosing columns, which is exactly when there is no plan worth showing.
+ * Failures are silent by design (`retry: false`), since a source table that is not reachable yet is
+ * normal during setup and the editor degrades to showing no inferred type.
+ */
+export function useInferredColumnTypes(replicationName: string | undefined, mappingName: string | undefined) {
+  return useQuery({
+    queryKey: keys.inferredColumnTypes(replicationName ?? '', mappingName ?? ''),
+    queryFn: () => api.provisioning.inferredColumnTypes(replicationName!, mappingName!),
+    enabled: !!replicationName && !!mappingName,
+    retry: false,
   })
 }
 

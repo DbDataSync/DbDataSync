@@ -497,6 +497,83 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Contains("Retired", columns);
     }
 
+    /// <summary>
+    /// A renamed target column is renamed on the target, not dropped and re-added — the whole point
+    /// being that the rows keep their values. Asserted against real data, because the failure mode
+    /// this guards against (an ADD beside the old column, or a DROP) still leaves a table that looks
+    /// right in the catalog and is empty in the column that matters.
+    /// </summary>
+    [Fact]
+    public async Task ARenamedTargetColumn_IsRenamedAndKeepsItsRows()
+    {
+        await ExecuteAsync(await OpenDatabaseAsync(),
+            $"INSERT INTO dbo.[{_targetTable}] (Id, Name) VALUES (7, 'dave');");
+
+        (await _client.PutAsJsonAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+            {
+                Name = "main",
+                Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
+                Targets = [new TableSpec { Schema = "dbo", Table = _targetTable }],
+                ColumnMappings =
+                [
+                    new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                    new ColumnMapping
+                    {
+                        SourceColumn = "Name",
+                        TargetColumn = "FullName",
+                        Renames = [new RenameStep("Name", "FullName")],
+                    },
+                ],
+            }, JsonOptions)).EnsureSuccessStatusCode();
+
+        var plan = await GetTargetPlanAsync();
+        var step = Assert.Single(plan.Steps);
+        Assert.Contains("Rename Name to FullName", step.Title);
+
+        (await _client.PostAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main/provisioning/alterTargetTable/apply", null))
+            .EnsureSuccessStatusCode();
+
+        var columns = await QueryColumnsAsync(_targetTable);
+        Assert.Contains("FullName", columns);
+        Assert.DoesNotContain("Name", columns);
+
+        // The row that was there before the rename still has its value: renamed, not recreated.
+        await using var connection = await OpenDatabaseAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"SELECT FullName FROM dbo.[{_targetTable}] WHERE Id = 7;";
+        Assert.Equal("dave", (string)(await cmd.ExecuteScalarAsync())!);
+
+        // And the plan goes quiet rather than planning the rename again on the next pass.
+        Assert.Equal("Satisfied", (await GetTargetPlanAsync()).State);
+    }
+
+    /// <summary>
+    /// The column mapping editor's inferred-type read path. It is the *same* translation the DDL
+    /// uses, which is the reason for the endpoint existing rather than the SPA guessing: what the
+    /// editor shows and what CREATE TABLE says cannot drift apart if there is only one of them.
+    /// </summary>
+    [Fact]
+    public async Task InferredColumnTypes_AnswerEverySourceColumn()
+    {
+        var inferred = await _client.GetFromJsonAsync<List<InferredColumnTypeDto>>(
+            $"/api/replications/{_replicationName}/table-mappings/main/provisioning/inferred-column-types",
+            JsonOptions);
+
+        Assert.Equal(2, inferred!.Count);
+
+        var name = Assert.Single(inferred, i => i.SourceColumn == "Name");
+        Assert.Equal("nvarchar(50)", name.SourceType, ignoreCase: true);
+        // Same engine on both sides here, so the inference is a round trip — which is exactly what
+        // makes a wrong answer visible.
+        Assert.Equal("nvarchar(50)", name.TargetType, ignoreCase: true);
+        Assert.Null(name.Problem);
+    }
+
+    private sealed record InferredColumnTypeDto(
+        string SourceColumn, string SourceType, string? TargetType, string? Fidelity, string? Problem);
+
     private sealed record ProvisioningStepDto(string Title, string CommandText);
     private sealed record ProvisioningPlanDto(
         string Action, string State, List<ProvisioningStepDto> Steps, List<string> Warnings);

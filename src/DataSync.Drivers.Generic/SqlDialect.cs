@@ -95,6 +95,18 @@ public abstract class SqlDialect
     public virtual string? RenderAlterColumnType(string qualifiedTable, string column, string type) =>
         $"ALTER TABLE {qualifiedTable} ALTER COLUMN {QuoteIdentifier(column)} TYPE {type};";
 
+    /// <summary>
+    /// Rename an existing column, keeping its type and its data.
+    /// <para>
+    /// A rename rather than an add-and-copy because the point of recording one is that the target's
+    /// existing rows keep their values: dropping the old column is not something provisioning does,
+    /// and leaving it beside the new one would leave the table with two columns and no way to tell
+    /// which is current.
+    /// </para>
+    /// </summary>
+    public virtual string RenderRenameColumn(string qualifiedTable, string from, string to) =>
+        $"ALTER TABLE {qualifiedTable} RENAME COLUMN {QuoteIdentifier(from)} TO {QuoteIdentifier(to)};";
+
     public virtual string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT * FROM {qualifiedTable} LIMIT {rows};";
 

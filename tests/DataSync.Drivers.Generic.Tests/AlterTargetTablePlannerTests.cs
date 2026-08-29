@@ -27,6 +27,136 @@ public sealed class AlterTargetTablePlannerTests
         IReadOnlyList<ProvisioningColumn> wanted, IReadOnlyList<ColumnMetadata> existing) =>
         AlterTargetTablePlanner.Plan(RoundTripDialect.Instance, Target, wanted, existing);
 
+    private static ProvisioningColumn Renamed(string name, params RenameStep[] renames) =>
+        Wanted(name) with { Renames = renames };
+
+    #region Renames
+
+    [Fact]
+    public void ARenamedColumn_IsRenamedRatherThanAddedAndDropped()
+    {
+        var plan = Plan([Renamed("CustomerId", new RenameStep("CustId", "CustomerId"))], [Existing("CustId", "int")]);
+
+        var step = Assert.Single(plan.Steps);
+        Assert.Contains("Rename CustId to CustomerId", step.Title);
+        Assert.Contains("RENAME COLUMN", step.CommandText);
+    }
+
+    /// <summary>
+    /// The rename makes the column present under its new name, so the ordinary add-or-alter pass must
+    /// not then plan an ADD for a column that is standing right there. Getting this wrong would leave
+    /// the table with the renamed column *and* an empty new one.
+    /// </summary>
+    [Fact]
+    public void ARenamedColumn_IsNotAlsoAdded()
+    {
+        var plan = Plan([Renamed("CustomerId", new RenameStep("CustId", "CustomerId"))], [Existing("CustId", "int")]);
+
+        Assert.Single(plan.Steps);
+        Assert.DoesNotContain(plan.Steps, s => s.Title.StartsWith("Add column"));
+    }
+
+    /// <summary>Intermediate names were never written to the target, so the whole chain is one statement.</summary>
+    [Fact]
+    public void SeveralUnappliedRenames_CollapseToOne()
+    {
+        var plan = Plan(
+            [Renamed("C", new RenameStep("A", "B"), new RenameStep("B", "C"))],
+            [Existing("A", "int")]);
+
+        var step = Assert.Single(plan.Steps);
+        Assert.Contains("Rename A to C", step.Title);
+    }
+
+    [Fact]
+    public void ARenameAlreadyReflectedOnTheTarget_PlansNothing()
+    {
+        var plan = Plan(
+            [Renamed("CustomerId", new RenameStep("CustId", "CustomerId", applied: true))],
+            [Existing("CustomerId", "int")]);
+
+        Assert.Equal(ProvisioningState.Satisfied, plan.State);
+        Assert.Empty(plan.Steps);
+    }
+
+    /// <summary>
+    /// A step left unapplied because somebody renamed the column by hand plans nothing: the target's
+    /// own columns are the authority, not the flag.
+    /// </summary>
+    [Fact]
+    public void AnUnappliedRenameWhoseOldNameIsGone_PlansNothing()
+    {
+        var plan = Plan(
+            [Renamed("CustomerId", new RenameStep("CustId", "CustomerId"))],
+            [Existing("CustomerId", "int")]);
+
+        Assert.Equal(ProvisioningState.Satisfied, plan.State);
+        Assert.Empty(plan.Steps);
+    }
+
+    /// <summary>
+    /// Two columns renamed past each other cannot be done in either order without one clobbering the
+    /// other. Refused, naming both — untangling it needs a temporary name and an order that is right
+    /// the first time, because getting it wrong drops somebody's data.
+    /// </summary>
+    [Fact]
+    public void TwoColumnsRenamedPastEachOther_AreRefusedRatherThanGuessedAt()
+    {
+        var plan = Plan(
+            [Renamed("B", new RenameStep("A", "B")), Renamed("A", new RenameStep("B", "A"))],
+            [Existing("A", "int"), Existing("B", "int")]);
+
+        Assert.Equal(ProvisioningState.Unsupported, plan.State);
+        Assert.Empty(plan.Steps);
+        var warning = Assert.Single(plan.Warnings);
+        Assert.Contains("'A' and 'B'", warning);
+        Assert.Contains("renamed past each other", warning);
+    }
+
+    [Fact]
+    public void ARenameOntoAnOccupiedName_IsRefusedWithoutOverwritingIt()
+    {
+        var plan = Plan(
+            [Renamed("Region", new RenameStep("Territory", "Region")), Wanted("Region")],
+            [Existing("Territory", "int"), Existing("Region", "int")]);
+
+        Assert.Equal(ProvisioningState.Unsupported, plan.State);
+        Assert.Empty(plan.Steps);
+        Assert.Contains("the target already uses", Assert.Single(plan.Warnings));
+    }
+
+    #endregion
+
+    #region Chosen target types
+
+    /// <summary>
+    /// An operator who typed a target type has answered the question the canonical system exists to
+    /// answer, so it is not asked again — and refusing because *we* could not have guessed it would be
+    /// refusing to honour the answer.
+    /// </summary>
+    [Fact]
+    public void AChosenTargetType_IsUsedVerbatim()
+    {
+        var wanted = Wanted("Payload", CanonicalTypeKind.Unmappable) with { TypeOverride = "jsonb" };
+
+        var step = Assert.Single(Plan([wanted], []).Steps);
+
+        Assert.Contains("jsonb", step.CommandText);
+        Assert.Equal(ProvisioningState.Missing, Plan([wanted], []).State);
+    }
+
+    [Fact]
+    public void AChosenTargetType_IsWhatAnExistingColumnIsComparedAgainst()
+    {
+        var wanted = Wanted("Code") with { TypeOverride = "char(4)" };
+
+        var step = Assert.Single(Plan([wanted], [Existing("Code", "int")]).Steps);
+
+        Assert.Contains("to char(4)", step.Title);
+    }
+
+    #endregion
+
     [Fact]
     public void ATargetThatAlreadyMatches_HasNothingToDo()
     {

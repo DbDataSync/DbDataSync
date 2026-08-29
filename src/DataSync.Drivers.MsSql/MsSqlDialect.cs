@@ -52,6 +52,17 @@ public sealed class MsSqlDialect : SqlDialect
     public override string? RenderAlterColumnType(string qualifiedTable, string column, string type) =>
         $"ALTER TABLE {qualifiedTable} ALTER COLUMN {QuoteIdentifier(column)} {type} NULL;";
 
+    /// <summary>
+    /// SQL Server has no <c>ALTER TABLE … RENAME COLUMN</c>; the rename is a stored procedure whose
+    /// first argument is the column's *qualified* name as a string literal and whose second is the new
+    /// name **unqualified** — passing a qualified new name is the classic way to end up with a column
+    /// literally called <c>dbo.T.NewName</c>.
+    /// </summary>
+    public override string RenderRenameColumn(string qualifiedTable, string from, string to) =>
+        $"EXEC sp_rename N'{Literal($"{qualifiedTable}.{QuoteIdentifier(from)}")}', N'{Literal(to)}', 'COLUMN';";
+
+    private static string Literal(string value) => value.Replace("'", "''");
+
     /// <summary>SQL Server has no LIMIT.</summary>
     public override string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT TOP ({rows}) * FROM {qualifiedTable};";
