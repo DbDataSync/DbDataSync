@@ -177,6 +177,7 @@ public sealed class ConfigRepository
     public ReplicationTaskConfig SaveReplicationTask(ReplicationTaskConfig task, GitAuthor author)
     {
         ConfigValidation.ValidateName(task.Name, nameof(task.Name));
+        ConfigValidation.ValidateScheduling(task.Scheduling, task.Name);
         ValidateHooks(task.Hooks);
 
         var path = ConfigPaths.TaskFile(_configRoot, task.Name);

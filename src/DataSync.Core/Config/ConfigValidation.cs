@@ -93,4 +93,43 @@ public static class ConfigValidation
                 "the secret store and applied when connecting.");
         }
     }
+
+    /// <summary>
+    /// A continuous replication's idle timeout has to outlast its frequency — **when somebody set
+    /// one**.
+    /// <para>
+    /// Idle means "looked for changes and found none". An explicit timeout shorter than the interval
+    /// between looks expires before the worker has looked even once, so the worker exits after every
+    /// pass — the behaviour the timeout exists to stop, restored by a number. That pairing is a
+    /// mistake and is refused.
+    /// </para>
+    /// <para>
+    /// The check is deliberately **not** applied to the default. A replication that polls hourly is a
+    /// perfectly ordinary thing to configure, and against the 60s default it means "run, wait a
+    /// minute, exit, come back in an hour" — which is right, and which the rule would forbid. Somebody
+    /// who wants a resident worker on an hourly frequency says so by setting the timeout, and then the
+    /// rule holds them to it.
+    /// </para>
+    /// </summary>
+    public static void ValidateScheduling(SchedulingConfig scheduling, string replicationName)
+    {
+        if (scheduling.Mode != ScheduleMode.Continuous)
+            return;
+
+        if (scheduling.FrequencySeconds is <= 0)
+            throw new ConfigValidationException(
+                $"Replication '{replicationName}' has a frequency of {scheduling.FrequencySeconds} seconds. " +
+                "A continuous replication needs a positive frequency.");
+
+        if (scheduling.IdleTimeoutSeconds is <= 0)
+            throw new ConfigValidationException(
+                $"Replication '{replicationName}' has an idle timeout of {scheduling.IdleTimeoutSeconds} seconds. " +
+                "A worker that gives up after no time at all never gets as far as looking.");
+
+        if (scheduling is { IdleTimeoutSeconds: { } idle, FrequencySeconds: { } frequency } && idle <= frequency)
+            throw new ConfigValidationException(
+                $"Replication '{replicationName}' sets an idle timeout of {idle}s against a frequency of " +
+                $"{frequency}s. The idle timeout has to be longer than the frequency, or the worker gives up " +
+                "before it has looked for changes even once.");
+    }
 }

@@ -29,7 +29,15 @@ public sealed class RunnerWithoutItsOwnerTests : IDisposable
             .SaveReplicationTask(new ReplicationTaskConfig
             {
                 Name = "sales",
-                Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 30 },
+                Scheduling = new SchedulingConfig
+            {
+                Mode = ScheduleMode.Continuous,
+                // A continuous worker now stays resident until it has gone a whole idle timeout
+                // without a pass reading anything. These tests drain a queue and want the worker to
+                // leave promptly, so they say so — the production default is 60 seconds.
+                FrequencySeconds = 1,
+                IdleTimeoutSeconds = 2,
+            },
                 ChangeProcessing = new ChangeProcessingConfig
                 {
                     Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },

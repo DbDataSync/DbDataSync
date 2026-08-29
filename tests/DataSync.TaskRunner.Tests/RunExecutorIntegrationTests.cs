@@ -108,7 +108,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private void SetUpConfig()
+    private void SetUpConfig(int frequencySeconds = 1, int idleTimeoutSeconds = 2)
     {
         ConnectionInput MakeConnectionInput(string name) => new()
         {
@@ -127,7 +127,15 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _configRepository.SaveReplicationTask(new ReplicationTaskConfig
         {
             Name = "e2e-sync",
-            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 30 },
+            Scheduling = new SchedulingConfig
+            {
+                Mode = ScheduleMode.Continuous,
+                // A continuous worker now stays resident until it has gone a whole idle timeout
+                // without a pass reading anything. These tests drain a queue and want the worker to
+                // leave promptly, so they say so — the production default is 60 seconds.
+                FrequencySeconds = frequencySeconds,
+                IdleTimeoutSeconds = idleTimeoutSeconds,
+            },
             ChangeProcessing = new ChangeProcessingConfig
             {
                 Reader = new ReaderConfig { Kind = MsSqlDriverKinds.ChangeTracking },
@@ -167,6 +175,46 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         var runId = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
         return _taskRunStore.GetRun(runId)!;
+    }
+
+    /// <summary>
+    /// One worker, two passes, real rows moving between them — the thing the old exit rule made
+    /// impossible.
+    /// <para>
+    /// It exited as soon as the queue was empty, which is true for a fraction of a second after every
+    /// pass, so a live load produced spawn-run-exit-respawn several times a minute. Here the second
+    /// pass is enqueued *while the worker is waiting out its interval*, and it lands inside the same
+    /// worker lifetime: one `ExecuteWorkerAsync` call, two succeeded runs, and the rows to prove the
+    /// second one did real work.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task AResidentWorker_RunsSuccessivePassesWithoutBeingRespawned()
+    {
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        // Long enough that the worker is still waiting when the second pass arrives, short enough that
+        // the test ends in seconds.
+        SetUpConfig(frequencySeconds: 2, idleTimeoutSeconds: 6);
+
+        var first = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
+        var worker = _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
+
+        // Wait for the first pass to land, then produce more work for a worker that is already idle.
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline && _taskRunStore.GetRun(first)?.Status != RunStatus.Succeeded)
+            await Task.Delay(100);
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(first)!.Status);
+
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
+        var second = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
+
+        // The same call is still running — nothing respawned a worker, because nothing had to.
+        Assert.False(worker.IsCompleted, "the worker left between passes.");
+        await worker;
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(second)!.Status);
+        Assert.Equal(new Dictionary<int, string> { [1] = "Alice", [2] = "Bob" }, await GetTargetRowsAsync());
     }
 
     [Fact]
@@ -330,7 +378,15 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _configRepository.SaveReplicationTask(new ReplicationTaskConfig
         {
             Name = "reload-only",
-            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
+            Scheduling = new SchedulingConfig
+            {
+                Mode = ScheduleMode.Continuous,
+                // A continuous worker now stays resident until it has gone a whole idle timeout
+                // without a pass reading anything. These tests drain a queue and want the worker to
+                // leave promptly, so they say so — the production default is 60 seconds.
+                FrequencySeconds = 1,
+                IdleTimeoutSeconds = 2,
+            },
             ChangeProcessing = new ChangeProcessingConfig
             {
                 Reader = new ReaderConfig

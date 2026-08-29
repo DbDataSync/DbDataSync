@@ -47,6 +47,19 @@ public sealed class RunExecutor(
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>
+    /// When this worker last did something that counts as finding changes — a pass that read at
+    /// least one row. Written by consumers on any thread, read by the producer, so it is a tick count
+    /// swapped atomically rather than a <see cref="DateTimeOffset"/> field.
+    /// </summary>
+    private long _lastProductiveTicks = DateTimeOffset.UtcNow.UtcTicks;
+
+    private void MarkProductive() =>
+        Interlocked.Exchange(ref _lastProductiveTicks, DateTimeOffset.UtcNow.UtcTicks);
+
+    private TimeSpan IdleFor() =>
+        DateTimeOffset.UtcNow - new DateTimeOffset(Interlocked.Read(ref _lastProductiveTicks), TimeSpan.Zero);
+
+    /// <summary>
     /// Claims and processes this replication's pending WorkQueue items until the queue is drained
     /// (no Pending/Claimed/Running items remain for it), using <paramref name="degreeOfParallelism"/>
     /// concurrent consumers. Per-item outcomes live in TaskRuns/WorkQueue, not this method's return
@@ -75,7 +88,7 @@ public sealed class RunExecutor(
             SingleReader = degreeOfParallelism == 1,
         });
 
-        var producer = ProduceAsync(taskName, workerId, channel.Writer, cancellationToken);
+        var producer = ProduceAsync(taskName, task.Scheduling, workerId, channel.Writer, cancellationToken);
         var consumers = Enumerable.Range(0, Math.Max(1, degreeOfParallelism))
             .Select(_ => ConsumeAsync(channel.Reader, cancellationToken))
             .ToArray();
@@ -102,16 +115,22 @@ public sealed class RunExecutor(
         return ExitCode.Success;
     }
 
-    /// <summary>Empty polls (queue observed to have no outstanding work) required before the worker
-    /// actually exits. Without this grace period, a worker that happens to finish draining at almost
-    /// exactly the moment ProcessSupervisor.EnsureWorkerRunning is called (it no-ops if a tracked
-    /// process is still alive, cheaper than always spawning fresh) can exit a moment before claiming
-    /// newly-enqueued work — and nothing else re-triggers a worker for a one-off manual trigger that
-    /// didn't come from SchedulerService's own due-ness check. This narrows that race to needing an
-    /// enqueue to land during this specific window, rather than eliminating it structurally — a full
-    /// fix (e.g. a worker heartbeat EnsureWorkerRunning can check against, not just OS process
-    /// liveness) is real follow-on work, not built here. See
-    /// architecture/implementation/done/phase-008-work-queue-schema.md.</summary>
+    /// <summary>Empty polls (queue observed to have no outstanding work) required before a
+    /// <see cref="ScheduleMode.Periodic"/> worker actually exits. Without this grace period, a worker
+    /// that happens to finish draining at almost exactly the moment
+    /// ProcessSupervisor.EnsureWorkerRunning is called (it no-ops if a tracked process is still alive,
+    /// cheaper than always spawning fresh) can exit a moment before claiming newly-enqueued work — and
+    /// nothing else re-triggers a worker for a one-off manual trigger that didn't come from
+    /// SchedulerService's own due-ness check. This narrows that race to needing an enqueue to land
+    /// during this specific window, rather than eliminating it structurally — a full fix (e.g. a worker
+    /// heartbeat EnsureWorkerRunning can check against, not just OS process liveness) is real
+    /// follow-on work, not built here. See
+    /// architecture/implementation/done/phase-008-work-queue-schema.md.
+    /// <para>
+    /// A <see cref="ScheduleMode.Continuous"/> worker uses the idle timeout instead, which subsumes
+    /// this: it is measured in tens of seconds rather than in polls.
+    /// </para>
+    /// </summary>
     private const int EmptyPollsBeforeExit = 5;
 
     /// <summary>Claims the next available item for this task in a loop, feeding it to the bounded
@@ -119,8 +138,11 @@ public sealed class RunExecutor(
     /// empty for this task across <see cref="EmptyPollsBeforeExit"/> consecutive polls — at which
     /// point the worker has nothing left to do and exits. New work enqueued after this point is
     /// picked up by the next spawned worker (see ProcessSupervisor).</summary>
-    private async Task ProduceAsync(string taskName, string workerId, ChannelWriter<WorkItem> writer, CancellationToken cancellationToken)
+    private async Task ProduceAsync(
+        string taskName, SchedulingConfig scheduling, string workerId, ChannelWriter<WorkItem> writer,
+        CancellationToken cancellationToken)
     {
+        var continuous = scheduling.Mode == ScheduleMode.Continuous;
         var consecutiveEmptyPolls = 0;
         try
         {
@@ -131,23 +153,63 @@ public sealed class RunExecutor(
                 {
                     consecutiveEmptyPolls = 0;
                     await writer.WriteAsync(item, cancellationToken);
+                    continue;
                 }
-                else if (!state.HasOutstandingWork(taskName))
+
+                if (state.HasOutstandingWork(taskName))
+                {
+                    // Consumers are still busy. Poll quickly — this is not idleness, it is waiting for
+                    // a colleague.
+                    consecutiveEmptyPolls = 0;
+                    await Task.Delay(PollInterval, cancellationToken);
+                    continue;
+                }
+
+                if (!continuous)
                 {
                     if (++consecutiveEmptyPolls >= EmptyPollsBeforeExit)
                         break;
                     await Task.Delay(PollInterval, cancellationToken);
+                    continue;
                 }
-                else
-                {
-                    consecutiveEmptyPolls = 0;
-                    await Task.Delay(PollInterval, cancellationToken);
-                }
+
+                // Continuous: an empty queue is the normal state between passes, not a reason to go.
+                // The worker leaves only once it has gone a whole idle timeout without a pass reading
+                // anything — under a live load that never arrives, so the process stays up instead of
+                // being respawned several times a minute.
+                if (IdleFor() >= scheduling.IdleTimeout)
+                    break;
+
+                await WaitForWorkAsync(taskName, scheduling.Frequency, cancellationToken);
             }
         }
         finally
         {
             writer.Complete();
+        }
+    }
+
+    /// <summary>
+    /// Waits out one interval between passes, and stops early the moment there is something to claim.
+    /// <para>
+    /// The interval is the configured frequency because that is when the next pass is due; sleeping
+    /// straight through it would be right if nothing else could enqueue work, and something can — a
+    /// person pressing Run Now, or a backfill. A manual trigger no-ops
+    /// <c>ProcessSupervisor.EnsureWorkerRunning</c> while this process is alive, so if this slept the
+    /// full minute, so would they.
+    /// </para>
+    /// </summary>
+    private async Task WaitForWorkAsync(string taskName, TimeSpan interval, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + interval;
+        while (DateTimeOffset.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+        {
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            await Task.Delay(remaining < PollInterval ? remaining : PollInterval, cancellationToken);
+            // Nothing is in flight at this point — the queue was empty when we got here — so anything
+            // outstanding is something to claim.
+            if (state.HasOutstandingWork(taskName))
+                return;
         }
     }
 
@@ -208,6 +270,12 @@ public sealed class RunExecutor(
             state.Flush();
             state.CompleteRun(item.RunId, RunStatus.Succeeded, rowsRead, rowsWritten, errorSummary: null);
             state.MarkDone(item.Id);
+
+            // Idle is "looked for changes and found none", not "the queue is empty" — the queue is
+            // empty for a moment after every single pass, which is why the worker used to exit
+            // straight through a live load. A pass that read nothing leaves the clock running.
+            if (rowsRead > 0)
+                MarkProductive();
         }
         catch (Exception ex) when (ex is FileNotFoundException or ConfigValidationException)
         {

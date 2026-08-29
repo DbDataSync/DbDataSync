@@ -1036,10 +1036,15 @@ public sealed class Shout : IValueColumnExpression
       await expect(page.getByTestId('enabled-toggle')).toBeVisible()
     }
 
-    // A worker drains its queue and exits, so between passes there is no process — and the card says
-    // that rather than leaving an idle healthy replication looking broken.
-    await expect(page.getByTestId('replication-status-state')).toContainText('not running')
-    await expect(page.getByTestId('replication-status-card')).toContainText('usual state between')
+    // Whichever of the two states it is in, the card names it — a worker stays up between passes now
+    // and leaves after its idle timeout, so both are ordinary and neither should read as a fault.
+    // Asserted as "says which, and explains it" rather than pinned to one, because which one it is
+    // depends on whether this replication happens to be inside its idle window right now.
+    await expect(page.getByTestId('replication-status-state')).toContainText(/^(not )?running$/)
+    await expect(page.getByTestId('replication-status-card')).toContainText(
+      await page.getByTestId('replication-status-state').textContent() === 'running'
+        ? 'PID'
+        : 'not a broken one')
 
     // The draft used to live in the Overview panel, which unmounts the moment you click Runs — so a
     // half-finished edit was lost by looking at something else. It is held in the chrome now.
@@ -1508,5 +1513,36 @@ public sealed class Shout : IValueColumnExpression
 
     expect((await page.request.put(
       `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: before })).ok()).toBeTruthy()
+  })
+
+  test('35 - the rail lines up with the pane, and the mappings list is a nav bar beside it', async ({ page }) => {
+    // Two columns whose first cards started on different lines, because the rail had no top padding
+    // and the pane did.
+    await page.goto(`/replications/${REPLICATION_NAME}/runs`)
+    await expect(page.getByTestId('run-history-table')).toBeVisible({ timeout: 20_000 })
+
+    const top = (locator: ReturnType<typeof page.locator>) =>
+      locator.first().evaluate((el) => Math.round(el.getBoundingClientRect().top))
+    expect(await top(page.locator('.pane > .card')))
+      .toBe(await top(page.locator('.detail-rail > .card')))
+
+    // The mappings list is a sidebar, so it belongs *beside* the pane and runs the full height. In a
+    // block container it stacked above it instead, and stopped short of the bottom.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/overview`)
+    await expect(page.getByTestId('mappings-overview')).toBeVisible({ timeout: 20_000 })
+
+    const sidebar = (await page.locator('.sidebar').boundingBox())!
+    const pane = (await page.locator('.pane').boundingBox())!
+    const body = (await page.locator('.detail-body').boundingBox())!
+
+    expect(sidebar.x + sidebar.width, 'the sidebar sits left of the pane').toBeLessThanOrEqual(pane.x + 1)
+    expect(Math.abs(sidebar.y - body.y), 'the sidebar starts at the top of the content').toBeLessThan(2)
+    expect(Math.abs((sidebar.y + sidebar.height) - (body.y + body.height)),
+      'the sidebar runs to the bottom of the content').toBeLessThan(2)
+
+    // And the rail is still beside both of them rather than under them.
+    const rail = (await page.locator('.detail-rail').boundingBox())!
+    expect(rail.x).toBeGreaterThan(pane.x)
+    await shot(page, '43-detail-layout.png')
   })
 })

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ClrKernel.Core.Secrets;
 using DataSync.Core.Config;
 using DataSync.Scripting;
@@ -60,11 +61,39 @@ public sealed class RunExecutorTests : IDisposable
         Directory.Delete(_repoRoot, recursive: true);
     }
 
+    private void SaveTask(
+        string name, ScheduleMode mode, int frequencySeconds, int? idleTimeoutSeconds) =>
+        _configRepository.SaveReplicationTask(new ReplicationTaskConfig
+        {
+            Name = name,
+            Scheduling = new SchedulingConfig
+            {
+                Mode = mode,
+                FrequencySeconds = mode == ScheduleMode.Continuous ? frequencySeconds : null,
+                CronExpression = mode == ScheduleMode.Periodic ? "0 0 * * *" : null,
+                IdleTimeoutSeconds = idleTimeoutSeconds,
+            },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+            },
+        }, Author);
+
     private void SaveTask(string name, string readerKind = "MsSqlChangeTracking") =>
         _configRepository.SaveReplicationTask(new ReplicationTaskConfig
         {
             Name = name,
-            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 30 },
+            Scheduling = new SchedulingConfig
+            {
+                Mode = ScheduleMode.Continuous,
+                // A continuous worker now stays resident until it has gone a whole idle timeout
+                // without a pass reading anything. These tests drain a queue and want the worker to
+                // leave promptly, so they say so — the production default is 60 seconds.
+                FrequencySeconds = 1,
+                IdleTimeoutSeconds = 2,
+            },
             ChangeProcessing = new ChangeProcessingConfig
             {
                 Reader = new ReaderConfig { Kind = readerKind },
@@ -195,4 +224,77 @@ public sealed class RunExecutorTests : IDisposable
         Assert.False(_runLockStore.IsLocked("crm-sync", RunKind.Primary, "orders"));
         Assert.False(_runLockStore.IsLocked("crm-sync", RunKind.Primary, "customers"));
     }
+
+    #region The continuous worker's idle timeout
+
+    /// <summary>
+    /// The bug this exists for: the worker exited as soon as the *queue* was empty, which is true for
+    /// a fraction of a second after every single pass. Under a live load that meant spawn, one pass,
+    /// exit, respawn, several times a minute — process churn larger than the work.
+    /// </summary>
+    [Fact]
+    public async Task AContinuousWorker_StaysUpForTheIdleTimeoutRatherThanLeavingOnAnEmptyQueue()
+    {
+        // Comfortably longer than the five one-second empty polls the old exit rule used, so this
+        // fails against that behaviour rather than passing by coincidence.
+        SaveTask("resident", ScheduleMode.Continuous, frequencySeconds: 1, idleTimeoutSeconds: 8);
+
+        var started = Stopwatch.GetTimestamp();
+        await _executor.ExecuteWorkerAsync("resident", degreeOfParallelism: 1, CancellationToken.None);
+        var elapsed = Stopwatch.GetElapsedTime(started);
+
+        Assert.True(elapsed >= TimeSpan.FromSeconds(6.5), $"left after {elapsed.TotalSeconds:F1}s.");
+        Assert.True(elapsed < TimeSpan.FromSeconds(20), $"outstayed its timeout by a long way ({elapsed.TotalSeconds:F1}s).");
+    }
+
+    /// <summary>
+    /// The wait between passes is the frequency, but it is not a sleep: a person pressing Run Now
+    /// no-ops <c>EnsureWorkerRunning</c> while this process is alive, so if the worker slept through
+    /// the interval, so would they.
+    /// </summary>
+    [Fact]
+    public async Task AWaitingWorker_ClaimsWorkEnqueuedDuringTheInterval()
+    {
+        SaveTask("responsive", ScheduleMode.Continuous, frequencySeconds: 30, idleTimeoutSeconds: 60);
+        _configRepository.SaveTableMapping("responsive", new TableMappingConfig
+        {
+            Name = "main",
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+        }, Author);
+
+        using var cancellation = new CancellationTokenSource();
+        var worker = _executor.ExecuteWorkerAsync("responsive", degreeOfParallelism: 1, cancellation.Token);
+
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        var runId = _workQueueStore.Enqueue("responsive", RunKind.Primary, "main");
+
+        // Claimed and finished well inside the 30s interval it was enqueued into — the run fails for
+        // want of a database, which is beside the point: it was *picked up*.
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (DateTimeOffset.UtcNow < deadline && _taskRunStore.GetRun(runId)?.Status is null or RunStatus.Queued)
+            await Task.Delay(100);
+
+        Assert.NotEqual(RunStatus.Queued, _taskRunStore.GetRun(runId)!.Status);
+
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => worker);
+    }
+
+    /// <summary>
+    /// A cron replication keeps the old fast exit. Its next occurrence can be hours away, and holding
+    /// a process open for that is not restraint, it is a leak.
+    /// </summary>
+    [Fact]
+    public async Task APeriodicWorker_StillLeavesAsSoonAsTheQueueIsEmpty()
+    {
+        SaveTask("nightly", ScheduleMode.Periodic, frequencySeconds: 0, idleTimeoutSeconds: null);
+
+        var started = Stopwatch.GetTimestamp();
+        await _executor.ExecuteWorkerAsync("nightly", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(30), "a cron worker waited out an idle timeout.");
+    }
+
+    #endregion
 }

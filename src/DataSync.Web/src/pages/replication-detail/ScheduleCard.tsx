@@ -39,16 +39,33 @@ export function ScheduleCard({ draft, enabled, onChange }: {
         </Field>
 
         {draft.scheduling.mode === 'Continuous' ? (
-          <Field label="Frequency (seconds)">
-            <input
-              className="input"
-              type="number"
-              min={1}
-              value={draft.scheduling.frequencySeconds ?? 60}
-              onChange={(e) => setScheduling({ frequencySeconds: Number(e.target.value) })}
-              data-testid="schedule-frequency-input"
-            />
-          </Field>
+          <>
+            <Field label="Frequency (seconds)">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                value={draft.scheduling.frequencySeconds ?? 60}
+                onChange={(e) => setScheduling({ frequencySeconds: Number(e.target.value) })}
+                data-testid="schedule-frequency-input"
+              />
+            </Field>
+            <Field label="Idle timeout (seconds)">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                // Blank rather than 60 when unset, because "nobody said" and "somebody chose 60" are
+                // different answers and only one of them gets written down.
+                placeholder="60"
+                value={draft.scheduling.idleTimeoutSeconds ?? ''}
+                onChange={(e) => setScheduling({
+                  idleTimeoutSeconds: e.target.value ? Number(e.target.value) : null,
+                })}
+                data-testid="schedule-idle-timeout-input"
+              />
+            </Field>
+          </>
         ) : (
           <Field label="Cron expression">
             <input
@@ -62,7 +79,8 @@ export function ScheduleCard({ draft, enabled, onChange }: {
 
         <span className="hint">
           {draft.scheduling.mode === 'Continuous'
-            ? 'Continuous mode re-reads changes on every interval.'
+            ? 'Continuous mode re-reads changes on every interval. The worker stays running between ' +
+              'intervals and exits once it has gone the idle timeout without finding a single changed row.'
             : 'Periodic mode runs on the cron expression above.'}
         </span>
       </div>

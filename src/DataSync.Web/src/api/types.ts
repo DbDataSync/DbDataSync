@@ -45,6 +45,10 @@ export type ScheduleMode = 'Continuous' | 'Periodic'
 export interface SchedulingConfig {
   mode: ScheduleMode
   frequencySeconds: number | null
+  /** How long a continuous worker keeps looking and finding nothing before it exits. Null means the
+   * server's default of 60 seconds. Must be longer than the frequency when it is set, or the worker
+   * gives up before it has looked even once. */
+  idleTimeoutSeconds?: number | null
   cronExpression: string | null
 }
 

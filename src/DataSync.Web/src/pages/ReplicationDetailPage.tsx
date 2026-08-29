@@ -143,8 +143,11 @@ export function ReplicationDetailPage() {
         </>
       }
     >
-      <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start', minHeight: 0 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="detail-body">
+        {/* A flex row, not a block: the mappings tab puts a sidebar beside its pane, and a block
+            container stacked them instead — the nav bar sat above the editor rather than beside it,
+            and stopped short of the bottom of the window. */}
+        <div className="detail-main">
           {/* Each tab's panel takes the replication name, the pending command and the draft from here
               rather than re-deriving them, so a panel never has to know it is mounted under a layout
               route. */}
@@ -155,7 +158,7 @@ export function ReplicationDetailPage() {
           />
         </div>
 
-        <div style={{ width: 288, flex: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="detail-rail">
           <ErrorBanner error={error ?? upsert.error ?? setEnabled.error} />
           <StatusCard replicationName={name} enabled={enabled} />
           <MetricsCard replicationName={name} />

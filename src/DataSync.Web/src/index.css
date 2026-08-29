@@ -173,6 +173,23 @@ button { font-family: inherit; }
   overflow: auto;
 }
 
+/* ── Replication detail: a pane (or a sidebar-and-pane) with a rail beside it ─────────────────── */
+
+.detail-body { flex: 1; min-height: 0; display: flex; }
+
+/* Flex, so a tab that brings its own sidebar puts it *beside* the pane and lets it run the full
+   height — the mappings tab does exactly that, and in a block container it stacked instead. */
+.detail-main { flex: 1; min-width: 0; min-height: 0; display: flex; }
+
+/* The same top padding the pane has, so the first card in each column starts on the same line. The
+   right padding lives here rather than as a gap, so the rail's own scrollbar sits at the edge. */
+.detail-rail {
+  width: 288px; flex: none;
+  padding: 20px 22px 20px 0;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow: auto;
+}
+
 /* ── Explorer sidebar ───────────────────────────────────────────────────────── */
 
 .sidebar {
