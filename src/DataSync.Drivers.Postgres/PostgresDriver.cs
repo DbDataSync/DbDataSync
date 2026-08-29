@@ -35,6 +35,7 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
     public IReadOnlyList<IChangeReader> Readers { get; } =
     [
         new WatermarkReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
+        new TriggerAuditReader(PostgresDialect.Instance, PostgresCatalog.Instance),
         new BatchReloadReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
     ];
 

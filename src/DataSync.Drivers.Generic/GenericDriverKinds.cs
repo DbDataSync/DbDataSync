@@ -8,6 +8,10 @@ namespace DataSync.Drivers.Generic;
 public static class GenericDriverKinds
 {
     public const string Watermark = "Watermark";
+
+    /// <summary>A trigger-maintained shadow table. The read side is engine-neutral; the trigger DDL
+    /// that fills it is not, and is a per-engine provisioning step.</summary>
+    public const string TriggerAudit = "TriggerAudit";
     public const string BatchReload = "BatchReload";
     public const string StagingTable = "StagingTable";
     public const string DeleteInsert = "DeleteInsert";

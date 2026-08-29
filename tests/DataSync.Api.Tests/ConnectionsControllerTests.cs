@@ -63,10 +63,11 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
             ["BatchReload", "MsSqlBatchReload"],
             capabilities.Readers.Where(r => r.SupportsSegmentation).Select(r => r.Kind).Order());
 
-        // The two change-feed readers report a source delete as one; the scanning readers cannot see
-        // a row that is no longer there.
+        // The change-feed readers report a source delete as one; the scanning readers cannot see a
+        // row that is no longer there. TriggerAudit is the engine-neutral one, which is the point of
+        // it — it brings delete detection to every engine with triggers rather than one.
         Assert.Equal(
-            ["MsSqlCdc", "MsSqlChangeTracking"],
+            ["MsSqlCdc", "MsSqlChangeTracking", "TriggerAudit"],
             capabilities.Readers.Where(r => r.DetectsDeletes).Select(r => r.Kind).Order());
 
         // The SPA decides whether to offer a Test action from this flag alone.

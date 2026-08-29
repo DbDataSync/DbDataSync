@@ -41,6 +41,9 @@ public static class MsSqlProvisioner
         if (request.ReaderKind == MsSqlDriverKinds.Cdc)
             return await PlanEnableCdcAsync(connection, request, cancellationToken);
 
+        if (request.ReaderKind == GenericDriverKinds.TriggerAudit)
+            return await PlanEnableTriggerAuditAsync(connection, request, cancellationToken);
+
         if (request.ReaderKind != MsSqlDriverKinds.ChangeTracking)
             return new ProvisioningPlan(ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Satisfied, [], []);
 
@@ -193,6 +196,76 @@ public static class MsSqlProvisioner
     /// <summary>A schema or table name inside a string literal, which is what sp_cdc_enable_table takes
     /// — it names its arguments as sysname values, not as identifiers to be quoted.</summary>
     private static string Literal(string value) => value.Replace("'", "''");
+
+    /// <summary>
+    /// The shadow table and the trigger that fills it. The decision shape is
+    /// <see cref="TriggerAuditPlan"/>'s, shared with every other engine; the DDL is
+    /// <see cref="MsSqlTriggerAudit"/>'s, shared with none, because there is no portable trigger DDL
+    /// to share.
+    /// </summary>
+    private static async Task<ProvisioningPlan> PlanEnableTriggerAuditAsync(
+        DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)
+    {
+        var table = request.Table;
+        await MsSqlDialect.Instance.UseDatabaseAsync(connection, table.Database, cancellationToken);
+
+        var columns = await MsSqlSchemaQueries.GetColumnsAsync(
+            connection, table.Schema, table.Table, cancellationToken);
+        var keyColumns = columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
+        var shadowTable = TriggerAuditStatement.ShadowTableName(table.Table);
+
+        var state = new TriggerAuditState(
+            await TableExistsAsync(connection, table.Schema, shadowTable, cancellationToken),
+            await TriggerExistsAsync(connection, table.Schema, MsSqlTriggerAudit.TriggerName(table.Table), cancellationToken),
+            keyColumns);
+
+        var steps = new List<ProvisioningStep>();
+
+        if (keyColumns.Count > 0 && !state.ShadowTableExists)
+        {
+            // The key columns are declared with the source's own types, so a composite key or a GUID
+            // key needs nothing special — the sequence orders the feed, not the key.
+            var definitions = columns
+                .Where(c => c.IsPrimaryKey)
+                .Select(c => $"{SqlIdentifier.Quote(c.Name)} {c.NativeType} NOT NULL")
+                .ToList();
+
+            steps.Add(new ProvisioningStep(
+                $"Create the shadow table {MsSqlDialect.Instance.QualifyTable(table.Schema, shadowTable)}",
+                MsSqlTriggerAudit.CreateShadowTable(table.Schema, table.Table, definitions),
+                "Holds one row per write to the source table, keyed by the source's primary key. It " +
+                "grows until a pass prunes it — see the reader's 'Prune applied changes' setting.",
+                ProvisioningStepScope.Table));
+        }
+
+        if (keyColumns.Count > 0 && !state.TriggerExists)
+            steps.Add(new ProvisioningStep(
+                $"Create the change trigger on {MsSqlDialect.Instance.QualifyTable(table.Schema, table.Table)}",
+                MsSqlTriggerAudit.CreateTrigger(table.Schema, table.Table, keyColumns),
+                "One statement-level trigger covering inserts, updates and deletes. Set-based rather " +
+                "than row-by-row, because a row-by-row trigger is how a bulk update starts taking " +
+                "minutes.",
+                ProvisioningStepScope.Table));
+
+        return TriggerAuditPlan.Build(
+            MsSqlDialect.Instance.QualifyTable(table.Schema, table.Table), state, steps);
+    }
+
+    private static async Task<bool> TriggerExistsAsync(
+        DbConnection connection, string schema, string trigger, CancellationToken cancellationToken)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT 1
+            FROM sys.triggers t
+            JOIN sys.objects o ON o.object_id = t.parent_id
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            WHERE s.name = @schema AND t.name = @trigger;
+            """;
+        cmd.AddParameter("@schema", schema);
+        cmd.AddParameter("@trigger", trigger);
+        return await cmd.ExecuteScalarAsync(cancellationToken) is not null;
+    }
 
     private static async Task<ProvisioningPlan> PlanCreateTargetTableAsync(
         DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)

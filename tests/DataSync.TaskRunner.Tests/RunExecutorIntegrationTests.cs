@@ -4,6 +4,7 @@ using DataSync.Scripting;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
+using DataSync.Drivers.Generic;
 using DataSync.State;
 using DataSync.TaskRunner;
 using LibGit2Sharp;
@@ -412,4 +413,106 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         }, Author);
     }
 
+    #region Position acknowledgement
+
+    /// <summary>
+    /// Sets up a second replication reading the source through the generic trigger-audit reader, with
+    /// pruning on. <paramref name="targetTable"/> is what the writer aims at — pointed at a table that
+    /// does not exist to make the pass fail after the read.
+    /// </summary>
+    private async Task SetUpTriggerAuditAsync(string replicationName, string targetTable)
+    {
+        await ExecuteAsync(_adminConnection, MsSqlTriggerAudit.CreateShadowTable(
+            "dbo", _sourceTable, ["[Id] INT NOT NULL"]));
+        await ExecuteAsync(_adminConnection, MsSqlTriggerAudit.CreateTrigger("dbo", _sourceTable, ["Id"]));
+
+        _configRepository.SaveReplicationTask(new ReplicationTaskConfig
+        {
+            Name = replicationName,
+            Scheduling = new SchedulingConfig
+            {
+                Mode = ScheduleMode.Continuous, FrequencySeconds = 1, IdleTimeoutSeconds = 2,
+            },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig
+                {
+                    Kind = GenericDriverKinds.TriggerAudit,
+                    Options = new Dictionary<string, string> { [TriggerAuditReader.PruneOption] = "true" },
+                },
+                Cache = new CacheConfig { Kind = MsSqlDriverKinds.StagingTable },
+                Writer = new WriterConfig { Kind = MsSqlDriverKinds.Merge },
+            },
+        }, Author);
+
+        _configRepository.SaveTableMapping(replicationName, new TableMappingConfig
+        {
+            Name = "main",
+            Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableSpec { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = targetTable }],
+            ColumnMappings =
+            [
+                new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
+            ],
+        }, Author);
+    }
+
+    private async Task<long> ShadowRowCountAsync()
+    {
+        await using var cmd = _adminConnection.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM dbo.[{TriggerAuditStatement.ShadowTableName(_sourceTable)}];";
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync());
+    }
+
+    /// <summary>
+    /// A successful pass tells the source its position is durable, and the shadow table is pruned —
+    /// which is the only thing stopping it growing for as long as the replication runs.
+    /// </summary>
+    [Fact]
+    public async Task ASuccessfulPass_AcknowledgesItsPositionAndPrunes()
+    {
+        await SetUpTriggerAuditAsync("trg-sync", _targetTable);
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        // The first pass is a full load, which stores a position without reading the shadow table.
+        // The second is the incremental one whose position is worth acknowledging.
+        var first = _workQueueStore.Enqueue("trg-sync", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("trg-sync", degreeOfParallelism: 1, CancellationToken.None);
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(first)!.Status);
+
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
+        Assert.True(await ShadowRowCountAsync() > 0);
+
+        var second = _workQueueStore.Enqueue("trg-sync", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("trg-sync", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(second)!.Status);
+        Assert.Equal(0, await ShadowRowCountAsync());
+    }
+
+    /// <summary>
+    /// **The assertion that protects the retry.** A pass that fails must not tell the source to
+    /// discard the changes it just read — do that and the failure stops being retryable, and a bad
+    /// pass becomes permanent data loss. Here the write fails because the target does not exist, and
+    /// the shadow rows are still there afterwards.
+    /// </summary>
+    [Fact]
+    public async Task AFailedPass_DoesNotAcknowledgeAndLeavesTheHistoryAlone()
+    {
+        await SetUpTriggerAuditAsync("trg-fail", $"NotATable_{Guid.NewGuid():N}");
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        var runId = _workQueueStore.Enqueue("trg-fail", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("trg-fail", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(runId)!.Status);
+
+        // Not pruned, and no watermark stored — the two go together, and that pairing is the invariant.
+        Assert.True(await ShadowRowCountAsync() > 0);
+        Assert.Null(_watermarkStore.GetWatermark(
+            "trg-fail", $"src-conn/{_databaseName}/dbo.{_sourceTable}"));
+    }
+
+    #endregion
 }

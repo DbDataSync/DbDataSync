@@ -30,6 +30,7 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
     [
         new MsSqlChangeTrackingReader(),
         new MsSqlCdcReader(),
+        new TriggerAuditReader(MsSqlDialect.Instance, MsSqlCatalog.Instance),
         new WatermarkReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
         new MsSqlBatchReloadReader(),
         new BatchReloadReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),

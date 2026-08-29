@@ -332,6 +332,38 @@ public sealed class RunExecutor(
     /// answers, and one unrunnable check is a fact about that check.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Tells a reader that cares that this position is durable, so its source can prune behind it.
+    /// <para>
+    /// A failure here is logged and does not fail the run. The rows are already at the target and the
+    /// watermark is already stored; what is left undone is housekeeping at the source, and failing a
+    /// successful pass over unpruned history would be reporting a disk-space problem as data loss.
+    /// </para>
+    /// </summary>
+    private async Task AcknowledgeAsync(
+        IChangeReader reader,
+        DbConnection sourceConnection,
+        SourceTableRef source,
+        string watermark,
+        IReadOnlyDictionary<string, string> options,
+        Guid runId,
+        CancellationToken cancellationToken)
+    {
+        if (reader is not IPositionAcknowledging acknowledging)
+            return;
+
+        try
+        {
+            await acknowledging.AcknowledgeAsync(sourceConnection, source, watermark, options, cancellationToken);
+        }
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        {
+            Log(runId, LogSeverity.Warning,
+                $"Could not tell the source that position '{watermark}' is durable: {ex.Message} " +
+                "The pass itself succeeded; the source keeps history it could have discarded.");
+        }
+    }
+
     private async Task<(long RowsRead, long RowsWritten)> RunVerificationAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, WorkItem item, CancellationToken cancellationToken)
     {
@@ -627,7 +659,17 @@ public sealed class RunExecutor(
             // own and echoes back whatever it was given — so taking the last segment's value is the
             // same as taking any of them. An ordinary incremental pass has exactly one segment (none).
             if (item.RunKind == RunKind.Primary && newWatermark is not null)
+            {
                 state.SetWatermark(task.Name, watermarkKey, newWatermark);
+
+                // After the write committed and after the watermark is durable, never before. A
+                // reader that acknowledges is telling its source it may discard the history behind
+                // this position — do that early and a failed run stops being retryable, which turns
+                // a bad pass into permanent data loss. See IPositionAcknowledging.
+                await AcknowledgeAsync(
+                    reader, sourceConnection!, source, newWatermark, processing.Reader.Options,
+                    item.RunId, cancellationToken);
+            }
 
             return (totalRead, totalWritten);
         }
