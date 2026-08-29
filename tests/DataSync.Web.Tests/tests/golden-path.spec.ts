@@ -32,12 +32,18 @@ async function setCode(page: Page, testId: string, code: string) {
   await page.keyboard.insertText(code)
 }
 
-/** Waits for a <select data-testid=testId>'s options to include `value` (populated asynchronously by
- * a metadata-browsing API call) before selecting it — avoids racing react-query. */
-async function selectWhenReady(page: Page, testId: string, value: string) {
+/**
+ * Waits for a <select data-testid=testId> to offer an option reading `label` (populated asynchronously
+ * by a metadata-browsing API call) before selecting it — avoids racing react-query.
+ *
+ * By **label**, not value. The table picker's option values are indexes into the loaded list, because
+ * a "schema.table" value has to be split back apart and that is wrong for a name containing a literal
+ * dot (phase 45). A label is what the operator picks anyway.
+ */
+async function selectWhenReady(page: Page, testId: string, label: string) {
   const select = page.getByTestId(testId)
-  await expect(select.locator(`option[value="${value}"]`)).toBeAttached({ timeout: 15_000 })
-  await select.selectOption(value)
+  await expect(select.locator('option', { hasText: label }).first()).toBeAttached({ timeout: 15_000 })
+  await select.selectOption({ label })
 }
 
 test.describe.serial('golden path: define, configure, and run a replication end-to-end', () => {
@@ -1050,5 +1056,60 @@ public sealed class Shout : IValueColumnExpression
     // Put it back, so the rest of the suite runs against an enabled replication.
     await page.getByTestId('enabled-toggle').click()
     await expect(page.getByTestId('enabled-toggle')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  test('26 - a dotted table name, an unknown column, and DDL that fits on the screen', async ({ page }) => {
+    test.setTimeout(180_000)
+
+    // A table whose *name contains a dot* — legal as a quoted identifier, and exactly what breaks a
+    // picker that combines schema and table into one string and splits it back apart.
+    const DOTTED = 'Pw.Dotted.Table'
+    runSql(`
+      IF OBJECT_ID('dbo.[${DOTTED}]', 'U') IS NOT NULL DROP TABLE dbo.[${DOTTED}];
+      CREATE TABLE dbo.[${DOTTED}] (Id INT NOT NULL PRIMARY KEY, Label NVARCHAR(40) NULL);
+      ALTER TABLE dbo.[${DOTTED}] ENABLE CHANGE_TRACKING;
+    `, DB_NAME)
+
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/new`)
+    await page.getByTestId('mapping-name-input').fill('dotted')
+    await selectWhenReady(page, 'source-table-select', `dbo.${DOTTED}`)
+
+    await page.getByTestId('target-schema-input').fill('dbo')
+    await page.getByTestId('target-table-input').fill('PwDottedTarget')
+
+    // The pair survives the round trip. Split on '.', this would have produced schema "dbo",
+    // table "Pw" and silently mapped the wrong table — or nothing at all.
+    await expect(page.getByTestId('column-mappings-table').locator('.grid-row'))
+      .toHaveCount(2, { timeout: 20_000 })
+    await expect(page.getByTestId('column-mappings-table')).toContainText('Label')
+
+    await page.getByTestId('save-mapping-button').click()
+    await expect(page.getByTestId('mapping-item-dotted')).toBeVisible({ timeout: 15_000 })
+
+    // The Setup card's SQL is Monaco now, not a <pre> whose overflow widened the whole page — and the
+    // generated CREATE TABLE is one column per line rather than forty on one.
+    const targetPlan = page.getByTestId('provisioning-plan-target')
+    await expect(targetPlan.locator('.monaco-editor')).toBeVisible({ timeout: 30_000 })
+    await expect(targetPlan).toContainText('CREATE TABLE')
+    await expect(targetPlan).toContainText('PRIMARY KEY')
+
+    const overflows = await page.evaluate(() =>
+      document.documentElement.scrollWidth > document.documentElement.clientWidth)
+    expect(overflows, 'a long generated statement must stay inside its card').toBeFalsy()
+    await shot(page, '35-setup-card-monaco.png')
+
+    // A stored source column the freshly loaded metadata does not have is shown as itself and marked,
+    // never silently rendered as the first option — which is what a bare <select> does, changing what
+    // the operator sees without changing what is stored.
+    const mapping = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/dotted`)).json()
+    mapping.columnMappings = [{ sourceColumn: 'gone_away', targetColumn: 'Label', transform: null }]
+    expect((await page.request.put(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/dotted`, { data: mapping })).ok()).toBeTruthy()
+
+    await page.reload()
+    await expect(page.getByTestId('column-mapping-source-0')).toHaveValue('gone_away', { timeout: 20_000 })
+    await expect(page.getByTestId('column-mapping-source-0')).toContainText('not on the source')
+    await shot(page, '34-unknown-source-column.png')
   })
 })

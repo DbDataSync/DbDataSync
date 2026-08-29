@@ -109,6 +109,15 @@ export function ColumnMappingEditor({ source, target, mappings, onChange, target
               onChange={(e) => updateRow(i, { sourceColumn: e.target.value })}
               data-testid={`column-mapping-source-${i}`}
             >
+              {/* A stored value the freshly loaded metadata does not have is shown as itself, marked.
+                  Without this option present the browser silently renders the *first* one instead —
+                  the state is unchanged, only the display lies — so a mapping could be resaved
+                  against a column the operator never chose and never saw change. */}
+              {!sourceColumns.some((c) => c.name === m.sourceColumn) && (
+                <option value={m.sourceColumn}>
+                  {m.sourceColumn ? `${m.sourceColumn} — not on the source` : 'Select…'}
+                </option>
+              )}
               {sourceColumns.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
             <span className="faint">{typeOf(m.sourceColumn)}</span>
@@ -117,6 +126,11 @@ export function ColumnMappingEditor({ source, target, mappings, onChange, target
           <span className="row" style={{ gap: 7 }}>
             {m.targetColumn}
             {isPk(m.targetColumn) && <span className="badge badge-accent">PK</span>}
+            {/* Same honesty on the other side: a target column the catalog does not have is a mapping
+                that will fail at staging, and saying so here beats finding out on the next pass. */}
+            {targetExists === true && !targetColumns.some((c) => c.name === m.targetColumn) && (
+              <span className="badge" title="This column is not on the target table.">MISSING</span>
+            )}
           </span>
           <span>
             <input

@@ -27,8 +27,11 @@ public static class CreateTableStatement
             $"{dialect.QuoteIdentifier(c.Name)} {c.Type.Sql} {(c.IsNullable ? "NULL" : "NOT NULL")}");
 
         var primaryKey = columns.Where(c => c.IsPrimaryKey).Select(c => dialect.QuoteIdentifier(c.Name)).ToList();
-        var primaryKeyClause = primaryKey.Count == 0 ? "" : $", PRIMARY KEY ({string.Join(", ", primaryKey)})";
+        var primaryKeyClause = primaryKey.Count == 0 ? "" : $",\n    PRIMARY KEY ({string.Join(", ", primaryKey)})";
 
-        return $"CREATE TABLE {qualifiedTable} ({string.Join(", ", defs)}{primaryKeyClause});";
+        // One column per line. A forty-column table on one line is unreadable wherever it is shown,
+        // and formatting it here rather than in whatever displays it means every reader of this
+        // statement — the Setup card, a copied-out script, a log line — gets the same thing.
+        return $"CREATE TABLE {qualifiedTable} (\n    {string.Join(",\n    ", defs)}{primaryKeyClause}\n);";
     }
 }

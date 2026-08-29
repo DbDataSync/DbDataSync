@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CodeEditor } from '../../components/CodeEditor'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { useApplyProvisioning, useProvisioning } from '../../api/hooks'
 import type { EndpointSide } from '../../components/EndpointSidePair'
@@ -64,11 +65,18 @@ function PlanPanel({ label, side, testId, plan, onApply, applying, result }: {
 
         {plan.steps.length > 0 && (
           <>
-            <pre className="mono" style={{
-              background: 'var(--sunken)', padding: 10, borderRadius: 6, overflowX: 'auto', margin: 0,
-            }}>
-              {sql}
-            </pre>
+            {/* Monaco, not a <pre>. The <pre>'s overflowX never contained a long statement — it
+                widened the page and produced a page-level horizontal scrollbar — and the preview
+                screen had already solved exactly this. Same component, same props. */}
+            <CodeEditor
+              value={sql}
+              language="sql"
+              readOnly
+              onChange={() => {}}
+              minLines={2}
+              maxLines={24}
+              testId={`${testId}-sql`}
+            />
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" className="btn" onClick={copy}>Copy</button>
               <button

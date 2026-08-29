@@ -17,8 +17,16 @@ public sealed class CreateTableStatementTests
             new CreateTableColumn("Name", Rendered("varchar(50)"), IsNullable: true, IsPrimaryKey: false),
         };
 
+        // One column per line: a forty-column table on one line is unreadable wherever it is shown,
+        // and formatting it here means every reader of the statement gets the same thing.
         Assert.Equal(
-            "CREATE TABLE [dbo].[Orders] ([Id] int NOT NULL, [Name] varchar(50) NULL, PRIMARY KEY ([Id]));",
+            """
+            CREATE TABLE [dbo].[Orders] (
+                [Id] int NOT NULL,
+                [Name] varchar(50) NULL,
+                PRIMARY KEY ([Id])
+            );
+            """.ReplaceLineEndings("\n").TrimEnd(),
             CreateTableStatement.Build(BracketDialect.Instance, "[dbo].[Orders]", columns));
     }
 
@@ -63,7 +71,12 @@ public sealed class CreateTableStatementTests
         var columns = new[] { new CreateTableColumn("Id", Rendered("int4"), IsNullable: false, IsPrimaryKey: true) };
 
         Assert.Equal(
-            "CREATE TABLE t (\"Id\" int4 NOT NULL, PRIMARY KEY (\"Id\"));",
+            """
+            CREATE TABLE t (
+                "Id" int4 NOT NULL,
+                PRIMARY KEY ("Id")
+            );
+            """.ReplaceLineEndings("\n").TrimEnd(),
             CreateTableStatement.Build(ColonDialect.Instance, "t", columns));
     }
 

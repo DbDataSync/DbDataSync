@@ -158,7 +158,11 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(@qualifiedName));";
-        cmd.AddParameter("@qualifiedName", $"{source.Schema}.{source.Table}");
+        // Each part quoted, not joined raw. OBJECT_ID parses its argument as a multi-part name, so a
+        // schema or table containing a literal '.' — which a quoted identifier allows — would be read
+        // as a different number of parts and resolve to the wrong object or to nothing.
+        cmd.AddParameter(
+            "@qualifiedName", $"{SqlIdentifier.Quote(source.Schema)}.{SqlIdentifier.Quote(source.Table)}");
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         if (result is null or DBNull)
             throw new InvalidOperationException(

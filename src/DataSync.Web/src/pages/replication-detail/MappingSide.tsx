@@ -41,7 +41,11 @@ export function MappingSide({ side, label, inherited, spec, onChange, testIdPref
   const { data: databases } = useDatabases(connectionName || undefined)
   const { data: tables } = useTables(connectionName || undefined, database || undefined)
 
-  const selectedTableKey = spec.schema && spec.table ? `${spec.schema}.${spec.table}` : ''
+  // The selection is an **index** into the loaded list, never a "schema.table" string. Combining the
+  // two and splitting them back apart is fine until a schema or table name contains a literal '.',
+  // which a quoted identifier allows — and then the split silently produces the wrong pair.
+  const selectedTableIndex = (tables ?? [])
+    .findIndex((t) => t.schema === spec.schema && t.table === spec.table)
   const exists = tableExists(tables, spec.schema, spec.table)
 
   const schemas = [...new Set((tables ?? []).map((t) => t.schema))]
@@ -172,17 +176,21 @@ export function MappingSide({ side, label, inherited, spec, onChange, testIdPref
           <Field label="Table">
             <select
               className="select"
-              value={selectedTableKey}
+              value={selectedTableIndex < 0 ? '' : String(selectedTableIndex)}
               disabled={!database}
               onChange={(e) => {
-                const [schema, table] = e.target.value.split('.')
-                onChange({ ...spec, schema: schema ?? '', table: table ?? '' })
+                const picked = (tables ?? [])[Number(e.target.value)]
+                onChange(picked
+                  ? { ...spec, schema: picked.schema, table: picked.table }
+                  : { ...spec, schema: '', table: '' })
               }}
               data-testid={`${testIdPrefix}-table-select`}
             >
               <option value="">Select…</option>
-              {tables?.map((t) => (
-                <option key={`${t.schema}.${t.table}`} value={`${t.schema}.${t.table}`}>{t.schema}.{t.table}</option>
+              {tables?.map((t, i) => (
+                // The label still reads "schema.table" — combining is fine for something a person
+                // reads. It is only a bug when the combined string becomes data somebody parses.
+                <option key={`${i}`} value={`${i}`}>{t.schema}.{t.table}</option>
               ))}
             </select>
           </Field>
