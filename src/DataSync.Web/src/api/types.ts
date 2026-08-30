@@ -688,3 +688,20 @@ export interface AuthStatus {
   /** Sign-in methods this deployment offers, so the sign-in screen shows the ones that exist. */
   methods: string[]
 }
+
+export interface UserCredentialSummary {
+  id: string
+  method: string
+  label: string | null
+  createdAtUtc: string
+  lastUsedAtUtc: string | null
+}
+
+export interface UserSummary {
+  id: string
+  displayName: string
+  email: string | null
+  role: string
+  enabled: boolean
+  credentials: UserCredentialSummary[]
+}

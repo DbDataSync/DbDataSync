@@ -12,6 +12,7 @@ import type {
   BulkCreateResult,
   InferredColumnType,
   AuthStatus,
+  UserSummary,
   DriverType,
   ParameterDescriptor,
   ProvisioningPlanReport,
@@ -176,6 +177,38 @@ export const api = {
      * says so where it is not one. */
     signInWithWindows: () => request<AuthStatus>('/api/auth/windows', { method: 'POST' }),
     signOut: () => request<void>('/api/auth/sign-out', { method: 'POST' }),
+    beginPasskey: () => request<unknown>('/api/auth/passkey/begin', { method: 'POST' }),
+    completePasskey: (assertion: unknown) =>
+      request<AuthStatus>('/api/auth/passkey/complete', { method: 'POST', body: JSON.stringify(assertion) }),
+  },
+  invites: {
+    create: (role: string, forUserId?: string) =>
+      request<{ url: string; expiresAtUtc: string; role: string }>('/api/invites', {
+        method: 'POST',
+        body: JSON.stringify({ role, forUserId: forUserId ?? null }),
+      }),
+    check: (code: string) => request<{ valid: boolean }>(`/api/invites/check?code=${encodeURIComponent(code)}`),
+    beginRegistration: (code: string, displayName: string, email: string | null) =>
+      request<unknown>('/api/invites/begin-registration', {
+        method: 'POST',
+        body: JSON.stringify({ code, displayName, email }),
+      }),
+    completeRegistration: (code: string, displayName: string, email: string | null, attestation: unknown) =>
+      request<AuthStatus>(
+        `/api/invites/complete-registration?code=${encodeURIComponent(code)}` +
+          `&displayName=${encodeURIComponent(displayName)}&email=${encodeURIComponent(email ?? '')}`,
+        { method: 'POST', body: JSON.stringify(attestation) },
+      ),
+  },
+  users: {
+    list: () => request<UserSummary[]>('/api/users'),
+    update: (id: string, changes: { role?: string; enabled?: boolean }) =>
+      put<UserSummary>(`/api/users/${encodeURIComponent(id)}`, changes),
+    removeCredential: (id: string, credentialId: string) =>
+      request<void>(
+        `/api/users/${encodeURIComponent(id)}/credentials/${encodeURIComponent(credentialId)}`,
+        { method: 'DELETE' },
+      ),
   },
   drivers: {
     /** What a connection of this driver takes, given what it has been given so far. A POST because

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStatus } from './api/hooks'
 import { SignInScreen } from './components/SignIn'
+import { InvitePage } from './pages/InvitePage'
 import { ConnectionEditPage } from './pages/ConnectionEditPage'
 import { ConnectionsPage } from './pages/ConnectionsPage'
 import { ReplicationsPage } from './pages/ReplicationsPage'
@@ -32,6 +33,11 @@ export default function App() {
   // Nothing is rendered until it is known whether anybody is signed in. Rendering the app first and
   // correcting to a sign-in screen would flash a shell full of failed requests.
   if (isLoading) return null
+
+  // Redemption is reachable without a session — that is the entire point of an invitation, and
+  // routing it behind the sign-in screen would be a door locked from the inside.
+  if (window.location.pathname === '/invite') return <InvitePage />
+
   if (status && !status.authenticated) return <SignInScreen />
 
   return (

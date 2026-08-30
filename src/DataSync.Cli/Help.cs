@@ -15,6 +15,10 @@ public static class Help
                   Registers this tool as a Windows service. Windows only, and install needs an
                   elevated prompt.
 
+              datasync invite [--role Admin|Viewer] [--repo <path>] [--url <url>]
+                  Prints a fresh single-use invitation URL. For when the first-run one has scrolled
+                  away, or the process is a service with nowhere to print it.
+
               datasync health [--url <url>]
                   Exits 0 if a running DataSync answers, 1 if it does not. What the container's
                   health check runs.

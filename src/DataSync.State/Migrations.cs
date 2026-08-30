@@ -214,5 +214,26 @@ internal static class Migrations
 
         CREATE INDEX IX_Sessions_User ON Sessions(UserId);
         """,
+
+        """
+        -- A one-time capability to create a user, or to add a credential to one.
+        --
+        -- The code itself is never stored — only a hash of it. It is a bearer credential that arrives
+        -- over chat or email and is worth exactly what a password is worth, and a database somebody
+        -- can read is a database somebody can sign in from.
+        CREATE TABLE Invites (
+            Id               TEXT PRIMARY KEY,
+            CodeHash         TEXT NOT NULL,
+            Role             TEXT NOT NULL,   -- what the invited user becomes
+            UserId           TEXT NULL,       -- set when adding a credential to an existing user
+            CreatedByUserId  TEXT NULL,       -- null for the bootstrap invite: nobody made it
+            CreatedAtUtc     TEXT NOT NULL,
+            ExpiresAtUtc     TEXT NOT NULL,
+            RedeemedAtUtc    TEXT NULL,
+            RedeemedByUserId TEXT NULL
+        );
+
+        CREATE UNIQUE INDEX UX_Invites_CodeHash ON Invites(CodeHash);
+        """,
     ];
 }

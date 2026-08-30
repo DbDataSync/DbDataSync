@@ -1,5 +1,9 @@
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { api } from '../api/client'
 import { useAuthStatus, useSignInWithWindows, useSignOut } from '../api/hooks'
 import { ErrorBanner } from './ErrorBanner'
+import { getCredential, isSupported } from './webauthn'
 
 /**
  * Whether anybody is signed in, and how to change that.
@@ -10,13 +14,34 @@ import { ErrorBanner } from './ErrorBanner'
 export function SignInScreen() {
   const { data: status } = useAuthStatus()
   const signIn = useSignInWithWindows()
+  const queryClient = useQueryClient()
+  const [passkeyError, setPasskeyError] = useState<unknown>(null)
+  const [passkeyBusy, setPasskeyBusy] = useState(false)
+
+  // Always offered, whatever the server lists: a passkey sign-in needs no server-side configuration
+  // beyond a relying-party id that already has a working default, and somebody who was invited has
+  // one whether or not this deployment also does Windows.
+  const signInWithPasskey = async () => {
+    setPasskeyBusy(true)
+    setPasskeyError(null)
+    try {
+      const options = await api.auth.beginPasskey()
+      const assertion = await getCredential(options)
+      await api.auth.completePasskey(assertion)
+      await queryClient.invalidateQueries()
+    } catch (ex) {
+      setPasskeyError(ex)
+    } finally {
+      setPasskeyBusy(false)
+    }
+  }
 
   return (
     <div className="pane" data-testid="sign-in-screen">
       <div className="card" style={{ maxWidth: 460, margin: '10vh auto' }}>
         <div className="card-head"><span className="card-title">Sign in to DataSync</span></div>
         <div className="card-body">
-          <ErrorBanner error={signIn.error} />
+          <ErrorBanner error={signIn.error ?? passkeyError} />
 
           {status?.methods.includes('windows') && (
             <button
@@ -30,11 +55,22 @@ export function SignInScreen() {
             </button>
           )}
 
+          {isSupported() && (
+            <button
+              type="button"
+              className="btn"
+              disabled={passkeyBusy}
+              onClick={signInWithPasskey}
+              data-testid="sign-in-passkey"
+            >
+              {passkeyBusy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+            </button>
+          )}
+
           {status && status.methods.length === 0 && (
             <span className="hint">
-              No sign-in method is configured on this deployment. An administrator sets
-              <code> DataSync:Auth:AdminGroup</code> for Windows authentication, or turns
-              authentication off deliberately with <code>DataSync:Auth:Disabled</code>.
+              No Windows groups are configured on this deployment. Sign in with a passkey if you have
+              been invited, or ask an administrator to run <code>datasync invite</code>.
             </span>
           )}
         </div>

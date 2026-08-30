@@ -69,6 +69,8 @@ public static class DataSyncHost
         // config — ProvisioningService among them — fail to construct: a singleton cannot hold a
         // per-request value, and the accessor exists precisely so it does not have to.
         builder.Services.AddSingleton<CurrentUser>();
+        builder.Services.AddSingleton(sp => PasskeyOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
+        builder.Services.AddSingleton<PasskeyService>();
 
         builder.Services.AddSingleton(new SecretStore(true));
         builder.Services.AddSingleton(sp =>
@@ -86,6 +88,7 @@ public static class DataSyncHost
         builder.Services.AddSingleton(sp => new VerificationResultStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new UserStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new SessionStore(sp.GetRequiredService<StateDatabase>()));
+        builder.Services.AddSingleton(sp => new InviteStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new ChangeWatermarkStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunLockStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new WorkQueueStore(sp.GetRequiredService<StateDatabase>()));
@@ -134,6 +137,7 @@ public static class DataSyncHost
         builder.Services.AddSingleton<ResyncService>();
         builder.Services.AddHostedService<SchedulerService>();
         builder.Services.AddHostedService<RunMonitorService>();
+        builder.Services.AddHostedService<BootstrapInvite>();
 
         // One scheme for every request — controllers and the hub alike — so there is one answer to
         // "who is this". Negotiate is registered alongside it and used by exactly one endpoint, which
@@ -159,6 +163,12 @@ public static class DataSyncHost
                 .Build());
 
         var app = builder.Build();
+
+        // At startup, so a deployment whose passkeys cannot possibly work says so now rather than
+        // failing inside a browser API with a message that names nothing. A warning and not a refusal:
+        // Windows authentication may be the only method this deployment intends to use.
+        if (app.Services.GetRequiredService<PasskeyOptions>().Problem() is { } passkeyProblem)
+            app.Logger.LogWarning("Passkeys are misconfigured and will not work: {Problem}", passkeyProblem);
 
         if (app.Environment.IsDevelopment())
             app.MapOpenApi();

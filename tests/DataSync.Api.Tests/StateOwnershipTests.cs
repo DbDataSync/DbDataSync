@@ -27,11 +27,22 @@ public sealed class StateOwnershipTests
             .Order()
             .ToList();
 
-        // The API's composition root, and nothing else. It moved out of Program.cs into
-        // DataSyncHost.cs when the CLI arrived and both entry points had to build the same graph —
-        // the rule this asserts is unchanged, only the file that holds the registration.
+        // The API's composition root, and one named exception.
+        //
+        // The rule exists because *runner processes* are spawned constantly and concurrently, and many
+        // writers against one SQLite file is what phase 39 was fixing; they reach state over loopback
+        // instead. `datasync invite` is a different risk profile: an operator runs it once, by hand,
+        // in the situation where nobody can sign in — which is precisely when an endpoint that needs a
+        // session is no help. One occasional writer alongside the API is what SQLite's busy_timeout
+        // and SqliteRetry already handle everywhere else in this codebase.
+        //
+        // Listed by name rather than by relaxing the rule, so the next file that wants an exception
+        // has to argue for it here.
         Assert.Equal(
-            [Path.Combine("src", "DataSync.Api", "DataSyncHost.cs")],
+            [
+                Path.Combine("src", "DataSync.Api", "DataSyncHost.cs"),
+                Path.Combine("src", "DataSync.Cli", "InviteCommand.cs"),
+            ],
             offenders);
     }
 

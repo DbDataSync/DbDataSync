@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Cronos" Version="0.13.0" />
+    <PackageReference Include="Fido2.AspNet" Version="4.0.1" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
     <!-- Lifetime and logging for a process the Windows SCM starts. Cross-platform to reference; the
          helper it provides answers false everywhere else, so nothing is conditional here. -->

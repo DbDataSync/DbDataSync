@@ -1,6 +1,6 @@
-# Phase 53 — Passkeys, and the invite that bootstraps them (planned)
+# Phase 53 — Passkeys, and the invite that bootstraps them
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/authentication-and-authorization.md`
 **Depends on**: phase 52, which builds the identity model this sits on.
 
@@ -113,3 +113,99 @@ A Users screen, admin-only:
 - **Whether the bootstrap invite should be suppressible** for a deployment that intends to use only
   Windows auth and never wants a passkey path. Likely a configuration flag, but "no users yet and no
   way in" needs an answer before that flag can exist.
+
+---
+
+# Retrospective
+
+A fresh install is **closed by default** and still usable: the first start prints an invitation URL,
+opening it enrols a passkey, and that account is the first administrator. Verified by running the tool
+against an empty directory — every endpoint answered 401, `/api/auth/status` answered honestly, and the
+invite was on the console.
+
+## The identity model paid off exactly as designed
+
+Adding a passkey to somebody who already signs in with Windows is one row in `UserCredentials`. Phase
+52's shape was chosen for this and it needed nothing.
+
+## The code goes in the fragment
+
+`/invite#<code>`. Browsers do not send a fragment to a server, so a bearer credential that arrives over
+chat does not end up in every proxy and access log between the sender and the recipient. The redemption
+page reads it client-side and posts it deliberately.
+
+Stored as a SHA-256 hash and never as itself — no salt, deliberately: it is a 256-bit random value, not
+a password, so there is no dictionary to defend against and a per-row salt would buy nothing.
+
+## Single use is a WHERE clause, not an intention
+
+`UPDATE Invites SET RedeemedAtUtc = … WHERE Id = … AND RedeemedAtUtc IS NULL`. Two redemptions racing
+each other both find the invite valid; only one of them updates a row, and the other gets a 409. The
+test asserts the second attempt fails rather than asserting the flag was set.
+
+Checking a code says only yes or no. "Expired", "already used" and "never existed" are one answer to
+somebody working through guesses, and the test asserts the two responses are byte-identical.
+
+## The relying-party id is validated at startup, because it is the whole support burden
+
+A passkey registered against `localhost` does not work against `datasync.corp.example`, and one
+registered against an IP address does not work at all — WebAuthn requires a domain. All three are
+checked when the app starts and reported as a warning naming the id and the origins, because the
+alternative is a browser API refusing a ceremony with a message that names neither.
+
+A warning rather than a refusal: Windows authentication may be the only method a deployment intends to
+use, and refusing to start over a feature nobody configured would be worse than the problem.
+
+## `datasync invite` broke a safety rule, and the exception is argued rather than assumed
+
+`StateOwnershipTests` asserts that only the API process opens the state file — phase 39's rule, which
+exists because *runner processes* are spawned constantly and concurrently and many writers against one
+SQLite file was the bug it fixed. The invite command opens it directly, because the situation it exists
+for is "nobody can sign in", and an endpoint needing a session is no help there.
+
+The test now lists the file by name with the reasoning, rather than relaxing the rule to a pattern.
+The next file that wants an exception has to argue for it in the same place.
+
+## Locking everybody out is three lines of check
+
+The only enabled administrator cannot demote or disable themselves, and nobody's last credential can be
+removed. Both are refused with a sentence saying what to do first. An account with no credential can
+only be recovered with an invitation, which is a support call rather than a decision anyone meant to
+make.
+
+## Verification
+
+- `InviteTests` (8) — minting as an admin and the URL's fragment, a viewer refused, the code absent
+  from the database, lookup by code only, single use, expiry, a check that says nothing about why, and
+  redemption reachable without a session.
+- `BootstrapInviteTests` (5) — minted when there are no users, replaced rather than accumulated across
+  restarts, revoked once somebody exists, an admin's own invite surviving that revocation, and nothing
+  minted when authentication is off.
+- `UserManagementTests` (7) — the list, a viewer refused, the only admin unable to demote or disable
+  themselves, both allowed once there is a second, and a last credential refused until there is another.
+- `PasskeyOptionsTests` (6) — a matching origin, a subdomain, a URL as the id, an IP as the id, an
+  origin outside the relying party, and the defaults being self-consistent.
+- Manual, end to end: the tool run against an empty directory printed the bootstrap invite, refused
+  every endpoint, and `datasync invite` produced a fresh one for both roles.
+
+## What is not covered, and why
+
+**No test completes a WebAuthn ceremony.** The plan hoped for Chrome's virtual authenticator through
+Playwright, and that would work — but the Playwright suite runs with authentication *disabled* (phase
+52's decision, for the Kerberos reason), so a passkey flow there would need a second suite configured
+differently. The library's own verification is not re-tested here; what is tested is everything around
+it, which is where the security properties live.
+
+That leaves the registration and assertion round trip proven only by the library's own tests and by
+running it. Said plainly rather than covered by a mock, which would test the mock.
+
+## Open questions
+
+- ~~**Path or fragment.**~~ Fragment, for the log reason above.
+- ~~**Suppressing the bootstrap invite.**~~ Not a flag: it is already suppressed by
+  `DataSync:Auth:Disabled`, and a Windows-only deployment that leaves it on simply has one unused
+  invitation that expires in a day and is revoked the moment anybody signs in.
+- ~~**A relying-party id that legitimately changes.**~~ Every enrolled passkey stops working, and there
+  is no migration possible — the startup warning names it and enrolling again is the answer.
+- **New**: a second Playwright project, configured with authentication on and a virtual authenticator,
+  is the only way to cover the ceremony end to end. Worth it before this is relied on in anger.
