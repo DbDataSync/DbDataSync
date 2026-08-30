@@ -1,6 +1,6 @@
-# Phase 52 — Identity, roles, and Windows authentication (planned)
+# Phase 52 — Identity, roles, and Windows authentication
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/authentication-and-authorization.md`
 
 ## What this phase builds
@@ -182,3 +182,97 @@ added later is closed rather than open by omission.
   group. The `Enabled` column above says yes; the group check says no. Pick one, and say which wins.
 - Exact flag name (`--local-admin-remote-viewer` is a placeholder) and whether it's a CLI flag only or
   also settable via config/environment for containerized deployments where CLI args are less natural.
+
+---
+
+# Retrospective
+
+Every endpoint is closed. The config history answers "who". A viewer cannot make anything happen, and
+the buttons that would 403 are not rendered.
+
+## The identity model earned its shape immediately
+
+One user, any number of credentials, each pointing back at it. Phase 53 adds passkeys by inserting a
+row — no migration, no second lookup path — which is exactly what the "one person, both methods"
+requirement asked for and what a `WindowsSid` column on `Users` would have made impossible.
+
+## A scoped `GitAuthor` did not survive contact
+
+Registering the author as a scoped service read tidily and broke the application at startup:
+`ProvisioningService` is a singleton, and a singleton cannot consume a per-request value. The DI
+container caught it, which is the one good thing about that failure — it fails to construct rather
+than silently capturing the first request's author forever.
+
+`CurrentUser` is a singleton that reads `IHttpContextAccessor` per call, which is the mechanism that
+exists for exactly this. Consumers ask for the author at the point of use rather than holding one.
+
+## The dividing line is not the HTTP verb
+
+`POST /connections/{name}/test` opens a connection to somebody's database, and `POST /scripts/{name}/test`
+compiles and executes operator-authored C#. Both are reads in intent and neither belongs to a viewer.
+That is asserted by name, because it is the rule most likely to be got wrong by whoever adds the next
+endpoint.
+
+The fallback policy closes anything unmarked, so a new endpoint is admin-only by omission. The coverage
+test enumerates endpoints by reflection rather than from a list somebody maintains — a hand-written
+list of routes goes stale the first time one is added in a hurry.
+
+## Two surfaces that get forgotten, and one that must not be touched
+
+The **hub** authenticates by the same session cookie, which is why the scheme is a cookie and not a
+bearer token: SignalR cannot set a header on a WebSocket handshake but does send cookies. A hub
+streaming a replication's live log to anyone who can reach the port is the same disclosure as an open
+API.
+
+The **loopback runner-state endpoint** is explicitly anonymous and keeps its own `RunnerToken`. It
+authenticates a child process, not a person; dragging it into the user scheme would mean a spawned
+worker needing a user to exist, which is a worker that cannot run on a fresh install.
+
+## A suite that failed one run in two
+
+Not caused by this phase, but exposed by it: adding tests pushed the integration suites over a
+threshold and the full solution run started failing with SQL Server error 1205 — deadlock victim — in a
+different test each time. xUnit runs test classes in parallel, several of them create and drop
+databases and enable CDC on the *same* container, and those are server-scoped operations that take
+locks in master and msdb.
+
+Fixed by disabling parallelisation in the four assemblies that touch a real database, and by a
+runsettings that stops assemblies running against each other. The cost is wall-clock; the alternative
+was scattering 1205 retries through the fixtures, which would have left two tests fighting over one
+server and calling it a pass. Five consecutive full runs since: three clean, one with a single
+unreproduced failure — better than half, and honestly still not perfect.
+
+## Verification
+
+- `AuthorizationCoverageTests` (5) — every endpoint carries a policy this app defines or falls through
+  to the closed default, and the three actions that look like reads are not viewer-readable.
+- `AuthorizationEnforcementTests` (11) — the same claims over the wire: nothing without a session,
+  health and auth-status reachable without one, a viewer reading and refused every action, an admin
+  reading, **disabling a user taking effect on the next request** while their session row is still
+  valid, and sign-out ending it.
+- `GitAttributionTests` (1) — a config change committed with the signed-in user's name and email, which
+  is the half of this feature worth more than access control.
+- The Playwright suite runs with authentication deliberately off, which is a real deployment mode and
+  the one this phase built as its escape hatch.
+
+## What is not covered, and why
+
+**No test signs in with Windows.** Kerberos against a Linux container is not a thing, and a test-only
+sign-in handler would be a second way in that has to be impossible to enable in a real deployment —
+the wrong thing to add for a test. `AuthenticatedApiFactory` mints sessions by writing rows, which
+exercises the real handler, the real store and the real policies; the negotiate exchange itself, and
+`WindowsPrincipal.IsInRole`, are unexercised here.
+
+## Open questions
+
+- ~~**How Playwright authenticates.**~~ It does not: the suite runs with `DataSync:Auth:Disabled`.
+- ~~**Whether "no authentication configured" should be a startup failure.**~~ Neither. Starting open
+  when nothing is configured is how products get breached; refusing to start makes a freshly installed
+  tool unusable. It is a flag that has to be set deliberately and names itself, and phase 53's
+  first-run invite is what removes the need for it.
+- ~~**Whether a Windows user can be disabled locally.**~~ Yes, and local wins: `Enabled` is checked on
+  every request after the group has already granted access. Removing somebody from the group is the
+  directory's answer; disabling them here is this application's, and the more restrictive one holds.
+- **New**: an admin can disable themselves, and there is no check stopping it. Harmless while Windows
+  groups are the only method — signing in again re-creates the mapping — and a real footgun once
+  passkeys exist. Phase 53 owns it, and its plan already names the equivalent rule.

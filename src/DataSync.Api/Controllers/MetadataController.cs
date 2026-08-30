@@ -1,4 +1,6 @@
 using DataSync.Api.Services;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -7,6 +9,7 @@ namespace DataSync.Api.Controllers;
 [Route("api/connections/{connectionName}/metadata")]
 public sealed class MetadataController(MetadataService metadataService) : ControllerBase
 {
+    [Authorize(Policies.Viewer)]
     [HttpGet("databases")]
     public async Task<IActionResult> ListDatabases(string connectionName, CancellationToken cancellationToken)
     {
@@ -20,6 +23,7 @@ public sealed class MetadataController(MetadataService metadataService) : Contro
         }
     }
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("databases/{database}/tables")]
     public async Task<IActionResult> ListTables(string connectionName, string database, CancellationToken cancellationToken)
     {
@@ -33,6 +37,7 @@ public sealed class MetadataController(MetadataService metadataService) : Contro
         }
     }
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("databases/{database}/schemas/{schema}/tables/{table}/columns")]
     public async Task<IActionResult> ListColumns(
         string connectionName, string database, string schema, string table, CancellationToken cancellationToken)

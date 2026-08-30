@@ -6,6 +6,8 @@ using DataSync.Api.Services;
 using DataSync.Core.Git;
 using DataSync.Core.Secrets;
 using DataSync.Drivers.Abstractions;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -17,12 +19,14 @@ public sealed class ConnectionsController(
     DriverRegistry driverRegistry,
     DriverConnectionFactory connectionFactory,
     ParameterCheck parameterCheck,
-    GitAuthor author) : ControllerBase
+    CurrentUser currentUser) : ControllerBase
 {
+    [Authorize(Policies.Viewer)]
     [HttpGet]
     public ActionResult<IReadOnlyList<ConnectionConfig>> List() =>
         Ok(configRepository.ListConnections().Select(configRepository.LoadConnection).ToList());
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("{name}")]
     public ActionResult<ConnectionConfig> Get(string name)
     {
@@ -42,6 +46,7 @@ public sealed class ConnectionsController(
     /// declarative properties, so a UI can build its Kind pickers against whatever drivers are
     /// registered rather than against a hardcoded list that goes stale the moment a second one exists.
     /// </summary>
+    [Authorize(Policies.Viewer)]
     [HttpGet("{name}/capabilities")]
     public ActionResult<DriverCapabilities> Capabilities(string name)
     {
@@ -70,6 +75,7 @@ public sealed class ConnectionsController(
     /// question the new-connection screen actually has.
     /// </para>
     /// </summary>
+    [Authorize(Policies.Viewer)]
     [HttpGet("~/api/drivers/{driverType}/capabilities")]
     public ActionResult<DriverCapabilities> CapabilitiesForDriver(ConnectionDriverType driverType)
     {
@@ -95,6 +101,7 @@ public sealed class ConnectionsController(
     /// <c>recalc</c> change the answer.
     /// </para>
     /// </summary>
+    [Authorize(Policies.Viewer)]
     [HttpPost("~/api/drivers/{driverType}/connection-parameters")]
     public ActionResult<IReadOnlyList<ParameterDescriptor>> ConnectionParameters(
         ConnectionDriverType driverType, [FromBody] Dictionary<string, string>? values)
@@ -163,6 +170,7 @@ public sealed class ConnectionsController(
     /// store, so there is nothing to choose — but an operator staring at an auth failure needs to know
     /// exactly which value the process is looking for, which is most of that diagnosis.
     /// </summary>
+    [Authorize(Policies.Viewer)]
     [HttpGet("{name}/credential-source")]
     public ActionResult<CredentialSource> GetCredentialSource(string name)
     {
@@ -191,7 +199,7 @@ public sealed class ConnectionsController(
         try
         {
             parameterCheck.ThrowIfInvalid(input);
-            return Ok(configRepository.SaveConnection(input, author));
+            return Ok(configRepository.SaveConnection(input, currentUser.Author));
         }
         catch (ConfigValidationException ex)
         {
@@ -202,7 +210,7 @@ public sealed class ConnectionsController(
     [HttpDelete("{name}")]
     public IActionResult Delete(string name)
     {
-        configRepository.DeleteConnection(name, author);
+        configRepository.DeleteConnection(name, currentUser.Author);
         return NoContent();
     }
 }

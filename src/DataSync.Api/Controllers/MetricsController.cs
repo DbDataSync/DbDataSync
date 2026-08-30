@@ -1,4 +1,6 @@
 using DataSync.State;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -25,6 +27,7 @@ public sealed class MetricsController(RunMetricsStore metrics) : ControllerBase
     /// moving hundreds dominates every total it is added to, so the two are asked about separately
     /// rather than summed into a number that describes neither.
     /// </param>
+    [Authorize(Policies.Viewer)]
     [HttpGet]
     public ActionResult<RunMetrics> Get(
         string replicationName,

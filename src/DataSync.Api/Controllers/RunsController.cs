@@ -1,6 +1,8 @@
 using DataSync.Api.Models;
 using DataSync.Api.Services;
 using DataSync.State;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -47,11 +49,13 @@ public sealed class RunsController(
         };
     }
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("replications/{name}/runs")]
     public ActionResult<IReadOnlyList<TaskRunRecord>> History(
         string name, [FromQuery] RunKind? kind = null, [FromQuery] int limit = 50) =>
         Ok(taskRunStore.GetRunHistory(name, kind, limit));
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("runs/{runId:guid}")]
     public ActionResult<TaskRunRecord> Get(Guid runId)
     {
@@ -59,6 +63,7 @@ public sealed class RunsController(
         return run is null ? NotFound() : Ok(run);
     }
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("runs/{runId:guid}/logs")]
     public ActionResult<IReadOnlyList<LogEntryRecord>> Logs(Guid runId, [FromQuery] long? sinceId = null) =>
         Ok(logWriter.GetLogs(runId, sinceId));

@@ -20,6 +20,12 @@ public static class RunnerStateEndpoints
 
         // ---- Prerequisites ----
 
+        // Deliberately outside the user scheme. This authenticates a *child process* with
+        // RunnerToken, on a loopback-only listener — dragging it into a user scheme would mean a
+        // spawned worker needing a user to exist, which is a worker that cannot run on a fresh
+        // install. See RunnerStateGuard.
+        group.AllowAnonymous();
+
         group.MapPost("/upsert-task", (UpsertTaskRequest r) =>
         {
             state.UpsertTask(r.TaskName, r.Enabled);

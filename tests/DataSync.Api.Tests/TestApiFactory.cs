@@ -27,6 +27,11 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>
                 ["DataSync:RepoRoot"] = RepoRoot,
                 ["DataSync:StateDbPath"] = Path.Combine(RepoRoot, "state.db"),
                 ["DataSync:TaskRunnerDllPath"] = ResolveTaskRunnerDllPathForTests(),
+                // Authentication off, deliberately. Every test using this factory is about what an
+                // endpoint *does*; making all of them sign in first would obscure that and test the
+                // same session plumbing a hundred times. Who may call what is
+                // AuthenticatedApiFactory's subject, and it turns authentication on.
+                ["DataSync:Auth:Disabled"] = "true",
             });
         });
 

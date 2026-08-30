@@ -1,5 +1,7 @@
 using DataSync.Api.Services;
 using DataSync.Core.Config;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -13,6 +15,7 @@ namespace DataSync.Api.Controllers;
 [Route("api/replications/{replicationName}/table-mappings/{mappingName}/preview")]
 public sealed class PreviewController(PreviewService previewService) : ControllerBase
 {
+    [Authorize(Policies.Viewer)]
     [HttpGet]
     public async Task<ActionResult<PreviewReport>> Get(
         string replicationName, string mappingName, CancellationToken cancellationToken)

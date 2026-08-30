@@ -1,6 +1,9 @@
 using System.Text.Json.Serialization;
 using ClrKernel.Core.Secrets;
 using DataSync.Api.Configuration;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authentication;
+using DataSync.Api.Auth;
 using DataSync.Api.Hubs;
 using DataSync.Api.Services;
 using DataSync.Api.State;
@@ -55,7 +58,17 @@ public static class DataSyncHost
 
         // No real auth yet (architecture/detailed-design.md §8, open question) — every config write from the
         // API is attributed to this fixed system identity until per-user auth exists.
-        builder.Services.AddSingleton(new GitAuthor("DataSync API", "datasync@localhost"));
+        // Per request, from whoever is signed in — which is what makes the config history in the
+        // Version Control tab able to answer "who", and is the reason this feature is worth more than
+        // access control. Falls back to a system identity where genuinely nobody is signed in.
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddSingleton(sp => AuthOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
+
+        // A singleton that reads IHttpContextAccessor per call, rather than a scoped GitAuthor.
+        // Registering the author itself as scoped looked tidier and made every singleton that writes
+        // config — ProvisioningService among them — fail to construct: a singleton cannot hold a
+        // per-request value, and the accessor exists precisely so it does not have to.
+        builder.Services.AddSingleton<CurrentUser>();
 
         builder.Services.AddSingleton(new SecretStore(true));
         builder.Services.AddSingleton(sp =>
@@ -71,6 +84,8 @@ public static class DataSyncHost
         builder.Services.AddSingleton(sp => new TaskRunStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunMetricsStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new VerificationResultStore(sp.GetRequiredService<StateDatabase>()));
+        builder.Services.AddSingleton(sp => new UserStore(sp.GetRequiredService<StateDatabase>()));
+        builder.Services.AddSingleton(sp => new SessionStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new ChangeWatermarkStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunLockStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new WorkQueueStore(sp.GetRequiredService<StateDatabase>()));
@@ -120,6 +135,29 @@ public static class DataSyncHost
         builder.Services.AddHostedService<SchedulerService>();
         builder.Services.AddHostedService<RunMonitorService>();
 
+        // One scheme for every request — controllers and the hub alike — so there is one answer to
+        // "who is this". Negotiate is registered alongside it and used by exactly one endpoint, which
+        // trades a Windows identity for a session.
+        var authentication = builder.Services
+            .AddAuthentication(SessionAuthenticationHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, SessionAuthenticationHandler>(
+                SessionAuthenticationHandler.SchemeName, _ => { });
+
+        if (OperatingSystem.IsWindows())
+            authentication.AddNegotiate();
+
+        builder.Services.AddAuthorizationBuilder()
+            .AddPolicy(Policies.Admin, policy => policy.RequireRole(nameof(UserRole.Admin)))
+            // An admin is a viewer too. Stating it here rather than putting both roles on every read
+            // endpoint keeps the attribute on a controller meaning what it says.
+            .AddPolicy(Policies.Viewer, policy => policy.RequireRole(nameof(UserRole.Admin), nameof(UserRole.Viewer)))
+            // Anything unmarked is closed. An endpoint added later is admin-only by omission rather
+            // than open by omission, which is the whole reason to state a fallback at all.
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .RequireRole(nameof(UserRole.Admin))
+                .Build());
+
         var app = builder.Build();
 
         if (app.Environment.IsDevelopment())
@@ -134,6 +172,7 @@ public static class DataSyncHost
             app.UseHttpsRedirection();
         }
 
+        app.UseAuthentication();
         app.UseAuthorization();
 
         // The SPA, served by the same process. In development Vite serves it on its own port and proxies

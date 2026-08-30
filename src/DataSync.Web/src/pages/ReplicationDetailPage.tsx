@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useParams } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
+import { useIsAdmin } from '../components/useIsAdmin'
 import { tabClass } from '../components/tabClass'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { MetricsCard } from './replication-detail/MetricsCard'
@@ -42,6 +43,7 @@ export function ReplicationDetailPage() {
   const { data: task, error } = useReplication(name)
   const upsert = useUpsertReplication()
   const setEnabled = useSetReplicationEnabled(name ?? '')
+  const isAdmin = useIsAdmin()
 
   // A command from the chrome down into the Runs panel. The nonce is what makes a repeat of the
   // same command distinguishable from no command at all.
@@ -111,34 +113,45 @@ export function ReplicationDetailPage() {
             </span>
 
             {/* The design puts the run controls in the chrome, reachable from any tab — clicking
-                either moves to Runs so the result is visible where it lands. */}
-            <button
-              className="btn btn-chrome"
-              onClick={() => send('backfill')}
-              data-testid="backfill-button"
-            >
-              Backfill…
-            </button>
-            <button
-              className="btn btn-primary btn-chrome"
-              onClick={() => send('run')}
-              data-testid="trigger-run-button"
-            >
-              Run Now
-            </button>
+                either moves to Runs so the result is visible where it lands.
+
+                Not rendered for a viewer. A Save button that always answers 403 invites somebody to
+                do work and then throws it away, which is worse than not offering it. */}
+            {isAdmin && (
+              <button
+                className="btn btn-chrome"
+                onClick={() => send('backfill')}
+                data-testid="backfill-button"
+              >
+                Backfill…
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                className="btn btn-primary btn-chrome"
+                onClick={() => send('run')}
+                data-testid="trigger-run-button"
+              >
+                Run Now
+              </button>
+            )}
             {/* Up here rather than buried in the Pipeline card, because it saves the whole draft —
                 endpoints, pipeline and script bindings — not just the card it used to sit in. */}
-            <button
-              className="btn btn-primary btn-chrome"
-              onClick={save}
-              disabled={upsert.isPending || !draft}
-              data-testid="save-settings-button"
-            >
-              {upsert.isPending ? 'Saving…' : 'Save settings'}
-            </button>
-            <button className="btn btn-danger btn-chrome" onClick={onDelete} data-testid="delete-replication-button">
-              Delete
-            </button>
+            {isAdmin && (
+              <button
+                className="btn btn-primary btn-chrome"
+                onClick={save}
+                disabled={upsert.isPending || !draft}
+                data-testid="save-settings-button"
+              >
+                {upsert.isPending ? 'Saving…' : 'Save settings'}
+              </button>
+            )}
+            {isAdmin && (
+              <button className="btn btn-danger btn-chrome" onClick={onDelete} data-testid="delete-replication-button">
+                Delete
+              </button>
+            )}
           </div>
         </>
       }

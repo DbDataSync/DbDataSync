@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
+import { SignedInAs } from './SignIn'
 import { CodeIcon, DatabaseIcon, FlowIcon, GridIcon, LogoIcon } from './icons'
 
 /**
@@ -66,7 +67,13 @@ export function AppShell({ crumbs, tabs, actions, children }: {
               )}
             </span>
           ))}
-          {actions && <div className="right">{actions}</div>}
+          {/* Who is signed in, on every screen — it belongs to the shell rather than to whichever
+              page remembered to render it. Absent entirely where the deployment does not
+              authenticate. */}
+          <div className="right">
+            {actions}
+            <SignedInAs />
+          </div>
         </header>
 
         {tabs && <div className="tabbar">{tabs}</div>}

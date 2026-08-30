@@ -17,6 +17,14 @@ const scratchRepoRoot = path.join(os.tmpdir(), 'datasync-web-e2e-scratch-repo')
 // TaskRunner child process* resolve the connection credentials it needs to actually run a
 // replication, matching how phase-4/5's manual and integration tests worked around the same gap.
 // See global-setup.ts for where these exact connection names get created.
+// The suite runs against a deployment that has deliberately turned authentication off — the
+// trusted-network mode phase 52 built as its escape hatch. The alternative is Kerberos against a
+// Linux container, which is not a thing, and a test-only sign-in backdoor, which would have to be
+// impossible to enable in a real deployment and is therefore the wrong thing to add for a test.
+const authEnv = {
+  DataSync__Auth__Disabled: 'true',
+}
+
 const secretEnv = {
   CLRKERNEL_SECRET_DATASYNC_CONNECTION_PLAYWRIGHT_SRC: 'DataSync_Test_Pw1',
   CLRKERNEL_SECRET_DATASYNC_CONNECTION_PLAYWRIGHT_TGT: 'DataSync_Test_Pw1',
@@ -51,6 +59,7 @@ export default defineConfig({
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
+        ...authEnv,
         ...secretEnv,
         DataSync__RepoRoot: scratchRepoRoot,
         DataSync__StateDbPath: path.join(scratchRepoRoot, 'state.db'),

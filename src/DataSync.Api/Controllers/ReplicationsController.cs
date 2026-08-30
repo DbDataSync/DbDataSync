@@ -1,6 +1,8 @@
 using DataSync.Api.Services;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -11,11 +13,13 @@ public sealed class ReplicationsController(
     ConfigRepository configRepository,
     ParameterCheck parameterCheck,
     ProcessSupervisor supervisor,
-    GitAuthor author) : ControllerBase
+    CurrentUser currentUser) : ControllerBase
 {
+    [Authorize(Policies.Viewer)]
     [HttpGet]
     public ActionResult<IReadOnlyList<string>> List() => Ok(configRepository.ListReplications());
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("{name}")]
     public ActionResult<ReplicationTaskConfig> Get(string name)
     {
@@ -37,6 +41,7 @@ public sealed class ReplicationsController(
     /// already covers.
     /// </para>
     /// </summary>
+    [Authorize(Policies.Viewer)]
     [HttpGet("{name}/status")]
     public ActionResult<ReplicationStatus> Status(string name)
     {
@@ -62,7 +67,7 @@ public sealed class ReplicationsController(
         {
             var task = configRepository.LoadReplicationTask(name);
             task.Enabled = request.Enabled;
-            return Ok(configRepository.SaveReplicationTask(task, author));
+            return Ok(configRepository.SaveReplicationTask(task, currentUser.Author));
         }
         catch (FileNotFoundException)
         {
@@ -77,7 +82,7 @@ public sealed class ReplicationsController(
         try
         {
             parameterCheck.ThrowIfInvalid(task);
-            return Ok(configRepository.SaveReplicationTask(task, author));
+            return Ok(configRepository.SaveReplicationTask(task, currentUser.Author));
         }
         catch (ConfigValidationException ex)
         {
@@ -88,10 +93,11 @@ public sealed class ReplicationsController(
     [HttpDelete("{name}")]
     public IActionResult Delete(string name)
     {
-        configRepository.DeleteReplicationTask(name, author);
+        configRepository.DeleteReplicationTask(name, currentUser.Author);
         return NoContent();
     }
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("{name}/history")]
     public ActionResult<IReadOnlyList<CommitInfo>> History(string name, [FromQuery] int limit = 50) =>
         Ok(configRepository.GetReplicationHistory(name, limit));

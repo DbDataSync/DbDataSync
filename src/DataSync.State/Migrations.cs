@@ -168,5 +168,51 @@ internal static class Migrations
         -- names. See PositionExpiredException.
         ALTER TABLE TaskRuns ADD COLUMN FailureKind TEXT NULL;
         """,
+
+        """
+        -- Who may use this, and how they prove it.
+        --
+        -- In the state store rather than the config repo: users are runtime state, and putting an
+        -- access-control list in a git history the UI diffs on screen would publish it to everyone
+        -- who can read the repo.
+        CREATE TABLE Users (
+            Id           TEXT PRIMARY KEY,   -- opaque; never a login name, which people change
+            DisplayName  TEXT NOT NULL,
+            Email        TEXT NULL,          -- for git attribution, where there is one
+            Role         TEXT NOT NULL,      -- Admin | Viewer
+            Enabled      INTEGER NOT NULL,
+            CreatedAtUtc TEXT NOT NULL
+        );
+
+        -- A credential per method, all pointing at one user. That shape is what makes "one person,
+        -- both methods" cheap: signing in is "find the credential, take its user", and adding a
+        -- passkey to an account that already signs in with Windows is inserting a row. Columns named
+        -- WindowsSid and PasskeyPublicKey on Users would have made the same requirement a migration.
+        CREATE TABLE UserCredentials (
+            Id            TEXT PRIMARY KEY,
+            UserId        TEXT NOT NULL REFERENCES Users(Id),
+            Method        TEXT NOT NULL,      -- Windows | Passkey
+            -- Windows: the account SID. Passkey: the credential id. What a sign-in is looked up by.
+            Subject       TEXT NOT NULL,
+            Secret        TEXT NULL,          -- a passkey's *public* key; null for Windows
+            Label         TEXT NULL,
+            CreatedAtUtc  TEXT NOT NULL,
+            LastUsedAtUtc TEXT NULL
+        );
+
+        CREATE UNIQUE INDEX UX_UserCredentials_Subject ON UserCredentials(Method, Subject);
+        CREATE INDEX IX_UserCredentials_User ON UserCredentials(UserId);
+
+        -- Server-side, so signing somebody out — or disabling them — takes effect on their next
+        -- request rather than whenever a token would have expired.
+        CREATE TABLE Sessions (
+            Id           TEXT PRIMARY KEY,
+            UserId       TEXT NOT NULL REFERENCES Users(Id),
+            CreatedAtUtc TEXT NOT NULL,
+            ExpiresAtUtc TEXT NOT NULL
+        );
+
+        CREATE INDEX IX_Sessions_User ON Sessions(UserId);
+        """,
     ];
 }

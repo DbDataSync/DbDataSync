@@ -3,6 +3,8 @@ using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Scripting;
 using DataSync.Scripting.Abstractions;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -19,7 +21,7 @@ public sealed class ScriptsController(
     ScriptHost scriptHost,
     ScriptUsageScanner usageScanner,
     ScriptTestService testService,
-    GitAuthor author) : ControllerBase
+    CurrentUser currentUser) : ControllerBase
 {
     /// <summary>
     /// Every script with where it is bound. The binding sites come with the list rather than from a
@@ -27,6 +29,7 @@ public sealed class ScriptsController(
     /// doing anything" is about all of them at once, and N+1 requests to answer it would be one
     /// request per row.
     /// </summary>
+    [Authorize(Policies.Viewer)]
     [HttpGet]
     public ActionResult<IReadOnlyList<ScriptListItem>> List()
     {
@@ -42,6 +45,7 @@ public sealed class ScriptsController(
     /// renders a slot only where it means something rather than offering a control that silently does
     /// nothing. <c>metadataProvider</c> is connection-only; see <see cref="ScriptSlots.BindableAt"/>.
     /// </summary>
+    [Authorize(Policies.Viewer)]
     [HttpGet("slots")]
     public ActionResult<IReadOnlyList<ScriptSlotInfo>> Slots() =>
         Ok(ScriptSlots.All
@@ -52,6 +56,7 @@ public sealed class ScriptsController(
                 ScriptSlots.Describe(slot).Description))
             .ToList());
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("{name}")]
     public ActionResult<ScriptDefinition> Get(string name)
     {
@@ -98,7 +103,7 @@ public sealed class ScriptsController(
 
         try
         {
-            configRepository.SaveScript(script, author);
+            configRepository.SaveScript(script, currentUser.Author);
             return Ok(new ScriptSaveResult(script.Manifest, []));
         }
         catch (ConfigValidationException ex)
@@ -173,7 +178,7 @@ public sealed class ScriptsController(
     [HttpDelete("{name}")]
     public IActionResult Delete(string name)
     {
-        configRepository.DeleteScript(name, author);
+        configRepository.DeleteScript(name, currentUser.Author);
         return NoContent();
     }
 }

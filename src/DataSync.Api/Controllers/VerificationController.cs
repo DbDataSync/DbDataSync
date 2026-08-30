@@ -3,6 +3,8 @@ using DataSync.Api.Services;
 using DataSync.Core.Config;
 using DataSync.State;
 using DataSync.Verification;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -56,6 +58,7 @@ public sealed class VerificationController(
         return Accepted(new { runIds = new[] { runId } });
     }
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("verification-results")]
     public ActionResult<IReadOnlyList<VerificationResultRecord>> List(
         string replicationName, [FromQuery] string? mappingName = null, [FromQuery] int limit = 50) =>
@@ -75,6 +78,7 @@ public sealed class VerificationController(
     /// serve without knowing it belongs where the caller says it does.
     /// </para>
     /// </summary>
+    [Authorize(Policies.Viewer)]
     [HttpGet("verification-results/{id:long}")]
     public async Task<ActionResult<VerificationResultPage>> Get(
         string replicationName,

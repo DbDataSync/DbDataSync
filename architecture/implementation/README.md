@@ -29,15 +29,14 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **052** — identity, roles and Windows auth | Every endpoint is open to anything that can reach the port |
-| 2 | **053** — passkeys and invites | Needs 052's identity model; also the only way in on a non-Windows host |
+| 1 | **053** — passkeys and invites | Needs 052's identity model; also the only way in on a non-Windows host |
 | 4 | **055** — snapshotting and SCD Type 2 writers | Before 054, which reads the column names this decides |
 | 5 | **054** — "current only" verification comparison | A check against a historized target reports the feature working as a defect |
 | 6 | **034** — PostgreSQL logical replication | |
 | 7 | **035** — config history diff and revert | |
 | 8 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-30; 032, 033, 036, 037, 039–050 and 051 done and removed. Distribution and auth moved above the
+Set 2026-08-30; 032, 033, 036, 037, 039–052 done and removed. Distribution and auth moved above the
 remaining engine work: with 032 and 033 done there are three change-tracking mechanisms and no way for
 anyone outside this repo to install any of them, and nothing guarding the port. A phase moving up or down is an ordinary
 decision and only this table changes.

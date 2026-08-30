@@ -11,6 +11,7 @@ import type {
   BulkCreateRequest,
   BulkCreateResult,
   InferredColumnType,
+  AuthStatus,
   DriverType,
   ParameterDescriptor,
   ProvisioningPlanReport,
@@ -47,6 +48,9 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
+    // The session is a cookie, and a cross-origin dev setup (Vite on 5173 proxying to the API) does
+    // not send one unless asked. Without this, signing in appears to do nothing.
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
 
@@ -165,6 +169,13 @@ export const api = {
           `/provisioning/${encodeURIComponent(action)}/apply`,
         { method: 'POST' },
       ),
+  },
+  auth: {
+    status: () => request<AuthStatus>('/api/auth/status'),
+    /** Negotiates a Windows identity and mints a session. Windows deployments only — the endpoint
+     * says so where it is not one. */
+    signInWithWindows: () => request<AuthStatus>('/api/auth/windows', { method: 'POST' }),
+    signOut: () => request<void>('/api/auth/sign-out', { method: 'POST' }),
   },
   drivers: {
     /** What a connection of this driver takes, given what it has been given so far. A POST because

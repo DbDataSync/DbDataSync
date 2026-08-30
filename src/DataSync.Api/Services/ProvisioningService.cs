@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Diagnostics;
+using DataSync.Api.Auth;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
@@ -22,7 +23,7 @@ namespace DataSync.Api.Services;
 /// </para>
 /// </summary>
 public sealed class ProvisioningService(
-    ConfigRepository configRepository, DriverConnectionFactory connections, GitAuthor author)
+    ConfigRepository configRepository, DriverConnectionFactory connections, CurrentUser currentUser)
 {
     public async Task<ProvisioningPlanReport> GetPlansAsync(
         string replicationName, string mappingName, CancellationToken cancellationToken)
@@ -266,7 +267,7 @@ public sealed class ProvisioningService(
         foreach (var rename in pending)
             rename.Applied = true;
 
-        configRepository.SaveTableMapping(replicationName, mapping, author);
+        configRepository.SaveTableMapping(replicationName, mapping, currentUser.Author);
     }
 
     private static ProvisioningPlan Unsupported(string action, ConnectionDriverType driverType) =>

@@ -1,5 +1,7 @@
 using DataSync.Api.Services;
 using DataSync.Core.Config;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DataSync.Api.Controllers;
@@ -11,6 +13,7 @@ namespace DataSync.Api.Controllers;
 [Route("api/replications/{replicationName}/table-mappings/{mappingName}/provisioning")]
 public sealed class ProvisioningController(ProvisioningService provisioningService) : ControllerBase
 {
+    [Authorize(Policies.Viewer)]
     [HttpGet]
     public async Task<ActionResult<ProvisioningPlanReport>> GetPlans(
         string replicationName, string mappingName, CancellationToken cancellationToken)
@@ -31,6 +34,7 @@ public sealed class ProvisioningController(ProvisioningService provisioningServi
 
     /// <summary>What each source column would become on the target — the column mapping editor's
     /// read path for the inferred type it shows on every row (phase 45 §3).</summary>
+    [Authorize(Policies.Viewer)]
     [HttpGet("inferred-column-types")]
     public async Task<ActionResult<IReadOnlyList<InferredColumnType>>> GetInferredColumnTypes(
         string replicationName, string mappingName, CancellationToken cancellationToken)

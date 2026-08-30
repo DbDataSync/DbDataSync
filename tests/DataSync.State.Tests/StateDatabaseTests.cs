@@ -21,7 +21,10 @@ public sealed class StateDatabaseTests : IDisposable
             tables.Add(reader.GetString(0));
 
         Assert.Equal(
-            ["ChangeWatermarks", "Logs", "RunLocks", "TaskRuns", "Tasks", "VerificationResults", "WorkQueue"],
+            [
+                "ChangeWatermarks", "Logs", "RunLocks", "Sessions", "TaskRuns", "Tasks",
+                "UserCredentials", "Users", "VerificationResults", "WorkQueue",
+            ],
             tables);
     }
 

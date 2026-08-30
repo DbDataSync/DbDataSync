@@ -12,6 +12,9 @@
     <!-- Lifetime and logging for a process the Windows SCM starts. Cross-platform to reference; the
          helper it provides answers false everywhere else, so nothing is conditional here. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
+    <!-- Kerberos/NTLM under Kestrel. Cross-platform to reference; it only authenticates anybody on
+         Windows, and the sign-in endpoint says so where it does not. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>

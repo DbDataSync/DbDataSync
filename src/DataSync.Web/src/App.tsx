@@ -1,4 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { useAuthStatus } from './api/hooks'
+import { SignInScreen } from './components/SignIn'
 import { ConnectionEditPage } from './pages/ConnectionEditPage'
 import { ConnectionsPage } from './pages/ConnectionsPage'
 import { ReplicationsPage } from './pages/ReplicationsPage'
@@ -25,6 +27,13 @@ import { VerificationResultPage } from './pages/replication-detail/VerificationR
  * breadcrumb trails and tab strips genuinely differ, so there is no shared frame to hoist.
  */
 export default function App() {
+  const { data: status, isLoading } = useAuthStatus()
+
+  // Nothing is rendered until it is known whether anybody is signed in. Rendering the app first and
+  // correcting to a sign-in screen would flash a shell full of failed requests.
+  if (isLoading) return null
+  if (status && !status.authenticated) return <SignInScreen />
+
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/replications" replace />} />

@@ -675,3 +675,16 @@ export interface BulkCreateProgress {
   total: number
   name: string
 }
+
+/** Who the caller is, and how they could sign in. The one endpoint the app can always call — the
+ * answer to "am I signed in" cannot itself require being signed in. */
+export interface AuthStatus {
+  authenticated: boolean
+  userId: string | null
+  displayName: string | null
+  /** `Admin` or `Viewer`. Null when nobody is signed in, and on a deployment that has deliberately
+   * turned authentication off — where everything is permitted and nobody has a name. */
+  role: string | null
+  /** Sign-in methods this deployment offers, so the sign-in screen shows the ones that exist. */
+  methods: string[]
+}

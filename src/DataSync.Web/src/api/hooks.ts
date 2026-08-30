@@ -43,6 +43,36 @@ const keys = {
     ['replications', replicationName, 'verification-results', id] as const,
 }
 
+/**
+ * Who the caller is. Refetched on window focus, so a session that expired while a tab was in the
+ * background is noticed when somebody comes back to it rather than at their next click.
+ */
+export function useAuthStatus() {
+  return useQuery({
+    queryKey: ['auth', 'status'] as const,
+    queryFn: () => api.auth.status(),
+    refetchOnWindowFocus: true,
+    retry: false,
+  })
+}
+
+export function useSignInWithWindows() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.auth.signInWithWindows(),
+    // Everything on screen was fetched as nobody; none of it is right any more.
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
+}
+
+export function useSignOut() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.auth.signOut(),
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
+}
+
 export function useConnections() {
   return useQuery({ queryKey: keys.connections, queryFn: api.connections.list })
 }

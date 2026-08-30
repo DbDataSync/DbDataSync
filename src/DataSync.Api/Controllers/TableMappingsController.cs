@@ -1,6 +1,8 @@
 using DataSync.Api.Hubs;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
+using DataSync.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 
@@ -9,12 +11,14 @@ namespace DataSync.Api.Controllers;
 [ApiController]
 [Route("api/replications/{replicationName}/table-mappings")]
 public sealed class TableMappingsController(
-    ConfigRepository configRepository, GitAuthor author, IHubContext<RunHub> hub) : ControllerBase
+    ConfigRepository configRepository, CurrentUser currentUser, IHubContext<RunHub> hub) : ControllerBase
 {
+    [Authorize(Policies.Viewer)]
     [HttpGet]
     public ActionResult<IReadOnlyList<string>> List(string replicationName) =>
         Ok(configRepository.ListTableMappings(replicationName));
 
+    [Authorize(Policies.Viewer)]
     [HttpGet("{mappingName}")]
     public ActionResult<TableMappingConfig> Get(string replicationName, string mappingName)
     {
@@ -34,7 +38,7 @@ public sealed class TableMappingsController(
         mapping.Name = mappingName;
         try
         {
-            return Ok(configRepository.SaveTableMapping(replicationName, mapping, author));
+            return Ok(configRepository.SaveTableMapping(replicationName, mapping, currentUser.Author));
         }
         catch (FileNotFoundException)
         {
@@ -92,7 +96,7 @@ public sealed class TableMappingsController(
 
             try
             {
-                configRepository.SaveTableMapping(replicationName, NewMapping(name, table), author);
+                configRepository.SaveTableMapping(replicationName, NewMapping(name, table), currentUser.Author);
             }
             catch (FileNotFoundException)
             {
@@ -139,7 +143,7 @@ public sealed class TableMappingsController(
     [HttpDelete("{mappingName}")]
     public IActionResult Delete(string replicationName, string mappingName)
     {
-        configRepository.DeleteTableMapping(replicationName, mappingName, author);
+        configRepository.DeleteTableMapping(replicationName, mappingName, currentUser.Author);
         return NoContent();
     }
 }

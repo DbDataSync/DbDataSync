@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <!--
+      One test assembly at a time.
+
+      Every integration-tagged project in this solution works against the *same* SQL Server container,
+      and several of them create and drop databases, enable Change Tracking, and enable CDC — all
+      server-scoped operations that take locks in master and msdb. Run in parallel they deadlock each
+      other: error 1205, "chosen as the deadlock victim", in a different test each time. A suite that
+      fails one run in two is a suite that has stopped telling anyone anything.
+
+      This costs wall-clock and buys a result that means something. Parallelism *within* an assembly
+      is untouched, because those tests were written for it.
+    -->
+    <MaxCpuCount>1</MaxCpuCount>
+  </RunConfiguration>
+</RunSettings>
