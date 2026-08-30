@@ -27,8 +27,11 @@ public sealed class StateOwnershipTests
             .Order()
             .ToList();
 
+        // The API's composition root, and nothing else. It moved out of Program.cs into
+        // DataSyncHost.cs when the CLI arrived and both entry points had to build the same graph —
+        // the rule this asserts is unchanged, only the file that holds the registration.
         Assert.Equal(
-            [Path.Combine("src", "DataSync.Api", "Program.cs")],
+            [Path.Combine("src", "DataSync.Api", "DataSyncHost.cs")],
             offenders);
     }
 

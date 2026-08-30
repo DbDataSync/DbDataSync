@@ -44,14 +44,34 @@ public sealed class ApiOptions
         };
     }
 
+    /// <summary>
+    /// Where the worker executable is, in the order the possibilities are actually true.
+    /// <para>
+    /// **Beside the running assembly first**, because that is what every published layout looks like —
+    /// the tool, the container, and a plain <c>dotnet publish</c> all put the two in one directory.
+    /// The dev-layout guess comes second and is kept only so this repo's own inner loop is unchanged:
+    /// it swaps a <c>DataSync.Api/bin</c> segment for <c>DataSync.TaskRunner/bin</c>, which is true of
+    /// this working tree and of nothing else, and was the only answer before.
+    /// </para>
+    /// <para>
+    /// Not finding it returns the beside-the-assembly path anyway, so the failure names a real path
+    /// somebody can look at rather than a plausible-looking one that never existed.
+    /// </para>
+    /// </summary>
     private static string ResolveDefaultTaskRunnerDllPath()
     {
-        // Both projects build to src/<ProjectName>/bin/<Configuration>/<TFM>/ in this repo — swap the
-        // project-name segment to find TaskRunner's output next to this project's own.
-        var apiBinDir = AppContext.BaseDirectory;
-        var taskRunnerBinDir = apiBinDir.Replace(
-            Path.Combine("DataSync.Api", "bin"),
-            Path.Combine("DataSync.TaskRunner", "bin"));
-        return Path.Combine(taskRunnerBinDir, "DataSync.TaskRunner.dll");
+        const string dll = "DataSync.TaskRunner.dll";
+
+        var beside = Path.Combine(AppContext.BaseDirectory, dll);
+        if (File.Exists(beside))
+            return beside;
+
+        var devLayout = Path.Combine(
+            AppContext.BaseDirectory.Replace(
+                Path.Combine("DataSync.Api", "bin"),
+                Path.Combine("DataSync.TaskRunner", "bin")),
+            dll);
+
+        return File.Exists(devLayout) ? devLayout : beside;
     }
 }

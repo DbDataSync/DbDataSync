@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/DataSync.Api/DataSync.Api.csproj" />
+    <Project Path="src/DataSync.Cli/DataSync.Cli.csproj" />
     <Project Path="src/DataSync.Core/DataSync.Core.csproj" />
     <Project Path="src/DataSync.Drivers.Abstractions/DataSync.Drivers.Abstractions.csproj" />
     <Project Path="src/DataSync.Drivers.Generic/DataSync.Drivers.Generic.csproj" />

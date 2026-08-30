@@ -1,6 +1,6 @@
-# Phase 51 — Distribution: a global tool, a Windows service, and a container (planned)
+# Phase 51 — Distribution: a global tool, a Windows service, and a container
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/distribution-and-hosting.md`
 
 ## What this phase builds
@@ -141,3 +141,101 @@ Dockerfile is broken is the release.
   one backup, but it also means a `git status` in that repo sees a binary that changes constantly —
   which it already does in dev, so the answer may be "it is already fine", but it should be checked
   rather than inherited.
+
+---
+
+# Retrospective
+
+`dotnet tool install -g DataSync && datasync serve` starts the product, and `docker build` produces an
+image that does the same. Both were verified by doing exactly that rather than by reasoning about the
+packaging.
+
+## Three things that only failed when run
+
+The plan named the gaps it could see by reading. Running it found three more, and every one of them
+produced a *working-looking* process:
+
+- **The CLI host found no controllers at all.** `AddControllers()` discovers from the **entry**
+  assembly, and under the tool the entry assembly is `DataSync.Cli`, not `DataSync.Api`. The host
+  started perfectly, logged one line — "No action descriptors found" — and answered 404 to every
+  route. Fixed by naming the application part explicitly, which is now the only way both entry points
+  can be correct.
+- **The container health check reported a healthy container as unhealthy.** It was a shell script
+  using `/dev/tcp` — a bash feature — run under `/bin/sh`, which is dash on Debian. It failed every
+  time. That is the specific failure that gets an orchestrator to restart something that was working.
+  Replaced with `datasync health`, which needs no shell and no curl and behaves the same on any base
+  image.
+- **`StateOwnershipTests` asserted a filename.** Moving the composition root out of `Program.cs` broke
+  it, correctly — the rule it enforces (only the API opens the state file) is unchanged and the test
+  now names the file that holds the registration.
+
+## The composition root moved, and had to
+
+The tool's `serve` and the API's own entry point build the *same* `DataSyncHost`. Two copies would
+drift the first time somebody registered a service in one of them, and the controller-discovery bug
+above is what that class of drift looks like: something true of one entry point and silently false of
+the other.
+
+`WebApplicationFactory<Program>` still works, which was the constraint that decided how far the move
+went.
+
+## Defaults land somewhere a user owns
+
+`ApiOptions` defaults to the current directory, which is right for running the API out of this repo and
+wrong for a tool: `datasync serve` from wherever a shell happens to be would scatter a config repo
+across a filesystem and find none of it on the second run. The tool defaults to a per-user
+application-data directory, creates it, `git init`s it, and prints where — because the config repo *is*
+a git repository and a first run failing on "not a repository" is not what anyone installs a tool
+expecting.
+
+## `TaskRunnerDllPath`, and how it was actually proved
+
+The old default swapped a `DataSync.Api/bin` path segment for `DataSync.TaskRunner/bin`, which is true
+of this working tree and nothing else. It now looks beside the running assembly first — which is what
+every published layout is — and keeps the dev-layout guess as a fallback so the repo's inner loop is
+unchanged.
+
+Proving it needed a spawned worker, not a unit test: a replication was created against the running
+container through its own API and triggered, and the run row came back `Running` with a pid. That is
+the only assertion that says the path resolves *in a published layout*.
+
+## Debian, and the reason is in the file
+
+LibGit2Sharp, `Microsoft.Data.Sqlite` and DuckDB.NET all ship glibc natives. Alpine would find that out
+as a `DllNotFoundException` at run time, which is the worst place to learn it, so the Dockerfile says
+so where somebody would otherwise "optimise" the base image.
+
+## Verification
+
+- `ApiFallbackTests` (4) — an unmatched `/api` route is a 404 and not the page, the same for `/hubs`,
+  a deep link reaches the app, and the API still answers. The exclusion is the load-bearing part: a
+  fallback that returns `index.html` with a 200 makes a client parse HTML as JSON and report something
+  incomprehensible, and that failure looks like a client bug from every angle except this one.
+- Manual, because they are the things a test cannot claim: the tool built, installed into a clean tool
+  root, and run with no arguments; the container built, serving the SPA at `/`, deep links returning
+  the app, `/api/nope` returning 404, `docker inspect` reporting **healthy**, a restart finding its
+  volume, and a spawned worker reporting a pid.
+- CI now packs the tool, installs it into a clean tool path, runs it, builds the image and waits for it
+  to answer — on every push, because the first time anyone finds out the Dockerfile is broken should
+  not be the release.
+- Full suite green: 796 .NET tests, 39 Playwright.
+
+## Not built, as planned
+
+A package feed decision, a systemd unit, auto-update, and any change to how runners are spawned.
+
+**Windows service registration is untested.** `datasync service install|uninstall|status` is written and
+its non-Windows refusal is verified, but there is no Windows runner in CI and no Windows host here.
+Saying so is better than a test that asserts `sc.exe` would have been called.
+
+## Open questions
+
+- ~~**Versioning.**~~ `0.1.0` on the tool package, set in one place. A real scheme belongs with the
+  first release, not with the first package.
+- ~~**`wwwroot` or an embedded resource.**~~ `wwwroot`, published by an MSBuild target that runs only on
+  publish and is skippable — `dotnet build` must not shell out to npm, or a node install sits between a
+  developer and a unit test.
+- ~~**Where the state database goes in the container.**~~ Inside the mounted root, so one volume is a
+  complete deployment.
+- **New**: the tool's `serve` has no way to run a one-off pass and exit, which is what a cron-driven
+  deployment would want instead of a resident scheduler. Worth its own small command if anyone asks.

@@ -84,3 +84,42 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+
+  # Built on every push rather than only at release time, because the first time anyone finds out the
+  # Dockerfile or the tool package is broken should not be the release.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Pack the global tool
+        run: dotnet pack src/DataSync.Cli/DataSync.Cli.csproj -c Release -o artifacts
+      - name: Install it into a clean tool root and run it
+        run: |
+          dotnet tool install --tool-path /tmp/datasync-tool --add-source artifacts DataSync
+          /tmp/datasync-tool/datasync version
+          /tmp/datasync-tool/datasync --help
+      - name: Build the container image
+        run: docker build -t datasync:ci .
+      - name: Start it and check it answers
+        run: |
+          docker run -d --name datasync-ci -p 18080:8080 datasync:ci
+          for i in $(seq 1 30); do
+            if docker exec datasync-ci dotnet /app/DataSync.Cli.dll health --url http://127.0.0.1:8080; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the container never became healthy"
+          docker logs datasync-ci
+          exit 1
+      - name: Upload the tool package
+        uses: actions/upload-artifact@v4
+        with:
+          name: datasync-tool
+          path: artifacts/*.nupkg
