@@ -68,6 +68,14 @@ public sealed class MsSqlDialect : SqlDialect
 
     protected override char IdentifierQuoteClose => ']';
 
+    /// <summary>SQL Server's canonical Boolean is <c>bit</c>, which takes 1 and 0 and refuses TRUE.</summary>
+    public override string TrueLiteral => "1";
+
+    public override string FalseLiteral => "0";
+
+    /// <summary>SQL Server concatenates with <c>+</c>; <c>||</c> is a syntax error.</summary>
+    public override string Concat(IEnumerable<string> expressions) => string.Join(" + ", expressions);
+
     /// <summary>SQL Server has no LIMIT.</summary>
     public override string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT TOP ({rows}) * FROM {qualifiedTable};";

@@ -64,6 +64,12 @@ export function OverviewPanel({ replicationName, draft, setDraft }: {
       : id === 'writer' ? capabilities.writers.find((w) => w.kind === kind)?.parameters
       : capabilities.stagingProviders.find((p) => p.kind === kind)?.parameters) ?? []
 
+  // SCD2 closes a version when a key is deleted, which needs a reader that says so. The reader
+  // declares whether it can (IChangeReader.DetectsDeletes) rather than this string-matching Kinds.
+  const historizingWithoutDeletes =
+    draft.changeProcessing.writer.kind === 'Scd2'
+    && capabilities.readers.find((r) => r.kind === draft.changeProcessing.reader.kind)?.detectsDeletes === false
+
   const current = draft.changeProcessing[stage]
   const options = kindsFor(stage)
   const known = options.some((o) => o.kind === current.kind)
@@ -125,6 +131,19 @@ export function OverviewPanel({ replicationName, draft, setDraft }: {
                   </span>
                 </Field>
               </div>
+
+              {/* An informed choice, not a validation error. SCD Type 2 keeps history by versioning
+                  each key and closing the old version when it changes — and closing one for a *deleted*
+                  key needs a reader that reports deletes. Paired with one that cannot, a row that
+                  disappears at the source stays "current" here forever, which is a real configuration
+                  for a source that never deletes and a silent wrong answer for one that does. */}
+              {stage === 'writer' && historizingWithoutDeletes && (
+                <span className="banner warn" role="alert" data-testid="scd2-delete-blind-warning">
+                  The <strong>{draft.changeProcessing.reader.kind}</strong> reader cannot report deletes,
+                  so a row deleted at the source will stay marked current in this target forever. That is
+                  correct for a source that never deletes rows, and wrong for one that does.
+                </span>
+              )}
 
               {/* The declared settings, plus whatever else is already in the bag. A Kind that
                   declares nothing still gets the free-form table, because an option a driver reads

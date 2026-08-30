@@ -237,8 +237,20 @@ public sealed class ConfigRepository
 
         // A mapping that resolves to no connection or database cannot run. Catch it here rather than
         // at the first run, where it surfaces as a failed run instead of a rejected edit.
-        EndpointResolution.Validate(LoadReplicationTask(replicationName), mapping);
+        var task = LoadReplicationTask(replicationName);
+        EndpointResolution.Validate(task, mapping);
         ValidateHooks(mapping.Hooks);
+
+        // Same reasoning, one step further: a historizing writer pointed at its own source grows the
+        // table on every pass, and finding out at run time means finding out after it has.
+        if (mapping.Sources.Count == 1 && mapping.Targets.Count == 1)
+        {
+            ConfigValidation.ValidateHistorizedTarget(
+                task.ChangeProcessing.Writer.Kind,
+                EndpointResolution.ResolveSource(task, mapping.Sources[0]),
+                EndpointResolution.ResolveTarget(task, mapping.Targets[0]),
+                mapping.Name);
+        }
 
         var path = ConfigPaths.TableMappingFile(_configRoot, replicationName, mapping.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

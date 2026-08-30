@@ -43,7 +43,11 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
         [new BatchInsertStagingProvider(PostgresDialect.Instance, PostgresCatalog.Instance)];
 
     public IReadOnlyList<IChangeWriter> Writers { get; } =
-        [new DeleteInsertWriter(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance)];
+    [
+        new DeleteInsertWriter(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
+        new SnapshotWriter(PostgresDialect.Instance, PostgresCatalog.Instance),
+        new Scd2Writer(PostgresDialect.Instance, PostgresCatalog.Instance),
+    ];
 
     public DbConnection CreateConnection(ConnectionConfig connection, string? credential)
     {

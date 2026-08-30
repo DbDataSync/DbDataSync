@@ -228,8 +228,15 @@ public sealed class ProvisioningService(
         var (columns, identityWarnings) = ProvisioningColumnBuilder.Build(
             ResolveDialect(sourceDriver.DriverType), sourceColumns, mapping.ColumnMappings);
 
+        // Extended with whatever the configured writer needs beyond the mapped columns — a snapshot's
+        // marker, an SCD Type 2 target's version key and validity range. The same list the create and
+        // alter planners already work from, rather than a second provisioning path.
+        var writerKind = task.ChangeProcessing.Writer.Kind;
+        var provisioned = HistorizedProvisioning.Extend(columns, writerKind);
+
         ProvisioningRequest Request(string action) => new(
-            action, target, ReaderKind: null, ReaderOptions: new Dictionary<string, string>(), columns);
+            action, target, ReaderKind: null, ReaderOptions: new Dictionary<string, string>(), provisioned,
+            writerKind);
 
         // Create first: its plan comes back Satisfied when the table already exists, which is exactly
         // when the alter plan is the one with something to say. The two are mutually exclusive, which

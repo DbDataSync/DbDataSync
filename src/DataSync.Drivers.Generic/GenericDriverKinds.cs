@@ -15,4 +15,12 @@ public static class GenericDriverKinds
     public const string BatchReload = "BatchReload";
     public const string StagingTable = "StagingTable";
     public const string DeleteInsert = "DeleteInsert";
+
+    /// <summary>Appends a complete copy per pass, marked with when it ran. Keeps history by keeping
+    /// every copy.</summary>
+    public const string Snapshot = "Snapshot";
+
+    /// <summary>Slowly Changing Dimension Type 2: keeps history by versioning each key, closing the
+    /// old version when its values change.</summary>
+    public const string Scd2 = "Scd2";
 }

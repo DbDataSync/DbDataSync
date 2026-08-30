@@ -139,4 +139,9 @@ public sealed record ProvisioningRequest(
     TableRef Table,
     string? ReaderKind,
     IReadOnlyDictionary<string, string> ReaderOptions,
-    IReadOnlyList<ProvisioningColumn> Columns);
+    IReadOnlyList<ProvisioningColumn> Columns,
+    /// <summary>
+    /// The configured writer, for the writers that need columns beyond the mapped ones — a snapshot's
+    /// marker, an SCD Type 2 target's version key and validity range. Null where it does not matter.
+    /// </summary>
+    string? WriterKind = null);

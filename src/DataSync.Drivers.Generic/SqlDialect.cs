@@ -171,6 +171,30 @@ public abstract class SqlDialect
     public virtual string RenderRenameColumn(string qualifiedTable, string from, string to) =>
         $"ALTER TABLE {qualifiedTable} RENAME COLUMN {QuoteIdentifier(from)} TO {QuoteIdentifier(to)};";
 
+    /// <summary>
+    /// An expression rendered as text, for building a composite value out of columns of mixed type.
+    /// ANSI <c>CAST(… AS VARCHAR(…))</c> by default; engines that spell it differently override.
+    /// </summary>
+    public virtual string CastToText(string expression) => $"CAST({expression} AS VARCHAR(4000))";
+
+    /// <summary>
+    /// How this engine writes a boolean literal in SQL.
+    /// <para>
+    /// Not cosmetic: a canonical <c>Boolean</c> renders as <c>boolean</c> on Postgres and <c>bit</c> on
+    /// SQL Server, and <c>= 1</c> against the former is "operator does not exist: boolean = integer".
+    /// A statement builder that hardcodes either one works on exactly one engine.
+    /// </para>
+    /// </summary>
+    public virtual string TrueLiteral => "TRUE";
+
+    public virtual string FalseLiteral => "FALSE";
+
+    /// <summary>
+    /// Joins string expressions. ANSI <c>||</c> by default; SQL Server spells it <c>+</c>, which is
+    /// the other half of the same problem.
+    /// </summary>
+    public virtual string Concat(IEnumerable<string> expressions) => string.Join(" || ", expressions);
+
     public virtual string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT * FROM {qualifiedTable} LIMIT {rows};";
 

@@ -744,8 +744,14 @@ public sealed class RunExecutor(
         var (columns, identityWarnings) = ProvisioningColumnBuilder.Build(
             ResolveDialect(sourceDriver), sourceColumns, mapping.ColumnMappings);
 
+        // The same extension the Setup card applies, so what an unattended pass creates and what an
+        // operator previewed are one answer rather than two.
+        var writerKind = task.ChangeProcessing.Writer.Kind;
+        var provisioned = HistorizedProvisioning.Extend(columns, writerKind);
+
         ProvisioningRequest Request(string action) => new(
-            action, target, ReaderKind: null, ReaderOptions: new Dictionary<string, string>(), columns);
+            action, target, ReaderKind: null, ReaderOptions: new Dictionary<string, string>(), provisioned,
+            writerKind);
 
         // Create if the table is missing, alter if it is there and out of shape — the two are mutually
         // exclusive, and each is gated by its own resolved setting. A replication that creates missing

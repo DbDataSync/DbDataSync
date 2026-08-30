@@ -1,6 +1,6 @@
-# Phase 55 — Data snapshotting and SCD Type 2 tracking (planned)
+# Phase 55 — Data snapshotting and SCD Type 2 tracking
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/data-snapshotting-and-scd-tracking.md`
 
 ## What this covers
@@ -126,3 +126,97 @@ account for.
 - Whether the SCD2 "values differ" comparison is column-by-column equality or something coarser (a row
   hash, mirroring the snapshot-diff strategy already named in `change-tracking-strategies.md`) — affects
   performance on wide tables, not correctness.
+
+---
+
+# Retrospective
+
+Two generic writers, both engine-neutral, both verified against a real database — because what they do
+is decided by SQL and every interesting case is about what happens on the *second* pass.
+
+## The natural key cannot be inferred, and finding that out cost a rewrite
+
+`Scd2Writer` first derived the business key from the target's primary key, excluding the surrogate.
+That is circular and it failed on the first run against a real table: in an SCD2 target the surrogate
+**is** the primary key, and the natural key is not a key at all — which is exactly what this phase's own
+provisioning creates.
+
+It is a declared setting now (`naturalKey`), required, offered by the parameter system like every other
+writer option. That is also the more honest answer: which columns make a customer the same customer is
+a question about the business, not about the schema.
+
+## Two dialect divergences, both found by running it
+
+Neither would have surfaced from reading the code, and both make a statement work on exactly one
+engine:
+
+- **A boolean literal.** A canonical `Boolean` renders as `boolean` on Postgres and `bit` on SQL
+  Server, and `= 1` against the former is *"operator does not exist: boolean = integer"*.
+- **String concatenation.** `||` everywhere, `+` on SQL Server.
+
+`SqlDialect` gained `TrueLiteral`, `FalseLiteral` and `Concat`. Small additions, and the kind that only
+appear when the generic layer is actually exercised on two engines.
+
+## Null-safety is the silent one
+
+`t.c <> s.c` is *unknown* when either side is null, so a value becoming null — or arriving where there
+was none — would not register as a change and the version would never close. The target then reports
+stale data as current, with nothing wrong on the surface.
+
+Each column is compared with an explicit null-handling pair instead. Asserted twice: in the SQL, and
+against a real database in both directions.
+
+A row hash would be cheaper on a wide table and is the obvious next step. It is not the first cut,
+because a hash makes "which column changed" unanswerable while this is still being trusted.
+
+## The snapshot writer's whole design is a refusal
+
+No comparison, no dedup, no delete. A writer that skipped unchanged rows would produce copies that are
+not snapshots: the row missing from Tuesday's would mean "unchanged" to somebody who knows the
+implementation and "deleted" to everybody else. Asserted by running it twice against an unchanged source
+and finding two complete copies under two distinct markers — the second of which is what phase 54 reads.
+
+## Provisioning extends the list it already had
+
+The bookkeeping columns go into the same `ProvisioningColumn` list `CreateTargetTable` and
+`AlterTargetTable` already work from, which is what phase 45 §8 was built to allow. The SCD2 surrogate
+becomes the table's primary key and the mapped columns stop being one — a target that keeps every
+version of a key has that key many times over, so leaving it as the primary key would make the *second*
+version of anything a constraint violation on the first write.
+
+## Same source and target is refused at save
+
+A historizing writer pointed at its own source grows the table on every pass, and the next pass reads
+what the last one wrote. Refused when a mapping is saved, following phase 16's precedent — finding out
+at run time means finding out after it has already doubled the table. Same *connection* is fine and
+needs nothing; it is the same table object that cannot work.
+
+## Verification
+
+- `HistorizedStatementTests` (11) — the snapshot's absence of a predicate, null-safe comparison in both
+  directions, a delete closing a version, only the open version closing, a key-only table where nothing
+  can change, versions opened only where none is open, no replacement for a delete, the surrogate
+  computed from the natural key, a composite key, and the dialect supplying booleans and concatenation.
+- `HistorizedWriterTests` (8, integration, Postgres) — two passes producing two complete snapshots under
+  two markers; a new key opening one version; a changed key closing and opening; an unchanged key
+  writing nothing at all; a value becoming null and a value arriving closing the version; a delete
+  closing with no replacement; and **a delete-blind reader leaving a disappeared key current**, which is
+  the accepted limitation behaving as documented rather than silently wrong.
+- `HistorizedTargetValidationTests` (6) — both historizing writers refused against their own source, the
+  same connection and the same name in another schema allowed, and ordinary writers unaffected.
+- Playwright 38 — the delete-blind warning appearing for SCD2 with a watermark reader, absent with a
+  delete-detecting one, and gone again with a writer that keeps no history.
+
+## Open questions
+
+- ~~**Bookkeeping column names.**~~ `DS_SnapshotAt`, `DS_VersionKey`, `DS_ValidFrom`, `DS_ValidTo`,
+  `DS_IsCurrent`, named once in `HistorizedColumns` so phase 54 and provisioning read the same
+  constant rather than three agreeing strings.
+- ~~**Column-by-column or a row hash.**~~ Column by column, for the reason above.
+- **New**: `DS_ValidTo IS NULL` and `DS_IsCurrent` say the same thing, written together in one
+  statement. The redundancy is deliberate — an indexable flag is what makes "the current row" cheap —
+  but nothing enforces that they agree, and a hand-written UPDATE against the target could separate
+  them.
+- **New**: the surrogate key is the pass timestamp plus the natural key, cast to text and concatenated.
+  Unique and legible, and longer than a hash would be. `VARCHAR(200)` will not hold a wide composite
+  key, and nothing checks.

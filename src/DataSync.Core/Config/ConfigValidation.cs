@@ -132,4 +132,34 @@ public static class ConfigValidation
                 $"{frequency}s. The idle timeout has to be longer than the frequency, or the worker gives up " +
                 "before it has looked for changes even once.");
     }
+
+    /// <summary>
+    /// A historizing writer must not write into the table it is reading.
+    /// <para>
+    /// Snapshot appends a complete copy per pass and SCD Type 2 appends a version per change; pointed
+    /// at their own source, both grow it without bound and the next pass reads what the last one
+    /// wrote. There is no useful configuration here to preserve, and finding out at run time means
+    /// finding out after the first pass has already doubled the table.
+    /// </para>
+    /// <para>
+    /// Same connection is fine and needs nothing — it is the same *table object* that cannot work.
+    /// </para>
+    /// </summary>
+    public static void ValidateHistorizedTarget(
+        string writerKind, SourceTableRef source, TableRef target, string mappingName)
+    {
+        if (writerKind is not ("Snapshot" or "Scd2"))
+            return;
+
+        var same = string.Equals(source.ConnectionName, target.ConnectionName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(source.Database, target.Database, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(source.Schema, target.Schema, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(source.Table, target.Table, StringComparison.OrdinalIgnoreCase);
+
+        if (same)
+            throw new ConfigValidationException(
+                $"Table mapping '{mappingName}' writes to the table it reads with the '{writerKind}' " +
+                "writer, which appends history rather than replacing rows. Each pass would grow the " +
+                "source and the next would read what the last one wrote. Point it at a different table.");
+    }
 }

@@ -1685,4 +1685,43 @@ public sealed class Shout : IValueColumnExpression
 
     expect(source.schema).toBe('dbo')
   })
+
+  test('38 - choosing SCD2 with a delete-blind reader says what it costs', async ({ page }) => {
+    // An informed choice, not a validation error. SCD Type 2 closes a version when a key is deleted,
+    // which needs a reader that reports deletes — paired with one that cannot, a row that disappears
+    // at the source stays current forever.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await expect(page.getByTestId('stage-writer')).toBeVisible({ timeout: 20_000 })
+
+    const before = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()
+
+    // By value, not label: the picker labels a kind with its own note ("Scd2 — upsert-only"), so an
+    // exact-label match never finds it.
+    const chooseKind = async (stage: string, kind: string) => {
+      const select = page.getByTestId(`${stage}-kind-select`)
+      await expect(select.locator(`option[value="${kind}"]`)).toBeAttached({ timeout: 15_000 })
+      await select.selectOption(kind)
+    }
+
+    await page.getByTestId('stage-writer').click()
+    await chooseKind('writer', 'Scd2')
+
+    // Change Tracking reports deletes, so nothing to warn about.
+    await expect(page.getByTestId('scd2-delete-blind-warning')).toHaveCount(0)
+
+    await page.getByTestId('stage-reader').click()
+    await chooseKind('reader', 'Watermark')
+    await page.getByTestId('stage-writer').click()
+
+    await expect(page.getByTestId('scd2-delete-blind-warning')).toBeVisible()
+    await expect(page.getByTestId('scd2-delete-blind-warning')).toContainText('stay marked current')
+    await shot(page, '45-scd2-delete-blind.png')
+
+    // And it is gone again with a writer that does not keep history — the warning is about the
+    // pairing, not about the reader.
+    await chooseKind('writer', 'MsSqlMerge')
+    await expect(page.getByTestId('scd2-delete-blind-warning')).toHaveCount(0)
+
+    expect((await page.request.put(`/api/replications/${REPLICATION_NAME}`, { data: before })).ok()).toBeTruthy()
+  })
 })

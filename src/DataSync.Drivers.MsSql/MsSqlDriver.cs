@@ -48,6 +48,8 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         new MsSqlMergeReconcileWriter(),
         new MsSqlDeleteInsertWriter(),
         new DeleteInsertWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
+            new SnapshotWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance),
+        new Scd2Writer(MsSqlDialect.Instance, MsSqlCatalog.Instance),
     ];
 
     public DbConnection CreateConnection(ConnectionConfig connection, string? credential)
