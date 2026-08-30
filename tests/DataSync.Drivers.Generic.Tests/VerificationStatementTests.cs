@@ -127,6 +127,9 @@ public sealed class VerificationStatementTests
             Dialect, "dbo", "Orders", VerificationStatement.ResolveTarget(Dialect, ["Region"]),
             filter: "Status <> 'draft'");
 
-        Assert.Contains("WHERE Status <> 'draft' GROUP BY", sql);
+        // Parenthesised since phase 54, which can AND a current-only predicate onto it: an operator's
+        // filter is an arbitrary expression, and one containing an OR would otherwise swallow the AND
+        // and silently compare every version again.
+        Assert.Contains("WHERE (Status <> 'draft') GROUP BY", sql);
     }
 }

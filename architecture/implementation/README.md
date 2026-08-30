@@ -29,12 +29,12 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **054** — "current only" verification comparison | A check against a historized target reports the feature working as a defect |
-| 2 | **034** — PostgreSQL logical replication | |
-| 3 | **035** — config history diff and revert | |
-| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **034** — PostgreSQL logical replication | |
+| 2 | **035** — config history diff and revert | |
+| 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-30; 032, 033, 036, 037, 039–053 and 055 done and removed. Distribution and auth moved above the
+Set 2026-08-30; 032, 033, 036, 037 and 039–055 done and removed. What is left is the three engine
+phases that were always behind the distribution and auth work. Distribution and auth moved above the
 remaining engine work: with 032 and 033 done there are three change-tracking mechanisms and no way for
 anyone outside this repo to install any of them, and nothing guarding the port. A phase moving up or down is an ordinary
 decision and only this table changes.

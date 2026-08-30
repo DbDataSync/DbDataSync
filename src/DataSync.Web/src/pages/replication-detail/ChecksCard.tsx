@@ -16,13 +16,25 @@ const KINDS: { kind: VerificationCheckKind; label: string; hint: string }[] = [
 /** The slot a verification script implements (see ScriptSlots.VerificationQueryBuilder). */
 const VERIFICATION_SLOT = 'verificationQueryBuilder'
 
+/**
+ * What "current" means, per writer — the constants phase 55's `HistorizedColumns` defines.
+ *
+ * The two writers historize differently and the filter is not the same shape: SCD Type 2 has a per-row
+ * flag, and a Snapshot target has a marker whose newest value is the newest complete copy. Offering
+ * one shape for both would produce a filter against a column that does not exist.
+ */
+const CURRENT_COLUMN_BY_WRITER: Record<string, string> = {
+  Scd2: 'DS_IsCurrent',
+  Snapshot: 'DS_SnapshotAt',
+}
+
 const COLUMNS = '1.1fr .7fr 1.6fr 120px'
 
 function blank(): VerificationCheckConfig {
   return {
     name: '', kind: 'RowCount', groupBy: [], measures: [],
     sourceSql: null, targetSql: null, scriptName: null, parameters: {},
-    filter: null, differenceThreshold: 0,
+    filter: null, compareCurrentOnly: false, currentColumn: null, differenceThreshold: 0,
   }
 }
 
@@ -37,8 +49,11 @@ function blank(): VerificationCheckConfig {
  * Saved through the ordinary mapping upsert. A check lives on the mapping, so there is nothing here a
  * second CRUD endpoint would own that the mapping's own save does not already.
  */
-export function ChecksCard({ mapping, onSave, saving }: {
+export function ChecksCard({ mapping, writerKind, onSave, saving }: {
   mapping: TableMappingConfig
+  /** The replication's configured writer, which decides whether this target keeps history and what
+   * marks a row current. */
+  writerKind: string | undefined
   onSave: (checks: VerificationCheckConfig[]) => Promise<void>
   saving: boolean
 }) {
@@ -112,6 +127,7 @@ export function ChecksCard({ mapping, onSave, saving }: {
       {draft && (
         <CheckEditor
           mapping={mapping}
+          writerKind={writerKind}
           draft={draft}
           setDraft={setDraft}
           onCancel={() => { setEditing(null); setDraft(null) }}
@@ -131,8 +147,9 @@ function summarise(check: VerificationCheckConfig): string {
   return check.kind === 'Script' ? `${check.scriptName ?? 'no script'}${grouped}` : measures + grouped
 }
 
-function CheckEditor({ mapping, draft, setDraft, onCancel, onCommit, saving, isNew }: {
+function CheckEditor({ mapping, writerKind, draft, setDraft, onCancel, onCommit, saving, isNew }: {
   mapping: TableMappingConfig
+  writerKind: string | undefined
   draft: VerificationCheckConfig
   setDraft: (next: VerificationCheckConfig) => void
   onCancel: () => void
@@ -267,6 +284,49 @@ function CheckEditor({ mapping, draft, setDraft, onCancel, onCommit, saving, isN
           testId="check-filter"
         />
       </Field>
+
+      {/* Only where the writer actually keeps history. On an ordinary target every row is current and
+          the option would be a filter against a column that does not exist. */}
+      {writerKind && CURRENT_COLUMN_BY_WRITER[writerKind] && (
+        <Field label="Compare current rows only">
+          <span className="hint">
+            {writerKind === 'Snapshot'
+              ? 'This target keeps every snapshot, so it holds more rows than the source by design. ' +
+                'Compares against the most recent snapshot instead of all of them.'
+              : 'This target keeps every version of a row, so it holds more rows than the source by ' +
+                'design. Compares against the current version of each.'}
+          </span>
+          <span className="row" style={{ gap: 7, height: 30 }}>
+            <button
+              type="button"
+              className={`toggle ${draft.compareCurrentOnly ? 'on' : ''}`}
+              aria-pressed={draft.compareCurrentOnly ?? false}
+              onClick={() => set({
+                compareCurrentOnly: !draft.compareCurrentOnly,
+                // Pre-filled from the writer, and editable — a check should still say plainly what it
+                // filters on rather than hiding an inference.
+                currentColumn: draft.currentColumn ?? CURRENT_COLUMN_BY_WRITER[writerKind],
+              })}
+              data-testid="check-current-only-toggle"
+            />
+            <span style={{ font: '500 11.5px var(--ui)', color: 'var(--ink-4)' }}>
+              {draft.compareCurrentOnly ? 'On' : 'Off'}
+            </span>
+          </span>
+        </Field>
+      )}
+
+      {draft.compareCurrentOnly && (
+        <Field label="Current-row column">
+          <input
+            className="input mono"
+            value={draft.currentColumn ?? ''}
+            placeholder={writerKind ? CURRENT_COLUMN_BY_WRITER[writerKind] : ''}
+            onChange={(e) => set({ currentColumn: e.target.value || null })}
+            data-testid="check-current-column-input"
+          />
+        </Field>
+      )}
 
       <Field label="Difference threshold (%)">
         <span className="hint">

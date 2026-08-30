@@ -28,13 +28,14 @@ public static class VerificationStatement
     /// </para>
     /// </summary>
     public static string BuildRowCount(
-        SqlDialect dialect, string schema, string table, IReadOnlyList<VerificationColumn> groupBy, string? filter)
+        SqlDialect dialect, string schema, string table, IReadOnlyList<VerificationColumn> groupBy,
+        string? filter, string? currentOnly = null)
     {
         var selected = groupBy
             .Select(g => $"{g.Expression} AS {dialect.QuoteIdentifier(g.ResultName)}")
             .Append($"COUNT(*) AS {dialect.QuoteIdentifier(RowCountColumn)}");
 
-        return Assemble(dialect, schema, table, selected, groupBy, filter);
+        return Assemble(dialect, schema, table, selected, groupBy, filter, currentOnly);
     }
 
     /// <summary>
@@ -44,7 +45,8 @@ public static class VerificationStatement
     /// </summary>
     public static string BuildSum(
         SqlDialect dialect, string schema, string table,
-        IReadOnlyList<VerificationColumn> groupBy, IReadOnlyList<VerificationColumn> measures, string? filter)
+        IReadOnlyList<VerificationColumn> groupBy, IReadOnlyList<VerificationColumn> measures,
+        string? filter, string? currentOnly = null)
     {
         if (measures.Count == 0)
             throw new ConfigValidationException("A Sum check needs at least one measure column.");
@@ -53,7 +55,37 @@ public static class VerificationStatement
             .Select(g => $"{g.Expression} AS {dialect.QuoteIdentifier(g.ResultName)}")
             .Concat(measures.Select(m => $"SUM({m.Expression}) AS {dialect.QuoteIdentifier(m.ResultName)}"));
 
-        return Assemble(dialect, schema, table, selected, groupBy, filter);
+        return Assemble(dialect, schema, table, selected, groupBy, filter, currentOnly);
+    }
+
+    /// <summary>
+    /// The predicate that narrows a historized target to what is current, or null.
+    ///
+    /// <para>
+    /// **Two shapes, because the two writers historize differently.** An SCD Type 2 target has a
+    /// per-row flag and one current row per key. A Snapshot target has no flag at all — every snapshot
+    /// is a complete separate copy — so "current" there means the most recent marker value, which is a
+    /// subquery rather than a comparison.
+    /// </para>
+    ///
+    /// <para>
+    /// The subquery is <c>= (SELECT MAX(marker) FROM …)</c> rather than a join or a window function:
+    /// the marker is one value per pass, so the planner reads it once, and it says what it means to
+    /// somebody reading the generated SQL.
+    /// </para>
+    /// </summary>
+    public static string? CurrentOnlyPredicate(SqlDialect dialect, string schema, string table, string? currentColumn)
+    {
+        if (string.IsNullOrWhiteSpace(currentColumn))
+            return null;
+
+        var quoted = dialect.QuoteIdentifier(currentColumn);
+
+        // A snapshot marker is a time, not a flag: the newest value is the newest copy.
+        if (string.Equals(currentColumn, HistorizedColumns.SnapshotAt, StringComparison.OrdinalIgnoreCase))
+            return $"{quoted} = (SELECT MAX({quoted}) FROM {dialect.QualifyTable(schema, table)})";
+
+        return $"{quoted} = {dialect.TrueLiteral}";
     }
 
     /// <summary>
@@ -67,12 +99,22 @@ public static class VerificationStatement
     /// </summary>
     private static string Assemble(
         SqlDialect dialect, string schema, string table,
-        IEnumerable<string> selected, IReadOnlyList<VerificationColumn> groupBy, string? filter)
+        IEnumerable<string> selected, IReadOnlyList<VerificationColumn> groupBy, string? filter,
+        string? currentOnly = null)
     {
         var sql = $"SELECT {string.Join(", ", selected)} FROM {dialect.QualifyTable(schema, table)}";
 
+        // Both, when both apply — the check's own filter narrows what is compared and the current-only
+        // predicate narrows which version of it. Parenthesised, because an operator's filter is an
+        // arbitrary expression and one containing an OR would otherwise swallow the AND.
+        var predicates = new List<string>();
         if (!string.IsNullOrWhiteSpace(filter))
-            sql += $" WHERE {filter}";
+            predicates.Add($"({filter})");
+        if (!string.IsNullOrWhiteSpace(currentOnly))
+            predicates.Add(currentOnly);
+
+        if (predicates.Count > 0)
+            sql += $" WHERE {string.Join(" AND ", predicates)}";
 
         if (groupBy.Count > 0)
         {

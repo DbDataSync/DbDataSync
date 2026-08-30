@@ -1,8 +1,8 @@
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import {
-  useDeleteVerificationResult, useRunVerification, useTableMapping, useUpsertTableMapping,
-  useVerificationResults,
+  useDeleteVerificationResult, useReplication, useRunVerification, useTableMapping,
+  useUpsertTableMapping, useVerificationResults,
 } from '../../api/hooks'
 import { ChecksCard } from './ChecksCard'
 import type { VerificationCheckConfig } from '../../api/types'
@@ -25,6 +25,9 @@ export function VerificationPanel() {
 
   const { data: results, error } = useVerificationResults(replicationName, mappingName)
   const { data: mapping } = useTableMapping(replicationName, mappingName)
+  // The replication's writer decides whether this target keeps history, and therefore whether a check
+  // against it needs narrowing to what is current.
+  const { data: task } = useReplication(replicationName)
   const upsert = useUpsertTableMapping(replicationName)
   const run = useRunVerification(replicationName)
   const remove = useDeleteVerificationResult(replicationName)
@@ -57,7 +60,14 @@ export function VerificationPanel() {
 
       <ErrorBanner error={error ?? run.error ?? upsert.error ?? remove.error} />
 
-      {mapping && <ChecksCard mapping={mapping} onSave={saveChecks} saving={upsert.isPending} />}
+      {mapping && (
+        <ChecksCard
+          mapping={mapping}
+          writerKind={task?.changeProcessing.writer.kind}
+          onSave={saveChecks}
+          saving={upsert.isPending}
+        />
+      )}
 
       <div className="card flush" data-testid="verification-results-list">
         <div className="card-head tight">

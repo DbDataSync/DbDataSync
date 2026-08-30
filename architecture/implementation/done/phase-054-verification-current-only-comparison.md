@@ -1,6 +1,6 @@
-# Phase 54 — "Current only" comparison for verification checks against historized targets (planned)
+# Phase 54 — "Current only" comparison for verification checks against historized targets
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/data-snapshotting-and-scd-tracking.md`, following up on
 the gap that doc flagged and phase 55 (SCD2/Snapshot writers) carries forward.
 **Depends on**: phase 55, which decides the bookkeeping column names this reads.
@@ -54,3 +54,65 @@ difference that isn't a defect — it's the feature working.
 
 - Exact query shape for "latest snapshot" filtering (a subquery for `MAX(snapshotMarker)`, or something
   cheaper if the marker is monotonic and indexed) — implementation detail, not a design question.
+
+---
+
+# Retrospective
+
+A check against an SCD Type 2 or Snapshot target can now compare like with like. Before this, one
+against a historized target reported a difference on every run — the feature working, shown as a
+defect, which is the fastest way to teach an operator that a screen is wrong.
+
+## Two shapes, not one assumed universally
+
+The plan flagged this and it turned out to be the whole of the design. SCD Type 2 has a per-row flag:
+one version of each key is current and the rest are closed, so the filter is a comparison. A Snapshot
+target has no such thing — every snapshot is a complete separate copy — so "current" means the newest
+marker value, and the filter is a subquery.
+
+Offering SCD2's shape for both would produce a filter against a column that does not exist. The editor
+offers the option only where the writer historizes, and pre-fills the column from the writer's own
+constant.
+
+## The parenthesis is the bug that was not written
+
+A check's own filter is admin-authored raw SQL, and the current-only predicate is `AND`ed onto it. A
+filter containing an `OR` — `Region = 'north' OR Region = 'south'` — would bind looser than the `AND`
+and silently compare every version again, reporting a difference that is not one. Wrapping the
+operator's filter in parentheses is one character each side and the difference between a correct
+answer and a plausible wrong one.
+
+That changed an existing assertion, which is how it got recorded rather than slipped in.
+
+## The source is never filtered
+
+A source has no history to filter, by definition — and filtering it too would compare a subset of the
+source against all of the target, which is the same mistake pointing the other way. It is the mistake a
+symmetric implementation makes without anybody deciding to, so it has its own test.
+
+## Additive, and asserted as such
+
+A check that does not ask for this builds exactly the statement it built before — asserted directly,
+because "additive" is a claim about existing behaviour and this feature touches the statement builder
+every check goes through.
+
+## Verification
+
+- `CurrentOnlyComparisonTests` (8) — the SCD2 flag predicate, the Snapshot most-recent subquery, no
+  column meaning no predicate, the statement unchanged without the option, the target narrowed with it,
+  a check's own filter parenthesised before the `AND`, a Sum check narrowed the same way, and the
+  boolean literal coming from the dialect.
+- `CurrentOnlyExecutionTests` (5) — the target narrowed and **the source not**, neither narrowed
+  without the option, a snapshot target's different shape, nothing narrowed when the option is set with
+  no column named, and a Sum check.
+- The SCD2 and Snapshot behaviours these filter over are phase 55's integration tests, against a real
+  database.
+
+## Open questions
+
+- ~~**The query shape for "latest snapshot".**~~ `= (SELECT MAX(marker) FROM …)`, rather than a join or
+  a window function: the marker is one value per pass, so the planner reads it once and the generated
+  SQL says what it means to somebody reading it.
+- **New**: nothing validates that the named current-row column exists on the target. A typo produces a
+  failed check with the engine's own "invalid column" message, which is honest but arrives one run
+  later than it needs to — the catalog is already loaded for the mapping's columns elsewhere.

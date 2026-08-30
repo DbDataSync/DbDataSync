@@ -406,6 +406,11 @@ export interface VerificationCheckConfig {
   scriptName: string | null
   parameters: Record<string, string>
   filter: string | null
+  /** Compares the target's current rows only. A historized target holds more rows than its source by
+   * design, so a check against one otherwise reports the feature working as a defect. */
+  compareCurrentOnly?: boolean
+  /** Which column marks a target row current. Null means the default for the mapping's own writer. */
+  currentColumn?: string | null
   /** How far apart two measures may be before it is worth pointing at, as a fraction of the larger
    * side. Zero means any difference at all. */
   differenceThreshold: number

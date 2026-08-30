@@ -71,6 +71,36 @@ public sealed class VerificationCheckConfig
     public string? Filter { get; set; }
 
     /// <summary>
+    /// Compares the target's **current** rows only.
+    /// <para>
+    /// A target written by an SCD Type 2 or Snapshot writer legitimately holds more rows than its
+    /// source — that is the feature, not a defect — so a check against one reports a difference on
+    /// every run and teaches an operator that this screen is wrong. Filtering the target side to what
+    /// is current compares like with like.
+    /// </para>
+    /// <para>
+    /// Off by default, so it changes nothing for a check that already exists. The source side is never
+    /// filtered: a source has no history to filter, by definition.
+    /// </para>
+    /// </summary>
+    public bool CompareCurrentOnly { get; set; }
+
+    /// <summary>
+    /// Which column marks a target row current, when <see cref="CompareCurrentOnly"/> is set.
+    /// <para>
+    /// **Two shapes, because the two writers historize differently.** An SCD Type 2 target has a
+    /// per-row flag — one row per key is current and the rest are closed. A Snapshot target has no such
+    /// thing: every snapshot is a complete separate copy, so "current" means "the most recent one",
+    /// which is a different filter against a marker column rather than a flag.
+    /// </para>
+    /// <para>
+    /// Null means the default for the mapping's own writer, which is what the editor pre-fills — an
+    /// editable default rather than a hidden inference, so a check still says what it filters on.
+    /// </para>
+    /// </summary>
+    public string? CurrentColumn { get; set; }
+
+    /// <summary>
     /// How far apart two measures may be before the difference is worth pointing at, as a fraction of
     /// the larger side. Zero means any difference at all.
     /// <para>

@@ -70,6 +70,14 @@ public static class VerificationExecutor
         VerificationEndpoint target,
         IVerificationQueryBuilder? queryBuilder = null)
     {
+        // Target side only. A source has no history to filter, by definition — and filtering it would
+        // be comparing a subset of the source against all of the target, which is the same mistake
+        // pointing the other way.
+        var currentOnly = check.CompareCurrentOnly
+            ? VerificationStatement.CurrentOnlyPredicate(
+                target.Dialect, target.Schema, target.Table, check.CurrentColumn)
+            : null;
+
         switch (check.Kind)
         {
             case VerificationCheckKind.RowCount:
@@ -79,7 +87,8 @@ public static class VerificationExecutor
                         VerificationStatement.ResolveSource(source.Dialect, columnMappings, check.GroupBy), check.Filter),
                     VerificationStatement.BuildRowCount(
                         target.Dialect, target.Schema, target.Table,
-                        VerificationStatement.ResolveTarget(target.Dialect, check.GroupBy), check.Filter));
+                        VerificationStatement.ResolveTarget(target.Dialect, check.GroupBy), check.Filter,
+                        currentOnly));
 
             case VerificationCheckKind.Sum:
                 return (
@@ -90,7 +99,8 @@ public static class VerificationExecutor
                     VerificationStatement.BuildSum(
                         target.Dialect, target.Schema, target.Table,
                         VerificationStatement.ResolveTarget(target.Dialect, check.GroupBy),
-                        VerificationStatement.ResolveTarget(target.Dialect, check.Measures), check.Filter));
+                        VerificationStatement.ResolveTarget(target.Dialect, check.Measures), check.Filter,
+                        currentOnly));
 
             case VerificationCheckKind.Sql:
                 if (string.IsNullOrWhiteSpace(check.SourceSql))
