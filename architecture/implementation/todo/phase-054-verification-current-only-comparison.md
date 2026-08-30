@@ -2,7 +2,8 @@
 
 **Status**: Planned, not started
 **Plan reference**: `architecture/planning/done/data-snapshotting-and-scd-tracking.md`, following up on
-the gap that doc flagged and phase 51 (SCD2/Snapshot writers) carries forward.
+the gap that doc flagged and phase 55 (SCD2/Snapshot writers) carries forward.
+**Depends on**: phase 55, which decides the bookkeeping column names this reads.
 
 ## The gap
 
@@ -16,8 +17,8 @@ difference that isn't a defect — it's the feature working.
 - **`VerificationCheckConfig`** gains a field (e.g. `compareCurrentOnly: bool` plus a
   `currentColumn: string | null` naming which column marks a row current) — when set, the check's
   target-side read filters to current rows only (`WHERE {currentColumn} = 1`, or the SCD2 writer's actual
-  equivalent from phase 51 §3) before comparing against the source.
-- **Default the column name from the mapping's own writer**, when it's SCD2: phase 51 already has the
+  equivalent from phase 55 §3) before comparing against the source.
+- **Default the column name from the mapping's own writer**, when it's SCD2: phase 55 already has the
   mapping declare its `IsCurrent` column name as part of its own provisioning config. The Checks editor
   (`VerificationPanel.tsx`'s Checks card, phase 48) should read that and pre-fill `currentColumn`
   automatically rather than asking the operator to type the same name twice — surface it as an editable
@@ -33,7 +34,7 @@ difference that isn't a defect — it's the feature working.
 
 ## What this phase does not build
 
-- Any change to how SCD2/Snapshot writers themselves work (phase 51).
+- Any change to how SCD2/Snapshot writers themselves work (phase 55).
 - A general "as of" comparison (comparing source-as-of-some-past-date against a target's historical
   version) — this is specifically "current vs. current," not point-in-time comparison.
 

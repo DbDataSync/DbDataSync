@@ -129,4 +129,5 @@ the writer contract's shape — this is close enough to write an implementation 
 
 # Outcome
 
-Agreed, as `implementation/todo/phase-051-snapshotting-and-scd-tracking.md`.
+Agreed, as `implementation/todo/phase-055-snapshotting-and-scd-tracking.md` (written as 051, and
+renumbered to resolve a collision with the distribution phase).

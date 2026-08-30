@@ -1,4 +1,4 @@
-# Phase 51 — Data snapshotting and SCD Type 2 tracking (planned)
+# Phase 55 — Data snapshotting and SCD Type 2 tracking (planned)
 
 **Status**: Planned, not started
 **Plan reference**: `architecture/planning/done/data-snapshotting-and-scd-tracking.md`
@@ -81,11 +81,11 @@ case otherwise needs nothing extra.
   precedent as `run-metrics.md` and phase 43: a policy question, not an implementation one.
 - **Building the verification-side fix itself** — resolved in direction (see below), but the actual
   `VerificationCheckConfig` field and the check-execution filter belong to phase 48 (the Checks editor,
-  not yet built), not here. Phase 51 only needs to make sure `IsCurrent`'s actual column name is
+  not yet built), not here. Phase 55 only needs to make sure `IsCurrent`'s actual column name is
   discoverable — it's this phase's own provisioning naming decision (§3, an open question below) that
   phase 48 has to read.
 
-### Resolved: current-only comparison, for phase 48 to build
+### Resolved: current-only comparison, for phase 54 to build
 
 **A verification check should have a "compare current only" option.** When set, the check's target-side
 read is filtered to current rows only (`WHERE IsCurrent = 1`, or its equivalent), so a check against an
@@ -97,7 +97,7 @@ knows its `IsCurrent` column name from its own provisioning config (§3) — the
 to that automatically rather than asking the operator to type the same column name twice. A check against
 a Snapshot-written target has no equivalent "current" concept (every snapshot is a distinct, complete
 copy, not a single row with a current flag) — "compare current only" for a snapshot target instead means
-"compare against the most recent snapshot marker," a related but separate filter phase 48 should also
+"compare against the most recent snapshot marker," a related but separate filter phase 54 should also
 account for.
 - Engine-specific optimized versions of either writer (a bulk-MERGE-based SCD2, say) — the generic
   version is the first cut, same phasing precedent as `DeleteInsertWriter` before `MsSqlMergeWriter`.
