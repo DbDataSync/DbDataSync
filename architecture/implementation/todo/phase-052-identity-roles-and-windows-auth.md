@@ -103,6 +103,45 @@ added later is closed rather than open by omission.
   not decoration — **admin-only affordances hidden for a viewer**. A Save button that always 403s is
   worse than no Save button.
 
+## 6. Bootstrap mode: `--local-admin-remote-viewer`, and refusing to start with no auth configured
+
+**Resolved 2026-08-29**, closing two of this phase's own open questions below.
+
+- **A CLI flag** (name TBD, e.g. `--local-admin-remote-viewer`) that, when passed, trusts the request's
+  origin instead of a credential: a request from loopback (`127.0.0.1`/`::1`) is treated as **Admin**, a
+  request from anywhere else is treated as **Viewer** — no sign-in, no `Users` row, no session. This is
+  evaluated per request from `HttpContext.Connection.RemoteIpAddress`, the same "re-evaluate every time"
+  shape §4 already uses for Windows group membership, not baked in at any kind of login.
+- **This is what fixes the Playwright authentication problem** §"Open questions" named below: tests run
+  against localhost, so passing this flag in the test environment gets them Admin for free, with no
+  test-only authentication handler to keep out of production. It also fixes first-run: someone who just
+  installed DataSync and runs it with no configuration gets full access from their own machine
+  immediately, without configuring a Windows group or waiting on phase 53's invite flow.
+- **This is a real, standing security-relevant default, not just a dev convenience, and has to be treated
+  like one**: anyone who can reach the port at all gets read access with zero credentials while this flag
+  is set. Starting under this flag logs a loud, unmissable warning naming exactly what it grants, every
+  time — not a one-line mention buried in normal startup logging.
+- **No authentication configured at all is now a startup failure, not a silent open door.** At startup,
+  if none of {Windows auth configured, this flag passed, (once phase 53 exists) at least one passkey
+  invite/credential} are true, the process prints the available options and exits non-zero rather than
+  starting. Sketch of the message:
+
+  ```
+  No authentication method is configured. DataSync will not start without one. Choose one:
+
+    --local-admin-remote-viewer     Trust localhost as Admin, everyone else as Viewer.
+                                     Fine for local/dev use; do not expose this port to an
+                                     untrusted network while this flag is set.
+
+    Configure Windows authentication — see <docs link>.
+
+  Exiting.
+  ```
+
+  This directly resolves this phase's own "whether 'no authentication configured' should be a supported
+  mode or a startup failure" open question below: it's a failure, unconditionally, and the flag is what
+  makes that not a first-run trap.
+
 ## What this phase does not build
 
 - Passkeys, invites, or user management UI beyond seeing who you are. Phase 53.
@@ -123,18 +162,23 @@ added later is closed rather than open by omission.
 - A config change made by a signed-in user is committed with that user's name, and shows in the Version
   Control tab.
 - Playwright: signed-in chrome shows the user, a viewer sees no Save or Run controls, and sign-out
-  returns to a sign-in screen.
+  returns to a sign-in screen. With `--local-admin-remote-viewer` set, the suite authenticates as Admin
+  with no sign-in step at all.
+- Starting the API with no Windows auth configured and no bootstrap flag passed exits non-zero and prints
+  the options message; starting with either configured succeeds.
+- A request to a mutating endpoint from a non-loopback address, under `--local-admin-remote-viewer`, gets
+  Viewer treatment (403 on admin-only routes), not Admin.
+- The startup warning for `--local-admin-remote-viewer` appears in the log every time the flag is set,
+  not just the first run.
 
 ## Open questions
 
-- **How the Playwright suite authenticates.** Negotiate against a test host is not something a
-  container easily does. Most likely a test-only authentication handler registered in the same way the
-  API tests already override configuration — which has to be impossible to enable in a real deployment,
-  and that is the part to get right rather than the part to make convenient.
-- **Whether "no authentication configured" should be a supported mode or a startup failure.** A tool
-  somebody just installed and ran with no arguments has no group and no passkey. Refusing to start is
-  honest and unusable; starting open is usable and how products get breached. The likely answer is
-  phase 53's first-run invite — the console prints a URL, and the product is closed but reachable —
-  which would make this a startup failure only when *neither* method is configured.
+- **~~How the Playwright suite authenticates.~~ Resolved by §6**: `--local-admin-remote-viewer` in the
+  test environment, no separate test-only handler needed.
+- **~~Whether "no authentication configured" should be a supported mode or a startup failure.~~
+  Resolved by §6**: always a startup failure; the bootstrap flag is the supported path for "I have no
+  auth method configured yet and that's fine for now."
 - **Whether a Windows-authenticated user should be able to be disabled locally** while remaining in the
   group. The `Enabled` column above says yes; the group check says no. Pick one, and say which wins.
+- Exact flag name (`--local-admin-remote-viewer` is a placeholder) and whether it's a CLI flag only or
+  also settable via config/environment for containerized deployments where CLI args are less natural.

@@ -98,20 +98,35 @@ a real dependency to flag, not solve here: phase 43's checks assume source and t
 shape"; an SCD/snapshot target isn't, and a check against one needs to know how to narrow itself back down
 to a fair comparison.
 
-## Open questions — these are product decisions, not implementation details
+## Resolved (2026-08-29)
 
-1. **Does SCD2 require a delete-detecting reader, or is "never closes on delete" an acceptable, clearly
-   labeled limitation for readers that can't?**
-2. **How does an operator query "as of" a point in time?** Is that DataSync's problem (a view, a helper),
+- **SCD2 + a delete-blind reader is allowed, clearly labeled.** Binding SCD2 to a reader whose
+  `DetectsDeletes` is false is not rejected — but the UI must state plainly that a row whose source
+  record is deleted will remain "current" in history forever, since the writer has no signal that it's
+  gone. This is a labeling requirement on the binding UI, not a validation error.
+- **Surrogate key is DataSync-computed**, not target-generated — a deterministic value (e.g. a hash of
+  the natural key plus `ValidFrom`) computed before insert. This means **no write-back is needed on the
+  writer contract**: `ApplyAsync` never has to read a generated identity back out of the target, which
+  keeps the writer interface exactly as it is today. Any engine behaves identically — no dependency on
+  identity/sequence support existing or being reachable.
+- **Snapshot writer always writes every row, every snapshot.** No last-snapshot comparison, no dedup
+  logic — the simplest possible writer. A snapshot is "everything, right now," full stop; cheaper storage
+  is a retention/compaction concern (see below), not something the writer itself should be doing.
+
+## Still open
+
+1. **How does an operator query "as of" a point in time?** Is that DataSync's problem (a view, a helper),
    or is "the table has ValidFrom/ValidTo, write your own WHERE clause" sufficient?
-3. **Retention for both.** Snapshots and SCD history both grow without bound by design — does anything
-   ever purge old versions/snapshots, and if so, on what policy?
-4. **Surrogate key generation** — an identity/sequence the target owns, or something DataSync computes
-   (a hash of natural key + ValidFrom)? This affects whether the target needs write-back of a generated
-   key, which nothing in the writer contract does today.
-5. **Does a "snapshot" need to detect that nothing changed and skip an entire no-op copy**, or is writing
-   every row on every snapshot (even unchanged ones) acceptable given it's meant to be a simple, cheap
-   mechanism?
+2. **Retention for both.** Snapshots and SCD history both grow without bound by design — does anything
+   ever purge old versions/snapshots, and if so, on what policy? (Same category of question `run-metrics.md`
+   and phase 43 both deliberately left as policy, not implementation.)
 
-**Next step**: resolve the open questions above — they change the writer contract's shape (surrogate key
-write-back, in particular) — then this is ready for an implementation phase doc.
+**Next step**: the two remaining questions are narrower than the ones already resolved and don't change
+the writer contract's shape — this is close enough to write an implementation phase doc against, treating
+"as of" querying and retention as explicitly out of scope for a first version rather than blockers.
+
+---
+
+# Outcome
+
+Agreed, as `implementation/todo/phase-051-snapshotting-and-scd-tracking.md`.
