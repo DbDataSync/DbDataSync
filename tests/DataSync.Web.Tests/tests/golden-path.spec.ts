@@ -145,6 +145,11 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('target-table-input').fill(TARGET_TABLE)
     await expect(page.getByTestId('target-table-will-be-created')).toHaveCount(0)
 
+    // The editor's own tabs (phase 64). Source/Target and the filter stay above them; everything
+    // about how the mapping behaves is a tab, and Notes is the one a bare mapping URL opens.
+    await expect(page.getByTestId('mapping-notes-card')).toBeVisible()
+    await page.getByTestId('mapping-tab-columns').click()
+
     // Column mappings auto-suggest once both tables' columns load (same-name match: Id, Name).
     // The design renders rows as CSS-grid divs rather than a <table>, so count the row class.
     await expect(page.getByTestId('column-mappings-table').locator('.grid-row')).toHaveCount(2, { timeout: 15_000 })
@@ -457,7 +462,7 @@ public sealed class ReverseName : ISqlColumnExpression
     await shot(page, '19-script-diagnostics.png')
 
     // Bind it on the mapping — the most specific level, which is what the hierarchy exists for.
-    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/transforms`)
     // Collapsed until something is bound (phase 37) — an advanced customisation should not hold the
     // best space on a screen for the majority who never use it.
     await expect(page.getByTestId('script-bindings-card')).toBeVisible({ timeout: 15_000 })
@@ -476,7 +481,7 @@ public sealed class ReverseName : ISqlColumnExpression
     // The mapping already carries a literal UPPER({{column}}) on Name from test 05, and a literal
     // transform beats a script — so the script's REVERSE has to lose. Clearing the literal is what
     // lets it win, and proves the precedence rule rather than assuming it.
-    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/columns`)
     await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}-edit`).click()
     await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}`).fill('')
     await page.getByTestId(`column-mapping-transform-${SOURCE_NAME_COLUMN}`).press('Enter')
@@ -674,9 +679,11 @@ public sealed class DropGadgets : IRowTransform
     // The target has no catalog to read, so its columns are the source's — and this is not cosmetic:
     // the CREATE TABLE is generated from the mapping's column mappings, so what is listed here is
     // literally what gets created.
+    await page.getByTestId('mapping-tab-columns').click()
     const rows = page.getByTestId('column-mappings-table').locator('.grid-row')
     await expect(rows).toHaveCount(2, { timeout: 15_000 })
     await expect(page.getByTestId('column-mappings-table')).toContainText("the source's columns")
+    await page.getByTestId('mapping-tab-provisioning').click()
     await expect(page.getByTestId('provisioning-after-save-hint')).toBeVisible()
     await shot(page, '23-new-target-table.png')
 
@@ -689,6 +696,17 @@ public sealed class DropGadgets : IRowTransform
     await page.reload()
     await expect(page.getByTestId('target-table-input')).toHaveValue(NEW_TARGET, { timeout: 15_000 })
     await expect(page.getByTestId('target-table-will-be-created')).toBeVisible({ timeout: 15_000 })
+
+    // The tab says how much is outstanding without being opened — a satisfied plan shows no badge
+    // at all rather than a "0".
+    await expect(page.getByTestId('mapping-tab-provisioning-badge')).toBeVisible({ timeout: 20_000 })
+    await page.getByTestId('mapping-tab-provisioning').click()
+
+    // The settings come first and the two plans follow them: the toggles are what this mapping asks
+    // for, and the plans are what that currently amounts to.
+    const provisioningCard = page.locator('.subtab-panel')
+    expect((await provisioningCard.getByTestId('provisioning-create').boundingBox())!.y)
+      .toBeLessThan((await provisioningCard.getByTestId('provisioning-plan-target').boundingBox())!.y)
 
     // The Setup card now plans against it: the same code path an unattended run's
     // CreateTargetTableIfMissing uses, so this DDL is the DDL that would have run anyway.
@@ -704,6 +722,9 @@ public sealed class DropGadgets : IRowTransform
     // Each step's outcome, not just the resulting state: a step can fail without the request failing.
     await expect(targetPlan.getByTestId('provisioning-plan-target-result')).toContainText('✓', { timeout: 20_000 })
     await expect(targetPlan).toContainText('satisfied', { timeout: 20_000 })
+
+    // Applied down to nothing outstanding, and the badge goes entirely rather than reading "0".
+    await expect(page.getByTestId('mapping-tab-provisioning-badge')).toHaveCount(0, { timeout: 20_000 })
 
     expect(querySql(`SELECT COUNT(*) FROM sys.tables WHERE name = '${NEW_TARGET}';`, DB_NAME)).toContain('1')
 
@@ -737,7 +758,7 @@ public sealed class DropGadgets : IRowTransform
     await expect(page.getByTestId('preview-from-pipeline-link')).toBeVisible({ timeout: 15_000 })
 
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
-    await page.getByTestId('preview-mapping-link').click()
+    await page.getByTestId('mapping-tab-preview').click()
     await expect(page).toHaveURL(new RegExp(`/mappings/${MAPPING_NAME}/preview$`))
 
     const preview = page.getByTestId('mapping-preview')
@@ -899,8 +920,13 @@ public sealed class Shout : IValueColumnExpression
     const targetBox = (await mappingPair.locator('[data-testid="target-side"]').boundingBox())!
     expect(Math.abs(sourceBox.height - targetBox.height)).toBeLessThan(2)
 
-    // And the filter is its own row beneath both, not inside either card.
+    // And the filter is its own row beneath both, not inside either card — collapsed while empty
+    // (phase 64), the same convention the script bindings card set, and it says so on its heading
+    // once a filter is actually set.
     await expect(mappingPair.getByTestId('source-filter-editor')).toHaveCount(0)
+    await expect(page.getByTestId('source-filter-applied-pill')).toHaveCount(0)
+    await expect(page.getByTestId('source-filter-editor')).toHaveCount(0)
+    await page.getByTestId('source-filter-toggle').click()
     await expect(page.getByTestId('source-filter-editor')).toBeVisible()
     await shot(page, '29-mapping-endpoints.png')
 
@@ -914,6 +940,8 @@ public sealed class Shout : IValueColumnExpression
 
     // And the association holds wherever a side is shown, not only on this pair: the Setup card's
     // two plan panels carry the same colours.
+    await page.getByTestId('mapping-tab-provisioning').click()
+    await expect(page.locator('[data-testid="provisioning-plan-source"]')).toBeVisible({ timeout: 20_000 })
     await expect(await page.locator('[data-testid="provisioning-plan-source"]')
       .evaluate((el) => getComputedStyle(el).borderTopColor)).toBe(sourceBorder)
     await expect(await page.locator('[data-testid="provisioning-plan-target"]')
@@ -961,7 +989,7 @@ public sealed class Shout : IValueColumnExpression
 
     // 3. And the layout hints group what belongs together. The connection card is one card because
     //    the declaration says so, not because this screen decided.
-    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await page.goto(`/replications/${REPLICATION_NAME}/overview/pipeline`)
     await page.getByTestId('stage-reader').click()
     await expect(page.getByTestId('reader-options')).toContainText('Snapshot isolation', { timeout: 15_000 })
 
@@ -996,7 +1024,7 @@ public sealed class Shout : IValueColumnExpression
 
     await setCheck(0)
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
-    await page.getByTestId('verify-mapping-link').click()
+    await page.getByTestId('mapping-tab-verify').click()
     await expect(page).toHaveURL(new RegExp(`/mappings/${MAPPING_NAME}/verification$`))
 
     await runAndWait(1)
@@ -1027,7 +1055,6 @@ public sealed class Shout : IValueColumnExpression
     // an operator reads it to judge drift — but no longer called a failure, because a replication
     // being behind is the premise of the feature rather than a fault.
     await setCheck(0.6)
-    await page.getByTestId('verify-mapping-link').isVisible().catch(() => {})
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/verification`)
     await runAndWait(2)
     await openNewest()
@@ -1129,6 +1156,7 @@ public sealed class Shout : IValueColumnExpression
 
     await page.getByTestId('target-schema-input').fill('dbo')
     await page.getByTestId('target-table-input').fill('PwDottedTarget')
+    await page.getByTestId('mapping-tab-columns').click()
 
     // The pair survives the round trip. Split on '.', this would have produced schema "dbo",
     // table "Pw" and silently mapped the wrong table — or nothing at all.
@@ -1141,6 +1169,7 @@ public sealed class Shout : IValueColumnExpression
 
     // The Setup card's SQL is Monaco now, not a <pre> whose overflow widened the whole page — and the
     // generated CREATE TABLE is one column per line rather than forty on one.
+    await page.getByTestId('mapping-tab-provisioning').click()
     const targetPlan = page.getByTestId('provisioning-plan-target')
     await expect(targetPlan.locator('.monaco-editor')).toBeVisible({ timeout: 30_000 })
     await expect(targetPlan).toContainText('CREATE TABLE')
@@ -1161,6 +1190,7 @@ public sealed class Shout : IValueColumnExpression
       `/api/replications/${REPLICATION_NAME}/table-mappings/dotted`, { data: mapping })).ok()).toBeTruthy()
 
     await page.reload()
+    await page.getByTestId('mapping-tab-columns').click()
     await expect(page.getByTestId('column-mapping-source-0')).toHaveValue('gone_away', { timeout: 20_000 })
     await expect(page.getByTestId('column-mapping-source-0')).toContainText('not on the source')
     await shot(page, '34-unknown-source-column.png')
@@ -1218,7 +1248,7 @@ public sealed class Shout : IValueColumnExpression
 
     // A mapping that has never been asked inherits it — which is why the mapping's own value starts
     // null rather than false: false would opt it out of a default it should pick up.
-    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/provisioning`)
     const mappingCreate = page.getByTestId('provisioning-create')
     await expect(mappingCreate).toContainText('INHERITED', { timeout: 20_000 })
     await expect(mappingCreate.getByTestId('provisioning-create-checkbox')).toBeChecked()
@@ -1248,7 +1278,7 @@ public sealed class Shout : IValueColumnExpression
   })
 
   test('29 - a column\'s target type is inferred until overridden, and a rename is recorded as one', async ({ page }) => {
-    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/columns`)
     const before = await (await page.request.get(
       `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
 
@@ -1292,6 +1322,7 @@ public sealed class Shout : IValueColumnExpression
 
     // Which the Setup card then plans as a RENAME — never an ADD beside the old column, and never a
     // DROP. Both of those leave a table that looks right and is empty in the column that matters.
+    await page.getByTestId('mapping-tab-provisioning').click()
     await expect(page.getByTestId('provisioning-plan-target')).toContainText('Rename', { timeout: 20_000 })
     await expect(page.getByTestId('provisioning-plan-target')).not.toContainText('DROP')
     await shot(page, '38-planned-rename.png')
@@ -1423,7 +1454,7 @@ public sealed class Shout : IValueColumnExpression
     expect((await page.request.put(
       `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, { data: widened })).ok()).toBeTruthy()
 
-    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/columns`)
     const table = page.getByTestId('column-mappings-table')
     await expect(table).toContainText('Target column', { timeout: 20_000 })
     await expect(table.getByTestId('column-mapping-target-1-text')).toContainText(LONG.slice(0, 20))
@@ -1655,7 +1686,6 @@ public sealed class Shout : IValueColumnExpression
 
     // A result is an artifact on disk, and somebody who ran the wrong check over a large table needs
     // to be rid of it without going looking for the file.
-    await page.getByTestId('verify-mapping-link').isVisible().catch(() => {})
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/wide/verification`)
     await page.getByTestId(`delete-result-${result!.id}`).click()
 
@@ -1704,7 +1734,7 @@ public sealed class Shout : IValueColumnExpression
     // An informed choice, not a validation error. SCD Type 2 closes a version when a key is deleted,
     // which needs a reader that reports deletes — paired with one that cannot, a row that disappears
     // at the source stays current forever.
-    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await page.goto(`/replications/${REPLICATION_NAME}/overview/pipeline`)
     await expect(page.getByTestId('stage-writer')).toBeVisible({ timeout: 20_000 })
 
     const before = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()

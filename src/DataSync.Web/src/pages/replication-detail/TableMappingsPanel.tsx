@@ -109,6 +109,7 @@ export function MappingEditorRoute() {
       key={mappingName ?? 'new'}
       replicationName={replicationName}
       existing={existing}
+      base={base}
       // A save can rename, and a create names something that had no route a moment ago — so the URL
       // follows what was actually saved rather than what was open.
       onSaved={(savedName) => navigate(`${base}/${encodeURIComponent(savedName)}`, { replace: true })}

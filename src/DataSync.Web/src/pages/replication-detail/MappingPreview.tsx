@@ -4,6 +4,8 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { useMappingPreview } from '../../api/hooks'
 import type { PreviewOrigin, PreviewStatement } from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
+import { SubTabs } from '../../components/SubTabs'
+import { mappingTabs } from './mappingTabs'
 
 const ORIGIN_LABEL: Record<PreviewOrigin, string> = {
   BuiltIn: 'built in',
@@ -38,6 +40,16 @@ export function MappingPreview() {
           <Link className="btn" to={`${base}/${encodeURIComponent(mappingName!)}`}>Back to the mapping</Link>
         </div>
       </div>
+
+      {/* The same bar the editor wears. These two routes sit beside the editor rather than inside it
+          — both are about the mapping *as saved*, which is not what an unsaved editor is showing —
+          so the bar is rendered here too rather than hoisted into a shared layout that would drag
+          the editor's draft along with it. */}
+      <SubTabs
+        base={`${base}/${encodeURIComponent(mappingName!)}`}
+        tabs={mappingTabs(base, mappingName, 0)}
+        testId="mapping-subtabs"
+      />
 
       <ErrorBanner error={error} />
 

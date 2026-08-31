@@ -167,29 +167,6 @@ export function ProvisioningCard({
         </div>
       )}
 
-      {plans && (
-        <div className="form-grid">
-          <PlanPanel
-            label="Source"
-            side="source"
-            testId="provisioning-plan-source"
-            plan={plans.source}
-            applying={applySource.isPending}
-            result={applySource.data}
-            onApply={() => apply(applySource, plans.source.action)}
-          />
-          <PlanPanel
-            label="Target"
-            side="target"
-            testId="provisioning-plan-target"
-            plan={plans.target}
-            applying={applyTarget.isPending}
-            result={applyTarget.data}
-            onApply={() => apply(applyTarget, plans.target.action)}
-          />
-        </div>
-      )}
-
       <div className="card">
         <div className="card-head">
           <span className="card-title">Provisioning</span>
@@ -216,6 +193,33 @@ export function ProvisioningCard({
           />
         </div>
       </div>
+
+      {/* Below the settings, not above them. The settings are what this mapping *asks for*; the two
+          plans are what that currently amounts to against these databases. Reading the consequence
+          before the decision meant the DDL was the first thing on the tab and the toggles that
+          produced it were somewhere past it. */}
+      {plans && (
+        <div className="form-grid">
+          <PlanPanel
+            label="Source"
+            side="source"
+            testId="provisioning-plan-source"
+            plan={plans.source}
+            applying={applySource.isPending}
+            result={applySource.data}
+            onApply={() => apply(applySource, plans.source.action)}
+          />
+          <PlanPanel
+            label="Target"
+            side="target"
+            testId="provisioning-plan-target"
+            plan={plans.target}
+            applying={applyTarget.isPending}
+            result={applyTarget.data}
+            onApply={() => apply(applyTarget, plans.target.action)}
+          />
+        </div>
+      )}
     </div>
   )
 }

@@ -13,10 +13,31 @@ import {
   CustomTransformsTab, OverviewNotesTab, PipelineTab, TargetProvisioningTab,
 } from './pages/replication-detail/OverviewPanel'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
+import {
+  ColumnMappingTab, MappingNotesTab, MappingProvisioningTab, MappingSegmentingTab,
+  MappingTransformsTab,
+} from './pages/replication-detail/TableMappingForm'
 import { MappingsOverview } from './pages/replication-detail/MappingsOverview'
 import { MappingPreview } from './pages/replication-detail/MappingPreview'
 import { VerificationPanel } from './pages/replication-detail/VerificationPanel'
 import { VerificationResultPage } from './pages/replication-detail/VerificationResultPage'
+
+/**
+ * The mapping editor's tab routes, shared by `new` and `:mappingName` — the same tabs either way,
+ * with the two that need a saved mapping saying so rather than being absent from one of the trees.
+ *
+ * A fragment rather than a component: these have to be children of a `<Route>`, and React Router
+ * reads that tree structurally.
+ */
+const MAPPING_EDITOR_TABS = (
+  <>
+    <Route index element={<MappingNotesTab />} />
+    <Route path="columns" element={<ColumnMappingTab />} />
+    <Route path="transforms" element={<MappingTransformsTab />} />
+    <Route path="segmenting" element={<MappingSegmentingTab />} />
+    <Route path="provisioning" element={<MappingProvisioningTab />} />
+  </>
+)
 
 /**
  * Every destination has a URL.
@@ -67,9 +88,17 @@ export default function App() {
           <Route path="overview" element={<MappingsOverview />} />
           {/* `new` before the parameter for readability; React Router ranks the static segment higher
               either way. It does mean a mapping literally named "new" is unreachable — the same
-              sentinel this screen has always used, and worth revisiting only if anyone hits it. */}
-          <Route path="new" element={<MappingEditorRoute />} />
-          <Route path=":mappingName" element={<MappingEditorRoute />} />
+              sentinel this screen has always used, and worth revisiting only if anyone hits it.
+
+              The editor is itself a layout: its tabs are routes, and it holds the draft above them
+              so switching tabs does not remount what somebody is half-way through typing. Notes is
+              the index, so a link to a mapping is the mapping's own URL. */}
+          <Route path="new" element={<MappingEditorRoute />}>
+            {MAPPING_EDITOR_TABS}
+          </Route>
+          <Route path=":mappingName" element={<MappingEditorRoute />}>
+            {MAPPING_EDITOR_TABS}
+          </Route>
           {/* Beside the editor rather than inside it: the preview is about the mapping as
               *saved*, which is not what an editor with unsaved changes is showing. */}
           <Route path=":mappingName/preview" element={<MappingPreview />} />

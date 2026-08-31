@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useColumns, useInferredColumnTypes } from '../../api/hooks'
 import { EditableValue } from '../../components/EditableValue'
 import type { ColumnMapping, ResolvedRef } from '../../api/types'
@@ -51,16 +51,10 @@ export function ColumnMappingEditor({
   const { data: inferred } = useInferredColumnTypes(replicationName, mappingName)
   const [columnToAdd, setColumnToAdd] = useState('')
 
-  useEffect(() => {
-    if (!targetColumns || !sourceColumns || mappings.length > 0) return
-    const sourceNames = new Set(sourceColumns.map((c) => c.name))
-    const suggested = targetColumns
-      .filter((tc) => sourceNames.has(tc.name))
-      .map((tc) => ({ sourceColumn: tc.name, targetColumn: tc.name, transform: null }))
-    if (suggested.length > 0) onChange(suggested)
-    // Only auto-suggest once, when both column lists first become available and nothing is mapped.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceColumns, targetColumns])
+  // The same-name auto-suggestion used to live here, and moved up to TableMappingForm when this
+  // editor became one tab among several (phase 64): a mapping whose columns were never suggested
+  // cannot be saved, and the operator would have had to visit this tab to make Save work. A
+  // suggestion about the mapping belongs with the mapping, not with whichever tab is open.
 
   // target.table is checked separately: with no target chosen at all, targetColumns falls back to the
   // source's and would otherwise render a full editor for a table nobody has named.

@@ -7,6 +7,8 @@ import {
 import { ChecksCard } from './ChecksCard'
 import type { VerificationCheckConfig } from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
+import { SubTabs } from '../../components/SubTabs'
+import { mappingTabs } from './mappingTabs'
 
 const RESULT_COLUMNS = '1.2fr .8fr .8fr 1.2fr 150px'
 
@@ -57,6 +59,16 @@ export function VerificationPanel() {
           </button>
         </div>
       </div>
+
+      {/* The same bar the editor wears. These two routes sit beside the editor rather than inside it
+          — both are about the mapping *as saved*, which is not what an unsaved editor is showing —
+          so the bar is rendered here too rather than hoisted into a shared layout that would drag
+          the editor's draft along with it. */}
+      <SubTabs
+        base={`${base}/${encodeURIComponent(mappingName!)}`}
+        tabs={mappingTabs(base, mappingName, 0)}
+        testId="mapping-subtabs"
+      />
 
       <ErrorBanner error={error ?? run.error ?? upsert.error ?? remove.error} />
 
