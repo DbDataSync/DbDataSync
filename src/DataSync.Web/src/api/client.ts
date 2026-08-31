@@ -1,6 +1,7 @@
 import type {
   ApplyResult,
   BackfillRequest,
+  SegmentCandidate,
   ColumnMetadata,
   CommitInfo,
   ConnectionConfig,
@@ -274,6 +275,15 @@ export const api = {
     logs: (runId: string, sinceId?: number) =>
       request<LogEntryRecord[]>(`/api/runs/${runId}/logs${sinceId ? `?sinceId=${sinceId}` : ''}`),
     cancel: (runId: string) => request<void>(`/api/runs/${runId}/cancel`, { method: 'POST' }),
+    /**
+     * What a segmenting strategy proposes for this mapping right now. Every candidate, selected or
+     * not — the checklist is a proposal to disagree with, not an announcement.
+     */
+    previewSegmenting: (replicationName: string, mappingName: string, strategyName: string) =>
+      request<{ candidates: SegmentCandidate[] }>(
+        `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}` +
+          `/segmenting/${encodeURIComponent(strategyName)}/preview`,
+      ),
     backfill: (replicationName: string, mappingName: string, body: BackfillRequest) =>
       request<TriggerResponse>(
         `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}/backfill`,

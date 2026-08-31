@@ -410,6 +410,29 @@ export function useBackfill(replicationName: string) {
   })
 }
 
+/**
+ * Runs a segmenting strategy and returns everything it proposes.
+ *
+ * Enabled only once a strategy is actually picked. Safe to run on selection for a DuckDB strategy,
+ * which opens no connection at all; the other three reach a real database, which is why the form
+ * says so beside the picker before offering them.
+ */
+export function useSegmentingPreview(
+  replicationName: string,
+  mappingName: string,
+  strategyName: string | null,
+) {
+  return useQuery({
+    queryKey: ['replications', replicationName, 'table-mappings', mappingName, 'segmenting', strategyName] as const,
+    queryFn: () => api.runs.previewSegmenting(replicationName, mappingName, strategyName!),
+    enabled: Boolean(replicationName && mappingName && strategyName),
+    // A strategy that computes from "today" has to be re-run rather than served from cache — the
+    // whole reason its default is a reference and not a frozen list.
+    staleTime: 0,
+    gcTime: 0,
+  })
+}
+
 export function useCancelRun(replicationName: string) {
   const queryClient = useQueryClient()
   return useMutation({

@@ -511,6 +511,10 @@ select.select {
 
 .empty { padding: 22px 14px; text-align: center; font: 400 12px var(--ui); color: var(--ink-7); }
 .hint { font: 400 11px var(--ui); color: var(--ink-9); line-height: 1.5; }
+/* A hint about a consequence rather than a hint about a field. Used where a choice has an effect
+   that keeps happening — a query bound as a default runs on every scheduled pass, forever — and the
+   operator can only weigh that if it is visible at the moment they choose. */
+.hint.warn { color: var(--warn); }
 .mono { font-family: var(--mono); }
 .row { display: flex; align-items: center; gap: 8px; }
 .row-between { display: flex; align-items: center; justify-content: space-between; }

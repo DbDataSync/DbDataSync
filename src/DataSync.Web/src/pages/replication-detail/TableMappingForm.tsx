@@ -5,7 +5,8 @@ import { Field } from '../../components/Field'
 import { useConnections, useDeleteTableMapping, useReplication, useTables, useUpsertTableMapping } from '../../api/hooks'
 import { tableExists } from '../../api/tableExists'
 import type {
-  ColumnMapping, ProvisioningConfig, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
+  BatchReloadSegment, ColumnMapping, ProvisioningConfig, ScriptBindings, SourceTableSpec,
+  TableMappingConfig, TableSpec,
 } from '../../api/types'
 import { MappingSide } from './MappingSide'
 import { EndpointSidePair } from '../../components/EndpointSidePair'
@@ -14,6 +15,7 @@ import { CodeEditor } from '../../components/CodeEditor'
 import { ColumnMappingEditor } from './ColumnMappingEditor'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { ProvisioningCard } from './ProvisioningCard'
+import { DefaultSegmentingCard } from './DefaultSegmentingCard'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
 const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
@@ -47,6 +49,9 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
       // and said no does not. Starting a new one at false would opt it out of a replication-level
       // default it should have picked up.
       ?? { createTargetTableIfMissing: null, alterTargetTableColumnsIfMissingOrChanged: null },
+  )
+  const [defaultSegmenting, setDefaultSegmenting] = useState<BatchReloadSegment[]>(
+    structuredClone(existing?.defaultSegmenting ?? []),
   )
 
   /**
@@ -92,7 +97,9 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
     e.preventDefault()
     await upsert.mutateAsync({
       mappingName: name,
-      mapping: { name, sources: [source], targets: [target], columnMappings, scripts, provisioning },
+      mapping: {
+        name, sources: [source], targets: [target], columnMappings, scripts, provisioning, defaultSegmenting,
+      },
     })
     onSaved(name)
   }
@@ -221,6 +228,12 @@ export function TableMappingForm({ replicationName, existing, onSaved, onRemoved
         inherited={{ ...(sourceConnection?.scripts ?? {}), ...(task?.scripts ?? {}) }}
         level="mapping"
         onChange={setScripts}
+      />
+
+      <DefaultSegmentingCard
+        segments={defaultSegmenting}
+        strategies={task?.segmentingStrategies ?? []}
+        onChange={setDefaultSegmenting}
       />
 
       {/* Only a saved mapping has a name the provisioning API can plan against. */}

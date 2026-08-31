@@ -97,6 +97,11 @@ export interface ReplicationTaskConfig {
   hooks?: Hooks
   /** What every mapping under this replication may do to its target, unless the mapping overrides. */
   provisioning?: ProvisioningConfig
+  /**
+   * Named segmenting strategies any of this replication's mappings may reference. At the replication
+   * because a set of tables replicated together usually segments the same way.
+   */
+  segmentingStrategies?: SegmentingStrategyConfig[]
 }
 
 /** One side of a table mapping as configured: null connection/database inherit the replication's
@@ -183,6 +188,8 @@ export interface TableMappingConfig {
   hooks?: Hooks
   provisioning?: ProvisioningConfig
   verification?: VerificationCheckConfig[]
+  /** How this table divides for a reload. Empty means Full — the whole table, unsegmented. */
+  defaultSegmenting?: BatchReloadSegment[]
 }
 
 export interface TableMetadata {
@@ -588,15 +595,54 @@ export interface ApplyResult {
 
 // Which slice of a source table one reload covers. The discriminator property is "mode", matching
 // DataSync.Drivers.Abstractions.BatchReloadSegment's JsonPolymorphic configuration exactly.
-export type SegmentMode = 'full' | 'list' | 'range' | 'auto'
+export type SegmentMode = 'full' | 'list' | 'range' | 'auto' | 'custom'
 
 export type BatchReloadSegment =
   | { mode: 'full' }
   | { mode: 'list'; column: string; values: string[] }
-  /** Half-open: rangeMin inclusive, rangeMax exclusive. */
-  | { mode: 'range'; column: string; rangeMin: string; rangeMax: string }
+  /**
+   * Half-open: rangeMin inclusive, rangeMax exclusive. `label` is what a segmenting strategy called
+   * this range — it becomes the run's SegmentLabel in place of the generated bounds text.
+   */
+  | { mode: 'range'; column: string; rangeMin: string; rangeMax: string; label?: string | null }
   /** Expanded server-side into bucketCount concrete range segments before anything is enqueued. */
   | { mode: 'auto'; column: string; bucketCount: number }
+  /**
+   * A reference to a named strategy, expanded server-side into its *selected* candidates every time
+   * it runs — never a frozen list, or a strategy tracking "the last three months" would stop moving.
+   */
+  | { mode: 'custom'; strategyName: string }
+
+export type SegmentingStrategyKind = 'DuckDb' | 'SourceSql' | 'TargetSql' | 'Script'
+
+/**
+ * A named way of dividing a table for reload, defined on the replication and referenced by name.
+ * Every kind returns the same four columns: label, range_start, range_end and selected.
+ */
+export interface SegmentingStrategyConfig {
+  name: string
+  kind: SegmentingStrategyKind
+  sql?: string | null
+  scriptName?: string | null
+  column?: string | null
+  parameters?: Record<string, string>
+}
+
+/** One row of a strategy's proposal, as the Backfill checklist renders it. */
+export interface SegmentCandidate {
+  label: string
+  segment: BatchReloadSegment
+  selected: boolean
+}
+
+/**
+ * Whether running this kind reaches a real database. The one fact the UI has to state out loud
+ * before a strategy is bound as a mapping's default, because a default runs unattended on the
+ * replication's own schedule — every pass, forever.
+ */
+export function runsAgainstAConnection(kind: SegmentingStrategyKind): boolean {
+  return kind !== 'DuckDb'
+}
 
 // A backfill is a run, not a config change — it produces no git commit, unlike every other write in
 // this API. Kinds are null to mean "use the replication's own configured pipeline"; a backfill of an
