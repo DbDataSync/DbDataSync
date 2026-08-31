@@ -109,7 +109,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private void SetUpConfig(int frequencySeconds = 1, int idleTimeoutSeconds = 2)
+    private void SetUpConfig(int frequencySeconds = 1, int idleTimeoutSeconds = 2, bool traceTiming = false)
     {
         ConnectionInput MakeConnectionInput(string name) => new()
         {
@@ -155,6 +155,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
                 new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
+            TraceTiming = traceTiming,
         }, Author);
     }
 
@@ -371,6 +372,72 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         // Every row lands exactly once — the buckets have to tile the range and cover MAX for this
         // count to come out right.
         Assert.Equal(8, (await GetRowsAsync(_reloadTargetTable)).Count);
+    }
+
+    /// <summary>
+    /// Phase 59's opt-in trace: off by default, so an unopted-in mapping's run carries no timing at
+    /// all rather than a row of zeros.
+    /// </summary>
+    [Fact]
+    public async Task WithoutTheTraceOption_ARunRecordsNoTiming()
+    {
+        SetUpConfig();
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One');");
+
+        var run = await EnqueueAndDrainAsync();
+
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        Assert.Null(run.Timing);
+    }
+
+    [Fact]
+    public async Task WithTheTraceOption_ARunRecordsEveryStage()
+    {
+        SetUpConfig(traceTiming: true);
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (3, 'Three');");
+
+        var run = await EnqueueAndDrainAsync();
+
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        var timing = run.Timing;
+        Assert.NotNull(timing);
+
+        // The Kinds this pass actually used, which for a Primary pass are the replication's own.
+        Assert.Equal(MsSqlDriverKinds.ChangeTracking, timing!.ReaderKind);
+        Assert.Equal(MsSqlDriverKinds.StagingTable, timing.StagingKind);
+        Assert.Equal(MsSqlDriverKinds.Merge, timing.WriterKind);
+
+        Assert.NotNull(timing.ReaderTimeToFirstRowMs);
+        Assert.NotNull(timing.ReaderLifetimeMs);
+        Assert.NotNull(timing.StagingDurationMs);
+        Assert.NotNull(timing.WriterDurationMs);
+
+        // The invariant worth asserting directly: time-to-first-row is a prefix of the lifetime.
+        Assert.True(timing.ReaderTimeToFirstRowMs <= timing.ReaderLifetimeMs,
+            $"first row at {timing.ReaderTimeToFirstRowMs}ms, lifetime {timing.ReaderLifetimeMs}ms");
+
+        // Today's staging provider consumes the reader as rows arrive, so its call spans the read and
+        // then some. A file-based provider doing work after the stream is exhausted would widen this
+        // gap, which is exactly what the wrapped-call measurement is there to capture.
+        Assert.True(timing.StagingDurationMs >= timing.ReaderLifetimeMs - 5,
+            $"staging {timing.StagingDurationMs}ms was shorter than the read it consumes ({timing.ReaderLifetimeMs}ms)");
+    }
+
+    [Fact]
+    public async Task WithTheTraceOption_AReadThatFoundNothing_StillRecordsALifetime()
+    {
+        SetUpConfig(traceTiming: true);
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One');");
+        await EnqueueAndDrainAsync();
+
+        // Second pass: nothing changed, so the reader produces no rows — but it still ran, and a run
+        // reporting nothing at all would hide a source that is slow to answer "no changes".
+        var run = await EnqueueAndDrainAsync();
+
+        Assert.NotNull(run.Timing);
+        Assert.NotNull(run.Timing!.ReaderLifetimeMs);
+        Assert.Null(run.Timing.ReaderTimeToFirstRowMs);
     }
 
     private void SetUpReloadReplication(IReadOnlyList<BatchReloadSegment> segments)

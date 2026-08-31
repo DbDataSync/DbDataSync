@@ -38,7 +38,10 @@ public sealed record CompleteRunRequest(
     Guid RunId, RunStatus Status, long RowsRead, long RowsWritten, string? ErrorSummary,
     /// <summary>Why it failed, when the product can act on it. Defaulted, so a journal written by an
     /// older runner still deserializes.</summary>
-    string? FailureKind = null);
+    string? FailureKind = null,
+    /// <summary>Per-stage timing, for a mapping that opted into tracing. Defaulted for the same reason
+    /// <see cref="FailureKind"/> is — a journal entry written before this existed has to replay.</summary>
+    RunTiming? Timing = null);
 public sealed record SetWatermarkRequest(string TaskName, string SourceTable, string Watermark);
 public sealed record RecordVerificationResultRequest(VerificationResultRecord Result);
 public sealed record LogRequest(Guid RunId, LogSeverity Level, string Message, DateTimeOffset TimestampUtc);

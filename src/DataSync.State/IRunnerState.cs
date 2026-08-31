@@ -53,7 +53,8 @@ public interface IRunnerState
 
     void CompleteRun(
         Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
-        string? failureKind = null);
+        string? failureKind = null,
+        RunTiming? timing = null);
 
     /// <summary>
     /// Only ever called after the target write has committed — the watermark-on-success-only rule the

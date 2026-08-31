@@ -55,7 +55,37 @@ public sealed record TaskRunRecord(
     string? ErrorSummary,
     /// <summary>Why it failed, when that is something the product can act on. Null for the ordinary
     /// case — see <see cref="RunFailureKinds"/>.</summary>
-    string? FailureKind = null);
+    string? FailureKind = null,
+    /// <summary>
+    /// What this pass actually did, and how long each stage took — null unless the mapping opted into
+    /// tracing (phase 59).
+    /// <para>
+    /// The Kinds are recorded alongside the timings deliberately: a unit of work may override the
+    /// replication's configured pipeline, so "which reader produced this number" is not answerable
+    /// from the replication's config afterwards.
+    /// </para>
+    /// </summary>
+    RunTiming? Timing = null);
+
+/// <param name="ReaderTimeToFirstRowMs">
+/// From just before <c>ReadChangesAsync</c> to the first row arriving. A prefix of
+/// <paramref name="ReaderLifetimeMs"/>, always.
+/// </param>
+/// <param name="ReaderLifetimeMs">From the same start to the row stream being disposed.</param>
+/// <param name="StagingDurationMs">
+/// The whole <c>StageAsync</c> call. Close to the reader's lifetime for a provider that writes
+/// straight through as rows arrive, and genuinely longer for one that does work *after* the stream is
+/// exhausted — a file-based provider moving or uploading what it staged. The difference between the
+/// two is that provider's own work beyond consuming the source, which is why both are recorded.
+/// </param>
+public sealed record RunTiming(
+    string? ReaderKind = null,
+    long? ReaderTimeToFirstRowMs = null,
+    long? ReaderLifetimeMs = null,
+    string? StagingKind = null,
+    long? StagingDurationMs = null,
+    string? WriterKind = null,
+    long? WriterDurationMs = null);
 
 /// <summary>
 /// Failures with a specific remedy, as opposed to failures an operator has to go and read logs about.

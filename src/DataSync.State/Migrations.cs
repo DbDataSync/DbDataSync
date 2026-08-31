@@ -235,5 +235,28 @@ internal static class Migrations
 
         CREATE UNIQUE INDEX UX_Invites_CodeHash ON Invites(CodeHash);
         """,
+
+        """
+        -- Per-pass timing, for a mapping that opted into tracing it — see phase 59.
+        --
+        -- Columns on TaskRuns rather than log lines, because the question these answer is comparative
+        -- ("is this mapping's reader slower than it was last week", "which of forty mappings spends
+        -- its time waiting on the source") and a log line cannot be aggregated. Every one is nullable
+        -- and stays null for a mapping that never asked, so tracing costs an unopted-in run nothing —
+        -- not even a zero.
+        ALTER TABLE TaskRuns ADD COLUMN ReaderKind TEXT NULL;
+
+        -- Two numbers, not one, because they mean different things: how long the source took to
+        -- *start* answering, and how long it took to finish. A slow first row is a source planning or
+        -- queueing; a slow lifetime with a fast first row is volume, or a consumer that cannot keep up.
+        ALTER TABLE TaskRuns ADD COLUMN ReaderTimeToFirstRowMs INTEGER NULL;
+        ALTER TABLE TaskRuns ADD COLUMN ReaderLifetimeMs INTEGER NULL;
+
+        ALTER TABLE TaskRuns ADD COLUMN StagingKind TEXT NULL;
+        ALTER TABLE TaskRuns ADD COLUMN StagingDurationMs INTEGER NULL;
+
+        ALTER TABLE TaskRuns ADD COLUMN WriterKind TEXT NULL;
+        ALTER TABLE TaskRuns ADD COLUMN WriterDurationMs INTEGER NULL;
+        """,
     ];
 }

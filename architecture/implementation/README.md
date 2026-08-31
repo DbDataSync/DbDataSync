@@ -35,7 +35,7 @@ So the order lives here, and is the one to work through:
 | 4 | **035** — config history diff and revert | |
 | 5 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-30; 032, 033, 036, 037, 039–055 and 056–058 done and removed. 058–060 go ahead of the
+Set 2026-08-30; 032, 033, 036, 037, 039–055 and 056–058 done and removed. 059 and 060 go ahead of the
 three engine phases: they are all work on machinery that already exists rather than a fourth and fifth
 engine mechanism to maintain. Behind them sit the three engine phases that have been waiting since
 distribution and auth moved above them — with 032 and 033 done there were three change-tracking

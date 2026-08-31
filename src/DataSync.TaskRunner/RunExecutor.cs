@@ -255,9 +255,15 @@ public sealed class RunExecutor(
                     $"{mapping.Targets.Count} target(s) — DataSync.TaskRunner only executes 1:1 " +
                     "mappings in v1 (the config schema allows more for future fan-in/fan-out).");
 
-            var (rowsRead, rowsWritten) = item.RunKind == RunKind.Verification
-                ? await RunVerificationAsync(task, mapping, item, cancellationToken)
-                : await RunMappingAsync(task, mapping, item, cancellationToken);
+            long rowsRead;
+            long rowsWritten;
+            // A verification run reads both sides and writes nothing, so the reader/staging/writer
+            // stages this traces do not exist for it. Null rather than zeros: it was not measured.
+            RunTiming? timing = null;
+            if (item.RunKind == RunKind.Verification)
+                (rowsRead, rowsWritten) = await RunVerificationAsync(task, mapping, item, cancellationToken);
+            else
+                (rowsRead, rowsWritten, timing) = await RunMappingAsync(task, mapping, item, cancellationToken);
 
             Log(item.RunId, LogSeverity.Info, item.RunKind == RunKind.Verification
                 ? $"Verification finished: {rowsRead} group(s) compared."
@@ -268,7 +274,7 @@ public sealed class RunExecutor(
             // where a single end-of-process Flush() was always guaranteed to happen first. Log lines
             // must be durable before the status that makes a poller stop looking for them.
             state.Flush();
-            state.CompleteRun(item.RunId, RunStatus.Succeeded, rowsRead, rowsWritten, errorSummary: null);
+            state.CompleteRun(item.RunId, RunStatus.Succeeded, rowsRead, rowsWritten, errorSummary: null, timing: timing);
             state.MarkDone(item.Id);
 
             // Idle is "looked for changes and found none", not "the queue is empty" — the queue is
@@ -455,7 +461,7 @@ public sealed class RunExecutor(
         }
     }
 
-    private async Task<(long RowsRead, long RowsWritten)> RunMappingAsync(
+    private async Task<(long RowsRead, long RowsWritten, RunTiming? Timing)> RunMappingAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, WorkItem item, CancellationToken cancellationToken)
     {
         var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
@@ -530,6 +536,15 @@ public sealed class RunExecutor(
             long totalWritten = 0;
             string? newWatermark = null;
 
+            // Resolved once per pass. Off means the row stream is never wrapped and no stopwatch is
+            // started — a mapping that did not ask pays nothing, which is the difference between an
+            // opt-in trace and a metric that is always collected and usually discarded.
+            var trace = mapping.TraceTiming;
+            long? timeToFirstRowMs = null;
+            long readerLifetimeMs = 0;
+            long stagingMs = 0;
+            long writerMs = 0;
+
             var targetDialect = ResolveDialect(targetDriver);
             var sourceDialect = ResolveDialect(sourceDriver);
             var targetQualified = targetDialect.QualifyTable(target.Schema, target.Table);
@@ -593,12 +608,18 @@ public sealed class RunExecutor(
                 Log(item.RunId, LogSeverity.Info,
                     $"Reading changes for '{mapping.Name}' ({scope}, watermark: {previousWatermark ?? "<none>"}).");
 
+                // Started before the call, not after: how long the source takes to *begin* answering
+                // is part of what the reader cost, and a stopwatch started once it returned would
+                // silently exclude it.
+                var passTiming = trace ? new ReaderTimingRecorder() : null;
+
                 var read = await reader.ReadChangesAsync(
                     sourceConnection, source, previousWatermark, columnMappings, readerOptions, cancellationToken);
+                var readRows = passTiming is null ? read.Rows : read.Rows.WithTiming(passTiming, cancellationToken);
                 var rows = transforms.IsEmpty
-                    ? read.Rows
+                    ? readRows
                     : transforms.ApplyAsync(
-                        read.Rows,
+                        readRows,
                         dropped => Log(item.RunId, LogSeverity.Info,
                             $"'{mapping.Name}': {dropped} row(s) dropped by a transform script."),
                         cancellationToken);
@@ -608,8 +629,15 @@ public sealed class RunExecutor(
                     targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
                 await RunGeneratedAsync(HookPoints.BeforeStage, null, null, null);
 
+                // The whole call, not just the part that consumes rows. For today's providers those
+                // are nearly the same span; for a file-based one that moves or uploads what it staged
+                // after the stream is exhausted, the difference from the reader's lifetime is that
+                // provider's own work — which is the number worth having.
+                var stagingClock = trace ? Stopwatch.StartNew() : null;
                 var staged = await stagingProvider.StageAsync(
                     targetConnection, target, rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
+                if (stagingClock is not null)
+                    stagingMs += stagingClock.ElapsedMilliseconds;
 
                 await RunHooksAsync(
                     HookPoints.AfterStage, hooksByPoint[HookPoints.AfterStage], Context(staged.StagingLocation, staged.RowCount, null),
@@ -631,8 +659,11 @@ public sealed class RunExecutor(
                         targetConnection, targetDialect, source.ConnectionName, sourceDialect, mapping.Name, item.RunId, cancellationToken);
                     await RunGeneratedAsync(HookPoints.BeforeLoad, staged.StagingLocation, staged.RowCount, null);
 
+                    var writerClock = trace ? Stopwatch.StartNew() : null;
                     var written = await writer.ApplyAsync(
                         targetConnection, target, staged, mapping.ColumnMappings, writerOptions, cancellationToken);
+                    if (writerClock is not null)
+                        writerMs += writerClock.ElapsedMilliseconds;
 
                     totalRead += staged.RowCount;
                     totalWritten += written.RowsWritten;
@@ -652,6 +683,15 @@ public sealed class RunExecutor(
                     // One pass can stage several times, so the staged set has to be discarded as it
                     // goes rather than left for connection teardown to deal with.
                     await stagingProvider.CleanupAsync(targetConnection, staged, CancellationToken.None);
+                }
+
+                if (passTiming is not null)
+                {
+                    // Lifetimes add up across segments; time-to-first-row does not. The first row of
+                    // the pass is the one that says how long the source took to start answering, and
+                    // a later segment's first row is measured from its own read, not from the pass's.
+                    readerLifetimeMs += passTiming.LifetimeMs ?? 0;
+                    timeToFirstRowMs ??= passTiming.TimeToFirstRowMs;
                 }
 
                 // After the stream is drained, and WatermarkAfterRead rather than NewWatermark: a
@@ -676,7 +716,14 @@ public sealed class RunExecutor(
                     item.RunId, cancellationToken);
             }
 
-            return (totalRead, totalWritten);
+            // Summed across segments, because a pass over several segments is one run and one row in
+            // TaskRuns — reporting only the last segment's numbers would understate every one of them.
+            var timing = trace
+                ? new RunTiming(
+                    readerKind, timeToFirstRowMs, readerLifetimeMs, cacheKind, stagingMs, writerKind, writerMs)
+                : null;
+
+            return (totalRead, totalWritten, timing);
         }
         finally
         {

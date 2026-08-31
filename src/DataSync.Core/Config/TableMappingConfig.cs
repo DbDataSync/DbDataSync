@@ -163,6 +163,20 @@ public sealed class TableMappingConfig
     /// </para>
     /// </summary>
     public List<BatchReloadSegment> DefaultSegmenting { get; set; } = new();
+
+    /// <summary>
+    /// Records how long each stage of a pass took, onto the run itself — see phase 59.
+    /// <para>
+    /// Opt-in, per mapping, and **off means no measurement at all** rather than measured-and-discarded:
+    /// the reader's row stream is only wrapped when this is set, so a mapping that never asked pays
+    /// nothing, not even a delegate call per row.
+    /// </para>
+    /// <para>
+    /// Mapping-level only. Timing is something an operator turns on for the one table that is behaving
+    /// oddly, which is not a thing to inherit from a replication.
+    /// </para>
+    /// </summary>
+    public bool TraceTiming { get; set; }
 }
 
 /// <summary>

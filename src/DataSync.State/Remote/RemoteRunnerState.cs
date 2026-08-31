@@ -83,8 +83,9 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
 
     public void CompleteRun(
         Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
-        string? failureKind = null) =>
-        Outcome("complete-run", new CompleteRunRequest(runId, status, rowsRead, rowsWritten, errorSummary, failureKind),
+        string? failureKind = null,
+        RunTiming? timing = null) =>
+        Outcome("complete-run", new CompleteRunRequest(runId, status, rowsRead, rowsWritten, errorSummary, failureKind, timing),
             JournalOperation.CompleteRun);
 
     public void SetWatermark(string taskName, string sourceTable, string watermark) =>
