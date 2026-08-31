@@ -42,6 +42,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
             Type = ParameterType.ColumnPicker,
             Required = true,
         },
+        BoundedRead.Descriptor,
     ];
 
     public async Task<ReadResult> ReadChangesAsync(
@@ -57,9 +58,17 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
 
-        var newWatermark = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken)
-            ?? previousWatermark
-            ?? "0";
+        var maxRows = BoundedRead.Read(options);
+
+        // A bounded read does not ask for the source's current maximum, and must not: recording a
+        // maximum this pass did not reach is exactly how capped reads lose rows. Its position comes
+        // out of the rows themselves, so until they have streamed the honest answer is "no further
+        // than where we already were".
+        var newWatermark = maxRows is not null
+            ? previousWatermark ?? "0"
+            : await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken)
+              ?? previousWatermark
+              ?? "0";
 
         // Resolved only when there is a bound to bind — a first pass has no predicate, so it needs no
         // column type and should not pay for a catalog round trip to learn one.
@@ -71,8 +80,11 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
                     $"Watermark column '{watermarkColumn}' was not found on '{source.Schema}.{source.Table}'.");
 
         var projection = SourceProjection.Render(dialect, columnMappings);
-        var rows = ReadRowsAsync(sourceConnection, source, watermarkColumn, previousWatermark, column, projection, cancellationToken);
-        return new ReadResult(rows, newWatermark);
+        var bounded = maxRows is null ? null : new BoundedReadPosition();
+        var rows = ReadRowsAsync(
+            sourceConnection, source, watermarkColumn, previousWatermark, column, projection, maxRows, bounded,
+            cancellationToken);
+        return new ReadResult(rows, newWatermark, Diagnostics: null, Bounded: bounded);
     }
 
     /// <summary>
@@ -98,32 +110,48 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
 
         var source = request.Source;
         var incremental = request.PreviousWatermark is not null;
+        var maxRows = BoundedRead.Read(request.Options);
 
-        return Task.FromResult<IReadOnlyList<PreviewStatement>>(
-        [
-            new PreviewStatement(
+        var statements = new List<PreviewStatement>();
+
+        // A bounded pass genuinely does not issue this one: the row read is its own boundary
+        // computation, so showing a MAX here would describe a statement that never runs.
+        if (maxRows is null)
+        {
+            statements.Add(new PreviewStatement(
                 PreviewStages.SourceRead,
                 $"Read the highest '{watermarkColumn}', which becomes the next pass's watermark",
                 WatermarkStatement.BuildMaxWatermark(dialect, source.Schema, source.Table, watermarkColumn, source.Filter),
                 PreviewOrigin.BuiltIn,
                 "Taken before the rows are read, not derived from them — a row written during the pass " +
-                "must be picked up by the next one rather than silently skipped."),
+                "must be picked up by the next one rather than silently skipped."));
+        }
 
-            new PreviewStatement(
-                PreviewStages.SourceRead,
-                incremental
-                    ? $"Read rows after watermark '{request.PreviousWatermark}'"
-                    : "Read every row — no watermark stored yet",
-                WatermarkStatement.BuildRead(
-                    dialect, source.Schema, source.Table, watermarkColumn, incremental, source.Filter,
-                    SourceProjection.Render(dialect, request.ColumnMappings)),
-                PreviewOrigin.BuiltIn,
-                incremental
-                    ? $"{dialect.ParameterName(WatermarkStatement.PreviousWatermarkParameter)} is bound as " +
-                      $"'{watermarkColumn}'s own type, not as text — a conversion on the column side would " +
-                      "prevent the index seek this strategy depends on."
-                    : null),
-        ]);
+        var boundNote = maxRows is { } limit
+            ? $"Capped at {limit} rows, ties included, so no two rows sharing the boundary " +
+              $"'{watermarkColumn}' can be split across passes. The next watermark is the last row's " +
+              "own value — a position this pass actually reached — and the remainder arrives on the " +
+              "pass after it. "
+            : "";
+
+        var bindingNote = incremental
+            ? $"{dialect.ParameterName(WatermarkStatement.PreviousWatermarkParameter)} is bound as " +
+              $"'{watermarkColumn}'s own type, not as text — a conversion on the column side would " +
+              "prevent the index seek this strategy depends on."
+            : "";
+
+        statements.Add(new PreviewStatement(
+            PreviewStages.SourceRead,
+            incremental
+                ? $"Read rows after watermark '{request.PreviousWatermark}'"
+                : "Read every row — no watermark stored yet",
+            WatermarkStatement.BuildRead(
+                dialect, source.Schema, source.Table, watermarkColumn, incremental, source.Filter,
+                SourceProjection.Render(dialect, request.ColumnMappings), bounded: maxRows is not null),
+            PreviewOrigin.BuiltIn,
+            string.IsNullOrEmpty(boundNote + bindingNote) ? null : (boundNote + bindingNote).TrimEnd()));
+
+        return Task.FromResult<IReadOnlyList<PreviewStatement>>(statements);
     }
 
     private async Task<string?> GetMaxWatermarkAsync(
@@ -144,11 +172,16 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         string? previousWatermark,
         ColumnMetadata? column,
         string projection,
+        int? maxRows,
+        BoundedReadPosition? bounded,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = WatermarkStatement.BuildRead(
-            dialect, source.Schema, source.Table, watermarkColumn, previousWatermark is not null, source.Filter, projection);
+            dialect, source.Schema, source.Table, watermarkColumn, previousWatermark is not null, source.Filter,
+            projection, bounded: maxRows is not null);
+        if (maxRows is { } limit)
+            cmd.AddParameter(dialect.ParameterName(BoundedRead.RowLimitParameter), limit);
         if (previousWatermark is not null)
         {
             // Bound as the watermark column's own type, not as text. SQL Server would convert
@@ -160,8 +193,26 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         }
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        var schema = ResultSetSchema.From(reader);
+
+        // A bounded read appends the watermark column to the select list, so the schema the rows carry
+        // is every field but that last one — which stays out of the change set and only ever becomes
+        // the new watermark.
+        var schema = bounded is null
+            ? ResultSetSchema.From(reader)
+            : ResultSetSchema.FromLeading(reader, reader.FieldCount - 1);
+        var positionOrdinal = reader.FieldCount - 1;
+
         while (await reader.ReadAsync(cancellationToken))
+        {
+            if (bounded is not null && !reader.IsDBNull(positionOrdinal))
+            {
+                // Every row, not just the last: the loop cannot know which row is last, and each
+                // overwrite is what leaves the final one standing. Rows arrive in watermark order, so
+                // this only ever moves forward.
+                bounded.Reached = WatermarkValue.Format(reader.GetValue(positionOrdinal));
+            }
+
             yield return new ChangeRow(ChangeOperation.Insert, schema, ResultSetSchema.ReadValues(reader, schema.Count));
+        }
     }
 }

@@ -10,11 +10,31 @@ namespace DataSync.Drivers.Abstractions;
 /// meaningful once <paramref name="Rows"/> has been fully consumed. Optional because most readers
 /// have nothing to report.
 /// </para>
+/// <para>
+/// <paramref name="Bounded"/> is the exception to the up-front rule above, and the reason callers
+/// should persist <see cref="WatermarkAfterRead"/> rather than <paramref name="NewWatermark"/>. A read
+/// capped by row count cannot know its next position before it runs — the position *is* the last row
+/// it emitted — so it fills this in while streaming. See <see cref="BoundedRead"/>.
+/// </para>
 /// </summary>
 public sealed record ReadResult(
     IAsyncEnumerable<ChangeRow> Rows,
     string NewWatermark,
-    ReadDiagnostics? Diagnostics = null);
+    ReadDiagnostics? Diagnostics = null,
+    BoundedReadPosition? Bounded = null)
+{
+    /// <summary>
+    /// The position to store once <see cref="Rows"/> has been fully consumed and written.
+    /// <para>
+    /// For an unbounded read this is just <see cref="NewWatermark"/>, computed before the first row.
+    /// A bounded read overrides it with the position it actually reached — but only when its own
+    /// semantics say it should, which is why the decision lives in the reader and this is a plain
+    /// null-coalesce. A Change Tracking pass that consumed its whole window advances to the window's
+    /// end; one that was cut short advances only as far as its last row.
+    /// </para>
+    /// </summary>
+    public string WatermarkAfterRead => Bounded?.Reached ?? NewWatermark;
+}
 
 /// <summary>
 /// Counters a reader accumulates while streaming, for the caller to log once the stream is drained.

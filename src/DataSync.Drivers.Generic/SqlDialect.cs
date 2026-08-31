@@ -122,6 +122,25 @@ public abstract class SqlDialect
     public virtual string OperationMarkerColumnType => "CHAR(1)";
 
     /// <summary>
+    /// The two fragments that cap an ordered query at a row count *without splitting ties*: whatever
+    /// goes right after <c>SELECT</c>, and whatever goes at the end of the statement. One of the two is
+    /// always empty, because the engines in scope put the clause at opposite ends.
+    /// <para>
+    /// Tie-safety is the whole point, not a refinement. The position a bounded read records is its last
+    /// row's ordering value; if a sibling row sharing that exact value were left behind, the next pass —
+    /// which reads strictly greater than the recorded position — would skip it forever. <c>WITH TIES</c>
+    /// is the engine promising that cannot happen, which is cheaper and far more trustworthy than
+    /// negotiating a boundary in application code.
+    /// </para>
+    /// <para>
+    /// SQL-standard <c>FETCH FIRST … ROWS WITH TIES</c> by default (Postgres 13+, Oracle 12c+); SQL
+    /// Server spells it <c>TOP (n) WITH TIES</c> at the front and overrides.
+    /// </para>
+    /// </summary>
+    public virtual (string Prefix, string Suffix) RenderTieSafeRowLimit(string parameterName) =>
+        ("", $"\nFETCH FIRST {ParameterReference(parameterName)} ROWS WITH TIES");
+
+    /// <summary>
     /// The staging table's ordinal column, definition and all: an engine-assigned, monotonically
     /// increasing number per staged row, which is what a chunked apply ranges over.
     /// <para>

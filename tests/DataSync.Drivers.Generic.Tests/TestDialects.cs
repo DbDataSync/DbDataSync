@@ -13,6 +13,13 @@ internal sealed class BracketDialect : SqlDialect
     public static BracketDialect Instance { get; } = new();
     public override string QuoteIdentifier(string identifier) => $"[{identifier.Replace("]", "]]")}]";
     public override string ParameterReference(string name) => $"@{name}";
+
+    /// <summary>SQL Server's <c>TOP (n) WITH TIES</c> rather than the ANSI trailing clause — the
+    /// generic tests pin the SQL Server rendering, so this dialect has to spell it SQL Server's way.
+    /// <see cref="ColonDialect"/> is what covers the ANSI default.</summary>
+    public override (string Prefix, string Suffix) RenderTieSafeRowLimit(string parameterName) =>
+        ($"TOP ({ParameterReference(parameterName)}) WITH TIES ", "");
+
     public override CanonicalType ToCanonicalType(string nativeType) => throw new NotSupportedException();
     public override RenderedColumnType RenderColumnType(CanonicalType type) => throw new NotSupportedException();
 }

@@ -19,6 +19,11 @@ public sealed class MsSqlDialect : SqlDialect
     /// <summary>SQL Server caps a request at 2100 parameters.</summary>
     public override int MaxParametersPerStatement => 2100;
 
+    /// <summary>SQL Server puts its row limit at the front, and has no <c>FETCH FIRST … WITH TIES</c>.
+    /// The parentheses around the parameter are required for a parameterised <c>TOP</c>.</summary>
+    public override (string Prefix, string Suffix) RenderTieSafeRowLimit(string parameterName) =>
+        ($"TOP ({ParameterReference(parameterName)}) WITH TIES ", "");
+
     /// <summary>SQL Server has no <c>GENERATED ALWAYS AS IDENTITY</c>; the key is clustered because
     /// staging is only ever appended to in ordinal order, so the insert stays at the end of it.</summary>
     public override string RenderStagingOrdinalColumn(string column) =>

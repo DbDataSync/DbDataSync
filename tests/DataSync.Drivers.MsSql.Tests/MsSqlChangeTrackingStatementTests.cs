@@ -86,4 +86,46 @@ public sealed class MsSqlChangeTrackingStatementTests
         Assert.Contains("WHERE CT.SYS_CHANGE_VERSION <= @targetVersion", sql);
         Assert.Contains("ORDER BY CT.SYS_CHANGE_VERSION", sql);
     }
+
+    private static string BuildBounded(params string[] nonKeyColumns) =>
+        MsSqlChangeTrackingStatement.BuildIncremental(
+            "dbo", "Orders", ["Id"], nonKeyColumns, renderNonKeyColumn: null, bounded: true);
+
+    [Fact]
+    public void Bounded_CapsTheWindowWithTies()
+    {
+        var sql = BuildBounded("Region");
+
+        Assert.Contains("SELECT TOP (@maxRows) WITH TIES ", sql);
+    }
+
+    [Fact]
+    public void Bounded_KeepsTheVersionBoundRatherThanReplacingIt()
+    {
+        // The row cap narrows the window; it does not become the window. A pass still reads no further
+        // than the end version it fixed for itself before it started.
+        var sql = BuildBounded("Region");
+
+        Assert.Contains("WHERE CT.SYS_CHANGE_VERSION <= @targetVersion", sql);
+        Assert.Contains("ORDER BY CT.SYS_CHANGE_VERSION", sql);
+    }
+
+    [Fact]
+    public void Bounded_PutsTheVersionLast_SoTheLeadingOrdinalsAreUnchanged()
+    {
+        // FirstKeyOrdinal and the reader's whole ordinal arithmetic depend on nothing being inserted
+        // ahead of the key columns. The position column is bookkeeping and goes at the end.
+        var sql = BuildBounded("Region", "Amount");
+
+        Assert.Contains("base.[Amount], CT.SYS_CHANGE_VERSION AS [__DS_Position]\nFROM", sql);
+    }
+
+    [Fact]
+    public void Unbounded_CarriesNoRowCapAndNoPositionColumn()
+    {
+        var sql = Build("Region");
+
+        Assert.DoesNotContain("TOP", sql);
+        Assert.DoesNotContain("__DS_Position", sql);
+    }
 }

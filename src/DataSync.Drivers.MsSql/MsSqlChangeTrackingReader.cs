@@ -42,6 +42,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
             Type = ParameterType.Bool,
             Default = "false",
         },
+        BoundedRead.Descriptor,
     ];
 
     /// <summary>Snapshot isolation transaction failed because it isn't allowed in this database.</summary>
@@ -80,14 +81,21 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         }
 
         var diagnostics = new ReadDiagnostics();
+
+        // The first pass has no version window to bound — it reads the table itself, not CHANGETABLE,
+        // and a row cap there would be a partial full load with no resumable position to record it.
+        // Bounding starts once there is a change window to take a slice of.
+        var maxRows = previousWatermark is null ? null : BoundedRead.Read(options);
+        var bounded = maxRows is null ? null : new BoundedReadPosition();
+
         var rows = previousWatermark is null
             ? ReadFullLoadAsync(
                 sourceConnection, source, SourceProjection.Render(MsSqlDialect.Instance, columnMappings), cancellationToken)
             : ReadIncrementalAsync(
                 sourceConnection, source, long.Parse(previousWatermark), targetVersion,
-                UseSnapshotIsolation(options), columnMappings, diagnostics, cancellationToken);
+                UseSnapshotIsolation(options), columnMappings, diagnostics, maxRows, bounded, cancellationToken);
 
-        return new ReadResult(rows, targetVersion.ToString(), diagnostics);
+        return new ReadResult(rows, targetVersion.ToString(), diagnostics, bounded);
     }
 
     /// <summary>
@@ -129,6 +137,14 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
             ];
         }
 
+        var maxRows = BoundedRead.Read(request.Options);
+        var notes = new List<string>();
+        if (maxRows is { } limit)
+            notes.Add($"Capped at {limit} rows, ties on SYS_CHANGE_VERSION included — a pass cut short " +
+                      "advances only to its last row's version, and the rest arrives on the next pass.");
+        if (UseSnapshotIsolation(request.Options))
+            notes.Add("Runs in a snapshot-isolation transaction.");
+
         return
         [
             new PreviewStatement(
@@ -137,9 +153,9 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
                 MsSqlChangeTrackingStatement.BuildIncremental(
                     request.Source.Schema, request.Source.Table, pkColumns,
                     columns.Where(c => !c.IsPrimaryKey).Select(c => c.Name).ToList(),
-                    column => RenderNonKeyColumn(column, request.ColumnMappings)),
+                    column => RenderNonKeyColumn(column, request.ColumnMappings), bounded: maxRows is not null),
                 PreviewOrigin.BuiltIn,
-                UseSnapshotIsolation(request.Options) ? "Runs in a snapshot-isolation transaction." : null),
+                notes.Count == 0 ? null : string.Join(" ", notes)),
         ];
     }
 
@@ -194,6 +210,8 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         bool useSnapshotIsolation,
         IReadOnlyList<ColumnMapping> columnMappings,
         ReadDiagnostics diagnostics,
+        int? maxRows,
+        BoundedReadPosition? bounded,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var columns = await MsSqlSchemaQueries.GetColumnsAsync(connection, source.Schema, source.Table, cancellationToken);
@@ -213,9 +231,16 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         // ambiguous against CHANGETABLE's own copy. This is the reason the token exists.
         cmd.CommandText = MsSqlChangeTrackingStatement.BuildIncremental(
             source.Schema, source.Table, pkColumns, nonKeyColumns,
-            column => RenderNonKeyColumn(column, columnMappings));
+            column => RenderNonKeyColumn(column, columnMappings), bounded: maxRows is not null);
         cmd.AddParameter("@previousVersion", previousVersion);
         cmd.AddParameter("@targetVersion", targetVersion);
+        if (maxRows is { } limit)
+            cmd.AddParameter($"@{BoundedRead.RowLimitParameter}", limit);
+
+        // The position column sits after everything the schema describes — see BuildIncremental.
+        var positionOrdinal = MsSqlChangeTrackingStatement.FirstKeyOrdinal + schema.Count;
+        long rowsRead = 0;
+        long lastVersion = 0;
 
         // Opening is separated from the read loop because a `yield return` may not sit inside a
         // try/catch — only inside try/finally. Everything that can throw the snapshot-not-allowed
@@ -264,6 +289,14 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
                     if (!hasRow)
                         break;
 
+                    if (bounded is not null)
+                    {
+                        // Counted before the skip below, not after: the cap is on rows the engine
+                        // returned, and a skipped row's version still went past.
+                        rowsRead++;
+                        lastVersion = reader.GetInt64(positionOrdinal);
+                    }
+
                     var operation = reader.GetString(MsSqlChangeTrackingStatement.OperationOrdinal) switch
                     {
                         "I" => ChangeOperation.Insert,
@@ -309,6 +342,18 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
                     yield return new ChangeRow(operation, schema, values);
                 }
             }
+
+            // Only a read the cap actually cut short reports an intermediate position. One that drained
+            // its window advances to targetVersion instead — the version it fixed for itself before
+            // reading, which is still a position it genuinely reached. Reporting the last row's version
+            // there would leave an idle table's watermark frozen at its final change, and a frozen
+            // watermark eventually falls below CHANGE_TRACKING_MIN_VALID_VERSION and expires.
+            //
+            // WITH TIES means the engine may return *more* than the cap, so the test is >=, and every
+            // row sharing lastVersion is guaranteed to be in this batch — which is what makes stopping
+            // here resumable rather than lossy.
+            if (bounded is not null && maxRows is { } cap && rowsRead >= cap)
+                bounded.Reached = lastVersion.ToString();
 
             if (transaction is not null)
                 await transaction.CommitAsync(cancellationToken);

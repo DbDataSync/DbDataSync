@@ -652,7 +652,10 @@ public sealed class RunExecutor(
                     await stagingProvider.CleanupAsync(targetConnection, staged, CancellationToken.None);
                 }
 
-                newWatermark = read.NewWatermark;
+                // After the stream is drained, and WatermarkAfterRead rather than NewWatermark: a
+                // row-bounded read only knows where it got to once its rows have been through. See
+                // ReadResult.
+                newWatermark = read.WatermarkAfterRead;
             }
 
             // Segmented passes only ever happen with a reload reader, which has no watermark of its

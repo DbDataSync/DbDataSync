@@ -1,3 +1,5 @@
+using DataSync.Drivers.Abstractions;
+
 namespace DataSync.Drivers.MsSql;
 
 /// <summary>
@@ -46,9 +48,25 @@ public static class MsSqlChangeTrackingStatement
     /// name. Taking it as a function rather than a list of names is what keeps this method's ordinal
     /// arithmetic — and therefore <see cref="BaseMissingOrdinal"/> — unchanged.
     /// </param>
+    /// <param name="bounded">
+    /// Caps the window at <see cref="BoundedRead.RowLimitParameter"/> rows, ties on
+    /// <c>SYS_CHANGE_VERSION</c> included, and carries that version back beside each row under
+    /// <see cref="BoundedRead.PositionColumn"/>.
+    /// <para>
+    /// The version bound stays: a bounded pass reads up to the *smaller* of the current end version
+    /// and where the row cap stopped it, never past the end version the pass fixed for itself. And
+    /// <c>WITH TIES</c> is what makes the stopping point resumable — one key's net change is one row
+    /// at one version, so including every row at the boundary version means no key at that version is
+    /// left for a next pass that will only look strictly beyond it.
+    /// </para>
+    /// <para>
+    /// The extra column is appended last, after the non-key columns, so
+    /// <see cref="FirstKeyOrdinal"/> and the whole ordinal arithmetic below it are unchanged.
+    /// </para>
+    /// </param>
     public static string BuildIncremental(
         string schema, string table, IReadOnlyList<string> primaryKeyColumns, IReadOnlyList<string> nonKeyColumns,
-        Func<string, string>? renderNonKeyColumn = null)
+        Func<string, string>? renderNonKeyColumn = null, bool bounded = false)
     {
         renderNonKeyColumn ??= c => $"base.{SqlIdentifier.Quote(c)}";
         var quotedSchema = SqlIdentifier.Quote(schema);
@@ -66,8 +84,16 @@ public static class MsSqlChangeTrackingStatement
         selected.AddRange(primaryKeyColumns.Select(pk => $"CT.{SqlIdentifier.Quote(pk)}"));
         selected.AddRange(nonKeyColumns.Select(renderNonKeyColumn));
 
+        var limit = "";
+        if (bounded)
+        {
+            var (prefix, _) = MsSqlDialect.Instance.RenderTieSafeRowLimit(BoundedRead.RowLimitParameter);
+            limit = prefix;
+            selected.Add($"CT.SYS_CHANGE_VERSION AS {SqlIdentifier.Quote(BoundedRead.PositionColumn)}");
+        }
+
         return $"""
-            SELECT {string.Join(", ", selected)}
+            SELECT {limit}{string.Join(", ", selected)}
             FROM CHANGETABLE(CHANGES {quotedSchema}.{quotedTable}, @previousVersion) AS CT
             LEFT JOIN {quotedSchema}.{quotedTable} AS base ON {joinCondition}
             WHERE CT.SYS_CHANGE_VERSION <= @targetVersion

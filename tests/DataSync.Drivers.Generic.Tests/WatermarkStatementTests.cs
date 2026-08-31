@@ -75,6 +75,65 @@ public sealed class WatermarkStatementTests
     }
 
     [Fact]
+    public void Read_Bounded_UsesTopWithTiesAndCarriesTheWatermarkBack()
+    {
+        Assert.Equal(
+            """
+            SELECT TOP (@maxRows) WITH TIES *, [ModifiedAt] AS [__DS_Position] FROM [dbo].[Orders]
+            WHERE [ModifiedAt] > @previousWatermark
+            ORDER BY [ModifiedAt];
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: true,
+                filter: null, bounded: true));
+    }
+
+    [Fact]
+    public void Read_Bounded_OnAnAnsiDialect_PutsTheLimitAtTheEndInstead()
+    {
+        // Same guarantee, opposite end of the statement. Both spellings include ties natively, which
+        // is the property the whole bounded read rests on: a row sharing the boundary value is never
+        // left behind for a next pass that will only look strictly past it.
+        Assert.Equal(
+            """
+            SELECT *, "MODIFIED_AT" AS "__DS_Position" FROM "APP"."ORDERS"
+            WHERE "MODIFIED_AT" > :previousWatermark
+            ORDER BY "MODIFIED_AT"
+            FETCH FIRST :maxRows ROWS WITH TIES;
+            """,
+            WatermarkStatement.BuildRead(
+                ColonDialect.Instance, "APP", "ORDERS", "MODIFIED_AT", hasPreviousWatermark: true,
+                filter: null, bounded: true));
+    }
+
+    [Fact]
+    public void Read_Bounded_KeepsTheWatermarkColumnLast_SoExistingOrdinalsAreUndisturbed()
+    {
+        // The reader builds the change schema from the leading columns and reads the position off the
+        // trailing one. If the position column ever moved, every row would gain a phantom column.
+        var sql = WatermarkStatement.BuildRead(
+            BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: false,
+            filter: null, projection: "[Id], [Name]", bounded: true);
+
+        Assert.Contains("[Id], [Name], [ModifiedAt] AS [__DS_Position] FROM", sql);
+    }
+
+    [Fact]
+    public void Read_Unbounded_IsUnchangedByTheBoundedOptionExisting()
+    {
+        // The default path has to render byte-for-byte what it did before bounding was an option —
+        // this is an incremental reader that runs constantly, and a stray clause would change its plan.
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders]
+            WHERE [ModifiedAt] > @previousWatermark
+            ORDER BY [ModifiedAt];
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: true, filter: null));
+    }
+
+    [Fact]
     public void QualifyTable_OmitsTheSchemaWhenThereIsNone() =>
         Assert.Equal(
             "SELECT MAX([ModifiedAt]) FROM [Orders];",

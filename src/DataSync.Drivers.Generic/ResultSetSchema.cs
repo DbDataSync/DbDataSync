@@ -7,10 +7,18 @@ namespace DataSync.Drivers.Generic;
 /// straight into a positional array. Used by every reader whose result set *is* the source row.</summary>
 public static class ResultSetSchema
 {
-    public static ChangeSchema From(DbDataReader reader)
+    public static ChangeSchema From(DbDataReader reader) => FromLeading(reader, reader.FieldCount);
+
+    /// <summary>
+    /// The first <paramref name="columnCount"/> columns only, for a statement that carries bookkeeping
+    /// past the end of the row — a bounded read appending the ordering value it stops at, for
+    /// instance. Leading rather than arbitrary, so every ordinal the schema describes is still its own
+    /// ordinal in the result set.
+    /// </summary>
+    public static ChangeSchema FromLeading(DbDataReader reader, int columnCount)
     {
-        var names = new string[reader.FieldCount];
-        for (var i = 0; i < names.Length; i++)
+        var names = new string[columnCount];
+        for (var i = 0; i < columnCount; i++)
             names[i] = reader.GetName(i);
         return new ChangeSchema(names);
     }
