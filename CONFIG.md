@@ -106,7 +106,9 @@ every default below lives in code.
 | key | env var | default | notes |
 | --- | --- | --- | --- |
 | `RepoRoot` | `DataSync__RepoRoot` | `<cwd>/datasync-repo` under raw `dotnet run`; the CLI's `--repo` default under `datasync serve` | git-tracked config store root |
-| `StateDbPath` | `DataSync__StateDbPath` | `<RepoRoot>/state.db` | SQLite state database |
+| `StateDbPath` | `DataSync__StateDbPath` | `<RepoRoot>/state.db` | the SQLite file; ignored when `StateEngine` is `MsSql` or `Postgres` |
+| `StateEngine` | `DataSync__StateEngine` | `Sqlite` | which database backs the state store — `Sqlite`, `MsSql` or `Postgres`; see below |
+| `StateConnectionString` | `DataSync__StateConnectionString` | none | how to reach that engine; required unless `StateEngine` is `Sqlite` |
 | `TaskRunnerDllPath` | `DataSync__TaskRunnerDllPath` | resolved automatically | see below |
 | `StatePort` | `DataSync__StatePort` | `0` (ephemeral) | loopback-only runner-state listener; set to a fixed port if you'd rather firewall a known one than trust the loopback binding |
 | `RunRetentionDays` | `DataSync__RunRetentionDays` | `90` | finished runs older than this are pruned hourly; `0` = keep forever |
@@ -116,6 +118,25 @@ every default below lives in code.
 `TaskRunnerDllPath` resolves in this order: (1) beside the running assembly — true for the tool, the
 container, and any plain `dotnet publish`; (2) a dev-repo-layout guess (swaps `DataSync.Api/bin` for
 `DataSync.TaskRunner/bin`) — true only for this repository's own working tree.
+
+### State store engine (`StateEngine`/`StateConnectionString`)
+
+SQLite by default — a file at `StateDbPath`, nothing to configure. `StateEngine` can instead be set to
+`MsSql` or `Postgres` to run the state store (run history, the work queue, watermarks, users and
+sessions) on infrastructure a deployment already operates and backs up, with `StateConnectionString`
+saying how to reach it. Two separate keys rather than one connection string carrying a provider hint,
+so a typo in the engine name fails as "you named an engine that doesn't exist" rather than as a
+driver-level parse error.
+
+The schema is created on first open regardless of engine, and all three are meant to behave
+identically — this is API-process-only config; `DataSync.TaskRunner` never reads it, since a runner
+always reaches state over the phase 39 loopback endpoint rather than opening the store directly.
+
+Two things worth being explicit about:
+- **No cross-engine migration.** Pointing an existing deployment at a different `StateEngine` starts an
+  empty store — it does not move anything. Choose once, at stand-up.
+- **An unrecognized `StateEngine` value falls back to `Sqlite`** rather than refusing to start — a typo
+  shouldn't take down an API that has a perfectly good store already.
 
 A run failing *either* retention cap is pruned along with its log lines; a run that hasn't finished is
 never pruned regardless of age. Verification results are **not** covered by this pruning — a
