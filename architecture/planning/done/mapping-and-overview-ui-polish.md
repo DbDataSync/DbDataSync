@@ -4,6 +4,12 @@
 fixes, none of which needs its own design discussion. Grouped here because they were raised together,
 not because they share a mechanism; the ordering below is roughly cheapest-first, not priority.
 
+---
+
+# Outcome
+
+Agreed, as `implementation/todo/phase-067-mapping-and-overview-ui-polish.md`.
+
 ## 1. Preview SQL and Verify are missing the mapping heading every other tab has
 
 `TableMappingForm.tsx` renders, above its `SubTabs` bar: the `page-head` (mapping name + badges),
