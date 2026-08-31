@@ -19,6 +19,11 @@ public sealed class MsSqlDialect : SqlDialect
     /// <summary>SQL Server caps a request at 2100 parameters.</summary>
     public override int MaxParametersPerStatement => 2100;
 
+    /// <summary>SQL Server has no <c>GENERATED ALWAYS AS IDENTITY</c>; the key is clustered because
+    /// staging is only ever appended to in ordinal order, so the insert stays at the end of it.</summary>
+    public override string RenderStagingOrdinalColumn(string column) =>
+        $"{QuoteIdentifier(column)} BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY CLUSTERED";
+
     /// <summary>The spellings the shared list does not carry. Everything else falls through to the
     /// base classification, so this is SQL Server's additions rather than a restatement.</summary>
     public override BucketableKind ClassifyForBucketing(string baseTypeName) => baseTypeName switch

@@ -24,6 +24,17 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
 {
     public const string OperationColumn = "__Operation";
 
+    /// <summary>
+    /// The per-pass row ordinal a chunked apply ranges over. Filled in by the engine, never by the
+    /// source: staging holds whatever rows arrived, in the order they arrived, and that order is the
+    /// only thing a writer needs in order to take them a chunk at a time.
+    /// <para>
+    /// Named like <see cref="OperationColumn"/> and for the same reason — a double-underscore prefix
+    /// keeps it out of the way of a real mapped column.
+    /// </para>
+    /// </summary>
+    public const string OrdinalColumn = "__Ordinal";
+
     public string Kind => GenericDriverKinds.StagingTable;
 
     public async Task<StagedChangeSet> StageAsync(
@@ -231,7 +242,8 @@ public static class StagingStatement
         // enforce when the writer applies the change set, not staging's to re-impose on the way in.
         var defs = columns.Select(c => $"{dialect.QuoteIdentifier(c)} {typeByName[c]} NULL");
         return $"CREATE TABLE {qualifiedTable} ({string.Join(", ", defs)}, " +
-               $"{dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} {dialect.OperationMarkerColumnType} NOT NULL);";
+               $"{dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} {dialect.OperationMarkerColumnType} NOT NULL, " +
+               $"{dialect.RenderStagingOrdinalColumn(BatchInsertStagingProvider.OrdinalColumn)});";
     }
 
     public static string BuildInsert(SqlDialect dialect, string qualifiedTable, IReadOnlyList<string> columns, int rowCount)

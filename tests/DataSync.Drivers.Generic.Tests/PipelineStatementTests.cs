@@ -66,4 +66,38 @@ public sealed class PipelineStatementTests
         Assert.Contains("\"__Operation\" <> 'D'",
             DeleteInsertStatement.BuildInsert(ColonDialect.Instance, "t", "c", "s"));
     }
+
+    [Fact]
+    public void Insert_Chunked_RefillsOneOrdinalRangeAtATime()
+    {
+        Assert.Equal(
+            """
+            INSERT INTO [dbo].[Orders] ([Id], [Name])
+            SELECT [Id], [Name] FROM [dbo].[DS_STG_x]
+            WHERE [__Operation] <> 'D'
+              AND [__Ordinal] > @afterOrdinal
+              AND [__Ordinal] <= @upToOrdinal;
+            """,
+            DeleteInsertStatement.BuildInsert(
+                BracketDialect.Instance, "[dbo].[Orders]", "[Id], [Name]", "[dbo].[DS_STG_x]",
+                overrideGenerated: false, chunked: true));
+    }
+
+    [Fact]
+    public void Insert_Chunked_KeepsTheStagedDeleteFilter()
+    {
+        // The bound narrows which staged rows this statement carries; it must not quietly widen what
+        // they mean. A 'D' row inside the range is still not something to insert.
+        Assert.Contains("[__Operation] <> 'D'",
+            DeleteInsertStatement.BuildInsert(
+                BracketDialect.Instance, "t", "c", "s", overrideGenerated: false, chunked: true));
+    }
+
+    [Fact]
+    public void Insert_Chunked_FollowsTheDialectForPlaceholders()
+    {
+        Assert.Contains(":afterOrdinal",
+            DeleteInsertStatement.BuildInsert(
+                ColonDialect.Instance, "t", "c", "s", overrideGenerated: false, chunked: true));
+    }
 }

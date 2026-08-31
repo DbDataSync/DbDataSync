@@ -20,6 +20,10 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
 {
     private const string OperationColumn = "__Operation";
 
+    /// <summary>Taken from the writer's own constant rather than restated: the chunked apply ranges
+    /// over this column, so the two disagreeing about its name would be a runtime failure.</summary>
+    private const string OrdinalColumn = MsSqlTargetShape.OrdinalColumn;
+
     public string Kind => MsSqlDriverKinds.StagingTable;
 
     public async Task<StagedChangeSet> StageAsync(
@@ -107,7 +111,11 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
         string stagingTable, IReadOnlyList<string> columns, IReadOnlyDictionary<string, string> typeByName)
     {
         var columnDefs = string.Join(", ", columns.Select(c => $"{SqlIdentifier.Quote(c)} {typeByName[c]} NULL"));
-        return $"CREATE TABLE {stagingTable} ({columnDefs}, {OperationColumn} CHAR(1) NOT NULL);";
+        // The ordinal is what MsSqlMergeWriter's chunked apply ranges over, and SqlBulkCopy fills it
+        // in for free: the column is not in ColumnMappings, and KeepIdentity is off, so the engine
+        // numbers each row as it lands.
+        return $"CREATE TABLE {stagingTable} ({columnDefs}, {OperationColumn} CHAR(1) NOT NULL, " +
+               $"{MsSqlDialect.Instance.RenderStagingOrdinalColumn(OrdinalColumn)});";
     }
 
     public async Task CleanupAsync(

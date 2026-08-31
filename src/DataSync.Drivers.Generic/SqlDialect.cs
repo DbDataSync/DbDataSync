@@ -121,6 +121,23 @@ public abstract class SqlDialect
     /// scope, but spelled as a type name, which is the part that varies.</summary>
     public virtual string OperationMarkerColumnType => "CHAR(1)";
 
+    /// <summary>
+    /// The staging table's ordinal column, definition and all: an engine-assigned, monotonically
+    /// increasing number per staged row, which is what a chunked apply ranges over.
+    /// <para>
+    /// Rendered whole rather than as a type name because the three parts that matter — how the engine
+    /// spells "generate this for me", and that the column is the table's key so a chunk's range is a
+    /// seek rather than a scan — are not separable. A chunked apply that had to scan the staging table
+    /// once per chunk would be quadratic, which would make chunking cost more than it saved.
+    /// </para>
+    /// <para>
+    /// ANSI <c>GENERATED ALWAYS AS IDENTITY</c> by default (Postgres, and the standard); SQL Server
+    /// spells it <c>IDENTITY(1,1)</c> and overrides.
+    /// </para>
+    /// </summary>
+    public virtual string RenderStagingOrdinalColumn(string column) =>
+        $"{QuoteIdentifier(column)} BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY";
+
     /// <summary>Renders a multi-row insert. The <c>VALUES (…), (…)</c> form works on SQL Server 2008+,
     /// Postgres and MySQL; Oracle's <c>INSERT ALL</c> is a different statement entirely, which is why
     /// this is a hook rather than a format string.</summary>

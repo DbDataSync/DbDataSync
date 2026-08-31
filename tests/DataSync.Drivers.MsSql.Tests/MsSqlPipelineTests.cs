@@ -63,11 +63,13 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
     private SourceTableRef Source() => new() { ConnectionName = "src", Database = db.DatabaseName, Schema = "dbo", Table = _sourceTable };
     private TableRef Target() => new() { ConnectionName = "tgt", Database = db.DatabaseName, Schema = "dbo", Table = _targetTable };
 
-    private async Task<(long RowsWritten, string Watermark)> RunOnceAsync(string? previousWatermark)
+    private async Task<(long RowsWritten, string Watermark)> RunOnceAsync(
+        string? previousWatermark, IReadOnlyDictionary<string, string>? writerOptions = null)
     {
         var read = await _reader.ReadChangesAsync(_sourceConnection, Source(), previousWatermark, Mappings, new Dictionary<string, string>(), CancellationToken.None);
         var staged = await _staging.StageAsync(_targetConnection, Target(), read.Rows, Mappings, new Dictionary<string, string>(), CancellationToken.None);
-        var written = await _writer.ApplyAsync(_targetConnection, Target(), staged, Mappings, new Dictionary<string, string>(), CancellationToken.None);
+        var written = await _writer.ApplyAsync(
+            _targetConnection, Target(), staged, Mappings, writerOptions ?? new Dictionary<string, string>(), CancellationToken.None);
         return (written.RowsWritten, read.NewWatermark);
     }
 
@@ -107,6 +109,55 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
         Assert.False(finalRows.ContainsKey(1));
         Assert.Equal("Robert", finalRows[2]);
         Assert.Equal("Carol", finalRows[3]);
+    }
+
+    [Fact]
+    public async Task ChunkedApply_AppliesEveryStagedRow_AcrossManyChunks()
+    {
+        // 250 rows at 10 to a chunk is 25 separate MERGE statements — enough that an off-by-one in the
+        // ordinal ranges, or a chunk bound that failed to filter at all, shows up as a wrong count
+        // rather than as a coincidence.
+        await ExecuteAsync(_sourceConnection, $"""
+            WITH Numbers AS (SELECT TOP (250) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS n
+                             FROM sys.all_objects)
+            INSERT INTO dbo.[{_sourceTable}] (Id, Name, Amount)
+            SELECT n, CONCAT('Name', n), n * 1.5 FROM Numbers;
+            """);
+
+        var options = new Dictionary<string, string> { ["applyBatchSize"] = "10" };
+        var (written, watermark) = await RunOnceAsync(null, options);
+
+        Assert.Equal(250, written);
+        var rows = await GetTargetRowsAsync();
+        Assert.Equal(250, rows.Count);
+        Assert.Equal("Name1", rows[1]);
+        Assert.Equal("Name250", rows[250]);
+
+        // And the chunked path stays correct for the incremental shape too, where a chunk can carry a
+        // mix of inserts, updates and deletes rather than 250 of one thing.
+        await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'Changed' WHERE Id % 5 = 0;");
+        await ExecuteAsync(_sourceConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id % 25 = 0;");
+
+        await RunOnceAsync(watermark, options);
+
+        var after = await GetTargetRowsAsync();
+        Assert.Equal(240, after.Count);
+        Assert.False(after.ContainsKey(25));
+        Assert.Equal("Changed", after[5]);
+        Assert.Equal("Name4", after[4]);
+    }
+
+    [Fact]
+    public async Task ChunkedApply_AndTheUnchunkedStatement_ReachTheSameEndState()
+    {
+        await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name, Amount) VALUES (1, 'Alice', 10.50), (2, 'Bob', 20.00);");
+
+        // applyBatchSize 0 is how an operator asks for the single statement this writer issued before
+        // chunking existed — the one escape hatch the option has to keep working.
+        var (written, _) = await RunOnceAsync(null, new Dictionary<string, string> { ["applyBatchSize"] = "0" });
+
+        Assert.Equal(2, written);
+        Assert.Equal(2, (await GetTargetRowsAsync()).Count);
     }
 
     [Fact]

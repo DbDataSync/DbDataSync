@@ -14,11 +14,25 @@ public sealed class StagingStatementTests
     };
 
     [Fact]
-    public void Create_StagesEveryMappedColumnAsNullablePlusAnOperationMarker()
+    public void Create_StagesEveryMappedColumnAsNullablePlusAnOperationMarkerAndAnOrdinal()
     {
         Assert.Equal(
-            "CREATE TABLE [dbo].[DS_STG_x] ([Id] int NULL, [Name] nvarchar(50) NULL, [__Operation] CHAR(1) NOT NULL);",
+            "CREATE TABLE [dbo].[DS_STG_x] ([Id] int NULL, [Name] nvarchar(50) NULL, " +
+            "[__Operation] CHAR(1) NOT NULL, " +
+            "[__Ordinal] BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY);",
             StagingStatement.BuildCreate(BracketDialect.Instance, "[dbo].[DS_STG_x]", ["Id", "Name"], Types));
+    }
+
+    [Fact]
+    public void Create_MakesTheOrdinalTheKey_SoAChunkedApplySeeksRatherThanScans()
+    {
+        // Not cosmetic: a chunked apply issues one range query per chunk. Without the ordinal being
+        // the table's key each of those re-scans everything staged, and chunking costs more than the
+        // single statement it replaced.
+        var sql = StagingStatement.BuildCreate(BracketDialect.Instance, "t", ["Id"], Types);
+
+        Assert.Contains("[__Ordinal]", sql);
+        Assert.Contains("PRIMARY KEY", sql);
     }
 
     [Fact]

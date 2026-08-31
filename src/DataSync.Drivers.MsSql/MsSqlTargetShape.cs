@@ -19,6 +19,12 @@ internal sealed class MsSqlTargetShape
 {
     public const string OperationColumn = "__Operation";
 
+    /// <summary>The staging table's per-pass row ordinal, which a chunked apply ranges over. Same
+    /// column, same purpose and same name as <see cref="Generic.BatchInsertStagingProvider.OrdinalColumn"/>
+    /// — restated here because this driver stages into its own temp table rather than through the
+    /// generic provider.</summary>
+    public const string OrdinalColumn = "__Ordinal";
+
     private MsSqlTargetShape(
         TableRef target,
         IReadOnlyList<ColumnMetadata> columns,

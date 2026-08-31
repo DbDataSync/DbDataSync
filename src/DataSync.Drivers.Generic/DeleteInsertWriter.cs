@@ -23,6 +23,15 @@ namespace DataSync.Drivers.Generic;
 /// Both statements run inside one transaction, so no concurrent reader ever observes the segment
 /// empty: a read during the write sees either the old contents or the new ones, never neither.
 /// </para>
+/// <para>
+/// **That is why this writer's chunking stops short of what <see cref="ApplyBatch"/> buys elsewhere.**
+/// The refill is issued a chunk at a time — smaller statements, so a huge reload no longer builds one
+/// enormous insert — but every chunk stays inside the single transaction the delete opened. Committing
+/// per chunk would publish a half-refilled segment to anyone reading the target, which for a writer
+/// whose entire contract is "replace this scope atomically" is not a tuning knob, it is a different
+/// writer. An upsert writer has no such invariant to protect and does commit per chunk; see
+/// <c>MsSqlMergeWriter</c>.
+/// </para>
 /// </summary>
 public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
     : IChangeWriter, IStatementPreview
@@ -30,6 +39,8 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
     public string Kind => GenericDriverKinds.DeleteInsert;
 
     public bool SupportsReconciliation => true;
+
+    public IReadOnlyList<ParameterDescriptor> Parameters { get; } = [ApplyBatch.Descriptor];
 
     public async Task<WriteResult> ApplyAsync(
         DbConnection targetConnection,
@@ -55,16 +66,31 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
                 await deleteCmd.ExecuteNonQueryAsync(cancellationToken);
             }
 
+            var batchSize = ApplyBatch.Read(options);
             var rowsInserted = await dialect.WriteWithGeneratedColumnOverrideAsync(
                 targetConnection, transaction, shape.QuotedTarget, shape.RequiresGeneratedColumnOverride,
                 async () =>
                 {
-                    using var insertCmd = targetConnection.CreateCommand();
-                    insertCmd.Transaction = transaction;
-                    insertCmd.CommandText = DeleteInsertStatement.BuildInsert(
-                        dialect, shape.QuotedTarget, shape.InsertColumnList, staged.StagingLocation,
-                        shape.RequiresGeneratedColumnOverride);
-                    return await insertCmd.ExecuteNonQueryAsync(cancellationToken);
+                    var inserted = 0;
+                    foreach (var (after, upTo) in ApplyBatch.Ranges(staged.RowCount, batchSize))
+                    {
+                        using var insertCmd = targetConnection.CreateCommand();
+                        insertCmd.Transaction = transaction;
+                        insertCmd.CommandText = DeleteInsertStatement.BuildInsert(
+                            dialect, shape.QuotedTarget, shape.InsertColumnList, staged.StagingLocation,
+                            shape.RequiresGeneratedColumnOverride, chunked: batchSize is not null);
+                        if (batchSize is not null)
+                        {
+                            insertCmd.AddParameter(
+                                dialect.ParameterName(DeleteInsertStatement.AfterOrdinalParameter), after);
+                            insertCmd.AddParameter(
+                                dialect.ParameterName(DeleteInsertStatement.UpToOrdinalParameter), upTo);
+                        }
+
+                        inserted += await insertCmd.ExecuteNonQueryAsync(cancellationToken);
+                    }
+
+                    return inserted;
                 },
                 cancellationToken);
 
@@ -106,9 +132,12 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
                 PreviewStages.Write, "Refill it from the staged rows",
                 DeleteInsertStatement.BuildInsert(
                     dialect, shape.QuotedTarget, shape.InsertColumnList, "<staging>",
-                    shape.RequiresGeneratedColumnOverride),
+                    shape.RequiresGeneratedColumnOverride, chunked: ApplyBatch.Read(request.Options) is not null),
                 PreviewOrigin.BuiltIn,
-                "Both statements run in one transaction."),
+                ApplyBatch.Read(request.Options) is { } size
+                    ? $"Issued once per {size} staged rows — but all of them inside the one transaction " +
+                      "the delete opened, so the scope is never observed half-refilled."
+                    : "Both statements run in one transaction."),
         ];
     }
 }
@@ -120,15 +149,32 @@ public static class DeleteInsertStatement
     public static string BuildDelete(string quotedTarget, string scopePredicate) =>
         $"DELETE FROM {quotedTarget} WHERE {scopePredicate};";
 
+    public const string AfterOrdinalParameter = "afterOrdinal";
+    public const string UpToOrdinalParameter = "upToOrdinal";
+
     /// <summary>
     /// Deletes in the change set are dropped rather than applied: the delete has already removed
     /// everything in scope, so a 'D' row would only be re-adding a row in order to say it isn't there.
     /// </summary>
+    /// <param name="chunked">
+    /// Adds a range over the staging table's ordinal, so one call refills part of the scope rather
+    /// than all of it. The ordinal is the staging table's key, which is what keeps a chunk a seek
+    /// instead of another scan of everything staged.
+    /// </param>
     public static string BuildInsert(
-        SqlDialect dialect, string quotedTarget, string insertColumnList, string stagingLocation, bool overrideGenerated = false) =>
-        $"""
-        {dialect.RenderInsertInto(quotedTarget, insertColumnList, overrideGenerated)}
-        SELECT {insertColumnList} FROM {stagingLocation}
-        WHERE {dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} <> 'D';
-        """;
+        SqlDialect dialect, string quotedTarget, string insertColumnList, string stagingLocation,
+        bool overrideGenerated = false, bool chunked = false)
+    {
+        var ordinal = dialect.QuoteIdentifier(BatchInsertStagingProvider.OrdinalColumn);
+        var bound = chunked
+            ? $"\n  AND {ordinal} > {dialect.ParameterReference(AfterOrdinalParameter)}" +
+              $"\n  AND {ordinal} <= {dialect.ParameterReference(UpToOrdinalParameter)}"
+            : "";
+
+        return $"""
+            {dialect.RenderInsertInto(quotedTarget, insertColumnList, overrideGenerated)}
+            SELECT {insertColumnList} FROM {stagingLocation}
+            WHERE {dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} <> 'D'{bound};
+            """;
+    }
 }
