@@ -467,7 +467,6 @@ public sealed class RunExecutor(
     {
         var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
         var target = EndpointResolution.ResolveTarget(task, mapping.Targets[0]);
-        var processing = task.ChangeProcessing;
 
         DbConnection? sourceConnection = null;
         DbConnection? targetConnection = null;
@@ -476,12 +475,20 @@ public sealed class RunExecutor(
             (sourceConnection, var sourceDriver) = await OpenConnectionAsync(source.ConnectionName, cancellationToken);
             (targetConnection, var targetDriver) = await OpenConnectionAsync(target.ConnectionName, cancellationToken);
 
-            // A unit of work may override the replication's configured pipeline. It's how a Backfill
-            // of an incrementally-synced replication reloads a segment at all: the replication's own
-            // reader reports changes since a watermark, which is not what reloading a segment means.
-            var readerKind = item.Kinds.ReaderKind ?? processing.Reader.Kind;
-            var cacheKind = item.Kinds.CacheKind ?? processing.Cache.Kind;
-            var writerKind = item.Kinds.WriterKind ?? processing.Writer.Kind;
+            // Two levels of override, resolved in order. First the mapping's own stage config, if it
+            // has one — Kind *and* Options together, since reading one stage's Kind from the mapping
+            // and its options from the replication is how an option set for a Kind nobody selected
+            // ends up being passed to the one they did (phase 68).
+            var effectiveReader = PipelineResolution.Reader(task, mapping);
+            var effectiveCache = PipelineResolution.Cache(task, mapping);
+            var effectiveWriter = PipelineResolution.Writer(task, mapping);
+
+            // Then the unit of work's own, which is the most specific. It's how a Backfill of an
+            // incrementally-synced replication reloads a segment at all: the configured reader reports
+            // changes since a watermark, which is not what reloading a segment means.
+            var readerKind = item.Kinds.ReaderKind ?? effectiveReader.Kind;
+            var cacheKind = item.Kinds.CacheKind ?? effectiveCache.Kind;
+            var writerKind = item.Kinds.WriterKind ?? effectiveWriter.Kind;
 
             // Through the registry rather than the driver, so a host-supplied reader (phase 30's
             // ScriptedQuery) is as visible to the pipeline as it is to the capability endpoint.
@@ -495,7 +502,7 @@ public sealed class RunExecutor(
             if (item.Kinds != WorkItemKinds.FromConfig)
                 Log(item.RunId, LogSeverity.Info,
                     $"Using reader '{readerKind}', cache '{cacheKind}', writer '{writerKind}' for this {item.RunKind} " +
-                    $"(the replication itself is configured for '{processing.Reader.Kind}'/'{processing.Cache.Kind}'/'{processing.Writer.Kind}').");
+                    $"(this mapping is configured for '{effectiveReader.Kind}'/'{effectiveCache.Kind}'/'{effectiveWriter.Kind}').");
 
             // Only a Primary pass ever advances the incremental watermark — a Backfill must never be
             // able to disturb the cursor a replication's ongoing incremental sync depends on,
@@ -526,6 +533,13 @@ public sealed class RunExecutor(
             await EnsureTargetTableProvisionedAsync(
                 task, sourceDriver, sourceConnection, source, targetDriver, targetConnection, target,
                 mapping, item.RunId, cancellationToken);
+
+            // Resolved once per pass, before the segment loop, for the same reason WithSegment builds a
+            // copy rather than mutating: the configured options dictionary is shared config, and a run
+            // must not write its own derivation into it.
+            var passWriterOptions = await WithDerivedNaturalKeyAsync(
+                writerKind, effectiveWriter.Options, sourceDriver, sourceConnection, source, mapping,
+                item.RunId, cancellationToken);
 
             var segments = await ResolveSegmentsAsync(
                 reader, sourceConnection, targetConnection, source, item, task, mapping, sourceScriptDialect,
@@ -577,9 +591,9 @@ public sealed class RunExecutor(
             for (var segmentIndex = 0; segmentIndex < segments.Count; segmentIndex++)
             {
                 var segment = segments[segmentIndex];
-                var readerOptions = WithSegment(processing.Reader.Options, segment);
-                var cacheOptions = WithSegment(processing.Cache.Options, segment);
-                var writerOptions = WithSegment(processing.Writer.Options, segment);
+                var readerOptions = WithSegment(effectiveReader.Options, segment);
+                var cacheOptions = WithSegment(effectiveCache.Options, segment);
+                var writerOptions = WithSegment(passWriterOptions, segment);
                 var isLastSegment = segmentIndex == segments.Count - 1;
 
                 HookRenderContext Context(string? stagingQualified, long? rowsStaged, long? rowsWritten) => new(
@@ -713,7 +727,7 @@ public sealed class RunExecutor(
                 // this position — do that early and a failed run stops being retryable, which turns
                 // a bad pass into permanent data loss. See IPositionAcknowledging.
                 await AcknowledgeAsync(
-                    reader, sourceConnection!, source, newWatermark, processing.Reader.Options,
+                    reader, sourceConnection!, source, newWatermark, effectiveReader.Options,
                     item.RunId, cancellationToken);
             }
 
@@ -798,8 +812,10 @@ public sealed class RunExecutor(
             ResolveDialect(sourceDriver), sourceColumns, mapping.ColumnMappings);
 
         // The same extension the Setup card applies, so what an unattended pass creates and what an
-        // operator previewed are one answer rather than two.
-        var writerKind = task.ChangeProcessing.Writer.Kind;
+        // operator previewed are one answer rather than two. The mapping's *effective* writer: a
+        // mapping that overrides its way onto Scd2 needs the version columns provisioned, and one that
+        // overrides its way off them must not get them.
+        var writerKind = PipelineResolution.Writer(task, mapping).Kind;
         var provisioned = HistorizedProvisioning.Extend(columns, writerKind);
 
         ProvisioningRequest Request(string action) => new(
@@ -1061,6 +1077,48 @@ public sealed class RunExecutor(
     /// reconciling writer needs the same scope to know which target rows the reload is accountable
     /// for. The configured options dictionary is never mutated — it's shared across every item this
     /// worker processes.</summary>
+    /// <summary>
+    /// The writer's options with a <c>naturalKey</c> derived from the source's primary key, when the
+    /// SCD Type 2 writer is running and nobody stated one — phase 68.
+    /// <para>
+    /// A per-call copy, never a write into the configured dictionary, for the reason
+    /// <see cref="WithSegment"/> copies: that dictionary is loaded config shared by everything reading
+    /// this mapping, and a derivation belongs to this pass.
+    /// </para>
+    /// <para>
+    /// Deriving nothing injects nothing. <c>Scd2Writer.ApplyAsync</c> then fails on its own required-option
+    /// check with a message naming what is missing, which is a better failure than one invented here —
+    /// and is exactly what happened before this existed.
+    /// </para>
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, string>> WithDerivedNaturalKeyAsync(
+        string writerKind, IReadOnlyDictionary<string, string> options,
+        IDriver sourceDriver, DbConnection sourceConnection, SourceTableRef source,
+        TableMappingConfig mapping, Guid runId, CancellationToken cancellationToken)
+    {
+        if (writerKind != GenericDriverKinds.Scd2)
+            return options;
+
+        // A stated key wins outright — at either level, since the mapping's override has already
+        // replaced the replication's stage by the time this sees it.
+        if (options.TryGetValue(Scd2Writer.NaturalKeyOption, out var stated) && !string.IsNullOrWhiteSpace(stated))
+            return options;
+
+        var sourceColumns = await sourceDriver.ListColumnsAsync(
+            sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
+        var derived = NaturalKeyDerivation.Derive(sourceColumns, mapping.ColumnMappings);
+        if (derived.Count == 0)
+            return options;
+
+        Log(runId, LogSeverity.Info,
+            $"'{mapping.Name}': natural key derived from the source's primary key — {NaturalKeyDerivation.Format(derived)}.");
+
+        return new Dictionary<string, string>(options, StringComparer.Ordinal)
+        {
+            [Scd2Writer.NaturalKeyOption] = NaturalKeyDerivation.Format(derived),
+        };
+    }
+
     private static IReadOnlyDictionary<string, string> WithSegment(
         IReadOnlyDictionary<string, string> options, BatchReloadSegment? segment) =>
         segment is null

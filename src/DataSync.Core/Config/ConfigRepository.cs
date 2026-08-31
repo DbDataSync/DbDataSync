@@ -246,7 +246,7 @@ public sealed class ConfigRepository
         if (mapping.Sources.Count == 1 && mapping.Targets.Count == 1)
         {
             ConfigValidation.ValidateHistorizedTarget(
-                task.ChangeProcessing.Writer.Kind,
+                PipelineResolution.Writer(task, mapping).Kind,
                 EndpointResolution.ResolveSource(task, mapping.Sources[0]),
                 EndpointResolution.ResolveTarget(task, mapping.Targets[0]),
                 mapping.Name);

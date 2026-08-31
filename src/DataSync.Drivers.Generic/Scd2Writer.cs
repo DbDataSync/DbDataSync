@@ -37,10 +37,12 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
     /// <summary>
     /// Which mapped columns identify a row across its versions — the dimension's business key.
     /// <para>
-    /// A declared setting rather than something inferred, because it **cannot** be inferred: in an
-    /// SCD2 target the primary key is the surrogate, so the natural key is not the target's key and
-    /// there is nothing to read it from. It is also a modelling decision — which columns make a
-    /// customer the same customer is a question about the business, not about the schema.
+    /// Not inferable from the *target*: in an SCD2 table the primary key is the surrogate this writer
+    /// generates, so there is nothing there to read a business key from. It is inferable from the
+    /// **source's** primary key, translated through the mapping's columns, which is what
+    /// <see cref="NaturalKeyDerivation"/> does and what <c>RunExecutor</c> injects here when this
+    /// option is absent (phase 68). Stating it stays possible, per mapping, because which columns make
+    /// a customer the same customer is ultimately a modelling decision rather than a schema fact.
     /// </para>
     /// </summary>
     public const string NaturalKeyOption = "naturalKey";
@@ -58,8 +60,12 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
             Description =
                 "The mapped column(s) that identify a row across its versions — the business key. " +
                 "Comma-separated for a composite one. Not the surrogate key, which this writer " +
-                "generates.",
-            Required = true,
+                "generates. Left empty it is derived from the source table's primary key.",
+            // Optional at every level since phase 68: absent means "derive it from the source's
+            // primary key", which is the normal case, and the replication level cannot state one at
+            // all. A run that can neither derive nor read a value still fails — in ApplyAsync below,
+            // where the message can say which table had no primary key.
+            Required = false,
         },
     ];
 
@@ -164,9 +170,11 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
 
         if (!options.TryGetValue(NaturalKeyOption, out var configured) || string.IsNullOrWhiteSpace(configured))
             throw new InvalidOperationException(
-                $"The '{NaturalKeyOption}' setting is required for the SCD Type 2 writer: it names the " +
-                "column(s) that identify a row across its versions. It cannot be inferred, because this " +
-                $"target's primary key is the generated {HistorizedColumns.SurrogateKey}.");
+                $"The SCD Type 2 writer needs a '{NaturalKeyOption}': the column(s) that identify a row " +
+                "across its versions. None was derived — the source table has no primary key, or its " +
+                "key columns are not all mapped — and this target's own primary key is the generated " +
+                $"{HistorizedColumns.SurrogateKey}, which says nothing about identity. Set it on this " +
+                "table mapping's Pipeline tab.");
 
         var keys = configured
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

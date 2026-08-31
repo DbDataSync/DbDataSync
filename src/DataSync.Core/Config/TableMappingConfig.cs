@@ -137,6 +137,31 @@ public sealed class TableMappingConfig
     public ProvisioningConfig Provisioning { get; set; } = new();
 
     /// <summary>
+    /// This mapping's own reader, in place of the replication's. Null — the normal case — inherits
+    /// <see cref="ChangeProcessingConfig.Reader"/> entirely.
+    /// <para>
+    /// **Atomic: Kind and Options together, never merged.** The same rule scripts, hooks and
+    /// provisioning already follow. Half a stage inherited and half overridden would mean an option
+    /// set for one Kind silently surviving onto another.
+    /// </para>
+    /// </summary>
+    public ReaderConfig? ReaderOverride { get; set; }
+
+    /// <summary>This mapping's own staging provider, in place of the replication's. Null inherits.
+    /// Independent of <see cref="ReaderOverride"/> and <see cref="WriterOverride"/> — see those.</summary>
+    public CacheConfig? CacheOverride { get; set; }
+
+    /// <summary>
+    /// This mapping's own writer, in place of the replication's. Null inherits.
+    /// <para>
+    /// The field phase 68 was actually for: the SCD Type 2 writer's <c>naturalKey</c> names the columns
+    /// that identify a row across its versions, and a replication syncing three tables needs three
+    /// answers. At the replication it could only ever state one.
+    /// </para>
+    /// </summary>
+    public WriterConfig? WriterOverride { get; set; }
+
+    /// <summary>
     /// Comparisons between this mapping's source and target, run on demand rather than as part of a
     /// pass — see phase 43. Empty for a mapping nobody has asked to verify.
     /// </summary>

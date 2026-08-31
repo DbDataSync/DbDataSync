@@ -31,7 +31,7 @@ public sealed class ProvisioningService(
     {
         var (task, mapping, source, target) = LoadMapping(replicationName, mappingName);
 
-        var (sourceConnection, sourcePlan) = await PlanEnableSourceChangeCaptureAsync(task, source, cancellationToken);
+        var (sourceConnection, sourcePlan) = await PlanEnableSourceChangeCaptureAsync(task, mapping, source, cancellationToken);
         if (sourceConnection is not null)
             await sourceConnection.DisposeAsync();
 
@@ -49,7 +49,7 @@ public sealed class ProvisioningService(
 
         var (connection, plan) = action switch
         {
-            ProvisioningActions.EnableSourceChangeCapture => await PlanEnableSourceChangeCaptureAsync(task, source, cancellationToken),
+            ProvisioningActions.EnableSourceChangeCapture => await PlanEnableSourceChangeCaptureAsync(task, mapping, source, cancellationToken),
             ProvisioningActions.CreateTargetTable or ProvisioningActions.AlterTargetTable =>
                 await PlanTargetAsync(task, mapping, source, target, cancellationToken),
             _ => throw new ConfigValidationException($"Unknown provisioning action '{action}'."),
@@ -173,7 +173,8 @@ public sealed class ProvisioningService(
     }
 
     private async Task<(DbConnection? Connection, ProvisioningPlan Plan)> PlanEnableSourceChangeCaptureAsync(
-        ReplicationTaskConfig task, SourceTableRef source, CancellationToken cancellationToken)
+        ReplicationTaskConfig task, TableMappingConfig mapping, SourceTableRef source,
+        CancellationToken cancellationToken)
     {
         var (connection, driver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);
         if (driver is not IProvisioner provisioner)
@@ -182,9 +183,11 @@ public sealed class ProvisioningService(
             return (null, Unsupported(ProvisioningActions.EnableSourceChangeCapture, driver.DriverType));
         }
 
+        // This mapping's effective reader — enabling change capture is planned for the reader that
+        // will actually read this table, which a mapping may override (phase 68).
+        var reader = PipelineResolution.Reader(task, mapping);
         var request = new ProvisioningRequest(
-            ProvisioningActions.EnableSourceChangeCapture, source, task.ChangeProcessing.Reader.Kind,
-            task.ChangeProcessing.Reader.Options, []);
+            ProvisioningActions.EnableSourceChangeCapture, source, reader.Kind, reader.Options, []);
         var plan = await provisioner.PlanAsync(connection, request, cancellationToken);
         return (connection, plan);
     }
@@ -232,7 +235,10 @@ public sealed class ProvisioningService(
         // Extended with whatever the configured writer needs beyond the mapped columns — a snapshot's
         // marker, an SCD Type 2 target's version key and validity range. The same list the create and
         // alter planners already work from, rather than a second provisioning path.
-        var writerKind = task.ChangeProcessing.Writer.Kind;
+        // The mapping's effective writer, not the replication's: a mapping that overrides its way onto
+        // Scd2 needs the version columns in this plan, and the run that creates the table unattended
+        // resolves the same way (see RunExecutor.EnsureTargetTableProvisionedAsync).
+        var writerKind = PipelineResolution.Writer(task, mapping).Kind;
         var provisioned = HistorizedProvisioning.Extend(columns, writerKind);
 
         ProvisioningRequest Request(string action) => new(
