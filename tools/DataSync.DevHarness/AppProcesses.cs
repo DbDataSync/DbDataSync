@@ -62,6 +62,14 @@ public sealed class AppProcesses : IAsyncDisposable
         // workload; warnings and above still surface anything that actually matters.
         startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
 
+        // The API this harness starts runs open, using the escape hatch AuthOptions already names.
+        // Without it `up` cannot configure its own scenario: every /api PUT below comes back 401,
+        // because there is no user yet and the first-run invite is a browser flow. A harness that
+        // needed a human to click through an invite before it could stand anything up would not be a
+        // harness. Only ever set on the process started *here*, on a loopback port, against a scratch
+        // repo — `--no-app` points at somebody else's API and does not touch its configuration.
+        startInfo.Environment["DataSync__Auth__Disabled"] = "true";
+
         // The spawned TaskRunner inherits these. In an environment with no OS keychain, SecretStore
         // falls back to CLRKERNEL_SECRET_* variables — without them a run fails to resolve the
         // connection password. Same workaround the Playwright suite and the integration tests use.
