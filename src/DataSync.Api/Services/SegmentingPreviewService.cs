@@ -30,6 +30,7 @@ public sealed class SegmentingPreviewService(
     DriverConnectionFactory connections,
     CustomSegmentExpansion customSegments)
 {
+    /// <summary>Previews a strategy the replication has already saved, by name.</summary>
     public async Task<SegmentingPreviewResult> PreviewAsync(
         string replicationName, string mappingName, string strategyName, CancellationToken cancellationToken)
     {
@@ -50,6 +51,46 @@ public sealed class SegmentingPreviewService(
         if (strategy is null)
             return new SegmentingPreviewResult(null, null, NotFound: true);
 
+        return await RunAsync(task, mapping, mappingName, strategy, cancellationToken);
+    }
+
+    /// <summary>
+    /// Previews a strategy that has not been saved — what the editor's Test button runs (phase 61).
+    /// <para>
+    /// The point of a Test button is finding out that a query is malformed while writing it, rather
+    /// than the next time an unattended reload silently does nothing. Requiring a save first would
+    /// mean committing a strategy in order to discover it does not work, which is the situation this
+    /// is meant to remove.
+    /// </para>
+    /// <para>
+    /// The strategy arrives in the request; everything else is read from config exactly as above, and
+    /// the execution below is the same code either way. A strategy previewed here and the same
+    /// strategy previewed once saved cannot disagree.
+    /// </para>
+    /// </summary>
+    public async Task<SegmentingPreviewResult> PreviewAsync(
+        string replicationName, string mappingName, SegmentingStrategyConfig strategy,
+        CancellationToken cancellationToken)
+    {
+        ReplicationTaskConfig task;
+        TableMappingConfig mapping;
+        try
+        {
+            task = configRepository.LoadReplicationTask(replicationName);
+            mapping = configRepository.LoadTableMapping(replicationName, mappingName);
+        }
+        catch (FileNotFoundException)
+        {
+            return new SegmentingPreviewResult(null, null, NotFound: true);
+        }
+
+        return await RunAsync(task, mapping, mappingName, strategy, cancellationToken);
+    }
+
+    private async Task<SegmentingPreviewResult> RunAsync(
+        ReplicationTaskConfig task, TableMappingConfig mapping, string mappingName,
+        SegmentingStrategyConfig strategy, CancellationToken cancellationToken)
+    {
         if (mapping.Sources.Count != 1 || mapping.Targets.Count != 1)
             return new SegmentingPreviewResult(
                 null, $"Table mapping '{mappingName}' is not 1:1, which segmenting does not support in v1.");

@@ -1,3 +1,4 @@
+using DataSync.Core.Config;
 using DataSync.Api.Models;
 using DataSync.Api.Services;
 using DataSync.State;
@@ -66,6 +67,34 @@ public sealed class RunsController(
         var result = await segmentingPreview.PreviewAsync(name, mappingName, strategyName, cancellationToken);
         if (result.NotFound)
             return NotFound(new { error = "Replication, table mapping or segmenting strategy not found." });
+
+        return result.Error is null
+            ? Ok(new { candidates = result.Candidates })
+            : BadRequest(new { error = result.Error });
+    }
+
+    /// <summary>
+    /// The same preview, for a strategy that is still being written — the editor's Test button (phase
+    /// 61).
+    /// <para>
+    /// A POST rather than a GET only because the strategy travels in the body: a DuckDB query does not
+    /// fit in a path segment. It writes nothing, and runs exactly the code the saved-strategy preview
+    /// above runs, so what the editor shows and what a backfill later proposes cannot disagree.
+    /// </para>
+    /// <para>
+    /// A mapping is still required, and not incidentally: a strategy proposes ranges over one table's
+    /// column, and the source-SQL and target-SQL kinds resolve their connection through the mapping's
+    /// endpoints. "Test this against nothing in particular" is not a question with an answer.
+    /// </para>
+    /// </summary>
+    [HttpPost("replications/{name}/mappings/{mappingName}/segmenting/preview")]
+    public async Task<IActionResult> PreviewUnsavedSegmenting(
+        string name, string mappingName, [FromBody] SegmentingStrategyConfig strategy,
+        CancellationToken cancellationToken)
+    {
+        var result = await segmentingPreview.PreviewAsync(name, mappingName, strategy, cancellationToken);
+        if (result.NotFound)
+            return NotFound(new { error = "Replication or table mapping not found." });
 
         return result.Error is null
             ? Ok(new { candidates = result.Candidates })
