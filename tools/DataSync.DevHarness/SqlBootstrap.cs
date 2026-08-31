@@ -13,14 +13,16 @@ namespace DataSync.DevHarness;
 /// </summary>
 public static class SqlBootstrap
 {
-    public static async Task CreateAsync(TargetEngine target, CancellationToken cancellationToken)
+    public static async Task CreateAsync(
+        TargetEngine target, IReadOnlyList<HarnessTable> tables, CancellationToken cancellationToken)
     {
-        Log.Step($"Creating the '{Scenario.DatabaseName}' database on the source and the {target.Name} target");
+        Log.Step($"Creating the '{Scenario.DatabaseName}' database and {tables.Count} table(s) on the source and the {target.Name} target");
 
-        await CreateSourceAsync(cancellationToken);
-        await target.RecreateAsync(cancellationToken);
+        await CreateSourceAsync(tables, cancellationToken);
+        await target.RecreateAsync(tables, cancellationToken);
 
-        Log.Ok($"{Scenario.QualifiedTable} exists on source (change tracking on), {target.QualifiedTable} on the {target.Name} target");
+        var widths = string.Join(", ", tables.Select(t => $"{t.Name} ({t.Columns.Count} cols)"));
+        Log.Ok($"on the source (change tracking on) and the {target.Name} target: {widths}");
     }
 
     public static async Task DropAsync(TargetEngine target, CancellationToken cancellationToken)
@@ -47,7 +49,8 @@ public static class SqlBootstrap
         }
     }
 
-    private static async Task CreateSourceAsync(CancellationToken cancellationToken)
+    private static async Task CreateSourceAsync(
+        IReadOnlyList<HarnessTable> tables, CancellationToken cancellationToken)
     {
         await using (var master = await OpenAsync(Scenario.SourceConnectionString(), cancellationToken))
         {
@@ -59,8 +62,11 @@ public static class SqlBootstrap
         }
 
         await using var db = await OpenAsync(Scenario.SourceConnectionString(Scenario.DatabaseName), cancellationToken);
-        await ExecuteAsync(db, Scenario.CreateTableSql, cancellationToken);
-        await ExecuteAsync(db, $"ALTER TABLE {Scenario.QualifiedTable} ENABLE CHANGE_TRACKING;", cancellationToken);
+        foreach (var table in tables)
+        {
+            await ExecuteAsync(db, Scenario.CreateTableSql(table), cancellationToken);
+            await ExecuteAsync(db, $"ALTER TABLE {table.QualifiedSource} ENABLE CHANGE_TRACKING;", cancellationToken);
+        }
     }
 
     /// <summary>
@@ -72,49 +78,68 @@ public static class SqlBootstrap
     /// and bulk copy is both unaffected by that and far faster at the sizes this exists to produce.
     /// </para>
     /// </summary>
-    public static async Task SeedAsync(int rows, CancellationToken cancellationToken)
+    /// <summary>
+    /// Bulk-loads rows into every generated table on the source, starting after whatever key is
+    /// already there so this can be called repeatedly to grow them.
+    /// <para>
+    /// Via <see cref="SqlBulkCopy"/> rather than multi-row INSERT statements: a parameterised INSERT
+    /// hits SQL Server's hard limit of 2100 parameters per request at only a few hundred rows of even
+    /// a narrow table, and bulk copy is both unaffected by that and far faster at the sizes this
+    /// exists to produce. It is also what makes widening a table free here — the mechanism never cared
+    /// how many columns it was given, only the hardcoded column list did.
+    /// </para>
+    /// </summary>
+    public static async Task SeedAsync(
+        int rows, IReadOnlyList<HarnessTable> tables, CancellationToken cancellationToken)
     {
         if (rows < 1)
             throw new HarnessException("--rows must be at least 1.");
 
         await using var connection = await OpenAsync(Scenario.SourceConnectionString(Scenario.DatabaseName), cancellationToken);
 
-        var startId = await MaxIdAsync(connection, cancellationToken) + 1;
-        Log.Step($"Seeding {rows:N0} row(s) into the source, from Id {startId:N0}");
+        // Every table gets the same number of rows. Widths vary by design; row counts do not, so a
+        // per-table difference in replication lag is about the shape rather than about the volume.
+        foreach (var table in tables)
+            await SeedTableAsync(connection, table, rows, cancellationToken);
+    }
 
-        var random = new Random(startId);
+    private static async Task SeedTableAsync(
+        SqlConnection connection, HarnessTable table, int rows, CancellationToken cancellationToken)
+    {
+        var startId = await MaxIdAsync(connection, table, cancellationToken) + 1;
+        Log.Step($"Seeding {rows:N0} row(s) into {table.Name}, from Id {startId:N0}");
+
+        // Seeded from the start key and the table index, so a table's data is reproducible and two
+        // tables of the same width do not end up holding identical rows.
+        var random = new Random(startId * 31 + table.Index);
+        var columns = table.Columns.ToList();
         const int batchSize = 10_000;
         var written = 0;
 
         while (written < rows)
         {
             var batch = Math.Min(batchSize, rows - written);
-            var table = new System.Data.DataTable();
-            foreach (var column in Scenario.Columns)
-                table.Columns.Add(column);
+            var data = new System.Data.DataTable();
+            foreach (var column in columns)
+                data.Columns.Add(column.Name);
 
             for (var i = 0; i < batch; i++)
             {
                 var id = startId + written + i;
-                table.Rows.Add(
-                    id,
-                    Scenario.Regions[random.Next(Scenario.Regions.Length)],
-                    $"Customer {id:D6}",
-                    Math.Round((decimal)(random.NextDouble() * 5000), 2),
-                    DateTime.UtcNow);
+                data.Rows.Add([.. columns.Select(c => Scenario.Value(c, id, random))]);
             }
 
-            using var bulkCopy = new SqlBulkCopy(connection) { DestinationTableName = Scenario.QualifiedTable };
-            foreach (var column in Scenario.Columns)
-                bulkCopy.ColumnMappings.Add(column, column);
-            await bulkCopy.WriteToServerAsync(table, cancellationToken);
+            using var bulkCopy = new SqlBulkCopy(connection) { DestinationTableName = table.QualifiedSource };
+            foreach (var column in columns)
+                bulkCopy.ColumnMappings.Add(column.Name, column.Name);
+            await bulkCopy.WriteToServerAsync(data, cancellationToken);
 
             written += batch;
             if (rows > batchSize)
-                Log.Info($"{written:N0} / {rows:N0}");
+                Log.Info($"{table.Name}: {written:N0} / {rows:N0}");
         }
 
-        Log.Ok($"source now holds {await CountAsync(connection, cancellationToken):N0} row(s)");
+        Log.Ok($"{table.Name} now holds {await CountAsync(connection, table, cancellationToken):N0} row(s)");
     }
 
     public static async Task<SqlConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
@@ -141,17 +166,17 @@ public static class SqlBootstrap
         await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public static async Task<int> CountAsync(SqlConnection connection, CancellationToken cancellationToken)
+    public static async Task<int> CountAsync(SqlConnection connection, HarnessTable table, CancellationToken cancellationToken)
     {
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"SELECT COUNT(*) FROM {Scenario.QualifiedTable};";
+        cmd.CommandText = $"SELECT COUNT(*) FROM {table.QualifiedSource};";
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
-    public static async Task<int> MaxIdAsync(SqlConnection connection, CancellationToken cancellationToken)
+    public static async Task<int> MaxIdAsync(SqlConnection connection, HarnessTable table, CancellationToken cancellationToken)
     {
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"SELECT ISNULL(MAX(Id), 0) FROM {Scenario.QualifiedTable};";
+        cmd.CommandText = $"SELECT ISNULL(MAX(Id), 0) FROM {table.QualifiedSource};";
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 

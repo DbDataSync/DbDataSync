@@ -48,7 +48,18 @@ public abstract class TargetEngine
     public abstract string ConnectionString(string? database = null);
     public abstract DbConnection Create(string connectionString);
     public abstract string Quote(string identifier);
-    public abstract string CreateTableSql { get; }
+
+    /// <summary>This engine's spelling for one harness column type. The pair of this and
+    /// <see cref="Scenario.SourceColumnType"/> is what keeps the target's shape identical in *meaning*
+    /// to the source's: the point of the harness is to make divergence visible, which needs a target
+    /// whose shape cannot be the explanation.</summary>
+    public abstract string ColumnType(HarnessColumnType type);
+
+    public string CreateTableSql(HarnessTable table)
+    {
+        var columns = table.Columns.Select(c => $"    {Quote(c.Name)} {ColumnType(c.Type)}");
+        return $"CREATE TABLE {QualifiedTable(table)} (\n{string.Join(",\n", columns)}\n);";
+    }
 
     /// <summary>
     /// The staging provider and writer Kinds for a replication into this engine. The *reader* is not
@@ -61,7 +72,7 @@ public abstract class TargetEngine
     /// no upsert writer of its own has to use — see the phase 20 retrospective.</summary>
     public abstract bool IsFullReload { get; }
 
-    public string QualifiedTable => $"{Quote(SchemaName)}.{Quote(Scenario.Table)}";
+    public string QualifiedTable(HarnessTable table) => $"{Quote(SchemaName)}.{Quote(table.Name)}";
     public abstract string SchemaName { get; }
 
     /// <summary>The scenario database's name *as this engine spells it*. Postgres folds unquoted
@@ -93,31 +104,34 @@ public abstract class TargetEngine
         await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task<int> CountAsync(DbConnection connection, CancellationToken cancellationToken)
+    public async Task<int> CountAsync(DbConnection connection, HarnessTable table, CancellationToken cancellationToken)
     {
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"SELECT COUNT(*) FROM {QualifiedTable};";
+        cmd.CommandText = $"SELECT COUNT(*) FROM {QualifiedTable(table)};";
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
-    public async Task<int> MaxIdAsync(DbConnection connection, CancellationToken cancellationToken)
+    public async Task<int> MaxIdAsync(DbConnection connection, HarnessTable table, CancellationToken cancellationToken)
     {
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"SELECT COALESCE(MAX({Quote("Id")}), 0) FROM {QualifiedTable};";
+        cmd.CommandText = $"SELECT COALESCE(MAX({Quote("Id")}), 0) FROM {QualifiedTable(table)};";
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
-    /// <summary>Recreates the scenario database and table, dropping whatever was there.</summary>
-    public abstract Task RecreateAsync(CancellationToken cancellationToken);
+    /// <summary>Recreates the scenario database and every generated table, dropping whatever was
+    /// there.</summary>
+    public abstract Task RecreateAsync(IReadOnlyList<HarnessTable> tables, CancellationToken cancellationToken);
 
     public abstract Task DropDatabaseAsync(CancellationToken cancellationToken);
 
     /// <summary>Deletes <paramref name="count"/> arbitrary rows. <c>DELETE TOP (n)</c> and
     /// <c>DELETE … LIMIT n</c> are not the same statement, which is the whole reason this is virtual
     /// rather than a format string.</summary>
-    public abstract Task<int> DeleteSomeAsync(DbConnection connection, int count, CancellationToken cancellationToken);
+    public abstract Task<int> DeleteSomeAsync(
+        DbConnection connection, HarnessTable table, int count, CancellationToken cancellationToken);
 
-    public abstract Task<int> AlterSomeAsync(DbConnection connection, int count, CancellationToken cancellationToken);
+    public abstract Task<int> AlterSomeAsync(
+        DbConnection connection, HarnessTable table, int count, CancellationToken cancellationToken);
 
     private sealed class MsSqlTarget : TargetEngine
     {
@@ -137,7 +151,8 @@ public abstract class TargetEngine
 
         public override string Quote(string identifier) => $"[{identifier}]";
 
-        public override string CreateTableSql => Scenario.CreateTableSql;
+        /// <summary>Identical to the source's, since the source is the same engine.</summary>
+        public override string ColumnType(HarnessColumnType type) => Scenario.SourceColumnType(type);
 
         // Change Tracking on the source, MERGE into the target: the incremental path this harness was
         // built to demonstrate.
@@ -146,7 +161,7 @@ public abstract class TargetEngine
 
         public override bool IsFullReload => false;
 
-        public override async Task RecreateAsync(CancellationToken cancellationToken)
+        public override async Task RecreateAsync(IReadOnlyList<HarnessTable> tables, CancellationToken cancellationToken)
         {
             await using (var master = await OpenAsync(null, cancellationToken))
             {
@@ -157,7 +172,8 @@ public abstract class TargetEngine
             // No change tracking on the target: nothing reads changes from it, and enabling it would
             // quietly suggest otherwise.
             await using var db = await OpenAsync(Scenario.DatabaseName, cancellationToken);
-            await ExecuteAsync(db, CreateTableSql, cancellationToken);
+            foreach (var table in tables)
+                await ExecuteAsync(db, CreateTableSql(table), cancellationToken);
         }
 
         public override async Task DropDatabaseAsync(CancellationToken cancellationToken)
@@ -174,20 +190,22 @@ public abstract class TargetEngine
             END
             """;
 
-        public override async Task<int> DeleteSomeAsync(DbConnection connection, int count, CancellationToken cancellationToken)
+        public override async Task<int> DeleteSomeAsync(
+            DbConnection connection, HarnessTable table, int count, CancellationToken cancellationToken)
         {
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"DELETE TOP ({count}) FROM {QualifiedTable};";
+            cmd.CommandText = $"DELETE TOP ({count}) FROM {QualifiedTable(table)};";
             return await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        public override async Task<int> AlterSomeAsync(DbConnection connection, int count, CancellationToken cancellationToken)
+        public override async Task<int> AlterSomeAsync(
+            DbConnection connection, HarnessTable table, int count, CancellationToken cancellationToken)
         {
+            // The text column, because every generated table has one whatever its width — table 1 has
+            // a single filler and it is always Text.
+            var text = Quote(table.TextColumn);
             await using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"""
-                UPDATE TOP ({count}) {QualifiedTable}
-                SET [CustomerName] = CONCAT('DRIFTED ', [CustomerName]), [Amount] = -1;
-                """;
+            cmd.CommandText = $"UPDATE TOP ({count}) {QualifiedTable(table)} SET {text} = CONCAT('DRIFTED ', {text});";
             return await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -223,20 +241,17 @@ public abstract class TargetEngine
 
         public override string Quote(string identifier) => $"\"{identifier}\"";
 
-        /// <summary>
-        /// The same shape as the source's, in Postgres's spelling. Deliberately identical in *meaning*:
-        /// the point of the harness is to make divergence visible, which needs a target whose shape
-        /// cannot be the explanation.
-        /// </summary>
-        public override string CreateTableSql => $"""
-            CREATE TABLE {QualifiedTable} (
-                "Id" integer NOT NULL PRIMARY KEY,
-                "Region" varchar(20) NOT NULL,
-                "CustomerName" varchar(100) NOT NULL,
-                "Amount" numeric(18,2) NOT NULL,
-                "UpdatedAtUtc" timestamp(3) NOT NULL
-            );
-            """;
+        public override string ColumnType(HarnessColumnType type) => type switch
+        {
+            HarnessColumnType.Key => "integer NOT NULL PRIMARY KEY",
+            HarnessColumnType.Text => "varchar(20) NOT NULL",
+            HarnessColumnType.Decimal => "numeric(18,2) NOT NULL",
+            HarnessColumnType.Int => "integer NOT NULL",
+            HarnessColumnType.Bool => "boolean NOT NULL",
+            HarnessColumnType.Date => "date NOT NULL",
+            HarnessColumnType.Timestamp => "timestamp(3) NOT NULL",
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown harness column type."),
+        };
 
         /// <summary>
         /// Reload, not incremental. There is no generic upsert writer yet, and the only reconciling
@@ -249,7 +264,7 @@ public abstract class TargetEngine
 
         public override bool IsFullReload => true;
 
-        public override async Task RecreateAsync(CancellationToken cancellationToken)
+        public override async Task RecreateAsync(IReadOnlyList<HarnessTable> tables, CancellationToken cancellationToken)
         {
             await using (var admin = await OpenAsync(null, cancellationToken))
             {
@@ -260,7 +275,8 @@ public abstract class TargetEngine
             }
 
             await using var db = await OpenAsync(Database, cancellationToken);
-            await ExecuteAsync(db, CreateTableSql, cancellationToken);
+            foreach (var table in tables)
+                await ExecuteAsync(db, CreateTableSql(table), cancellationToken);
         }
 
         public override async Task DropDatabaseAsync(CancellationToken cancellationToken)
@@ -269,23 +285,28 @@ public abstract class TargetEngine
             await ExecuteAsync(admin, $"DROP DATABASE IF EXISTS \"{Database}\" WITH (FORCE);", cancellationToken);
         }
 
-        public override async Task<int> DeleteSomeAsync(DbConnection connection, int count, CancellationToken cancellationToken)
+        public override async Task<int> DeleteSomeAsync(
+            DbConnection connection, HarnessTable table, int count, CancellationToken cancellationToken)
         {
+            var qualified = QualifiedTable(table);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = $"""
-                DELETE FROM {QualifiedTable}
-                WHERE "Id" IN (SELECT "Id" FROM {QualifiedTable} LIMIT {count});
+                DELETE FROM {qualified}
+                WHERE "Id" IN (SELECT "Id" FROM {qualified} LIMIT {count});
                 """;
             return await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        public override async Task<int> AlterSomeAsync(DbConnection connection, int count, CancellationToken cancellationToken)
+        public override async Task<int> AlterSomeAsync(
+            DbConnection connection, HarnessTable table, int count, CancellationToken cancellationToken)
         {
+            var qualified = QualifiedTable(table);
+            var text = Quote(table.TextColumn);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = $"""
-                UPDATE {QualifiedTable}
-                SET "CustomerName" = 'DRIFTED ' || "CustomerName", "Amount" = -1
-                WHERE "Id" IN (SELECT "Id" FROM {QualifiedTable} ORDER BY "Id" DESC LIMIT {count});
+                UPDATE {qualified}
+                SET {text} = 'DRIFTED ' || {text}
+                WHERE "Id" IN (SELECT "Id" FROM {qualified} ORDER BY "Id" DESC LIMIT {count});
                 """;
             return await cmd.ExecuteNonQueryAsync(cancellationToken);
         }

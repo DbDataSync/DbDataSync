@@ -63,29 +63,35 @@ try
             return 0;
 
         case "reset":
-            await SqlBootstrap.CreateAsync(TargetEngine.Resolve(harness), cancellation.Token);
+            await SqlBootstrap.CreateAsync(
+                TargetEngine.Resolve(harness), Scenario.Tables(harness), cancellation.Token);
             AppProcesses.ResetScratchRepo();
             Log.Ok("databases recreated and the scratch config repo cleared");
             Log.Info("Run `up` again to reconfigure the replication.");
             return 0;
 
         case "seed":
-            await SqlBootstrap.SeedAsync(harness.Int("rows", 1000), cancellation.Token);
+            await SqlBootstrap.SeedAsync(
+                harness.Int("rows", 1000), Scenario.Tables(harness), cancellation.Token);
             return 0;
 
         case "workload":
             await Workload.RunAsync(
                 harness.Int("rate", 10),
                 harness.Duration("duration", TimeSpan.FromMinutes(1)),
+                Scenario.Tables(harness),
+                harness.Int("parallelism", 1),
                 cancellation.Token);
             return 0;
 
         case "drift":
-            await Drift.InjectAsync(TargetEngine.Resolve(harness), harness.Int("rows", 30), cancellation.Token);
+            await Drift.InjectAsync(
+                TargetEngine.Resolve(harness), Scenario.Tables(harness), harness.Int("rows", 30), cancellation.Token);
             return 0;
 
         case "verify":
-            return await Verifier.VerifyAsync(TargetEngine.Resolve(harness), cancellation.Token) ? 0 : 1;
+            return await Verifier.VerifyAsync(
+                TargetEngine.Resolve(harness), Scenario.Tables(harness), cancellation.Token) ? 0 : 1;
 
         default:
             Log.Error($"Unknown verb '{harness.Verb}'.");
@@ -129,13 +135,14 @@ async Task UpAsync(HarnessArgs options, string root, CancellationToken cancellat
     }
 
     var targetEngine = TargetEngine.Resolve(options);
+    var tables = Scenario.Tables(options);
 
     if (!options.Has("keep-data"))
-        await SqlBootstrap.CreateAsync(targetEngine, cancellationToken);
+        await SqlBootstrap.CreateAsync(targetEngine, tables, cancellationToken);
 
     var seedRows = options.Int("rows", 200);
     if (seedRows > 0 && !options.Has("keep-data"))
-        await SqlBootstrap.SeedAsync(seedRows, cancellationToken);
+        await SqlBootstrap.SeedAsync(seedRows, tables, cancellationToken);
 
     await using var app = new AppProcesses();
     if (startApp)
@@ -151,7 +158,7 @@ async Task UpAsync(HarnessArgs options, string root, CancellationToken cancellat
 
     using var api = new ApiClient(apiUrl);
     await api.WaitUntilHealthyAsync(TimeSpan.FromMinutes(1), cancellationToken);
-    await api.ConfigureScenarioAsync(targetEngine, cancellationToken);
+    await api.ConfigureScenarioAsync(targetEngine, tables, cancellationToken);
 
     if (!startApp)
     {
@@ -164,6 +171,8 @@ async Task UpAsync(HarnessArgs options, string root, CancellationToken cancellat
     Log.Info($"Config repo and state database: {AppProcesses.ScratchRepoRoot}");
     Log.Info("In another terminal, try:");
     Log.Info("  tools/dev-harness workload --rate 20 --duration 2m   # live inserts/updates/deletes");
+    if (tables.Count > 1)
+        Log.Info($"  tools/dev-harness workload --rate 40 --parallelism {Math.Min(4, tables.Count)}    # {tables.Count} tables on concurrent connections");
     Log.Info("  tools/dev-harness verify                             # source vs target, row by row");
     Log.Info("  tools/dev-harness drift                              # corrupt the target, then backfill in the UI");
     Log.Info("Ctrl+C stops the API and SPA (the containers keep running — `down` stops those).");
@@ -203,6 +212,7 @@ static void PrintUsage()
                       --no-containers   assume the containers are already up
                       --keep-data       don't recreate or reseed the databases
                       --target-engine E replicate into mssql (default) or postgres
+                      --tables N        how many tables to generate (default 1)
 
           down        Stop the containers.
                       --volumes         also discard their data volumes
@@ -210,21 +220,40 @@ static void PrintUsage()
           reset       Recreate the databases and clear the scratch config repo, leaving containers up.
                       --target-engine E as for `up`
 
-          seed        Bulk-load rows into the source.
-                      --rows N          (default 1000)
+          seed        Bulk-load rows into every generated table on the source.
+                      --rows N          rows per table (default 1000)
+                      --tables N        as for `up`
 
-          workload    Run continuous insert/update/delete transactions against the source.
-                      --rate N          transactions per second (default 10)
+          workload    Run continuous insert/update/delete transactions against the source, on
+                      --parallelism concurrent connections.
+                      --rate N          transactions per second, across all tables (default 10)
                       --duration T      e.g. 90s, 5m, 1h        (default 1m)
+                      --parallelism P   concurrent connections  (default 1)
+                      --tables N        as for `up`
 
           drift       Corrupt the target directly, behind the replication's back — the situation only
-                      a reconciling backfill can repair.
-                      --rows N          rows to affect, split across delete/alter/phantom (default 30)
+                      a reconciling backfill can repair. Affects every generated table.
+                      --rows N          rows per table, split across delete/alter/phantom (default 30)
                       --target-engine E as for `up`
+                      --tables N        as for `up`
 
-          verify      Compare source and target row by row. Exit code 0 if identical, 1 if not.
-                      Works across engines: a SQL Server source against a PostgreSQL target.
+          verify      Compare source and target row by row, table by table. Exit code 0 if identical,
+                      1 if not. Works across engines: a SQL Server source against a PostgreSQL target.
                       --target-engine E as for `up`
+                      --tables N        as for `up`
+
+        Tables:
+          --tables N generates N independent tables of increasing width. Table i carries Id, i filler
+          columns cycling through string/decimal/int/bool/date, and UpdatedAtUtc — so table 1 is three
+          columns wide and table 20 is twenty-two, and every representative type gets exercised. There
+          is no relational structure between them. Every verb needs the same N, so set
+          DATASYNC_HARNESS_TABLES once rather than passing the flag each time: `verify` looking for
+          tables `up` never created reports a difference that is really a forgotten flag.
+
+          `workload --parallelism P` splits the tables into P groups, each on its own connection,
+          running at once. Within a group the tables are visited in a fixed rotation, one per turn.
+          The rate is shared out in proportion to each group's table count, so every *table* sees
+          about rate/N regardless of how unevenly N divides by P.
 
         Cross-engine:
           The source is always SQL Server — Change Tracking is what makes the incremental story
@@ -237,5 +266,6 @@ static void PrintUsage()
           DATASYNC_MSSQL_SA_PASSWORD      SA password for both SQL Server instances (default DataSync_Test_Pw1)
           DATASYNC_POSTGRES_PASSWORD      PostgreSQL password (default DataSync_Test_Pw1)
           DATASYNC_HARNESS_TARGET_ENGINE  mssql (default) or postgres
+          DATASYNC_HARNESS_TABLES         how many tables to generate (default 1)
         """);
 }

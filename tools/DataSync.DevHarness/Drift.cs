@@ -15,39 +15,54 @@ namespace DataSync.DevHarness;
 /// </summary>
 public static class Drift
 {
-    public static async Task InjectAsync(TargetEngine engine, int rows, CancellationToken cancellationToken)
+    public static async Task InjectAsync(
+        TargetEngine engine, IReadOnlyList<HarnessTable> tables, int rows, CancellationToken cancellationToken)
     {
         await using var target = await engine.OpenAsync(Scenario.DatabaseName, cancellationToken);
         await using var source = await SqlBootstrap.OpenAsync(
             Scenario.SourceConnectionString(Scenario.DatabaseName), cancellationToken);
 
-        var total = await engine.CountAsync(target, cancellationToken);
-        if (total == 0)
-            throw new HarnessException("The target table is empty — run a replication first, so there's something to corrupt.");
+        // Every table, not just the first: a multi-table scenario whose drift landed on one mapping
+        // would make the other mappings' backfills look like no-ops rather than like repairs.
+        foreach (var table in tables)
+            await InjectIntoAsync(engine, target, source, table, rows, cancellationToken);
 
-        var each = Math.Max(1, rows / 3);
-        Log.Step($"Injecting drift into the target ({each} deleted, {each} altered, {each} phantom rows)");
-
-        var deleted = await engine.DeleteSomeAsync(target, each, cancellationToken);
-        var altered = await engine.AlterSomeAsync(target, each, cancellationToken);
-        var phantomIds = await InsertPhantomsAsync(engine, target, source, each, cancellationToken);
-
-        Log.Ok($"{deleted} row(s) deleted, {altered} altered, {phantomIds.Count} phantom row(s) inserted");
         Log.Info("`verify` will now report differences.");
         Log.Info(engine.IsFullReload
             // A reload pipeline re-reads the source every pass, so it repairs drift on its own — worth
             // saying, because the usual "an incremental run will not fix this" advice is wrong here.
             ? "This target runs a reload pipeline, so the next scheduled run will repair them."
-            : $"An incremental run will not fix any of them — repair with a backfill of "
-              + $"'{Scenario.MappingName}' using a reconciling writer.");
+            : "An incremental run will not fix any of them — repair with a backfill of each affected "
+              + "mapping using a reconciling writer.");
+    }
+
+    private static async Task InjectIntoAsync(
+        TargetEngine engine, DbConnection target, SqlConnection source, HarnessTable table, int rows,
+        CancellationToken cancellationToken)
+    {
+        var total = await engine.CountAsync(target, table, cancellationToken);
+        if (total == 0)
+        {
+            Log.Warn($"{table.Name} is empty at the target — run a replication first, so there's something to corrupt.");
+            return;
+        }
+
+        var each = Math.Max(1, rows / 3);
+        Log.Step($"Injecting drift into {table.Name} ({each} deleted, {each} altered, {each} phantom rows)");
+
+        var deleted = await engine.DeleteSomeAsync(target, table, each, cancellationToken);
+        var altered = await engine.AlterSomeAsync(target, table, each, cancellationToken);
+        var phantomIds = await InsertPhantomsAsync(engine, target, source, table, each, cancellationToken);
+
+        Log.Ok($"{table.Name}: {deleted} row(s) deleted, {altered} altered, {phantomIds.Count} phantom row(s) inserted");
 
         if (phantomIds.Count > 0)
         {
-            var inRange = await AreWithinSourceRangeAsync(source, phantomIds, cancellationToken);
+            var inRange = await AreWithinSourceRangeAsync(source, table, phantomIds, cancellationToken);
             Log.Info(inRange
-                ? $"Phantom Ids {phantomIds[0]}–{phantomIds[^1]} sit inside the source's key range, so a " +
+                ? $"  phantom Ids {phantomIds[0]}–{phantomIds[^1]} sit inside the source's key range, so a " +
                   "segmented reload covering them removes them too."
-                : $"Phantom Ids {phantomIds[0]}–{phantomIds[^1]} sit *outside* the source's key range (it has no " +
+                : $"  phantom Ids {phantomIds[0]}–{phantomIds[^1]} sit *outside* the source's key range (it has no " +
                   "gaps to use). An Auto-segmented reload derives its buckets from the source's own MIN/MAX, so " +
                   "it will not reach them — only a Full segment will.");
         }
@@ -65,30 +80,35 @@ public static class Drift
     /// </para>
     /// </summary>
     private static async Task<List<int>> InsertPhantomsAsync(
-        TargetEngine engine, DbConnection target, SqlConnection source, int count, CancellationToken cancellationToken)
+        TargetEngine engine, DbConnection target, SqlConnection source, HarnessTable table, int count,
+        CancellationToken cancellationToken)
     {
-        var ids = await FindGapIdsAsync(source, count, cancellationToken);
+        var ids = await FindGapIdsAsync(source, table, count, cancellationToken);
 
         // No gaps (a freshly seeded, contiguous table). Fall back to keys above the source's range —
         // still valid drift, just only reachable by a reload whose segment covers them, which the
         // caller is told about.
         if (ids.Count < count)
         {
-            var next = await engine.MaxIdAsync(target, cancellationToken) + 1;
+            var next = await engine.MaxIdAsync(target, table, cancellationToken) + 1;
             while (ids.Count < count)
                 ids.Add(next++);
         }
 
+        // Seeded from the table so a phantom row is reproducible, and built by the same value
+        // generator seeding uses — a phantom has to be a plausible row, or the difference `verify`
+        // reports would be about its shape rather than about its existence.
+        var random = new Random(table.Index * 104729);
+        var columns = table.Columns;
         foreach (var id in ids)
         {
             await using var cmd = target.CreateCommand();
-            var columns = string.Join(", ", Scenario.Columns.Select(engine.Quote));
-            cmd.CommandText = $"INSERT INTO {engine.QualifiedTable} ({columns}) VALUES (@id, 'EU', @name, 0, @updated);";
-            AddParameter(cmd, "@id", id);
-            AddParameter(cmd, "@name", $"PHANTOM {id}");
-            // Unspecified rather than Utc: Postgres rejects a UTC-kinded DateTime for a `timestamp`
-            // column, and the harness stores wall-clock UTC in a column with no time zone either way.
-            AddParameter(cmd, "@updated", DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified));
+            cmd.CommandText =
+                $"INSERT INTO {engine.QualifiedTable(table)} " +
+                $"({string.Join(", ", columns.Select(c => engine.Quote(c.Name)))}) " +
+                $"VALUES ({string.Join(", ", columns.Select((_, i) => $"@p{i}"))});";
+            for (var i = 0; i < columns.Count; i++)
+                AddParameter(cmd, $"@p{i}", Scenario.Value(columns[i], id, random));
             await cmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -98,12 +118,13 @@ public static class Drift
 
     /// <summary>Keys the source does not have but which lie between keys it does — found with a
     /// window function so this costs one round trip rather than pulling the key set over.</summary>
-    private static async Task<List<int>> FindGapIdsAsync(SqlConnection source, int count, CancellationToken cancellationToken)
+    private static async Task<List<int>> FindGapIdsAsync(
+        SqlConnection source, HarnessTable table, int count, CancellationToken cancellationToken)
     {
         await using var cmd = source.CreateCommand();
         cmd.CommandText = $"""
             SELECT TOP (@count) Id + 1
-            FROM (SELECT Id, LEAD(Id) OVER (ORDER BY Id) AS NextId FROM {Scenario.QualifiedTable}) gaps
+            FROM (SELECT Id, LEAD(Id) OVER (ORDER BY Id) AS NextId FROM {table.QualifiedSource}) gaps
             WHERE NextId > Id + 1
             ORDER BY Id;
             """;
@@ -117,10 +138,10 @@ public static class Drift
     }
 
     private static async Task<bool> AreWithinSourceRangeAsync(
-        SqlConnection source, List<int> ids, CancellationToken cancellationToken)
+        SqlConnection source, HarnessTable table, List<int> ids, CancellationToken cancellationToken)
     {
         await using var cmd = source.CreateCommand();
-        cmd.CommandText = $"SELECT ISNULL(MIN(Id), 0), ISNULL(MAX(Id), 0) FROM {Scenario.QualifiedTable};";
+        cmd.CommandText = $"SELECT ISNULL(MIN(Id), 0), ISNULL(MAX(Id), 0) FROM {table.QualifiedSource};";
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
             return false;

@@ -16,17 +16,36 @@ public static class Verifier
 {
     private const int MaxReportedDifferences = 20;
 
-    public static async Task<bool> VerifyAsync(TargetEngine engine, CancellationToken cancellationToken)
+    public static async Task<bool> VerifyAsync(
+        TargetEngine engine, IReadOnlyList<HarnessTable> tables, CancellationToken cancellationToken)
     {
-        Log.Step($"Comparing the source with the {engine.Name} target");
+        Log.Step($"Comparing the source with the {engine.Name} target across {tables.Count} table(s)");
 
         await using var source = await SqlBootstrap.OpenAsync(Scenario.SourceConnectionString(Scenario.DatabaseName), cancellationToken);
         await using var target = await engine.OpenAsync(Scenario.DatabaseName, cancellationToken);
 
+        // Every table is compared even once one has failed: "which tables diverged" is the useful
+        // answer, and stopping at the first would report the narrowest one and hide the rest.
+        var allMatch = true;
+        foreach (var table in tables)
+            allMatch &= await VerifyTableAsync(engine, source, target, table, cancellationToken);
+
+        if (allMatch)
+            Log.Ok($"all {tables.Count} table(s) match");
+
+        return allMatch;
+    }
+
+    private static async Task<bool> VerifyTableAsync(
+        TargetEngine engine, DbConnection source, DbConnection target, HarnessTable table,
+        CancellationToken cancellationToken)
+    {
+        var columns = table.ColumnNames.ToList();
+
         await using var sourceReader = await OpenOrderedReaderAsync(
-            source, Scenario.QualifiedTable, TargetEngine.MsSql.Quote, cancellationToken);
+            source, table.QualifiedSource, columns, TargetEngine.MsSql.Quote, cancellationToken);
         await using var targetReader = await OpenOrderedReaderAsync(
-            target, engine.QualifiedTable, engine.Quote, cancellationToken);
+            target, engine.QualifiedTable(table), columns, engine.Quote, cancellationToken);
 
         var missing = new List<int>();      // in the source, absent from the target
         var extra = new List<int>();        // in the target, absent from the source
@@ -52,7 +71,7 @@ public static class Verifier
             }
             else
             {
-                if (Compare(sourceReader, targetReader) is string difference)
+                if (Compare(sourceReader, targetReader, columns) is string difference)
                     different.Add(difference);
                 else
                     matched++;
@@ -62,30 +81,31 @@ public static class Verifier
             }
         }
 
-        return Report(matched, missing, extra, different);
+        return Report(table, matched, missing, extra, different);
     }
 
     /// <summary>Each side quotes and qualifies in its own dialect: the merge-join itself is the same
     /// on either engine, which is what makes cross-engine verification the same code path.</summary>
     private static async Task<DbDataReader> OpenOrderedReaderAsync(
-        DbConnection connection, string qualifiedTable, Func<string, string> quote, CancellationToken cancellationToken)
+        DbConnection connection, string qualifiedTable, IReadOnlyList<string> columns,
+        Func<string, string> quote, CancellationToken cancellationToken)
     {
         var cmd = connection.CreateCommand();
         cmd.CommandText =
-            $"SELECT {string.Join(", ", Scenario.Columns.Select(quote))} FROM {qualifiedTable} ORDER BY {quote("Id")};";
+            $"SELECT {string.Join(", ", columns.Select(quote))} FROM {qualifiedTable} ORDER BY {quote("Id")};";
         return await cmd.ExecuteReaderAsync(cancellationToken);
     }
 
     /// <summary>Returns a description of the first column that disagrees, or null if the rows match.</summary>
-    private static string? Compare(DbDataReader source, DbDataReader target)
+    private static string? Compare(DbDataReader source, DbDataReader target, IReadOnlyList<string> columns)
     {
-        for (var i = 1; i < Scenario.Columns.Length; i++)
+        for (var i = 1; i < columns.Count; i++)
         {
             var sourceValue = source.IsDBNull(i) ? null : source.GetValue(i);
             var targetValue = target.IsDBNull(i) ? null : target.GetValue(i);
 
             if (!ValuesMatch(sourceValue, targetValue))
-                return $"Id {source.GetInt32(0)}: {Scenario.Columns[i]} is " +
+                return $"Id {source.GetInt32(0)}: {columns[i]} is " +
                        $"{Format(targetValue)} at the target, {Format(sourceValue)} at the source";
         }
 
@@ -124,16 +144,17 @@ public static class Verifier
         _ => $"'{value}'",
     };
 
-    private static bool Report(int matched, List<int> missing, List<int> extra, List<string> different)
+    private static bool Report(
+        HarnessTable table, int matched, List<int> missing, List<int> extra, List<string> different)
     {
         var total = missing.Count + extra.Count + different.Count;
         if (total == 0)
         {
-            Log.Ok($"source and target match — {matched:N0} row(s) identical");
+            Log.Ok($"{table.Name}: source and target match — {matched:N0} row(s) identical");
             return true;
         }
 
-        Log.Error($"{total:N0} difference(s) across {matched + different.Count:N0} compared row(s)");
+        Log.Error($"{table.Name}: {total:N0} difference(s) across {matched + different.Count:N0} compared row(s)");
 
         if (missing.Count > 0)
             Log.Info($"{missing.Count:N0} row(s) in the source but not the target: {Sample(missing)}");

@@ -55,9 +55,10 @@ public sealed class ApiClient(string baseUrl) : IDisposable
 
     /// <summary>Creates the connections, replication and table mapping the scenario needs. Every call
     /// is a PUT, so re-running <c>up</c> against an existing config converges rather than failing.</summary>
-    public async Task ConfigureScenarioAsync(TargetEngine target, CancellationToken cancellationToken)
+    public async Task ConfigureScenarioAsync(
+        TargetEngine target, IReadOnlyList<HarnessTable> tables, CancellationToken cancellationToken)
     {
-        Log.Step($"Configuring connections, replication and table mapping (target: {target.Name})");
+        Log.Step($"Configuring connections, replication and {tables.Count} table mapping(s) (target: {target.Name})");
 
         await PutAsync($"/api/connections/{Scenario.SourceConnectionName}", new ConnectionInput
         {
@@ -106,26 +107,33 @@ public sealed class ApiClient(string baseUrl) : IDisposable
             },
         }, cancellationToken);
 
-        await PutAsync($"/api/replications/{Scenario.ReplicationName}/table-mappings/{Scenario.MappingName}",
-            new TableMappingConfig
-            {
-                Name = Scenario.MappingName,
-                Sources = [new SourceTableSpec
+        // One mapping per generated table. They share the replication's endpoints and pipeline and
+        // differ only in their table and column list, which is what makes N mappings a loop rather
+        // than N configurations.
+        foreach (var table in tables)
+        {
+            await PutAsync($"/api/replications/{Scenario.ReplicationName}/table-mappings/{table.MappingName}",
+                new TableMappingConfig
                 {
-                    Schema = Scenario.Schema,
-                    Table = Scenario.Table,
-                }],
-                Targets = [new TableSpec
-                {
-                    // The one thing the target side cannot inherit: `dbo` and `public` are not the
-                    // same word, so a cross-engine mapping states its target schema.
-                    Schema = target.SchemaName,
-                    Table = Scenario.Table,
-                }],
-                ColumnMappings = [.. Scenario.Columns.Select(c => new ColumnMapping { SourceColumn = c, TargetColumn = c })],
-            }, cancellationToken);
+                    Name = table.MappingName,
+                    Sources = [new SourceTableSpec
+                    {
+                        Schema = Scenario.Schema,
+                        Table = table.Name,
+                    }],
+                    Targets = [new TableSpec
+                    {
+                        // The one thing the target side cannot inherit: `dbo` and `public` are not the
+                        // same word, so a cross-engine mapping states its target schema.
+                        Schema = target.SchemaName,
+                        Table = table.Name,
+                    }],
+                    ColumnMappings =
+                        [.. table.ColumnNames.Select(c => new ColumnMapping { SourceColumn = c, TargetColumn = c })],
+                }, cancellationToken);
+        }
 
-        Log.Ok($"replication '{Scenario.ReplicationName}' is configured and enabled");
+        Log.Ok($"replication '{Scenario.ReplicationName}' is configured and enabled with {tables.Count} mapping(s)");
     }
 
     public async Task TriggerRunAsync(CancellationToken cancellationToken)
