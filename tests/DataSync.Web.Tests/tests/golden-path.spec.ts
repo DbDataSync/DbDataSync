@@ -2060,4 +2060,83 @@ public sealed class Shout : IValueColumnExpression
     await page.goto(`/replications/${REPLICATION_NAME}/runs`)
     await expect(page.getByTestId(`run-timing-toggle-${tracedRunId}`)).toBeVisible({ timeout: 20_000 })
   })
+
+  test('43 - the natural key is auto-derived, and only a mapping can say otherwise', async ({ page }) => {
+    // Phase 68. A replication syncing three tables needs three natural keys and could state one, so
+    // it now states none: the replication says the key is derived, and a mapping is where the answer
+    // for *its* table lives.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview/pipeline`)
+    await expect(page.getByTestId('stage-writer')).toBeVisible({ timeout: 20_000 })
+
+    const before = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()
+
+    await page.getByTestId('stage-writer').click()
+    const writerSelect = page.getByTestId('writer-kind-select')
+    await expect(writerSelect.locator('option[value="Scd2"]')).toBeAttached({ timeout: 15_000 })
+    await writerSelect.selectOption('Scd2')
+
+    // Nowhere to type one at this level, and a sentence saying why rather than a field silently gone.
+    await expect(page.getByTestId('natural-key-auto-derived')).toContainText("each mapping's primary key")
+    await expect(page.getByTestId('writer-options-naturalKey')).toHaveCount(0)
+    await shot(page, '49-replication-natural-key-auto-derived.png')
+
+    // Saved as Scd2, so the mapping's tab below is describing what would really run.
+    await page.getByTestId('save-settings-button').click()
+    await expect.poll(async () =>
+      (await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()).changeProcessing.writer.kind,
+      { timeout: 15_000 }).toBe('Scd2')
+
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/pipeline`)
+    await expect(page.getByTestId('mapping-pipeline')).toBeVisible({ timeout: 20_000 })
+
+    // Every stage starts inherited — a mapping that has never been asked runs the replication's
+    // pipeline, which is not the same as one overriding it with a copy of the same thing.
+    await expect(page.getByTestId('mapping-writer-override')).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.getByTestId('mapping-writer-inherited')).toContainText('Scd2')
+
+    // The derived key, read from the source's actual primary key through this mapping's columns —
+    // the same helper a run injects with, so this is not a second opinion.
+    await expect(page.getByTestId('mapping-natural-key-derived')).toHaveText('Id', { timeout: 20_000 })
+    await shot(page, '50-mapping-natural-key-derived.png')
+
+    // Overriding it opens the field already holding what was going to be derived, rather than empty.
+    await page.getByTestId('mapping-natural-key-override').click()
+    const input = page.getByTestId('mapping-natural-key-input')
+    await expect(input).toHaveValue('Id')
+    await input.fill(SOURCE_NAME_COLUMN)
+    await page.getByTestId('save-mapping-button').click()
+
+    // Stating a key *is* overriding the writer — there is nowhere else for the value to live — so the
+    // saved mapping carries a whole writer stage, not a loose option.
+    await expect.poll(async () => {
+      const mapping = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+      return mapping.writerOverride?.options?.naturalKey
+    }, { timeout: 15_000 }).toBe(SOURCE_NAME_COLUMN)
+
+    // And the reader and cache are untouched by it: the three stages override independently.
+    const saved = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+    expect(saved.readerOverride ?? null).toBeNull()
+    expect(saved.cacheOverride ?? null).toBeNull()
+    expect(saved.writerOverride.kind).toBe('Scd2')
+
+    // Back to deriving, and back to the merge writer, so the rest of this suite's replication is the
+    // one it was.
+    await page.reload()
+    await expect(page.getByTestId('mapping-natural-key-input')).toHaveValue(SOURCE_NAME_COLUMN,
+      { timeout: 20_000 })
+    await page.getByTestId('mapping-natural-key-override').click()
+    await expect(page.getByTestId('mapping-natural-key-derived')).toHaveText('Id', { timeout: 20_000 })
+    await page.getByTestId('mapping-writer-override').click()
+    await page.getByTestId('save-mapping-button').click()
+
+    await expect.poll(async () => {
+      const mapping = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()
+      return mapping.writerOverride ?? null
+    }, { timeout: 15_000 }).toBeNull()
+
+    expect((await page.request.put(`/api/replications/${REPLICATION_NAME}`, { data: before })).ok()).toBeTruthy()
+  })
 })
