@@ -174,6 +174,31 @@ normal schedule.
 > conversion: the two are not quite the same thing, and silently reinterpreting a stored reload scope
 > is a worse failure than an obvious one.
 
+## Where the state store lives
+
+The state database — run history, the work queue, watermarks, users and sessions — is **SQLite by
+default**, a file beside the config repo. Nothing needs configuring for that, and it is what an
+unconfigured deployment gets.
+
+It can instead run on SQL Server or PostgreSQL, for a deployment that would rather this lived on
+infrastructure it already operates and backs up:
+
+| setting (under `DataSync:`) | default | meaning |
+| --- | --- | --- |
+| `StateEngine` | `Sqlite` | `Sqlite`, `MsSql` or `Postgres` |
+| `StateConnectionString` | — | how to reach that server. Required unless the engine is SQLite |
+| `StateDbPath` | `<repo>/state.db` | the SQLite file. Ignored by the other two |
+
+The schema is created on first open, whichever engine it is, and the three behave identically — the
+cross-engine test suite exists to keep that true rather than to assert it once.
+
+> **There is no migration between engines.** Pointing an existing deployment at a different one
+> starts an empty state store; it does not move anything. Choose once, when the deployment is stood
+> up. Moving an existing store is a deliberate follow-up.
+
+An unrecognised `StateEngine` falls back to SQLite rather than refusing to start: a typo in an engine
+name should not take down an API that has a perfectly good store already.
+
 ## Run history retention
 
 Every pass writes a `TaskRuns` row and its log lines to the state database, so a continuous
