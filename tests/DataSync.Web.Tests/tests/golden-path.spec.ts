@@ -1884,4 +1884,95 @@ public sealed class Shout : IValueColumnExpression
     await expect(page.getByTestId('mapping-notes-rendered')).toContainText('OrderDate')
     await shot(page, '44-mapping-tabs.png')
   })
+
+  test('41 - a segmenting strategy is authored, tested and used, without editing a config file', async ({ page }) => {
+    // Phase 58 built strategies end to end and left them creatable only by hand-editing the
+    // replication's config. This is that gap closed.
+    //
+    // Its own tab, named exactly as the mapping editor's is: this defines the strategies, that one
+    // chooses among them, and somebody looking for where the names come from should find the same
+    // words (phase 61).
+    await page.goto(`/replications/${REPLICATION_NAME}/overview/segmenting`)
+    await expect(page.getByTestId('segmenting-strategies')).toBeVisible({ timeout: 20_000 })
+
+    await page.getByTestId('add-strategy-button').click()
+    await page.getByTestId('strategy-name-input').fill('by-id-band')
+    await page.getByTestId('strategy-column-input').fill('Id')
+
+    // DuckDb is the default, and the one worth reaching for first: it opens no connection at all, so
+    // there is no warning to show.
+    await expect(page.getByTestId('strategy-kind-select')).toHaveValue('DuckDb')
+    await expect(page.getByTestId('strategy-connection-note')).toHaveCount(0)
+
+    await setCode(page, 'strategy-sql-editor',
+      "SELECT * FROM (VALUES ('low', '1', '5', TRUE), ('high', '5', '1000', TRUE)) " +
+      't(label, range_start, range_end, selected);')
+
+    // Tested before it is saved — the whole point. An operator finds out a query is malformed while
+    // writing it, not the next time a scheduled reload silently does nothing.
+    await page.getByTestId('test-strategy-button').click()
+    const result = page.getByTestId('strategy-test-result')
+    await expect(result).toBeVisible({ timeout: 20_000 })
+    await expect(result).toContainText('low')
+    await expect(result).toContainText('high')
+    await expect(result).toContainText('Id [1, 5)')
+    await expect(result).toContainText('2 candidate(s)')
+    await shot(page, '45-strategy-tested-before-saving.png')
+
+    // The test wrote nothing: the strategy exists only in the draft until Save settings commits it.
+    expect((await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}`)).json()).segmentingStrategies ?? []).toHaveLength(0)
+
+    await page.getByTestId('commit-strategy-button').click()
+    await page.getByTestId('save-settings-button').click()
+
+    await expect.poll(async () => (await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}`)).json()).segmentingStrategies?.[0]?.name,
+      { timeout: 15_000 }).toBe('by-id-band')
+
+    // Reopened, it round-trips — a strategy edited through this card and one written by hand are the
+    // same object.
+    await page.reload()
+    await expect(page.getByTestId('segmenting-strategies')).toContainText('by-id-band', { timeout: 20_000 })
+    await page.getByTestId('edit-strategy-by-id-band').click()
+    await expect(page.getByTestId('strategy-column-input')).toHaveValue('Id')
+    await expect(page.getByTestId('strategy-kind-select')).toHaveValue('DuckDb')
+    await page.getByTestId('cancel-strategy-button').click()
+
+    // The connection warning is per kind, and says more here than at the picker: this is where the
+    // thing that will run unattended forever gets created.
+    await page.getByTestId('edit-strategy-by-id-band').click()
+    await page.getByTestId('strategy-kind-select').selectOption('SourceSql')
+    await expect(page.getByTestId('strategy-connection-note')).toContainText('source')
+    await page.getByTestId('strategy-kind-select').selectOption('TargetSql')
+    await expect(page.getByTestId('strategy-connection-note')).toContainText('target')
+    await page.getByTestId('cancel-strategy-button').click()
+    await expect(page.getByTestId('strategy-editor')).toHaveCount(0)
+
+    // And it closes the loop: the strategy authored here is selectable in the Backfill form and
+    // proposes the same candidates the editor's Test button showed.
+    runSql(`DELETE FROM dbo.[${TARGET_TABLE}];`, DB_NAME)
+
+    await page.goto(`/replications/${REPLICATION_NAME}`)
+    await page.getByTestId('backfill-button').click()
+    await page.getByTestId('backfill-mode-select').selectOption('custom')
+    await page.getByTestId('backfill-strategy-select').selectOption('by-id-band')
+
+    await expect(page.getByTestId('backfill-candidate-0')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId('backfill-candidate-1')).toBeVisible()
+    await shot(page, '46-strategy-in-backfill.png')
+
+    await page.getByTestId('backfill-submit-button').click()
+    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 40_000 })
+
+    // The strategy's own labels become the runs' segment labels, which is what makes a segmented
+    // reload readable in history rather than a list of bounds.
+    await expect(page.getByTestId('run-history-table')).toContainText('low', { timeout: 20_000 })
+
+    // By row count, not by a column name: earlier tests in this suite rename the target's columns,
+    // and what matters here is that the two bands between them reloaded the table the strategy
+    // divided — not which column the names landed in.
+    expect(querySql(`SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.[${TARGET_TABLE}];`, DB_NAME))
+      .toContain('2')
+  })
 })

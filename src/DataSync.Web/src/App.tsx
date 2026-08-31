@@ -10,7 +10,7 @@ import { ScriptsPage } from './pages/ScriptsPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
 import {
-  CustomTransformsTab, OverviewNotesTab, PipelineTab, TargetProvisioningTab,
+  CustomTransformsTab, OverviewNotesTab, PipelineTab, SegmentingStrategiesTab, TargetProvisioningTab,
 } from './pages/replication-detail/OverviewPanel'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
 import {
@@ -80,6 +80,7 @@ export default function App() {
           <Route path="pipeline" element={<PipelineTab />} />
           <Route path="provisioning" element={<TargetProvisioningTab />} />
           <Route path="transforms" element={<CustomTransformsTab />} />
+          <Route path="segmenting" element={<SegmentingStrategiesTab />} />
         </Route>
         <Route path="mappings" element={<MappingsTab />}>
           <Route index element={<MappingsIndex />} />

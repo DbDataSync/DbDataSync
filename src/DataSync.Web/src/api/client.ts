@@ -2,6 +2,7 @@ import type {
   ApplyResult,
   BackfillRequest,
   SegmentCandidate,
+  SegmentingStrategyConfig,
   ColumnMetadata,
   CommitInfo,
   ConnectionConfig,
@@ -287,6 +288,18 @@ export const api = {
       request<{ candidates: SegmentCandidate[] }>(
         `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}` +
           `/segmenting/${encodeURIComponent(strategyName)}/preview`,
+      ),
+    /**
+     * The same preview, for a strategy that has not been saved — the editor's Test button. A POST
+     * only because the strategy travels in the body; it writes nothing.
+     */
+    previewUnsavedSegmenting: (
+      replicationName: string, mappingName: string, strategy: SegmentingStrategyConfig,
+    ) =>
+      request<{ candidates: SegmentCandidate[] }>(
+        `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}` +
+          `/segmenting/preview`,
+        { method: 'POST', body: JSON.stringify(strategy) },
       ),
     backfill: (replicationName: string, mappingName: string, body: BackfillRequest) =>
       request<TriggerResponse>(

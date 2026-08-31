@@ -4,7 +4,7 @@ import { api } from './client'
 import type {
   BulkCreateRequest,
   DriverType,
-  ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig, TableMappingConfig } from './types'
+  ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig, SegmentingStrategyConfig, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
@@ -435,6 +435,21 @@ export function useBackfill(replicationName: string) {
  * which opens no connection at all; the other three reach a real database, which is why the form
  * says so beside the picker before offering them.
  */
+/**
+ * Runs a strategy that is still being written and hands back what it proposes — the editor's Test
+ * button (phase 61).
+ *
+ * A mutation rather than a query, even though it reads: it runs when somebody presses Test, and a
+ * query keyed on a half-typed SQL string would run against a real connection on every keystroke for
+ * the two connection-bound kinds.
+ */
+export function useTestSegmentingStrategy(replicationName: string) {
+  return useMutation({
+    mutationFn: ({ mappingName, strategy }: { mappingName: string; strategy: SegmentingStrategyConfig }) =>
+      api.runs.previewUnsavedSegmenting(replicationName, mappingName, strategy),
+  })
+}
+
 export function useSegmentingPreview(
   replicationName: string,
   mappingName: string,

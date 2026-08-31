@@ -7,6 +7,7 @@ import { ParameterForm } from '../../components/ParameterForm'
 import { EndpointsCard } from './EndpointsCard'
 import { InheritableToggle } from '../../components/InheritableToggle'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
+import { SegmentingStrategiesCard } from './SegmentingStrategiesCard'
 import { NotesPanel } from '../../components/NotesPanel'
 import { SubTabs, type SubTab } from '../../components/SubTabs'
 import { readerNotes } from '../../api/readerNotes'
@@ -27,6 +28,7 @@ const TABS: SubTab[] = [
   { path: 'pipeline', label: 'Pipeline', testId: 'overview-tab-pipeline' },
   { path: 'provisioning', label: 'Target Provisioning', testId: 'overview-tab-provisioning' },
   { path: 'transforms', label: 'Custom Transforms', testId: 'overview-tab-transforms' },
+  { path: 'segmenting', label: 'Reload Segmenting', testId: 'overview-tab-segmenting' },
 ]
 
 /**
@@ -302,6 +304,30 @@ export function CustomTransformsTab() {
       inherited={sourceConnection?.scripts ?? {}}
       level="replication"
       onChange={(scripts) => setDraft({ ...draft, scripts })}
+    />
+  )
+}
+
+/**
+ * The replication's named segmenting strategies — phase 61.
+ *
+ * **Its own tab, named exactly as the mapping editor's is.** The two are the halves of one idea: this
+ * defines the strategies, and a mapping's Reload Segmenting tab chooses among them. An operator who
+ * has seen "Reload Segmenting" on a mapping and wants to know where the names come from will look for
+ * the same words here, and finding them somewhere else called something else is the version of this
+ * that wastes their afternoon.
+ *
+ * The phase doc predates the Overview being tabbed at all and asked for a card in the old flat stack;
+ * neither Pipeline (which is reader/staging/writer) nor Custom Transforms (which is script *bindings*,
+ * a different thing entirely) is where this belongs.
+ */
+export function SegmentingStrategiesTab() {
+  const { replicationName, draft, setDraft } = useOutletContext<OverviewOutletContext>()
+  return (
+    <SegmentingStrategiesCard
+      replicationName={replicationName}
+      strategies={draft.segmentingStrategies ?? []}
+      onChange={(segmentingStrategies) => setDraft({ ...draft, segmentingStrategies })}
     />
   )
 }
