@@ -163,10 +163,9 @@ obvious one, which is the reasoning behind refusing the migration in the first p
 - ~~**Wording and placement of the repeated-execution warning.**~~ Beside the strategy picker on the
   mapping editor, stating that the query runs on every scheduled pass and which side it queries.
 - ~~**Whether static entries may mix with Auto or Custom.**~~ Not in the editor; see above.
-- **No UI yet for authoring the strategies themselves.** They are defined on the replication config and
-  the mapping/backfill forms select from them, but the list is edited through the replication's
-  settings JSON rather than a dedicated editor. A real strategy editor — with a Test button, in the
-  spirit of phase 48's Checks editor — is the obvious follow-on and is not built here.
+- ~~**No UI yet for authoring the strategies themselves.**~~ Closed by phase 61, which built exactly
+  the editor this named: phase 48's Checks card in shape, with the Test button, on the replication's
+  Overview.
 - **No integration test drives a source-SQL or target-SQL strategy against a live server.** The runner
   is shared and the DuckDB path covers the row-to-candidate translation, but the two connection-bound
   kinds are currently only covered by their refusal paths.
