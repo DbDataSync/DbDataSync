@@ -222,11 +222,12 @@ A single SQLite database file, shared by `DataSync.Api` and every `DataSync.Task
 
 | Table | Purpose |
 |---|---|
-| `Tasks` | One row per configured replication task (mirrors config, for fast joins/reporting — config file remains source of truth). |
+| `Tasks` | One row per configured replication task (mirrors config's `Enabled`, for fast joins/reporting — the config file remains source of truth). Also carries `Paused`/`PauseNote`, which are **not** a mirror of anything: a pause is state-only, never committed, and is the scheduler's second gate. `ShouldRun := Enabled && !Paused` (phase 64). |
 | `TaskRuns` | One row per **unit of work** — a table mapping's own Primary (incremental) pass, or one segment of a Backfill (reload) — not one row per replication invocation. Run id, task/mapping name, run kind (`Primary`/`Backfill`), segment label, PID, start/end time, status (`Queued`/`Pending`/`Running`/`Succeeded`/`Failed`/`Cancelled`), rows read/written, error summary. |
 | `ChangeWatermarks` | Per task + source table: last-processed watermark (change-tracking version/LSN, or a plain column value for the fallback reader), updated at end of a successful **Primary** reader stage only — a Backfill unit of work never touches this table. |
 | `Logs` | Structured log lines: run id, timestamp, level, message. |
 | `RunLocks` | One row per `(task, run kind, table mapping)` while that mapping's unit of work is in flight — a Primary pass and a Backfill both scoped to the same mapping serialize against each other; different mappings of the same replication (even under the same run kind) don't. |
+| `PauseEvents` | Append-only: one row per pause and per resume, with the note entered at the time and who entered it. `Tasks` says what is true now; this says how it got there — a pause changes what the product does without touching the config repo, so without this table it is the one operational act that leaves no trace. Written in the same transaction as the `Tasks` update. No reader yet — see `planning/todo/pause-history-ui.md`. |
 | `WorkQueue` | Durable, SQLite-backed cross-process work queue: the API enqueues Primary passes (scheduled or manually triggered) and Backfill segments here; a spawned TaskRunner worker process claims and drains them. See "Per-mapping run model" below. |
 
 **Per-mapping run model** (architecture/implementation/done/phase-008-work-queue-schema.md) — a "run" is
