@@ -146,6 +146,18 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         if (UseSnapshotIsolation(request.Options))
             notes.Add("Runs in a snapshot-isolation transaction.");
 
+        // The version ReadIncrementalAsync would fix as its own upper bound, fetched here for the same
+        // reason: without a real value, @targetVersion in the statement text is a placeholder no query
+        // tool can resolve on its own.
+        var targetVersion = await GetCurrentVersionAsync(request.Connection, cancellationToken);
+        List<PreviewParameter> parameters =
+        [
+            new("previousVersion", "bigint", request.PreviousWatermark!),
+            new("targetVersion", "bigint", targetVersion.ToString()),
+        ];
+        if (maxRows is { } cap)
+            parameters.Add(new(BoundedRead.RowLimitParameter, "int", cap.ToString()));
+
         return
         [
             new PreviewStatement(
@@ -156,7 +168,8 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
                     columns.Where(c => !c.IsPrimaryKey).Select(c => c.Name).ToList(),
                     column => RenderNonKeyColumn(column, request.ColumnMappings), bounded: maxRows is not null),
                 PreviewOrigin.BuiltIn,
-                notes.Count == 0 ? null : string.Join(" ", notes)),
+                notes.Count == 0 ? null : string.Join(" ", notes),
+                MsSqlDialect.Instance.RenderDeclarations(parameters)),
         ];
     }
 

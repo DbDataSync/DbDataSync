@@ -16,6 +16,8 @@
           "DataSync__Auth__Disabled":"true"
         }
       },
+      "dependsOn": "Build solution",
+      "dependsOrder": "sequence",
       "isBackground": true,
       "problemMatcher": {
         "pattern": {

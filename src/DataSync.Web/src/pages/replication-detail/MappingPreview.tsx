@@ -95,6 +95,26 @@ function Statement({ statement }: { statement: PreviewStatement }) {
 
       {statement.detail && <span className="hint">{statement.detail}</span>}
 
+      {/* Shown ahead of the statement, not folded into it: these are the exact values this pass would
+          bind right now, declared as variables rather than left as the bare placeholders the statement
+          itself shows. Pasting this block and the statement below it into a query tool reproduces
+          exactly what a pass would run — pasting the statement alone does not, because nothing has
+          declared what its parameters mean. */}
+      {statement.declaredParameters && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span className="hint">Declared as variables, so pasting this and the statement below reproduces exactly what a pass would run:</span>
+          <CodeEditor
+            value={statement.declaredParameters}
+            language="sql"
+            readOnly
+            onChange={() => {}}
+            minLines={1}
+            maxLines={8}
+            testId={`preview-params-${statement.title.slice(0, 24)}`}
+          />
+        </div>
+      )}
+
       {/* A step with no SQL is named and left at that. Rendering an empty editor for one would suggest
           there is a statement that failed to load. */}
       {statement.sql && (

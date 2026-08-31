@@ -183,6 +183,32 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         }
 
         var function = FunctionFor(instance);
+
+        // Not resolved by ReadChangesAsync until it actually runs — but a preview that showed
+        // @storedLsn/@toLsn as bare placeholders would leave an admin pasting this into SSMS with
+        // nothing to declare them from. Fetched here purely to describe the statement, same as
+        // ReadIncrementalAsync would fetch it to run one.
+        var maxLsn = await MsSqlCdcCatalog.GetMaxLsnAsync(request.Connection, cancellationToken);
+        if (maxLsn is null)
+        {
+            return
+            [
+                new PreviewStatement(
+                    PreviewStages.SourceRead, "Incremental read", null, PreviewOrigin.BuiltIn,
+                    $"Change Data Capture reports no maximum LSN in database '{request.Source.Database}', " +
+                    "which means the capture job has not run — this pass would fail before issuing a " +
+                    "statement."),
+            ];
+        }
+
+        var declaredParameters = MsSqlDialect.Instance.RenderDeclarations(
+        [
+            new PreviewParameter(
+                "storedLsn", "binary(10)",
+                MsSqlDialect.Instance.RenderLiteral(MsSqlCdcCatalog.FromWatermark(request.PreviousWatermark))),
+            new PreviewParameter("toLsn", "binary(10)", MsSqlDialect.Instance.RenderLiteral(maxLsn)),
+        ]);
+
         return
         [
             new PreviewStatement(
@@ -195,7 +221,8 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
                 function == MsSqlCdcStatement.CdcFunction.NetChanges
                     ? "Net changes: one row per key, whatever happened to it in the window."
                     : "All changes: every intermediate change. This capture instance was created " +
-                      "without @supports_net_changes, so net changes are not available for it."),
+                      "without @supports_net_changes, so net changes are not available for it.",
+                declaredParameters),
         ];
     }
 

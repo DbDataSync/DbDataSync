@@ -364,6 +364,13 @@ export interface PreviewStatement {
   sql: string | null
   origin: PreviewOrigin
   detail: string | null
+  /**
+   * Declares, as variables, every runtime parameter `sql` references — each one the literal value
+   * that would actually be bound right now, not the bare placeholder `sql` shows in its place. Null
+   * for a statement with no runtime parameters, or on an engine with no notion of a variable outside
+   * a query itself.
+   */
+  declaredParameters: string | null
 }
 
 export interface PreviewReport {

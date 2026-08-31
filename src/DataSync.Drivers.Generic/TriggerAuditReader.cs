@@ -132,6 +132,16 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
 
         var (keys, nonKeys) = await ResolveColumnsAsync(request.Connection, request.Source, cancellationToken);
 
+        // The sequence ReadIncrementalAsync would fix as its own upper bound, fetched here for the
+        // same reason MsSqlChangeTrackingReader fetches its current version: a preview showing
+        // @targetSequence as a bare placeholder gives an admin nothing a query tool can resolve.
+        var target = await GetMaxSequenceAsync(request.Connection, request.Source, cancellationToken);
+        List<PreviewParameter> parameters =
+        [
+            new("previousSequence", "bigint", request.PreviousWatermark!),
+            new("targetSequence", "bigint", target.ToString()),
+        ];
+
         return
         [
             new PreviewStatement(
@@ -144,7 +154,8 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
                 Prunes(request.Options)
                     ? "Applied rows are deleted from the shadow table once the pass has written and " +
                       "recorded its position."
-                    : "The shadow table is not pruned, so it grows for as long as this replication runs."),
+                    : "The shadow table is not pruned, so it grows for as long as this replication runs.",
+                dialect.RenderDeclarations(parameters)),
         ];
     }
 

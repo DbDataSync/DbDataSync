@@ -1,6 +1,20 @@
 using System.Data.Common;
+using System.Globalization;
 
 namespace DataSync.Core.Sql;
+
+/// <summary>
+/// One runtime value a previewed statement would bind, rendered as it would actually be bound right
+/// now — not the bare placeholder the statement text shows in its place.
+/// </summary>
+/// <param name="Name">Without the dialect's sigil — the same name passed to <see
+/// cref="SqlDialect.ParameterReference"/> when the statement itself was built.</param>
+/// <param name="SqlType">A type an admin's query tool will accept in a declaration for this value —
+/// the source column's own native type where there is one, a fixed type where the value is always the
+/// same shape (an LSN, a change-tracking version).</param>
+/// <param name="Literal">Already rendered via <see cref="SqlDialect.RenderLiteral"/> — quoted, escaped
+/// or hex-prefixed as this value's type needs.</param>
+public sealed record PreviewParameter(string Name, string SqlType, string Literal);
 
 /// <summary>
 /// The small, mechanical ways SQL engines disagree — quoting, parameter placeholders, switching the
@@ -229,6 +243,37 @@ public abstract class SqlDialect
     /// the other half of the same problem.
     /// </summary>
     public virtual string Concat(IEnumerable<string> expressions) => string.Join(" || ", expressions);
+
+    /// <summary>
+    /// Renders one bound value as a SQL literal — for a preview that shows exactly what a statement
+    /// would run, not a bare parameter placeholder standing in for a value nobody can see.
+    /// <para>
+    /// ANSI-ish default: quoted and doubled-quote-escaped for text, hex-prefixed for binary, ISO-ish
+    /// for dates. A dialect overrides only where its literal syntax genuinely differs.
+    /// </para>
+    /// </summary>
+    public virtual string RenderLiteral(object? value) => value switch
+    {
+        null or DBNull => "NULL",
+        bool b => b ? TrueLiteral : FalseLiteral,
+        byte[] bytes => "0x" + Convert.ToHexString(bytes),
+        DateTime dt => $"'{dt:yyyy-MM-dd HH:mm:ss.fffffff}'",
+        DateTimeOffset dto => $"'{dto:yyyy-MM-dd HH:mm:ss.fffffff zzz}'",
+        Guid g => $"'{g}'",
+        string s => $"'{s.Replace("'", "''")}'",
+        _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL",
+    };
+
+    /// <summary>
+    /// Declares each parameter as a variable ahead of the statement that references it, so pasting
+    /// both into a query tool reproduces exactly what a pass would run right now — instead of the
+    /// placeholder the statement text shows, which no query tool can resolve on its own.
+    /// <para>
+    /// Null when this engine has no notion of a variable outside a query itself, which is reported to
+    /// an operator as that rather than papered over with something that would not actually run.
+    /// </para>
+    /// </summary>
+    public virtual string? RenderDeclarations(IReadOnlyList<PreviewParameter> parameters) => null;
 
     public virtual string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT * FROM {qualifiedTable} LIMIT {rows};";

@@ -88,6 +88,13 @@ public sealed class MsSqlDialect : SqlDialect
     public override string RenderSampleSelect(string qualifiedTable, int rows) =>
         $"SELECT TOP ({rows}) * FROM {qualifiedTable};";
 
+    /// <summary>Plain <c>DECLARE @name type = literal;</c>, one per line — valid on its own ahead of
+    /// any batch, which is what makes pasting this block followed by the statement it belongs to just
+    /// work in SSMS or any other tool that runs a script rather than one bound statement at a time.</summary>
+    public override string? RenderDeclarations(IReadOnlyList<PreviewParameter> parameters) =>
+        parameters.Count == 0 ? null : string.Join(
+            "\n", parameters.Select(p => $"DECLARE {ParameterReference(p.Name)} {p.SqlType} = {p.Literal};"));
+
     public override CanonicalType ToCanonicalType(string nativeType)
     {
         var (baseName, args) = CanonicalTypeSpec.Parse(nativeType);

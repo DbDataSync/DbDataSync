@@ -94,19 +94,19 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
     /// depends on the stored watermark, and that is the difference between an incremental read and a
     /// full table scan.
     /// </summary>
-    public Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
+    public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
         PreviewRequest request, CancellationToken cancellationToken)
     {
         if (!request.Options.TryGetValue("watermarkColumn", out var watermarkColumn)
             || string.IsNullOrWhiteSpace(watermarkColumn))
         {
-            return Task.FromResult<IReadOnlyList<PreviewStatement>>(
+            return
             [
                 new PreviewStatement(
                     PreviewStages.SourceRead, "Read", null, PreviewOrigin.BuiltIn,
                     "The 'watermarkColumn' option is required for this reader and is not set, so this " +
                     "pass would fail before issuing a statement."),
-            ]);
+            ];
         }
 
         var source = request.Source;
@@ -141,6 +141,26 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
               "prevent the index seek this strategy depends on."
             : "";
 
+        // The bound rather than described: an admin pasting @previousWatermark's bare name into a
+        // query tool has nothing to run. Declared as the watermark column's own type, matching the
+        // note above — and matching what ReadRowsAsync actually binds.
+        List<PreviewParameter> parameters = [];
+        if (incremental)
+        {
+            var column = (await catalog.GetColumnsAsync(request.Connection, source.Schema, source.Table, cancellationToken))
+                .FirstOrDefault(c => string.Equals(c.Name, watermarkColumn, StringComparison.OrdinalIgnoreCase));
+            if (column is not null)
+            {
+                var bound = binder.CreateParameter(
+                    dialect.ParameterName(WatermarkStatement.PreviousWatermarkParameter),
+                    request.PreviousWatermark!, column);
+                parameters.Add(new(
+                    WatermarkStatement.PreviousWatermarkParameter, column.NativeType, dialect.RenderLiteral(bound.Value)));
+            }
+        }
+        if (maxRows is { } cap)
+            parameters.Add(new(BoundedRead.RowLimitParameter, "int", cap.ToString()));
+
         statements.Add(new PreviewStatement(
             PreviewStages.SourceRead,
             incremental
@@ -150,9 +170,10 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
                 dialect, source.Schema, source.Table, watermarkColumn, incremental, source.Filter,
                 SourceProjection.Render(dialect, request.ColumnMappings), bounded: maxRows is not null),
             PreviewOrigin.BuiltIn,
-            string.IsNullOrEmpty(boundNote + bindingNote) ? null : (boundNote + bindingNote).TrimEnd()));
+            string.IsNullOrEmpty(boundNote + bindingNote) ? null : (boundNote + bindingNote).TrimEnd(),
+            dialect.RenderDeclarations(parameters)));
 
-        return Task.FromResult<IReadOnlyList<PreviewStatement>>(statements);
+        return statements;
     }
 
     private async Task<string?> GetMaxWatermarkAsync(

@@ -1,5 +1,6 @@
 using System.Data.Common;
 using DataSync.Core.Config;
+using DataSync.Core.Sql;
 
 namespace DataSync.Drivers.Abstractions;
 
@@ -29,8 +30,21 @@ public enum PreviewOrigin
 /// </param>
 /// <param name="Detail">Where it came from: which script, at which binding level, or a note about why
 /// this step could not be described.</param>
+/// <param name="DeclaredParameters">
+/// A block declaring, as variables, every runtime parameter <paramref name="Sql"/> references — each
+/// one the literal value that would actually be bound right now, not the placeholder the statement
+/// text shows in its place. Null for a statement with no runtime parameters, or on an engine that has
+/// no notion of a variable outside a query itself (<see cref="SqlDialect.RenderDeclarations"/>).
+/// <para>
+/// Without this, an admin who copies <paramref name="Sql"/> into a query tool to see what a pass would
+/// actually do gets back "must declare the scalar variable" — the statement is faithful to what the
+/// reader builds, but not runnable on its own, which for this screen's whole purpose amounts to the
+/// same thing as not showing it.
+/// </para>
+/// </param>
 public sealed record PreviewStatement(
-    string Stage, string Title, string? Sql, PreviewOrigin Origin, string? Detail = null);
+    string Stage, string Title, string? Sql, PreviewOrigin Origin, string? Detail = null,
+    string? DeclaredParameters = null);
 
 /// <summary>
 /// Everything a pipeline component is given at run time, so that what it describes is built from the

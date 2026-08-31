@@ -149,20 +149,23 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
           {runs && visible.length === 0 && (
             <div className="empty">{filter === 'all' ? 'No runs yet.' : 'No runs match this filter.'}</div>
           )}
-          {visible.map((r) => (
+          {visible.map((r) => {
+            const hasError = r.status === 'Failed' && !!r.errorSummary
+            const expandable = !!r.timing || hasError
+            return (
             <div key={r.runId} style={{ display: 'contents' }}>
             <div className="grid-row short" style={{ gridTemplateColumns: COLUMNS, gap: 12 }}>
               <span className="dim row" style={{ gap: 5 }}>
-                {/* Only a traced run gets the affordance. Tracing is opt-in and off by default, so
-                    for nearly every row there is nothing to open — and a disabled chevron on every
-                    line would be the whole table advertising a feature it is not using. */}
-                {r.timing && (
+                {/* Only a traced or failed run gets the affordance — for nearly every row there is
+                    nothing to open, and a disabled chevron on every line would be the whole table
+                    advertising a feature it is not using. */}
+                {expandable && (
                   <button
                     type="button"
                     className="btn-link quiet"
                     style={{ padding: 0 }}
                     aria-expanded={expandedRunId === r.runId}
-                    title="This pass was traced — stage timings"
+                    title={r.timing ? 'This pass was traced — stage timings' : 'This pass failed — error details'}
                     onClick={() => setExpandedRunId(expandedRunId === r.runId ? null : r.runId)}
                     data-testid={`run-timing-toggle-${r.runId}`}
                   >
@@ -199,9 +202,13 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
                 )}
               </span>
             </div>
-            {r.timing && expandedRunId === r.runId && <TimingDetail timing={r.timing} runId={r.runId} />}
+            {expandedRunId === r.runId && r.timing && <TimingDetail timing={r.timing} runId={r.runId} />}
+            {expandedRunId === r.runId && hasError && (
+              <div className="run-error-detail" data-testid={`run-error-${r.runId}`}>{r.errorSummary}</div>
+            )}
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>
