@@ -8,7 +8,7 @@ import { ChecksCard } from './ChecksCard'
 import type { VerificationCheckConfig } from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
 import { SubTabs } from '../../components/SubTabs'
-import { mappingTabs } from './mappingTabs'
+import { useMappingTabs } from './mappingTabs'
 import { SavedMappingHeading } from './SavedMappingHeading'
 
 const RESULT_COLUMNS = '1.2fr .8fr .8fr 1.2fr 150px'
@@ -34,6 +34,7 @@ export function VerificationPanel() {
   const upsert = useUpsertTableMapping(replicationName)
   const run = useRunVerification(replicationName)
   const remove = useDeleteVerificationResult(replicationName)
+  const tabs = useMappingTabs(replicationName, base, mappingName)
 
   // Saved through the mapping, because a check lives on the mapping. The whole config goes back, so
   // an edit here cannot quietly drop a field this screen does not render.
@@ -46,9 +47,11 @@ export function VerificationPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} data-testid="verification-panel">
       <div className="page-head">
         <h2 className="page-title mono">{mappingName}</h2>
+        {/* Every mapping this screen can be open for is a saved one, so the badge the editor shows
+            beside the name is true here too, and was simply missing. */}
+        <span className="badge badge-accent">MAPPED</span>
         <span className="page-note">source and target compared, on demand</span>
         <div className="right">
-          <Link className="btn" to={`${base}/${encodeURIComponent(mappingName!)}`}>Back to the mapping</Link>
           <button
             type="button"
             className="btn btn-primary"
@@ -70,7 +73,7 @@ export function VerificationPanel() {
           the editor's draft along with it. */}
       <SubTabs
         base={`${base}/${encodeURIComponent(mappingName!)}`}
-        tabs={mappingTabs(base, mappingName, 0)}
+        tabs={tabs}
         testId="mapping-subtabs"
       />
 

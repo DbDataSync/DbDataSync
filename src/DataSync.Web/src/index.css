@@ -223,6 +223,11 @@ button { font-family: inherit; }
   color: var(--ink);
 }
 .sidebar-item .meta { margin-left: auto; font: 400 10.5px var(--mono); color: var(--ink-7); }
+/* min-width: 0 is the load-bearing half — a flex item defaults to min-width: auto and refuses to
+   shrink below its content, so without it the ellipsis never happens and the row pushes the sidebar
+   wide. The count keeps its size regardless; only the name truncates. */
+.sidebar-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sidebar-item .badge { margin-left: auto; flex-shrink: 0; }
 
 /* ── Cards ──────────────────────────────────────────────────────────────────── */
 

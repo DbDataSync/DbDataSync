@@ -73,8 +73,10 @@ function MappingSidebarItem({ replicationName, name, to }: { replicationName: st
       className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
       data-testid={`mapping-item-${name}`}
     >
-      {name}
-      <span className="meta">{data ? `${data.columnMappings.length} cols` : '…'}</span>
+      {/* The name is the only part allowed to give way: a long one truncates to an ellipsis with the
+          whole thing on hover, rather than widening the fixed-width sidebar into a scrollbar. */}
+      <span className="sidebar-item-name" title={name}>{name}</span>
+      <span className="badge">{data ? data.columnMappings.length : '…'}</span>
     </NavLink>
   )
 }

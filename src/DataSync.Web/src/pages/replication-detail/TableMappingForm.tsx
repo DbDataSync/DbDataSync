@@ -3,7 +3,7 @@ import { Outlet, useOutletContext } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import {
-  useColumns, useConnections, useDeleteTableMapping, useProvisioning, useReplication, useTables,
+  useColumns, useConnections, useDeleteTableMapping, useReplication, useTables,
   useUpsertTableMapping,
 } from '../../api/hooks'
 import { tableExists } from '../../api/tableExists'
@@ -18,7 +18,7 @@ import { ColumnMappingEditor } from './ColumnMappingEditor'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { NotesPanel } from '../../components/NotesPanel'
 import { SubTabs } from '../../components/SubTabs'
-import { mappingTabs } from './mappingTabs'
+import { useMappingTabs } from './mappingTabs'
 import { ProvisioningCard } from './ProvisioningCard'
 import { DefaultSegmentingCard } from './DefaultSegmentingCard'
 import { SourceFilterCard } from './SourceFilterCard'
@@ -142,11 +142,10 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceColumns, targetColumns])
 
-  // The tab bar shows the badge whichever tab is open, so it asks for the plans itself rather than
-  // only the Provisioning tab's card doing so. The same query, keyed the same way — React Query
-  // serves both from one fetch.
-  const { data: plans } = useProvisioning(replicationName, existing?.name)
-  const pendingSteps = (plans?.source.steps.length ?? 0) + (plans?.target.steps.length ?? 0)
+  // The tab bar and its provisioning badge, computed by the hook rather than here: Preview SQL and
+  // Verify wear the same bar, and one implementation is the only way three screens agree on what it
+  // says.
+  const tabs = useMappingTabs(replicationName, base, existing?.name)
 
   const canSave = name
     && resolvedSource.connectionName && resolvedSource.database && source.table
@@ -244,7 +243,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
 
       <SubTabs
         base={existing ? `${base}/${encodeURIComponent(existing.name)}` : `${base}/new`}
-        tabs={mappingTabs(base, existing?.name, pendingSteps)}
+        tabs={tabs}
         testId="mapping-subtabs"
       />
 

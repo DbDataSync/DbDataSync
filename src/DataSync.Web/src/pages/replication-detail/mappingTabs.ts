@@ -1,4 +1,5 @@
 import type { SubTab } from '../../components/SubTabs'
+import { useProvisioning } from '../../api/hooks'
 
 /**
  * The mapping editor's tabs. Notes is the index — no segment — so a link to a mapping is just the
@@ -8,8 +9,21 @@ import type { SubTab } from '../../components/SubTabs'
  * rather than inside it, deliberately — both are about the mapping *as saved*, which is not what an
  * editor holding unsaved changes is showing. They become tabs without moving, so the URLs that were
  * being linked to still work and the distinction survives.
+ *
+ * A hook rather than a plain function because the Provisioning badge is a *fact about the mapping*,
+ * not something each screen should be trusted to pass in: Preview SQL and Verify both used to hand it
+ * a hardcoded 0, so the same mapping showed a different number depending on which tab was open. The
+ * count is computed here, once, for every caller. It is the same query the Provisioning card runs,
+ * keyed identically, so React Query serves both from one fetch.
  */
-export function mappingTabs(base: string, mappingName: string | undefined, pendingSteps: number): SubTab[] {
+export function useMappingTabs(
+  replicationName: string,
+  base: string,
+  mappingName: string | undefined,
+): SubTab[] {
+  const { data: plans } = useProvisioning(replicationName, mappingName)
+  const pendingSteps = (plans?.source.steps.length ?? 0) + (plans?.target.steps.length ?? 0)
+
   const tabs: SubTab[] = [
     { path: null, label: 'Notes', testId: 'mapping-tab-notes' },
     { path: 'columns', label: 'Column Mapping', testId: 'mapping-tab-columns' },

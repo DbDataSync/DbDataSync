@@ -1,11 +1,11 @@
-import { Link, useOutletContext, useParams } from 'react-router-dom'
+import { useOutletContext, useParams } from 'react-router-dom'
 import { CodeEditor } from '../../components/CodeEditor'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { useMappingPreview } from '../../api/hooks'
 import type { PreviewOrigin, PreviewStatement } from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
 import { SubTabs } from '../../components/SubTabs'
-import { mappingTabs } from './mappingTabs'
+import { useMappingTabs } from './mappingTabs'
 import { SavedMappingHeading } from './SavedMappingHeading'
 
 const ORIGIN_LABEL: Record<PreviewOrigin, string> = {
@@ -29,6 +29,7 @@ export function MappingPreview() {
   const { replicationName, base } = useOutletContext<MappingsOutletContext>()
   const { mappingName } = useParams<{ mappingName: string }>()
   const { data, isLoading, error } = useMappingPreview(replicationName, mappingName)
+  const tabs = useMappingTabs(replicationName, base, mappingName)
 
   const stages = [...new Set((data?.statements ?? []).map((s) => s.stage))]
 
@@ -36,10 +37,10 @@ export function MappingPreview() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} data-testid="mapping-preview">
       <div className="page-head">
         <h2 className="page-title mono">{mappingName}</h2>
+        {/* Every mapping this screen can be open for is a saved one, so the badge the editor shows
+            beside the name is true here too, and was simply missing. */}
+        <span className="badge badge-accent">MAPPED</span>
         <span className="page-note">what a pass would run, in order — nothing here is executed</span>
-        <div className="right">
-          <Link className="btn" to={`${base}/${encodeURIComponent(mappingName!)}`}>Back to the mapping</Link>
-        </div>
       </div>
 
       {/* And the same heading: which two tables this is about, read from the mapping as saved. */}
@@ -51,7 +52,7 @@ export function MappingPreview() {
           the editor's draft along with it. */}
       <SubTabs
         base={`${base}/${encodeURIComponent(mappingName!)}`}
-        tabs={mappingTabs(base, mappingName, 0)}
+        tabs={tabs}
         testId="mapping-subtabs"
       />
 
