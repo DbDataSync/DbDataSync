@@ -112,6 +112,35 @@ public sealed class ReaderTimingTests
         Assert.NotNull(recorder.LifetimeMs);
     }
 
+    /// <summary>
+    /// Why staging is measured as a whole wrapped call rather than being assumed equal to the reader's
+    /// lifetime.
+    /// <para>
+    /// Today's only staging provider writes rows through as they arrive, so the two numbers track each
+    /// other and the second looks redundant. <c>IStagingProvider</c> already names file-based staging
+    /// as a real future shape, and such a provider does its move or upload **after** the stream is
+    /// exhausted — work the reader's lifetime cannot see. This models one, and shows the wrapped-call
+    /// measurement already captures it, ahead of any real provider existing.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task StagingThatWorksAfterTheReadIsDone_MeasuresLongerThanTheRead()
+    {
+        var recorder = new ReaderTimingRecorder();
+        var stagingClock = System.Diagnostics.Stopwatch.StartNew();
+
+        // Consume every row — which is where a pass-through provider would stop — and then keep
+        // working, the way a stage-to-file/move-file provider does.
+        await DrainAsync(RowsAsync(3).WithTiming(recorder));
+        await Task.Delay(120);
+        var stagingMs = stagingClock.ElapsedMilliseconds;
+
+        Assert.NotNull(recorder.LifetimeMs);
+        Assert.True(stagingMs > recorder.LifetimeMs + 50,
+            $"staging {stagingMs}ms did not exceed the {recorder.LifetimeMs}ms read it consumes, so the " +
+            "post-read work was not being measured");
+    }
+
     [Fact]
     public async Task AConsumerThatStopsEarly_StillRecordsALifetime()
     {
