@@ -1,6 +1,6 @@
-# Phase 68 — Per-mapping pipeline settings, and an auto-derived SCD2 natural key (planned)
+# Phase 68 — Per-mapping pipeline settings, and an auto-derived SCD2 natural key
 
-**Status**: Planned, not started
+**Status**: Done
 **Plan reference**: `architecture/planning/done/per-mapping-pipeline-settings.md`
 
 ## Why
@@ -182,3 +182,92 @@ touched.
 - Whether `ParameterCheck`'s existing source-driver-for-every-stage shortcut (see "Validation," above)
   is worth fixing for the **replication**-level check too while this phase is already touching that
   file, or left as pre-existing behavior outside this phase's scope.
+
+---
+
+# Outcome
+
+Built in five commits — config model and resolution, validation and the preview endpoint, the
+integration tests, the SPA, and the Playwright walk-through. Everything the doc specified is in,
+including the `Required = false` flip and the two-level resolution in `RunExecutor`.
+
+## The open question: the replication-level check was fixed too
+
+`ParameterCheck.ThrowIfInvalid(ReplicationTaskConfig)` now resolves the reader against the **source**
+connection's driver and staging and the writer against the **target's**, alongside the new per-mapping
+check that does the same. Leaving the old shortcut in place would have meant two checks in one file
+disagreeing about which driver owns a writer Kind, and the next person to read it would have had to
+work out which one was deliberate. It is also not a behaviour change anybody can observe today: the
+lenient path already returns no problems for a Kind the resolved driver does not declare, so a config
+that saved before saves now.
+
+What was **not** changed there is the leniency itself. A Kind the driver does not offer stays a run-time
+error at the replication level and became a save-time error only for a mapping override, which is the
+asymmetry the doc asked for. The reason it is defensible rather than merely asked-for: an override
+exists solely to name something other than what would otherwise run, so one naming a Kind that cannot
+run has no effect except to make the mapping silently unrunnable. A replication's own Kind at least
+still has the pipeline's run-time message, which is better than this check's.
+
+## The optional `ColumnPicker` conversion: not taken
+
+`ParameterType.ColumnPicker` with `ParameterCardinality.Any` is not the small addition the doc hoped
+it might be, for two reasons found on opening the file:
+
+1. `ParameterForm` renders **any** vararg as a `KeyValueTable` — a list of name/value pairs. A
+   multi-select over the mapping's columns is not a control that exists yet, so this would mean writing
+   one and deciding how it behaves for every other `ColumnPicker` caller.
+2. A vararg's persisted shape is `naturalKey.0`, `naturalKey.1` — flat keys with an index suffix, not
+   one comma-separated value. `Scd2Writer.SplitColumns` parses a comma-separated string and
+   `NaturalKeyDerivation.Format` produces one, so converting the declaration changes the *stored*
+   shape and both ends of it, plus every config already written.
+
+Neither is hard; together they are a phase of their own, not a change taken in passing. The mapping's
+Pipeline tab renders the natural key with its own control regardless, so the free-text field is only
+reached by somebody deliberately overriding, and it opens pre-filled with the derived columns.
+
+## The SCD2 writer had never issued valid SQL on SQL Server
+
+Writing the integration test the doc asked for — two mappings, one SCD2 replication, real server —
+immediately failed on `Incorrect syntax near '<'`. `HistorizedStatement`'s null-safe change comparison
+emitted `(t.c IS NULL) <> (s.c IS NULL)`; `IS NULL` is a predicate rather than a value, so that is a
+syntax error on SQL Server. Every SCD2 pass would have failed on the close statement. Postgres accepts
+it, the unit tests assert the string against a test dialect, and nothing had ever run the writer against
+a server — so the doc's own note that SCD2 was unused in production is the only reason this had not been
+found. Both halves go through `CASE WHEN ... THEN 1 ELSE 0 END` now, which is valid and identical in
+meaning on both engines. Out of this phase's scope on paper; in practice the phase would have shipped an
+auto-derived natural key for a writer that cannot write.
+
+## Other decisions
+
+- **`PipelineResolution` in `DataSync.Core.Config`**, beside `EndpointResolution`,
+  `ProvisioningResolution`, `ScriptResolution` and `HookResolution`, rather than inline `??` in
+  `RunExecutor`. It is where every other "which level answers this" helper lives, and it makes the
+  resolution — including "a work item's Kind still wins" — unit-testable without a database, which is
+  what the doc's second verification bullet asks for.
+- **Three more callers resolve the effective stage now**, which the doc did not name but which are
+  wrong without it: `RunExecutor.EnsureTargetTableProvisionedAsync` and
+  `ProvisioningService.PlanTargetAsync` extend the provisioned columns by writer Kind (a mapping that
+  overrides its way onto Scd2 needs the version columns, and one that overrides its way off must not
+  get them), `ProvisioningService.PlanEnableSourceChangeCaptureAsync` plans for the reader that will
+  actually read the table, `ConfigRepository.SaveTableMapping`'s historized-target check asks about the
+  writer that will actually run, and `BackfillService.ExpandAsync` resolves the reader the same way.
+- **Stating a natural key on the mapping creates the writer override.** There is nowhere else for the
+  value to live, so the SPA seeds `writerOverride` from the replication's writer and edits one key in
+  it. The toggle keys off the *presence* of `naturalKey` rather than its emptiness, so an override
+  somebody has switched on and not yet typed into is not silently undone.
+- **The mapping's Pipeline tab reads capabilities per side** — `useCapabilities(source)` for reader
+  Kinds and `useCapabilities(target)` for staging and writer — rather than
+  `useReplicationCapabilities`, which resolves against the *first* mapping's connections. On the
+  mapping's own screen the right pair is that mapping's, and it matches what the server validates
+  against.
+- **The Playwright test covers the two UI claims, not the run-level one.** "A run using the override
+  applies against the overridden key rather than the derived one" is asserted in
+  `Scd2NaturalKeyIntegrationTests`, where two passes over a real server can distinguish the two keys
+  unambiguously; through the browser it would have needed a second SCD2 replication built by hand to
+  say something already said.
+
+## Test results
+
+Full non-integration suite: 859 passed, 0 failed. `Category=Integration` for the new
+`Scd2NaturalKeyIntegrationTests`: 3 passed. `npm run build` (`tsc -b` + vite) clean, no new lint
+warnings. Playwright: 45 passed, including the new test 43.
