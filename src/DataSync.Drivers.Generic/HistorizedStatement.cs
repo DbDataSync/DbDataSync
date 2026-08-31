@@ -139,10 +139,20 @@ public static class HistorizedStatement
     /// misses a value that became null and one that arrived where there was none. Both are changes, and
     /// a version that never closes because of them is a target quietly reporting stale data as current.
     /// </summary>
+    /// <summary>
+    /// "One of them is null and the other is not, or neither is and they differ."
+    /// <para>
+    /// The nullness halves go through <c>CASE</c> rather than being compared directly. <c>IS NULL</c>
+    /// is a *predicate*, not a value, so <c>(a IS NULL) &lt;&gt; (b IS NULL)</c> is a syntax error on
+    /// SQL Server — which nothing found until phase 68 ran this writer against a real server for the
+    /// first time. <c>CASE</c> is the portable way to get a comparable value out of a predicate, and it
+    /// says the same thing on Postgres, which had accepted the original.
+    /// </para>
+    /// </summary>
     private static string NullSafeDiffers(SqlDialect dialect, string quotedTarget, string column)
     {
         var c = dialect.QuoteIdentifier(column);
-        return $"(({quotedTarget}.{c} IS NULL) <> (s.{c} IS NULL) " +
+        return $"(CASE WHEN {quotedTarget}.{c} IS NULL THEN 1 ELSE 0 END <> CASE WHEN s.{c} IS NULL THEN 1 ELSE 0 END " +
                $"OR ({quotedTarget}.{c} IS NOT NULL AND s.{c} IS NOT NULL AND {quotedTarget}.{c} <> s.{c}))";
     }
 }

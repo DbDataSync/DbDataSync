@@ -42,7 +42,11 @@ public sealed class HistorizedStatementTests
         var sql = HistorizedStatement.BuildCloseChanged(
             BracketDialect.Instance, "[dbo].[Hist]", "#staging", ["Id"], ["Name"]);
 
-        Assert.Contains("([dbo].[Hist].[Name] IS NULL) <> (s.[Name] IS NULL)", sql);
+        // Through CASE, because `IS NULL` is a predicate rather than a value and comparing two of them
+        // directly is a syntax error on SQL Server. See NullSafeDiffers.
+        Assert.Contains(
+            "CASE WHEN [dbo].[Hist].[Name] IS NULL THEN 1 ELSE 0 END <> CASE WHEN s.[Name] IS NULL THEN 1 ELSE 0 END",
+            sql);
         Assert.Contains("[dbo].[Hist].[Name] IS NOT NULL AND s.[Name] IS NOT NULL", sql);
     }
 
