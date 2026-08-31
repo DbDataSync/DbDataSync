@@ -6,6 +6,7 @@ import type { PreviewOrigin, PreviewStatement } from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
 import { SubTabs } from '../../components/SubTabs'
 import { mappingTabs } from './mappingTabs'
+import { SavedMappingHeading } from './SavedMappingHeading'
 
 const ORIGIN_LABEL: Record<PreviewOrigin, string> = {
   BuiltIn: 'built in',
@@ -40,6 +41,9 @@ export function MappingPreview() {
           <Link className="btn" to={`${base}/${encodeURIComponent(mappingName!)}`}>Back to the mapping</Link>
         </div>
       </div>
+
+      {/* And the same heading: which two tables this is about, read from the mapping as saved. */}
+      <SavedMappingHeading replicationName={replicationName} mappingName={mappingName} />
 
       {/* The same bar the editor wears. These two routes sit beside the editor rather than inside it
           — both are about the mapping *as saved*, which is not what an unsaved editor is showing —

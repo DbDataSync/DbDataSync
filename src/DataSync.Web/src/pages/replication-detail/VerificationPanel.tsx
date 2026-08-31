@@ -9,6 +9,7 @@ import type { VerificationCheckConfig } from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
 import { SubTabs } from '../../components/SubTabs'
 import { mappingTabs } from './mappingTabs'
+import { SavedMappingHeading } from './SavedMappingHeading'
 
 const RESULT_COLUMNS = '1.2fr .8fr .8fr 1.2fr 150px'
 
@@ -59,6 +60,9 @@ export function VerificationPanel() {
           </button>
         </div>
       </div>
+
+      {/* And the same heading: which two tables this is about, read from the mapping as saved. */}
+      <SavedMappingHeading replicationName={replicationName} mappingName={mappingName} />
 
       {/* The same bar the editor wears. These two routes sit beside the editor rather than inside it
           — both are about the mapping *as saved*, which is not what an unsaved editor is showing —
