@@ -42,6 +42,125 @@ public sealed class TaskRunStore(StateDatabase database)
             cmd.ExecuteNonQuery();
         });
 
+    /// <summary>
+    /// Holds a replication, or releases it, and records that somebody did — see phase 64.
+    /// <para>
+    /// Both writes happen in one transaction. <c>Tasks</c> is the fast current state the scheduler
+    /// reads on every tick; <c>PauseEvents</c> is the history. Two separate writes could leave a
+    /// replication paused with nothing saying who paused it, which is precisely the question the
+    /// history exists to answer.
+    /// </para>
+    /// <para>
+    /// The row is upserted rather than updated, because a replication that has never run has no
+    /// <c>Tasks</c> row yet — <c>UpsertTask</c> is called by a worker starting up, and pausing
+    /// something before it has ever started is a perfectly ordinary thing to do. <c>Enabled</c>
+    /// defaults to 1 on insert: it is config's answer, mirrored here, and this method has no business
+    /// inventing one, so it writes the permissive value the mirror is refreshed from anyway.
+    /// </para>
+    /// </summary>
+    /// <param name="note">
+    /// Null and empty are stored as-is rather than normalised to one: the popup lets an operator
+    /// deliberately clear the note, and "cleared it" is a different act from "never wrote one".
+    /// </param>
+    public void SetPaused(string taskName, bool paused, string? note, string performedBy) =>
+        SqliteRetry.Execute(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var transaction = connection.BeginTransaction();
+
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = """
+                    INSERT INTO Tasks (Name, Enabled, Paused, PauseNote, UpdatedAtUtc)
+                    VALUES ($name, 1, $paused, $note, $now)
+                    ON CONFLICT(Name) DO UPDATE SET
+                        Paused = excluded.Paused,
+                        PauseNote = excluded.PauseNote,
+                        UpdatedAtUtc = excluded.UpdatedAtUtc;
+                    """;
+                cmd.Parameters.AddWithValue("$name", taskName);
+                cmd.Parameters.AddWithValue("$paused", paused ? 1 : 0);
+                cmd.Parameters.AddWithValue("$note", (object?)note ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = """
+                    INSERT INTO PauseEvents (TaskName, Action, Note, PerformedAtUtc, PerformedBy)
+                    VALUES ($name, $action, $note, $now, $by);
+                    """;
+                cmd.Parameters.AddWithValue("$name", taskName);
+                cmd.Parameters.AddWithValue("$action", paused ? PauseActions.Paused : PauseActions.Resumed);
+                cmd.Parameters.AddWithValue("$note", (object?)note ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.Parameters.AddWithValue("$by", performedBy);
+                cmd.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        });
+
+    /// <summary>Whether this replication is currently held. A task with no row has never been paused,
+    /// which is not paused.</summary>
+    public bool IsPaused(string taskName) => GetPauseState(taskName).Paused;
+
+    /// <summary>The current hold and the note that came with it, in one read — what the status
+    /// endpoint needs, and one query rather than two.</summary>
+    public (bool Paused, string? Note) GetPauseState(string taskName) =>
+        SqliteRetry.Execute(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT Paused, PauseNote FROM Tasks WHERE Name = $name;";
+            cmd.Parameters.AddWithValue("$name", taskName);
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read())
+                return (false, (string?)null);
+            return (reader.GetInt64(0) != 0, reader.IsDBNull(1) ? null : reader.GetString(1));
+        });
+
+    /// <summary>
+    /// Every pause and resume for a replication, most recent first.
+    /// <para>
+    /// Ordered by Id rather than by PerformedAtUtc: two actions within the same clock tick are
+    /// otherwise in an arbitrary order, and the sequence is the whole point of an audit trail. The
+    /// autoincrement is the only monotonic thing here.
+    /// </para>
+    /// <para>
+    /// Nothing in the product calls this yet — the viewer is its own follow-up, see
+    /// architecture/planning/todo/pause-history-ui.md. It exists so the history is reachable, and
+    /// tested so it is reachable correctly.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<PauseEventRecord> GetPauseHistory(string taskName, int limit = 50) =>
+        SqliteRetry.Execute(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT Id, TaskName, Action, Note, PerformedAtUtc, PerformedBy
+                FROM PauseEvents WHERE TaskName = $name
+                ORDER BY Id DESC LIMIT $limit;
+                """;
+            cmd.Parameters.AddWithValue("$name", taskName);
+            cmd.Parameters.AddWithValue("$limit", limit);
+            using var reader = cmd.ExecuteReader();
+            var results = new List<PauseEventRecord>();
+            while (reader.Read())
+                results.Add(new PauseEventRecord(
+                    reader.GetInt64(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    DateTimeOffset.Parse(reader.GetString(4)),
+                    reader.GetString(5)));
+            return (IReadOnlyList<PauseEventRecord>)results;
+        });
+
     /// <summary>Transitions an existing Queued row (written by WorkQueueStore.Enqueue when the work
     /// was queued) to Running, once a worker actually claims and begins processing it. There is no
     /// longer an INSERT-based "start a run" method — every run's row now originates from

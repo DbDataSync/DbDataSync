@@ -22,7 +22,7 @@ public sealed class StateDatabaseTests : IDisposable
 
         Assert.Equal(
             [
-                "ChangeWatermarks", "Invites", "Logs", "RunLocks", "Sessions", "TaskRuns", "Tasks",
+                "ChangeWatermarks", "Invites", "Logs", "PauseEvents", "RunLocks", "Sessions", "TaskRuns", "Tasks",
                 "UserCredentials", "Users", "VerificationResults", "WorkQueue",
             ],
             tables);

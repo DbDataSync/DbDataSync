@@ -45,7 +45,10 @@ public sealed class SchedulerService(
                 continue;
             }
 
-            if (!task.Enabled || mappingNames.Count == 0)
+            // Paused is read from state, Enabled from the config just loaded — both gates, one
+            // definition. A pause stops the *next* thing being scheduled; anything already claimed by
+            // a worker runs to completion, exactly as disabling has always behaved.
+            if (!TaskScheduling.ShouldRun(task.Enabled, taskRunStore.IsPaused(name)) || mappingNames.Count == 0)
                 continue;
 
             var enqueuedAny = task.Scheduling.Mode == ScheduleMode.Periodic

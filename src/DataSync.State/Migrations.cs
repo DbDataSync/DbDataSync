@@ -258,5 +258,39 @@ internal static class Migrations
         ALTER TABLE TaskRuns ADD COLUMN WriterKind TEXT NULL;
         ALTER TABLE TaskRuns ADD COLUMN WriterDurationMs INTEGER NULL;
         """,
+
+        """
+        -- A temporary hold on a replication, in state rather than in config — see phase 64.
+        --
+        -- Not a second spelling of Enabled. Enabled is durable intent, git-tracked and diffed, and
+        -- changing it is a commit somebody has to justify later; a pause is an operator reacting to
+        -- something right now, and making that a commit would either fill the config history with
+        -- noise or discourage anybody from using it. The two gates apply independently: ShouldRun is
+        -- Enabled AND NOT Paused.
+        --
+        -- On Tasks rather than in its own current-state table because the scheduler reads it on every
+        -- tick, for every replication, and the row is already being read.
+        ALTER TABLE Tasks ADD COLUMN Paused INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE Tasks ADD COLUMN PauseNote TEXT NULL;
+
+        -- The append-only history behind those two columns. Tasks says what is true now; this says how
+        -- it got there, one row per action, written in the same transaction as the Tasks update so the
+        -- two can never disagree.
+        --
+        -- A pause is the one operational action with no other record: it changes what the product does
+        -- without touching the config repo, so without this table "why did this stop replicating for
+        -- three days in March" has no answer anywhere. Nothing reads it yet — a viewer is deliberately
+        -- separate, see architecture/planning/todo/pause-history-ui.md — but the history has to exist
+        -- before it can be shown, and a table added later starts empty.
+        CREATE TABLE PauseEvents (
+            Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            TaskName       TEXT NOT NULL,
+            Action         TEXT NOT NULL,   -- 'Paused' | 'Resumed'
+            Note           TEXT NULL,
+            PerformedAtUtc TEXT NOT NULL,
+            PerformedBy    TEXT NOT NULL
+        );
+        CREATE INDEX IX_PauseEvents_TaskName ON PauseEvents(TaskName);
+        """,
     ];
 }

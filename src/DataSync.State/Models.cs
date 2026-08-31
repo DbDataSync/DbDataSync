@@ -115,6 +115,31 @@ public sealed record VerificationResultRecord(
     int DifferingGroups,
     string ResultPath);
 
+/// <summary>
+/// One pause or resume, as it happened. See <c>TaskRunStore.SetPaused</c>.
+/// <para>
+/// <see cref="Action"/> is a string rather than an enum for the same reason
+/// <see cref="RunFailureKinds"/> is: it is stored, and read back by things that are not this assembly.
+/// See <see cref="PauseActions"/>.
+/// </para>
+/// </summary>
+/// <param name="Note">Whatever the operator typed for *this* action — including nothing, which is a
+/// deliberate answer rather than a missing one, since the popup lets them clear it every time.</param>
+public sealed record PauseEventRecord(
+    long Id,
+    string TaskName,
+    string Action,
+    string? Note,
+    DateTimeOffset PerformedAtUtc,
+    string PerformedBy);
+
+/// <summary>The two things that can happen to a pause.</summary>
+public static class PauseActions
+{
+    public const string Paused = "Paused";
+    public const string Resumed = "Resumed";
+}
+
 public sealed record LogEntryRecord(
     long Id,
     Guid RunId,
