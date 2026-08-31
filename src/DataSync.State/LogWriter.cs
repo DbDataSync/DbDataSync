@@ -128,7 +128,7 @@ public sealed class LogWriter : IDisposable
             while (reader.Read())
             {
                 results.Add(new LogEntryRecord(
-                    reader.GetInt64(0),
+                    reader.Int64(0),
                     Guid.Parse(reader.GetString(1)),
                     DateTimeOffset.Parse(reader.GetString(2)),
                     Enum.Parse<LogSeverity>(reader.GetString(3)),

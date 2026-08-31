@@ -88,11 +88,24 @@ public sealed class MsSqlStateDialect : StateDialect
     /// Points a partial index's predicate at the stored row. The predicate is written unqualified in
     /// the schema (it is an index definition, where there is only one table); inside a MERGE there are
     /// two, and an unqualified column reference would be ambiguous.
+    /// <para>
+    /// **String literals are skipped, and that is not a detail.** The work queue's predicate is
+    /// <c>Status IN ('Pending','Claimed','Running')</c>, and a naive word-substitution turns the
+    /// *values* into <c>target.Pending</c> — which is still valid SQL if a column happens to exist,
+    /// and otherwise fails somewhere far from the cause. The first version of this did exactly that,
+    /// and the cross-engine queue test is what caught it.
+    /// </para>
     /// </summary>
     private static string Qualify(string predicate) =>
         System.Text.RegularExpressions.Regex.Replace(
-            predicate, @"\b([A-Za-z_]\w*)\b(?!\s*\()", match =>
-                Keywords.Contains(match.Value.ToUpperInvariant()) ? match.Value : $"target.{match.Value}");
+            predicate,
+            // A quoted literal, or a bare word that is not a function call. Matching literals first
+            // and returning them untouched is what keeps the substitution out of them.
+            @"'(?:[^']|'')*'|\b([A-Za-z_]\w*)\b(?!\s*\()",
+            match =>
+                match.Value.StartsWith('\'') || Keywords.Contains(match.Value.ToUpperInvariant())
+                    ? match.Value
+                    : $"target.{match.Value}");
 
     private static readonly HashSet<string> Keywords =
         ["IN", "AND", "OR", "NOT", "NULL", "IS", "LIKE", "BETWEEN", "EXISTS"];

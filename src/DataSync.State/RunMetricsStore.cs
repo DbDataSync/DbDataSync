@@ -73,10 +73,10 @@ public sealed class RunMetricsStore(StateDatabase database)
         // SUM over no rows is NULL in SQL, and zero is the honest reading of "nothing happened" —
         // a dash where a zero belongs is exactly the invented reading phase 15 refused.
         return (
-            reader.GetInt32(0),
-            reader.IsDBNull(1) ? 0 : reader.GetInt32(1),
-            reader.IsDBNull(2) ? 0 : reader.GetInt64(2),
-            reader.IsDBNull(3) ? 0 : reader.GetInt64(3));
+            reader.Int32(0),
+            reader.IsDBNull(1) ? 0 : reader.Int32(1),
+            reader.IsDBNull(2) ? 0 : reader.Int64(2),
+            reader.IsDBNull(3) ? 0 : reader.Int64(3));
     }
 
     /// <summary>
@@ -197,7 +197,7 @@ public sealed class RunMetricsStore(StateDatabase database)
                 counts[index]++;
                 if (reader.GetString(1) == nameof(RunStatus.Failed))
                     failures[index]++;
-                written[index] += reader.GetInt64(2);
+                written[index] += reader.Int64(2);
             }
         }
 

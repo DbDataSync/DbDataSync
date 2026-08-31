@@ -113,7 +113,7 @@ public sealed class TaskRunStore(StateDatabase database)
             using var reader = cmd.ExecuteReader();
             if (!reader.Read())
                 return (false, (string?)null);
-            return (reader.GetInt64(0) != 0, reader.IsDBNull(1) ? null : reader.GetString(1));
+            return (reader.Int64(0) != 0, reader.IsDBNull(1) ? null : reader.GetString(1));
         });
 
     /// <summary>
@@ -144,7 +144,7 @@ public sealed class TaskRunStore(StateDatabase database)
             var results = new List<PauseEventRecord>();
             while (reader.Read())
                 results.Add(new PauseEventRecord(
-                    reader.GetInt64(0),
+                    reader.Int64(0),
                     reader.GetString(1),
                     reader.GetString(2),
                     reader.IsDBNull(3) ? null : reader.GetString(3),
@@ -391,31 +391,35 @@ public sealed class TaskRunStore(StateDatabase database)
                    ROW_NUMBER() OVER (PARTITION BY TaskName, MappingName ORDER BY StartedAtUtc DESC) AS Recency
             FROM TaskRuns
             WHERE EndedAtUtc IS NOT NULL
-        )
+        ) AS Ranked
         WHERE ($cutoff IS NOT NULL AND StartedAtUtc < $cutoff)
            OR ($maxPerMapping IS NOT NULL AND Recency > $maxPerMapping)
         """;
 
     private void AddPruneParameters(DbCommand cmd, TimeSpan? maxAge, int? maxPerMapping)
     {
+        // Typed explicitly, because both are null on the ordinary path and both are used only in an
+        // `IS NOT NULL` test — from which Postgres cannot infer a type and refuses to plan the
+        // statement at all. The other two engines do not care, and giving them the type costs nothing.
         cmd.Bind(
             database, "cutoff",
-            maxAge is { } age ? (DateTimeOffset.UtcNow - age).ToString("O") : null);
-        cmd.Bind(database, "maxPerMapping", (object?)maxPerMapping ?? DBNull.Value);
+            maxAge is { } age ? (DateTimeOffset.UtcNow - age).ToString("O") : null,
+            System.Data.DbType.String);
+        cmd.Bind(database, "maxPerMapping", maxPerMapping, System.Data.DbType.Int32);
     }
 
     private static TaskRunRecord ReadRun(DbDataReader reader) => new(
         Guid.Parse(reader.GetString(0)),
         reader.GetString(1),
-        reader.IsDBNull(2) ? null : reader.GetInt32(2),
+        reader.IsDBNull(2) ? null : reader.Int32(2),
         Enum.Parse<RunStatus>(reader.GetString(3)),
         Enum.Parse<RunKind>(reader.GetString(4)),
         reader.GetString(5),
         reader.IsDBNull(6) ? null : reader.GetString(6),
         DateTimeOffset.Parse(reader.GetString(7)),
         reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)),
-        reader.GetInt64(9),
-        reader.GetInt64(10),
+        reader.Int64(9),
+        reader.Int64(10),
         reader.IsDBNull(11) ? null : reader.GetString(11),
         reader.IsDBNull(12) ? null : reader.GetString(12),
         ReadTiming(reader));
@@ -439,11 +443,11 @@ public sealed class TaskRunStore(StateDatabase database)
 
         return new RunTiming(
             reader.IsDBNull(13) ? null : reader.GetString(13),
-            reader.IsDBNull(14) ? null : reader.GetInt64(14),
-            reader.IsDBNull(15) ? null : reader.GetInt64(15),
+            reader.IsDBNull(14) ? null : reader.Int64(14),
+            reader.IsDBNull(15) ? null : reader.Int64(15),
             reader.IsDBNull(16) ? null : reader.GetString(16),
-            reader.IsDBNull(17) ? null : reader.GetInt64(17),
+            reader.IsDBNull(17) ? null : reader.Int64(17),
             reader.IsDBNull(18) ? null : reader.GetString(18),
-            reader.IsDBNull(19) ? null : reader.GetInt64(19));
+            reader.IsDBNull(19) ? null : reader.Int64(19));
     }
 }

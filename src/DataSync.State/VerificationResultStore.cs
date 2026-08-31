@@ -100,7 +100,7 @@ public sealed class VerificationResultStore(StateDatabase database)
         });
 
     private static VerificationResultRecord Read(DbDataReader reader) => new(
-        reader.GetInt64(0),
+        reader.Int64(0),
         Guid.Parse(reader.GetString(1)),
         reader.GetString(2),
         reader.GetString(3),
@@ -108,7 +108,7 @@ public sealed class VerificationResultStore(StateDatabase database)
         DateTimeOffset.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
         DateTimeOffset.Parse(reader.GetString(6), null, System.Globalization.DateTimeStyles.RoundtripKind),
         DateTimeOffset.Parse(reader.GetString(7), null, System.Globalization.DateTimeStyles.RoundtripKind),
-        reader.GetInt32(8),
-        reader.GetInt32(9),
+        reader.Int32(8),
+        reader.Int32(9),
         reader.GetString(10));
 }

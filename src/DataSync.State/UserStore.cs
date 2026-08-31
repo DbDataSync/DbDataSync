@@ -204,6 +204,6 @@ public sealed class UserStore(StateDatabase database)
         reader.GetString(1),
         reader.IsDBNull(2) ? null : reader.GetString(2),
         Enum.Parse<UserRole>(reader.GetString(3)),
-        reader.GetInt32(4) == 1,
+        reader.Int32(4) == 1,
         DateTimeOffset.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind));
 }

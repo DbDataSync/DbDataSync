@@ -304,7 +304,7 @@ public sealed class WorkQueueStore(StateDatabase database)
         });
 
     private static WorkItem ReadItem(DbDataReader reader) => new(
-        reader.GetInt64(0),
+        reader.Int64(0),
         reader.GetString(1),
         Enum.Parse<RunKind>(reader.GetString(2)),
         reader.GetString(3),
