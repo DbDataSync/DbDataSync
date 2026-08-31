@@ -278,12 +278,24 @@ public sealed class ProcessSupervisor(
 /// </summary>
 /// <param name="MemoryBytes">Resident set. Null when nothing is running.</param>
 /// <param name="CpuMilliseconds">Processor time this worker has used since it started.</param>
+/// <param name="ShouldRun">
+/// Whether the scheduler is allowed to enqueue anything for this replication — <c>Enabled</c> (config)
+/// and not <c>Paused</c> (state), from <see cref="TaskScheduling.ShouldRun"/>. The answer rather than
+/// the inputs, so the SPA never re-derives the rule; the inputs come too, because the UI has to say
+/// *which* gate is closed and they are different controls with different consequences.
+/// </param>
+/// <param name="PauseNote">Why it is held, if whoever held it said. Null when not paused, and also
+/// when they cleared it — the popup allows both.</param>
 public sealed record ReplicationStatus(
     bool Running,
     int? Pid = null,
     long? MemoryBytes = null,
     double? CpuMilliseconds = null,
-    DateTimeOffset? StartedAtUtc = null)
+    DateTimeOffset? StartedAtUtc = null,
+    bool ShouldRun = true,
+    bool Enabled = true,
+    bool Paused = false,
+    string? PauseNote = null)
 {
     /// <summary>A replication with no worker. The common state, and not a problem — a worker drains
     /// its queue and exits, so an idle replication has no process by design.</summary>

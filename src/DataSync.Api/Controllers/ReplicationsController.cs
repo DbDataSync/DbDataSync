@@ -2,6 +2,7 @@ using DataSync.Api.Services;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Api.Auth;
+using DataSync.State;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,6 +14,7 @@ public sealed class ReplicationsController(
     ConfigRepository configRepository,
     ParameterCheck parameterCheck,
     ProcessSupervisor supervisor,
+    TaskRunStore taskRunStore,
     CurrentUser currentUser) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
@@ -48,7 +50,51 @@ public sealed class ReplicationsController(
         if (!configRepository.ListReplications().Contains(name, StringComparer.Ordinal))
             return NotFound();
 
-        return Ok(supervisor.DescribeStatus(name));
+        // Composed here rather than in the supervisor, which knows about processes and has no business
+        // reading config or state. What the worker is doing and whether it is allowed to do anything
+        // are different questions; they travel together because one card asks both.
+        var (paused, pauseNote) = taskRunStore.GetPauseState(name);
+        var enabled = true;
+        try
+        {
+            enabled = configRepository.LoadReplicationTask(name).Enabled;
+        }
+        catch (FileNotFoundException)
+        {
+            // Listed a moment ago and gone now. A status call is not the place to turn that into an
+            // error — the next poll will 404 on the listing check above.
+        }
+
+        return Ok(supervisor.DescribeStatus(name) with
+        {
+            Enabled = enabled,
+            Paused = paused,
+            PauseNote = pauseNote,
+            ShouldRun = TaskScheduling.ShouldRun(enabled, paused),
+        });
+    }
+
+    /// <summary>
+    /// Holds this replication, or releases it — state only, never a commit.
+    /// <para>
+    /// Deliberately not shaped like <see cref="SetEnabled"/> beyond its URL: there is no config load
+    /// and no save at all, because a pause is not config. That is the whole point of it existing
+    /// separately from <c>Enabled</c> rather than as another value of it.
+    /// </para>
+    /// <para>
+    /// The note arrives with every action, in both directions, because the popup asks every time —
+    /// pausing with a reason, resuming with a note about the resolution, or either with the note
+    /// cleared. Nothing here decides on the operator's behalf what should happen to it.
+    /// </para>
+    /// </summary>
+    [HttpPut("{name}/paused")]
+    public ActionResult<ReplicationStatus> SetPaused(string name, [FromBody] SetPausedRequest request)
+    {
+        if (!configRepository.ListReplications().Contains(name, StringComparer.Ordinal))
+            return NotFound();
+
+        taskRunStore.SetPaused(name, request.Paused, request.Note, currentUser.Author.Name);
+        return Status(name);
     }
 
     /// <summary>
@@ -105,3 +151,9 @@ public sealed class ReplicationsController(
 
 /// <summary>The one field that saves on its own — see <c>SetEnabled</c>.</summary>
 public sealed record SetEnabledRequest(bool Enabled);
+
+/// <summary>
+/// A hold, and whatever the operator wants recorded about it — see <c>SetPaused</c>.
+/// </summary>
+/// <param name="Note">Sent on every action, including a resume. Null clears it.</param>
+public sealed record SetPausedRequest(bool Paused, string? Note);

@@ -177,6 +177,17 @@ public sealed class TableMappingConfig
     /// </para>
     /// </summary>
     public bool TraceTiming { get; set; }
+
+    /// <summary>
+    /// Markdown notes about this table mapping specifically — the quirks of this table, why a column is
+    /// mapped the way it is, what broke last time. Git-tracked and diffed like the replication's own
+    /// (see <c>ReplicationTaskConfig.Notes</c>).
+    /// <para>
+    /// Not inherited from the replication. A note that applied to forty mappings would be a note about
+    /// the replication, and that field already exists.
+    /// </para>
+    /// </summary>
+    public string? Notes { get; set; }
 }
 
 /// <summary>

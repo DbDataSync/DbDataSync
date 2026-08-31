@@ -63,4 +63,15 @@ public sealed class ReplicationTaskConfig
     /// </para>
     /// </summary>
     public List<SegmentingStrategyConfig> SegmentingStrategies { get; set; } = new();
+
+    /// <summary>
+    /// Whatever whoever owns this replication needs the next person to know. Markdown, git-tracked and
+    /// diffed like every other field here — see phase 64.
+    /// <para>
+    /// Config rather than state, unlike the pause note beside it, and the difference is deliberate: a
+    /// pause note is about one incident and is worth nothing a month later, while this is about the
+    /// replication itself and its edits are exactly the kind of thing the history view is for.
+    /// </para>
+    /// </summary>
+    public string? Notes { get; set; }
 }
