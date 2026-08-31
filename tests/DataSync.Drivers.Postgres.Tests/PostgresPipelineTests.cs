@@ -3,6 +3,7 @@ using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.Generic;
 using Npgsql;
 using Xunit;
+using DataSync.Core.Sql;
 
 namespace DataSync.Drivers.Postgres.Tests;
 

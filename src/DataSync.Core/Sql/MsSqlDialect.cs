@@ -1,8 +1,6 @@
 using System.Data.Common;
-using DataSync.Drivers.Abstractions;
-using DataSync.Drivers.Generic;
 
-namespace DataSync.Drivers.MsSql;
+namespace DataSync.Core.Sql;
 
 /// <summary>SQL Server's answers to the mechanical variations in <see cref="SqlDialect"/>: bracket
 /// quoting and <c>@</c>-prefixed parameters, both in statement text and when binding.</summary>

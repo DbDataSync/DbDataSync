@@ -7,6 +7,7 @@ using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.Generic;
 using DataSync.Drivers.MsSql;
 using DataSync.Drivers.Postgres;
+using DataSync.Core.Sql;
 
 namespace DataSync.Api.Services;
 

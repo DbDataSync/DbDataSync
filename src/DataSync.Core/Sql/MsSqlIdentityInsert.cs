@@ -1,13 +1,13 @@
 using System.Data.Common;
 
-namespace DataSync.Drivers.MsSql;
+namespace DataSync.Core.Sql;
 
 /// <summary>
 /// Brackets a write with <c>SET IDENTITY_INSERT ... ON/OFF</c> when the target's identity column is
 /// among the columns being written. The setting is session-scoped and SQL Server permits it on only
 /// one table at a time, so it's always turned back off — including when the write fails.
 /// </summary>
-internal static class MsSqlIdentityInsert
+public static class MsSqlIdentityInsert
 {
     public static async Task<T> RunAsync<T>(
         DbConnection connection,

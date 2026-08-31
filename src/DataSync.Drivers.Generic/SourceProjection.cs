@@ -1,4 +1,5 @@
 using DataSync.Core.Config;
+using DataSync.Core.Sql;
 
 namespace DataSync.Drivers.Generic;
 

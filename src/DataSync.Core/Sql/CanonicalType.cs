@@ -1,13 +1,17 @@
-namespace DataSync.Drivers.Abstractions;
+namespace DataSync.Core.Sql;
 
 /// <summary>
 /// The intermediate a column's native type is translated through so that supporting N engines costs
 /// 2N translations (native → canonical, canonical → native) rather than N² (every engine pair
-/// directly). See <see cref="DataSync.Drivers.Generic.SqlDialect.ToCanonicalType"/> and
-/// <see cref="DataSync.Drivers.Generic.SqlDialect.RenderColumnType"/> — those live in
-/// <c>DataSync.Drivers.Generic</c>, but the type itself lives here so that <see cref="IProvisioner"/>
-/// and its request/plan shapes can reference it without <c>DataSync.Drivers.Abstractions</c> taking a
-/// dependency on <c>DataSync.Drivers.Generic</c> (which already depends on this project).
+/// directly). See <see cref="SqlDialect.ToCanonicalType"/> and
+/// <see cref="SqlDialect.RenderColumnType"/>.
+/// <para>
+/// In <c>DataSync.Core</c> alongside <see cref="SqlDialect"/> since phase 63. It used to live in
+/// <c>DataSync.Drivers.Abstractions</c>, which was the lowest project both the dialects and
+/// <c>IProvisioner</c> could see; once the dialects moved down to <c>Core</c> so that
+/// <c>DataSync.State</c> could reach them, leaving this behind would have meant a type in <c>Core</c>
+/// referencing one in a project above it — exactly the layering the move exists to avoid.
+/// </para>
 /// </summary>
 public enum CanonicalTypeKind
 {

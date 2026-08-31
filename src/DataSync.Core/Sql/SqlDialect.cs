@@ -1,7 +1,6 @@
 using System.Data.Common;
-using DataSync.Drivers.Abstractions;
 
-namespace DataSync.Drivers.Generic;
+namespace DataSync.Core.Sql;
 
 /// <summary>
 /// The small, mechanical ways SQL engines disagree — quoting, parameter placeholders, switching the

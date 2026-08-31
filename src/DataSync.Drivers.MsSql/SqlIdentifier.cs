@@ -1,3 +1,5 @@
+using DataSync.Core.Sql;
+
 namespace DataSync.Drivers.MsSql;
 
 /// <summary>Bracket-quotes a SQL Server identifier. A shorthand for

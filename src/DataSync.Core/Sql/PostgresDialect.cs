@@ -1,8 +1,6 @@
 using System.Data.Common;
-using DataSync.Drivers.Abstractions;
-using DataSync.Drivers.Generic;
 
-namespace DataSync.Drivers.Postgres;
+namespace DataSync.Core.Sql;
 
 /// <summary>
 /// PostgreSQL's answers to the mechanical variations in <see cref="SqlDialect"/>.

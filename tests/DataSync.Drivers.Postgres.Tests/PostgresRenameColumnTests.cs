@@ -1,4 +1,5 @@
 using DataSync.Drivers.Postgres;
+using DataSync.Core.Sql;
 
 namespace DataSync.Drivers.Postgres.Tests;
 

@@ -1,4 +1,5 @@
 using DataSync.Drivers.MsSql;
+using DataSync.Core.Sql;
 
 namespace DataSync.Drivers.MsSql.Tests;
 

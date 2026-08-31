@@ -2,6 +2,7 @@ using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
 using DataSync.Scripting;
 using DataSync.Scripting.Abstractions;
+using DataSync.Core.Sql;
 
 namespace DataSync.Scripting.Tests;
 
@@ -357,7 +358,7 @@ public sealed class TransformPipelineTests : IDisposable
         public string EngineName => "MsSql";
         public string QuoteIdentifier(string identifier) => $"[{identifier}]";
         public string ParameterReference(string name) => $"@{name}";
-        public DataSync.Drivers.Abstractions.CanonicalType ToCanonicalType(string nativeType) => throw new NotSupportedException();
-        public DataSync.Drivers.Abstractions.RenderedColumnType RenderColumnType(DataSync.Drivers.Abstractions.CanonicalType type) => throw new NotSupportedException();
+        public DataSync.Core.Sql.CanonicalType ToCanonicalType(string nativeType) => throw new NotSupportedException();
+        public DataSync.Core.Sql.RenderedColumnType RenderColumnType(DataSync.Core.Sql.CanonicalType type) => throw new NotSupportedException();
     }
 }

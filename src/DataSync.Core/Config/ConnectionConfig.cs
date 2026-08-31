@@ -1,3 +1,5 @@
+using DataSync.Core.Sql;
+
 namespace DataSync.Core.Config;
 
 /// <summary>Database engines a connection can target. Extended as new drivers are added (see implementation-plan.md's Backlog section).</summary>

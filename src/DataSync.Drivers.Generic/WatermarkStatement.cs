@@ -1,4 +1,5 @@
 using DataSync.Drivers.Abstractions;
+using DataSync.Core.Sql;
 
 namespace DataSync.Drivers.Generic;
 

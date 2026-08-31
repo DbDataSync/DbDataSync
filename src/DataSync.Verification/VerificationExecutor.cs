@@ -3,6 +3,7 @@ using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.Generic;
 using DataSync.Scripting.Abstractions;
+using DataSync.Core.Sql;
 
 namespace DataSync.Verification;
 

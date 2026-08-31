@@ -4,6 +4,7 @@ using DataSync.Scripting;
 using DataSync.Scripting.Abstractions;
 using Microsoft.Data.SqlClient;
 using Xunit;
+using DataSync.Core.Sql;
 
 namespace DataSync.Drivers.MsSql.Tests;
 

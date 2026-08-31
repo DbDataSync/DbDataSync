@@ -3,6 +3,7 @@ using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.MsSql;
 using DataSync.Drivers.Postgres;
 using DataSync.Scripting.Abstractions;
+using DataSync.Core.Sql;
 
 namespace DataSync.Scripting.Tests;
 
@@ -122,7 +123,7 @@ public sealed class LifecycleHookContractTests
     /// <summary>Wraps a real <see cref="SqlDialect"/> the way <c>RunnerScriptDialect</c> does in
     /// production — proving the contract against the actual translation tables phase 25 built, not a
     /// stand-in that would accept a spelling neither engine uses.</summary>
-    private sealed class FakeScriptDialect(string engineName, DataSync.Drivers.Generic.SqlDialect dialect) : IScriptDialect
+    private sealed class FakeScriptDialect(string engineName, DataSync.Core.Sql.SqlDialect dialect) : IScriptDialect
     {
         public string EngineName => engineName;
         public string QuoteIdentifier(string identifier) => dialect.QuoteIdentifier(identifier);

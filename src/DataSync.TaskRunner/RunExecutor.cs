@@ -14,6 +14,7 @@ using DataSync.Scripting.Abstractions;
 using DataSync.State;
 using DataSync.State.Remote;
 using DataSync.Verification;
+using DataSync.Core.Sql;
 
 namespace DataSync.TaskRunner;
 

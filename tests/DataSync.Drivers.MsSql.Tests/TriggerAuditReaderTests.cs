@@ -3,6 +3,7 @@ using DataSync.Drivers.Abstractions;
 using DataSync.Drivers.Generic;
 using Microsoft.Data.SqlClient;
 using Xunit;
+using DataSync.Core.Sql;
 
 namespace DataSync.Drivers.MsSql.Tests;
 
