@@ -27,6 +27,41 @@ public sealed class ApiOptions
     /// </summary>
     public int StatePort { get; init; }
 
+    /// <summary>
+    /// How long a finished run's history is kept, in days. Null keeps runs forever.
+    /// <para>
+    /// **90 days by default, rather than unlimited.** A state database that only ever grows is not a
+    /// policy anyone chose; it is what happens when nobody chooses one, and the cost lands months
+    /// later on whoever is trying to work out why the API got slow. Ninety days is long enough to
+    /// answer "was this mapping always this slow" across a quarter, which is the longest question run
+    /// history is actually asked.
+    /// </para>
+    /// </summary>
+    public int? RunRetentionDays { get; init; }
+
+    /// <summary>
+    /// How many finished runs are kept per table mapping. Null keeps every run within the age cap.
+    /// <para>
+    /// **Per mapping, not global**, which is the entire reason this exists alongside the age cap: a
+    /// continuous replication of one busy table can produce thousands of runs a day, and a global cap
+    /// would let it evict a quiet mapping's entire history — exactly the history somebody goes looking
+    /// for when that quiet mapping finally breaks.
+    /// </para>
+    /// <para>
+    /// 1,000 by default: more than any run-history view pages through, and small enough that a mapping
+    /// running every fifteen seconds does not carry a year of rows to satisfy a question about the last
+    /// few days.
+    /// </para>
+    /// </summary>
+    public int? RunRetentionMaxPerMapping { get; init; }
+
+    /// <summary>
+    /// How often pruning runs. Hourly, and coarse on purpose: nothing about retention is
+    /// time-sensitive, the work is a handful of deletes, and a frequent sweep would be contention with
+    /// the writers that matter for no benefit anybody could observe.
+    /// </summary>
+    public TimeSpan RunPruningInterval { get; init; } = TimeSpan.FromHours(1);
+
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection("DataSync");
@@ -41,7 +76,30 @@ public sealed class ApiOptions
             StateDbPath = stateDbPath,
             TaskRunnerDllPath = taskRunnerDllPath,
             StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : 0,
+            // Defaults applied when unset, rather than "unset means no limit". An operator who wants
+            // no limit says so with 0, which is a decision; silence is not.
+            RunRetentionDays = ReadCap(section["RunRetentionDays"], defaultValue: 90),
+            RunRetentionMaxPerMapping = ReadCap(section["RunRetentionMaxPerMapping"], defaultValue: 1_000),
+            RunPruningInterval = TimeSpan.FromMinutes(
+                int.TryParse(section["RunPruningIntervalMinutes"], out var minutes) && minutes > 0 ? minutes : 60),
         };
+    }
+
+    /// <summary>
+    /// A retention cap: the configured number, the default when nothing is configured, or null when the
+    /// operator explicitly asked for no cap by setting 0.
+    /// <para>
+    /// Zero as "keep everything" rather than as "keep nothing", because the alternative reading of a
+    /// mistyped 0 is a policy that deletes all run history the first time it sweeps. Between two
+    /// interpretations of the same typo, the recoverable one wins.
+    /// </para>
+    /// </summary>
+    private static int? ReadCap(string? configured, int defaultValue)
+    {
+        if (configured is null)
+            return defaultValue;
+
+        return int.TryParse(configured, out var value) && value > 0 ? value : null;
     }
 
     /// <summary>

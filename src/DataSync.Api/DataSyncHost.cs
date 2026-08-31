@@ -140,6 +140,7 @@ public static class DataSyncHost
         builder.Services.AddSingleton<ResyncService>();
         builder.Services.AddHostedService<SchedulerService>();
         builder.Services.AddHostedService<RunMonitorService>();
+        builder.Services.AddHostedService<RunPruningService>();
         builder.Services.AddHostedService<BootstrapInvite>();
 
         // One scheme for every request — controllers and the hub alike — so there is one answer to

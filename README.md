@@ -174,6 +174,29 @@ normal schedule.
 > conversion: the two are not quite the same thing, and silently reinterpreting a stored reload scope
 > is a worse failure than an obvious one.
 
+## Run history retention
+
+Every pass writes a `TaskRuns` row and its log lines to the state database, so a continuous
+replication of a busy table produces rows indefinitely. Two independent caps, both applied by an
+hourly sweep inside the API process:
+
+| setting (under `DataSync:`) | default | meaning |
+| --- | --- | --- |
+| `RunRetentionDays` | 90 | finished runs older than this are deleted |
+| `RunRetentionMaxPerMapping` | 1000 | only the most recent N finished runs per table mapping are kept |
+| `RunPruningIntervalMinutes` | 60 | how often the sweep runs |
+
+A run failing *either* cap is pruned, along with its log lines. The count cap is per table mapping on
+purpose: a global one would let one busy mapping evict a quiet mapping's entire history, which is
+exactly the history somebody goes looking for when the quiet one finally breaks. **A run that has not
+finished is never pruned**, whatever its age.
+
+Set a cap to `0` to turn it off. Leaving it unset applies the default rather than meaning "keep
+everything" — a state database that only grows is not a policy anyone chose.
+
+> Verification results are **not** pruned by this. A verification run's `TaskRuns` row is, but its
+> parquet result file and index entry are not — a known gap, not an oversight.
+
 ## Running the tests
 
 ```sh

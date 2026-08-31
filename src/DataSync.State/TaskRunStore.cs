@@ -227,6 +227,84 @@ public sealed class TaskRunStore(StateDatabase database)
             return (IReadOnlyList<TaskRunRecord>)results;
         });
 
+    /// <summary>
+    /// Deletes finished runs beyond either retention cap, and the log lines belonging to them.
+    /// Returns how many runs went.
+    /// <para>
+    /// **Both caps are applied in one statement, and a row failing either is pruned.** Two separate
+    /// deletes would be two scans and — worse — would make "which cap removed this" a question with an
+    /// answer, which invites somebody to depend on it. A row is either within retention or it is not.
+    /// </para>
+    /// <para>
+    /// **A run that has not finished is never pruned**, whatever its age. `EndedAtUtc IS NULL` covers
+    /// Queued, Running and anything stranded mid-flight: an in-flight run is about to be written to,
+    /// and deleting the row underneath its own worker would turn a slow pass into a lost one.
+    /// </para>
+    /// </summary>
+    /// <param name="maxPerMapping">
+    /// Counted per (TaskName, MappingName), not globally. A continuous replication of one busy table
+    /// produces runs orders of magnitude faster than a quiet mapping beside it, and a global cap would
+    /// let the busy one evict the quiet one's entire history.
+    /// </param>
+    public int PruneRuns(TimeSpan? maxAge, int? maxPerMapping) =>
+        SqliteRetry.Execute(() =>
+        {
+            if (maxAge is null && maxPerMapping is null)
+                return 0;
+
+            using var connection = database.OpenConnection();
+            using var transaction = connection.BeginTransaction();
+
+            // Same transaction as the delete below, because Logs has no enforced foreign key here —
+            // SQLite's are off unless asked for, and this schema does not. A crash between the two
+            // statements would leave log lines belonging to a run that no longer exists, which nothing
+            // would ever clean up.
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = $"DELETE FROM Logs WHERE RunId IN ({DoomedRuns});";
+                AddPruneParameters(cmd, maxAge, maxPerMapping);
+                cmd.ExecuteNonQuery();
+            }
+
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.Transaction = transaction;
+                cmd.CommandText = $"DELETE FROM TaskRuns WHERE RunId IN ({DoomedRuns});";
+                AddPruneParameters(cmd, maxAge, maxPerMapping);
+                var deleted = cmd.ExecuteNonQuery();
+                transaction.Commit();
+                return deleted;
+            }
+        });
+
+    /// <summary>
+    /// The runs both caps condemn, as one subquery used by both deletes above.
+    /// <para>
+    /// A null cap is expressed as "$param IS NULL OR …" rather than by building different SQL: two
+    /// statement shapes would be two things to keep correct, and this one is evaluated once per prune
+    /// an hour rather than in any hot path.
+    /// </para>
+    /// </summary>
+    private const string DoomedRuns = """
+        SELECT RunId FROM (
+            SELECT RunId, StartedAtUtc,
+                   ROW_NUMBER() OVER (PARTITION BY TaskName, MappingName ORDER BY StartedAtUtc DESC) AS Recency
+            FROM TaskRuns
+            WHERE EndedAtUtc IS NOT NULL
+        )
+        WHERE ($cutoff IS NOT NULL AND StartedAtUtc < $cutoff)
+           OR ($maxPerMapping IS NOT NULL AND Recency > $maxPerMapping)
+        """;
+
+    private static void AddPruneParameters(SqliteCommand cmd, TimeSpan? maxAge, int? maxPerMapping)
+    {
+        cmd.Parameters.AddWithValue(
+            "$cutoff",
+            maxAge is { } age ? (DateTimeOffset.UtcNow - age).ToString("O") : (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("$maxPerMapping", (object?)maxPerMapping ?? DBNull.Value);
+    }
+
     private static TaskRunRecord ReadRun(SqliteDataReader reader) => new(
         Guid.Parse(reader.GetString(0)),
         reader.GetString(1),
