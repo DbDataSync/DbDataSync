@@ -132,7 +132,7 @@ interface Props {
   stale?: boolean
 }
 
-/** The Setup card: both sides' provisioning plans for a saved table mapping, previewed and applied
+/** The Provisioning card: both sides' provisioning plans for a saved table mapping, previewed and applied
  * live against the database — separate from the mapping's own Save, since Apply runs DDL immediately
  * rather than writing config. See phase 25 §7. */
 export function ProvisioningCard({

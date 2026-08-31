@@ -104,7 +104,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     resolvedTarget.connectionName || undefined, resolvedTarget.database || undefined)
   const targetExists = tableExists(targetTables, resolvedTarget.schema, resolvedTarget.table)
 
-  // The Setup card plans against the mapping as *saved*, so a target retyped since then is not what
+  // The Provisioning card plans against the mapping as *saved*, so a target retyped since then is not what
   // it is describing.
   const targetChangedSinceSave = !!existing
     && (existing.targets[0]?.schema !== target.schema || existing.targets[0]?.table !== target.table)
@@ -434,7 +434,7 @@ export function MappingProvisioningTab() {
  * What this mapping measures about its own passes — phase 62, surfacing phase 59's opt-in trace.
  *
  * **Its own tab rather than folded into one of the others**, and the reason is what the other tabs
- * are: Column Mapping, Custom Transforms, Reload Segmenting and Provisioning all describe what this
+ * are: Column Mapping, Custom Transforms, Backfill and Provisioning all describe what this
  * mapping *is* and what it will do. Tracing describes how it is *observed* — it changes no behaviour
  * and produces no different result, only numbers about the pass. It sits beside Preview SQL and
  * Verify, which are the other two answers to "what is this mapping actually doing", and it is where

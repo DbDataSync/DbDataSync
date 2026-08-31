@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Field } from './Field'
 import { KeyValueTable } from './KeyValueTable'
 import { useScripts, useScriptSlots } from '../api/hooks'
@@ -20,11 +19,10 @@ import type { ScriptBinding, ScriptBindings, ScriptConfig, ScriptSlotInfo } from
  * inherit and none. Phase 16's endpoints never needed the distinction because an endpoint is always
  * required; a script never is.
  *
- * **Collapsed until something is bound.** This is an advanced customisation most installations never
- * touch, and a card reading "no scripts bound" holding a screen's best space is noise for everyone it
- * does not apply to. Collapsed, it is one line saying the feature exists — which is what someone
- * looking for it needs, and all it owes anyone else. It opens by itself when this level binds
- * something, because then it is describing behaviour rather than offering it.
+ * **Always open.** It used to collapse until something was bound, because a card reading "no scripts
+ * bound" was noise in a flat stack of cards competing for one screen. It is its own tab now — on the
+ * mapping editor and on the replication Overview — so there is no stack to save space in, and a tab
+ * somebody has already clicked into should show its contents.
  */
 export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
   bindings: ScriptBindings
@@ -38,8 +36,6 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
 
   const applicable = (slots ?? []).filter((s) => s.levels.includes(level))
   const boundHere = applicable.filter((s) => s.slot in bindings)
-  const [expanded, setExpanded] = useState(false)
-  const open = expanded || boundHere.length > 0
 
   const inheritedFrom =
     level === 'mapping' ? 'the replication or connection'
@@ -49,15 +45,7 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
   return (
     <div className="card" data-testid="script-bindings-card">
       <div className="card-head">
-        <button
-          type="button"
-          className="btn-link"
-          onClick={() => setExpanded(!open)}
-          aria-expanded={open}
-          data-testid="script-bindings-toggle"
-        >
-          {open ? '▾' : '▸'} Custom transforms and providers
-        </button>
+        <span className="card-title" data-testid="script-bindings-title">Custom transforms and providers</span>
         <span className="card-note">
           {boundHere.length > 0
             ? `${summarise(boundHere, bindings)} · ${level === 'connection'
@@ -68,9 +56,7 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
               : `C# that changes what this level reads or writes — none bound, inherited from ${inheritedFrom}`}
         </span>
       </div>
-      {/* Not rendered rather than `hidden`: `.card-body` sets `display: flex`, and a class rule beats
-          the user-agent's `[hidden]` rule, so the attribute alone shows a collapsed card's contents. */}
-      {open && <div className="card-body">
+      <div className="card-body">
         {/* Only the slots that mean something at this level. A metadata provider bound on a mapping
             would be invisible to the pickers, which ask before a mapping exists. */}
         {applicable.map(({ slot, label, description }) => (
@@ -93,7 +79,7 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
         {slots && applicable.length === 0 && (
           <span className="hint">No script slots apply at this level.</span>
         )}
-      </div>}
+      </div>
     </div>
   )
 }
@@ -101,7 +87,7 @@ export function ScriptBindingsCard({ bindings, inherited, level, onChange }: {
 const INHERIT = '__inherit__'
 const NONE = '__none__'
 
-/** "Row transform, value transform" rather than a count: the point of the collapsed line is to say
+/** "Row transform, value transform" rather than a count: the point of the card's note is to say
  * what is happening, and two names are shorter than "2 scripts bound" is uninformative. */
 function summarise(boundHere: ScriptSlotInfo[], bindings: ScriptBindings): string {
   const named = boundHere.map((s) => (bindings[s.slot] === null ? `${s.label} (none)` : s.label))

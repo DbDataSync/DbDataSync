@@ -115,11 +115,9 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await expect(page.getByTestId('replication-notes-card')).toBeVisible()
     await expect(page.getByTestId('overview-tab-notes')).toHaveClass(/active/)
 
-    // And the scripts card is one line until it has something to say.
+    // And the scripts card shows its slots straight away — it is a tab now, not a card in a stack.
     await page.getByTestId('overview-tab-transforms').click()
-    await expect(page.getByTestId('script-bindings-toggle')).toContainText('Custom transforms and providers')
-    await expect(page.getByTestId('script-binding-rowTransform')).toBeHidden()
-    await page.getByTestId('script-bindings-toggle').click()
+    await expect(page.getByTestId('script-bindings-title')).toContainText('Custom transforms and providers')
     await expect(page.getByTestId('script-binding-rowTransform')).toBeVisible()
   })
 
@@ -463,11 +461,7 @@ public sealed class ReverseName : ISqlColumnExpression
 
     // Bind it on the mapping — the most specific level, which is what the hierarchy exists for.
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/transforms`)
-    // Collapsed until something is bound (phase 37) — an advanced customisation should not hold the
-    // best space on a screen for the majority who never use it.
     await expect(page.getByTestId('script-bindings-card')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByTestId('script-binding-sqlColumnExpression')).toBeHidden()
-    await page.getByTestId('script-bindings-toggle').click()
     await page.getByTestId('script-binding-sqlColumnExpression').selectOption(SCRIPT)
 
     const parameters = page.getByTestId('script-parameters-sqlColumnExpression')
@@ -571,7 +565,6 @@ public sealed class DropGadgets : IRowTransform
     // Bound on the replication this time — the middle level, inherited by every mapping under it.
     await page.goto(`/replications/${REPLICATION_NAME}/overview/transforms`)
     await expect(page.getByTestId('script-bindings-card')).toBeVisible({ timeout: 15_000 })
-    await page.getByTestId('script-bindings-toggle').click()
     await page.getByTestId('script-binding-rowTransform').selectOption(SCRIPT)
     await page.getByTestId('save-settings-button').click()
 

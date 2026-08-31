@@ -168,7 +168,7 @@ export function MappingSide({ side, label, inherited, spec, onChange, testIdPref
             {exists === false && (
               <div className="hint" data-testid={`${testIdPrefix}-table-will-be-created`}>
                 <span className="badge badge-accent">NEW</span>{' '}
-                does not exist yet — save the mapping and apply the plan in Setup to create it
+                does not exist yet — save the mapping and apply the plan in Provisioning to create it
               </div>
             )}
           </>

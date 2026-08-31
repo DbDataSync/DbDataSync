@@ -28,7 +28,7 @@ const TABS: SubTab[] = [
   { path: 'pipeline', label: 'Pipeline', testId: 'overview-tab-pipeline' },
   { path: 'provisioning', label: 'Target Provisioning', testId: 'overview-tab-provisioning' },
   { path: 'transforms', label: 'Custom Transforms', testId: 'overview-tab-transforms' },
-  { path: 'segmenting', label: 'Reload Segmenting', testId: 'overview-tab-segmenting' },
+  { path: 'segmenting', label: 'Backfill', testId: 'overview-tab-segmenting' },
 ]
 
 /**
@@ -312,8 +312,8 @@ export function CustomTransformsTab() {
  * The replication's named segmenting strategies — phase 61.
  *
  * **Its own tab, named exactly as the mapping editor's is.** The two are the halves of one idea: this
- * defines the strategies, and a mapping's Reload Segmenting tab chooses among them. An operator who
- * has seen "Reload Segmenting" on a mapping and wants to know where the names come from will look for
+ * defines the strategies, and a mapping's Backfill tab chooses among them. An operator who
+ * has seen "Backfill" on a mapping and wants to know where the names come from will look for
  * the same words here, and finding them somewhere else called something else is the version of this
  * that wastes their afternoon.
  *
