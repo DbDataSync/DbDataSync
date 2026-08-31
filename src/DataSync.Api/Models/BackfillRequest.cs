@@ -1,3 +1,4 @@
+using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
 
 namespace DataSync.Api.Models;

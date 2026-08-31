@@ -1,3 +1,4 @@
+using DataSync.Core.Config;
 using System.Text.Json;
 using DataSync.Drivers.Abstractions;
 using Xunit;
@@ -53,6 +54,7 @@ public sealed class SegmentSerializerTests
         new FullSegment(),
         new ListSegment("Region", ["EU", "US"]),
         new RangeSegment("OrderDate", "2024-01-01T00:00:00.0000000", "2024-02-01T00:00:00.0000000"),
+        new RangeSegment("OrderDate", "2024-03-01", "2024-04-01", "2024-03"),
         new AutoSegment("OrderId", 8),
     ];
 

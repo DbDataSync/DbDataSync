@@ -520,7 +520,7 @@ public sealed class RunExecutor(
                 task, sourceDriver, sourceConnection, source, targetDriver, targetConnection, target,
                 mapping, item.RunId, cancellationToken);
 
-            var segments = await ResolveSegmentsAsync(reader, sourceConnection, source, item, processing.Reader.Options, cancellationToken);
+            var segments = await ResolveSegmentsAsync(reader, sourceConnection, source, item, mapping, cancellationToken);
             if (segments.Count > 1)
                 Log(item.RunId, LogSeverity.Info, $"Processing {segments.Count} configured segment(s) in this pass.");
 
@@ -955,21 +955,32 @@ public sealed class RunExecutor(
         ?? throw new InvalidOperationException(
             $"The '{driver.DriverType}' driver does not name a SQL dialect.");
 
+    /// <summary>
+    /// What this pass processes, in order: the one segment a Backfill work item carries, or the
+    /// mapping's own configured default segmenting, or a single null meaning "the whole thing".
+    /// <para>
+    /// **Read from the mapping, not from <c>readerOptions["segments"]</c>.** That option is no longer
+    /// consulted at all — segmenting is a property of the table mapping, and phase 58 moved it onto
+    /// one with a real editor rather than leaving it as hand-typed JSON in a stringly-typed bag. A
+    /// config still carrying the old option behaves as if it had none; this is a documented breaking
+    /// change, deliberately without a migration.
+    /// </para>
+    /// </summary>
     private static async Task<IReadOnlyList<BatchReloadSegment?>> ResolveSegmentsAsync(
         IChangeReader reader,
         DbConnection sourceConnection,
         SourceTableRef source,
         WorkItem item,
-        IReadOnlyDictionary<string, string> readerOptions,
+        TableMappingConfig mapping,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(item.SegmentJson))
             return [SegmentSerializer.Deserialize(item.SegmentJson)];
 
-        if (!readerOptions.TryGetValue(SegmentSerializer.SegmentsOptionKey, out var configured) || string.IsNullOrWhiteSpace(configured))
+        if (mapping.DefaultSegmenting.Count == 0)
             return [null];
 
-        var segments = SegmentSerializer.DeserializeMany(configured);
+        IReadOnlyList<BatchReloadSegment> segments = mapping.DefaultSegmenting;
 
         // Auto segments are resolved against the source's actual value range, so they're expanded
         // here rather than at config-save time — the range moves as the table does.

@@ -337,8 +337,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await ExecuteAsync(_adminConnection,
             $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (5, 'Five'), (9, 'Nine'), (40, 'Forty');");
 
-        SetUpReloadReplication(SegmentSerializer.SerializeMany(
-            [new RangeSegment("Id", "1", "6"), new RangeSegment("Id", "6", "11")]));
+        SetUpReloadReplication([new RangeSegment("Id", "1", "6"), new RangeSegment("Id", "6", "11")]);
 
         var runId = _workQueueStore.Enqueue("reload-only", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("reload-only", degreeOfParallelism: 1, CancellationToken.None);
@@ -363,7 +362,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             SELECT n, CONCAT('Row', n) FROM (VALUES (1),(2),(3),(4),(5),(6),(7),(8)) v(n);
             """);
 
-        SetUpReloadReplication(SegmentSerializer.SerializeMany([new AutoSegment("Id", 3)]));
+        SetUpReloadReplication(([new AutoSegment("Id", 3)]));
 
         var runId = _workQueueStore.Enqueue("reload-only", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("reload-only", degreeOfParallelism: 1, CancellationToken.None);
@@ -374,7 +373,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.Equal(8, (await GetRowsAsync(_reloadTargetTable)).Count);
     }
 
-    private void SetUpReloadReplication(string segmentsJson)
+    private void SetUpReloadReplication(IReadOnlyList<BatchReloadSegment> segments)
     {
         _configRepository.SaveReplicationTask(new ReplicationTaskConfig
         {
@@ -393,7 +392,6 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
                 Reader = new ReaderConfig
                 {
                     Kind = MsSqlDriverKinds.BatchReload,
-                    Options = { [SegmentSerializer.SegmentsOptionKey] = segmentsJson },
                 },
                 Cache = new CacheConfig { Kind = MsSqlDriverKinds.StagingTable },
                 Writer = new WriterConfig { Kind = MsSqlDriverKinds.MergeReconcile },
@@ -410,6 +408,9 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
                 new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
+            // On the mapping, not on the reader's options bag — phase 58 moved segmenting to where it
+            // belongs and stopped reading the old `segments` reader option entirely.
+            DefaultSegmenting = [.. segments],
         }, Author);
     }
 

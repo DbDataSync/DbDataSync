@@ -141,6 +141,28 @@ public sealed class TableMappingConfig
     /// pass — see phase 43. Empty for a mapping nobody has asked to verify.
     /// </summary>
     public List<VerificationCheckConfig> Verification { get; set; } = new();
+
+    /// <summary>
+    /// How this table divides for a reload — the mapping's own answer, used both as what a scheduled
+    /// <c>BatchReload</c> pass processes and as what the Backfill form starts from.
+    /// <para>
+    /// **Empty means Full, no segmenting** — naming what already happened rather than changing it. A
+    /// mapping that configures nothing reloads its whole table, which is what the Backfill form has
+    /// always defaulted to.
+    /// </para>
+    /// <para>
+    /// A list, because "how this table segments" genuinely is one: any number of <c>List</c> entries
+    /// and any number of <c>Range</c> entries can sit side by side. A single <c>Auto</c> or
+    /// <c>Custom</c> entry is the other shape — one entry that expands into many at reload time,
+    /// against the source's real values or the strategy's fresh output.
+    /// </para>
+    /// <para>
+    /// **This replaced the <c>segments</c> reader option, it does not sit beside it.** Segmenting is a
+    /// property of the mapping, not something buried in a stringly-typed options bag with no editor of
+    /// its own. See phase 58 — a documented breaking change, deliberately without a migration.
+    /// </para>
+    /// </summary>
+    public List<BatchReloadSegment> DefaultSegmenting { get; set; } = new();
 }
 
 /// <summary>

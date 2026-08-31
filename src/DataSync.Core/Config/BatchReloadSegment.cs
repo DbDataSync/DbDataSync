@@ -1,12 +1,18 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DataSync.Drivers.Abstractions;
+namespace DataSync.Core.Config;
 
 /// <summary>
 /// Describes which slice of a source table one batch-reload unit of work covers. Engine-neutral: a
 /// segment is a column plus bounds, never a SQL fragment — each driver renders its own predicate (see
 /// DataSync.Drivers.MsSql.MsSqlSegmentScope for the v1 MSSQL rendering).
+/// <para>
+/// **In <c>DataSync.Core.Config</c> rather than beside the drivers that consume it**, because a table
+/// mapping now stores its own default segmenting as one of these lists — and config cannot depend on
+/// the driver layer, which depends on config. The type was always engine-neutral; this only moves it
+/// to where its neutrality is structurally enforced.
+/// </para>
 /// <para>
 /// A sealed hierarchy rather than one record with mode-dependent nullable fields: every mode carries
 /// only the fields that are valid for it, so consumers can <c>switch</c> exhaustively instead of
@@ -18,6 +24,7 @@ namespace DataSync.Drivers.Abstractions;
 [JsonDerivedType(typeof(ListSegment), "list")]
 [JsonDerivedType(typeof(RangeSegment), "range")]
 [JsonDerivedType(typeof(AutoSegment), "auto")]
+[JsonDerivedType(typeof(CustomSegment), "custom")]
 public abstract record BatchReloadSegment
 {
     /// <summary>Short human-readable description, used as a run's SegmentLabel and in log lines.</summary>
@@ -54,9 +61,20 @@ public sealed record ListSegment(string Column, IReadOnlyList<string> Values) : 
 
 /// <summary>Rows where <c>Column &gt;= RangeMin AND Column &lt; RangeMax</c> — half-open, so
 /// consecutive ranges tile a value space without gaps or overlaps.</summary>
-public sealed record RangeSegment(string Column, string RangeMin, string RangeMax) : BatchReloadSegment
+/// <param name="Label">
+/// What to call this range, when something knows a better name for it than its bounds.
+/// <para>
+/// A segmenting strategy that divides a date column by calendar month has a name for each segment —
+/// <c>"2024-03"</c> — and the generated <c>"OrderDate [2024-03-01, 2024-04-01)"</c> is strictly worse
+/// to read in a run history. Optional, and null for every segment built any other way, so
+/// <see cref="Describe"/> keeps producing exactly what it always did unless somebody supplied
+/// something better.
+/// </para>
+/// </param>
+public sealed record RangeSegment(string Column, string RangeMin, string RangeMax, string? Label = null)
+    : BatchReloadSegment
 {
-    public override string Describe() => $"{Column} [{RangeMin}, {RangeMax})";
+    public override string Describe() => Label ?? $"{Column} [{RangeMin}, {RangeMax})";
 }
 
 /// <summary>
@@ -71,10 +89,32 @@ public sealed record AutoSegment(string Column, int BucketCount) : BatchReloadSe
 }
 
 /// <summary>
+/// A request to run a bound segmenting strategy and use whichever candidates it flags as selected.
+/// <para>
+/// A marker, consumed exactly once — the same shape <see cref="AutoSegment"/> already establishes. It
+/// is never persisted as, or handed to a reader or writer as, a runtime segment: whatever expands it
+/// substitutes the strategy's own segments in its place first.
+/// </para>
+/// <para>
+/// **The stored default is the strategy's name, not the segments it produced.** Freezing a list would
+/// defeat the point of the feature: a strategy that generates "the last three months" has to be
+/// re-evaluated against today every time it runs, not baked in on the day somebody configured it.
+/// </para>
+/// </summary>
+public sealed record CustomSegment(string StrategyName) : BatchReloadSegment
+{
+    public override string Describe() => $"custom/{StrategyName}";
+}
+
+/// <summary>
 /// The one place <see cref="BatchReloadSegment"/> is serialized, so the polymorphic discriminator is
 /// configured identically at every round-trip point: the ephemeral <c>options["segment"]</c> channel
-/// (injected per work item) and the persisted YAML-embedded JSON array a standalone reload
-/// replication uses for its static segment list.
+/// (injected per work item) and the array a backfill request carries over HTTP.
+/// <para>
+/// The persisted form is no longer one of them. A mapping's stored segmenting is YAML now — see
+/// <see cref="BatchReloadSegmentYamlConverter"/> — because it gained a real editor and stopped being
+/// JSON somebody typed into an options bag.
+/// </para>
 /// <para>
 /// Every method here goes through the <see cref="BatchReloadSegment"/>-typed generic overload
 /// deliberately. Serializing a variable statically typed as a concrete derived record instead
@@ -86,10 +126,6 @@ public static class SegmentSerializer
 {
     /// <summary>The well-known per-work-item options key carrying one serialized segment.</summary>
     public const string SegmentOptionKey = "segment";
-
-    /// <summary>The well-known reader-options key carrying a standalone reload replication's
-    /// persisted JSON array of segments.</summary>
-    public const string SegmentsOptionKey = "segments";
 
     public static JsonSerializerOptions Options { get; } = new(JsonSerializerDefaults.Web);
 
