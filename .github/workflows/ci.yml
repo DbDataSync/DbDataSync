@@ -54,6 +54,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: DataSync_Test_Pw1
+          POSTGRES_USER: datasync
+          POSTGRES_DB: datasync
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U datasync"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4

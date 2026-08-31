@@ -190,11 +190,20 @@ public static class StateCommandExtensions
     /// Binds a value, taking the parameter's bare name — the <c>$</c>, <c>@</c> or nothing is the
     /// engine's business, not the caller's.
     /// </summary>
-    public static DbCommand Bind(this DbCommand command, StateDatabase database, string name, object? value)
+    /// <param name="type">
+    /// Stated only where it has to be: a parameter that is null *and* appears solely in an
+    /// <c>IS NULL</c> test gives Postgres nothing to infer from, and it refuses to plan the statement
+    /// rather than guessing.
+    /// </param>
+    public static DbCommand Bind(
+        this DbCommand command, StateDatabase database, string name, object? value,
+        System.Data.DbType? type = null)
     {
         var parameter = command.CreateParameter();
         parameter.ParameterName = database.Dialect.ParameterName(name);
         parameter.Value = value ?? DBNull.Value;
+        if (type is not null)
+            parameter.DbType = type.Value;
         command.Parameters.Add(parameter);
         return command;
     }

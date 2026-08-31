@@ -1,3 +1,4 @@
+using DataSync.State;
 namespace DataSync.Api.Configuration;
 
 /// <summary>
@@ -11,6 +12,31 @@ public sealed class ApiOptions
 {
     public required string RepoRoot { get; init; }
     public required string StateDbPath { get; init; }
+
+    /// <summary>
+    /// Which database backs the state store — see phase 63.
+    /// <para>
+    /// **Two fields rather than one connection string with a provider hint**, resolving the phase
+    /// doc's open question. A connection string's shape already differs per provider, so a hint
+    /// embedded in it would have to be parsed back out before the string could be handed to anything —
+    /// and getting it wrong would surface as a driver-level parse error rather than as "you named an
+    /// engine that does not exist". Two fields make the choice explicit and each half validatable on
+    /// its own.
+    /// </para>
+    /// <para>
+    /// Chosen once when a deployment is stood up. There is deliberately no cross-engine migration, so
+    /// pointing an existing deployment at a different engine starts an empty store rather than moving
+    /// anything — a follow-up, per the plan.
+    /// </para>
+    /// </summary>
+    public StateEngine StateEngine { get; init; } = StateEngine.Sqlite;
+
+    /// <summary>
+    /// How to reach that engine. Ignored for SQLite, which uses <see cref="StateDbPath"/> — the
+    /// setting an existing deployment already has, and the reason an unconfigured one keeps behaving
+    /// exactly as it did.
+    /// </summary>
+    public string? StateConnectionString { get; init; }
     public required string TaskRunnerDllPath { get; init; }
 
     /// <summary>
@@ -74,6 +100,12 @@ public sealed class ApiOptions
         {
             RepoRoot = repoRoot,
             StateDbPath = stateDbPath,
+            // Anything unrecognised is SQLite, loudly wrong rather than quietly fatal: a typo in an
+            // engine name should not stop the API starting on the store it has always used.
+            StateEngine = Enum.TryParse<StateEngine>(section["StateEngine"], ignoreCase: true, out var engine)
+                ? engine
+                : StateEngine.Sqlite,
+            StateConnectionString = section["StateConnectionString"],
             TaskRunnerDllPath = taskRunnerDllPath,
             StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : 0,
             // Defaults applied when unset, rather than "unset means no limit". An operator who wants

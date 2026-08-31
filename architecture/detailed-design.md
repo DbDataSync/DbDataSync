@@ -217,7 +217,12 @@ note in [§7](#7-deployment-topology-v1).
 
 ### 3.7 Central SQLite State Store (`DataSync.State`)
 
-A single SQLite database file, shared by `DataSync.Api` and every `DataSync.TaskRunner` process.
+A single database, shared by `DataSync.Api` and every `DataSync.TaskRunner` process. **SQLite by
+default** — a file, no server to run — and since phase 63 optionally SQL Server or PostgreSQL, chosen
+once per deployment via `DataSync:StateEngine`. The stores are written against one SQL text and one
+parameter spelling; `StateDialect` renders the four things the engines actually disagree about
+(auto-assigned keys, unbounded vs indexable text, integer width, and `ALTER TABLE ... ADD`) plus the
+three that differ structurally (upsert, row limiting, and where the schema version is kept).
 **Schema sketch**:
 
 | Table | Purpose |

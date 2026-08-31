@@ -82,7 +82,21 @@ public static class DataSyncHost
                 sp.GetRequiredService<SecretStore>());
         });
 
-        builder.Services.AddSingleton(sp => new StateDatabase(sp.GetRequiredService<ApiOptions>().StateDbPath));
+        builder.Services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<ApiOptions>();
+            // SQLite keeps its own constructor and its own setting, so a deployment that has never
+            // heard of phase 63 reaches exactly the code it always did.
+            if (options.StateEngine == StateEngine.Sqlite)
+                return new StateDatabase(options.StateDbPath);
+
+            return new StateDatabase(
+                options.StateEngine,
+                options.StateConnectionString
+                    ?? throw new InvalidOperationException(
+                        $"DataSync:StateEngine is '{options.StateEngine}', which needs " +
+                        "DataSync:StateConnectionString. Only SQLite is configured by path."));
+        });
         builder.Services.AddSingleton(sp => new TaskRunStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunMetricsStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new VerificationResultStore(sp.GetRequiredService<StateDatabase>()));
