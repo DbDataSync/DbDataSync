@@ -1,4 +1,5 @@
 using DataSync.Api.Hubs;
+using DataSync.Api.Services;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Api.Auth;
@@ -11,7 +12,8 @@ namespace DataSync.Api.Controllers;
 [ApiController]
 [Route("api/replications/{replicationName}/table-mappings")]
 public sealed class TableMappingsController(
-    ConfigRepository configRepository, CurrentUser currentUser, IHubContext<RunHub> hub) : ControllerBase
+    ConfigRepository configRepository, CurrentUser currentUser, IHubContext<RunHub> hub,
+    ParameterCheck parameterCheck) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
@@ -38,6 +40,10 @@ public sealed class TableMappingsController(
         mapping.Name = mappingName;
         try
         {
+            // Beside the endpoint and hook checks SaveTableMapping already makes, and for the same
+            // reason: a per-stage override naming a Kind or a setting that cannot work is caught while
+            // somebody is still looking at the edit, not on the first pass (phase 68).
+            parameterCheck.ThrowIfInvalid(configRepository.LoadReplicationTask(replicationName), mapping);
             return Ok(configRepository.SaveTableMapping(replicationName, mapping, currentUser.Author));
         }
         catch (FileNotFoundException)

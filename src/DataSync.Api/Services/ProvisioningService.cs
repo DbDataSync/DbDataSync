@@ -132,6 +132,55 @@ public sealed class ProvisioningService(
     }
 
     /// <summary>
+    /// What the SCD Type 2 writer's natural key would be for this mapping if nobody stated one — the
+    /// source's primary key, said in the target's column names.
+    /// <para>
+    /// Beside <see cref="GetInferredTargetTypesAsync"/> because it is the same job: read the source's
+    /// <see cref="ColumnMetadata"/> and answer a per-mapping question the SPA has no way to work out
+    /// for itself. And through the same <see cref="NaturalKeyDerivation"/> helper
+    /// <c>RunExecutor</c> injects with at run time, so what the Pipeline tab says would happen and what
+    /// happens cannot quietly disagree.
+    /// </para>
+    /// <para>
+    /// Reports why it derived nothing rather than answering with an empty list and no explanation:
+    /// "there is no natural key here" and "you have not looked" are different answers, and only one of
+    /// them means the operator has to type one.
+    /// </para>
+    /// </summary>
+    public async Task<InferredNaturalKey> GetInferredNaturalKeyAsync(
+        string replicationName, string mappingName, CancellationToken cancellationToken)
+    {
+        var (_, mapping, source, _) = LoadMapping(replicationName, mappingName);
+
+        var (sourceConnection, sourceDriver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);
+        IReadOnlyList<ColumnMetadata> sourceColumns;
+        try
+        {
+            sourceColumns = await sourceDriver.ListColumnsAsync(
+                sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
+        }
+        finally
+        {
+            await sourceConnection.DisposeAsync();
+        }
+
+        var derived = NaturalKeyDerivation.Derive(sourceColumns, mapping.ColumnMappings);
+        if (derived.Count > 0)
+            return new InferredNaturalKey(derived, null);
+
+        var keyColumns = sourceColumns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
+        var unmapped = keyColumns
+            .Where(k => !mapping.ColumnMappings.Any(m => string.Equals(m.SourceColumn, k, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        return new InferredNaturalKey([], keyColumns.Count == 0
+            ? $"'{source.Schema}.{source.Table}' has no primary key, so there is nothing to derive a " +
+              "natural key from. Enter one below."
+            : $"'{source.Schema}.{source.Table}'s primary key includes {string.Join(", ", unmapped.Select(u => $"'{u}'"))}, " +
+              "which this mapping does not carry across. Map those columns, or enter a natural key below.");
+    }
+
+    /// <summary>
     /// One column's inference, or a null <c>TargetType</c> with the reason.
     /// <para>
     /// A type with no cross-engine equivalent is reported as such rather than thrown, because one
@@ -306,6 +355,12 @@ public sealed record ProvisioningPlanReport(ProvisioningPlan Source, Provisionin
 /// <paramref name="TargetType"/> are never both set.</param>
 public sealed record InferredColumnType(
     string SourceColumn, string SourceType, string? TargetType, string? Fidelity, string? Problem);
+
+/// <param name="Columns">Target column names, in the order the source lists them. Empty when nothing
+/// could be derived, in which case <paramref name="Problem"/> says why.</param>
+/// <param name="Problem">Why there is no derived key, when there isn't. Never set alongside a
+/// non-empty <paramref name="Columns"/>.</param>
+public sealed record InferredNaturalKey(IReadOnlyList<string> Columns, string? Problem);
 
 public sealed record ApplyStepResult(string Title, bool Succeeded, string? Error, double ElapsedMs);
 

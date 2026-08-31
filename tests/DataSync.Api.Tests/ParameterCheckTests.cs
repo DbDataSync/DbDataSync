@@ -125,6 +125,156 @@ public sealed class ParameterCheckTests(TestApiFactory factory) : IClassFixture<
         Assert.Contains("snapshotIsolatoin", await response.Content.ReadAsStringAsync());
     }
 
+    // ---- Per-mapping pipeline overrides (phase 68) ----
+
+    private async Task<string> SaveReplicationForMappingsAsync(string connectionName)
+    {
+        var name = $"param-repl-{Guid.NewGuid():N}";
+        (await _client.PutAsJsonAsync($"/api/replications/{name}", new ReplicationTaskConfig
+        {
+            Name = name,
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
+            Endpoints = new TaskEndpoints
+            {
+                Source = new EndpointRef { ConnectionName = connectionName, Database = "App" },
+                Target = new EndpointRef { ConnectionName = connectionName, Database = "App" },
+            },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+            },
+        }, JsonOptions)).EnsureSuccessStatusCode();
+        return name;
+    }
+
+    private Task<HttpResponseMessage> SaveMappingAsync(
+        string replicationName, Action<TableMappingConfig> configure)
+    {
+        var mapping = new TableMappingConfig
+        {
+            Name = "dbo.Orders",
+            Sources = [new SourceTableSpec { Table = "Orders" }],
+            // A different table from the source's: a historizing writer pointed at what it reads is
+            // refused by its own check, which is not what these are about.
+            Targets = [new TableSpec { Table = "OrdersHistory" }],
+            ColumnMappings = [new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" }],
+        };
+        configure(mapping);
+        return _client.PutAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/{mapping.Name}", mapping, JsonOptions);
+    }
+
+    [Fact]
+    public async Task AMappingOverridingAStageWithWhatThatKindDeclared_Saves()
+    {
+        var replicationName = await SaveReplicationForMappingsAsync(await SaveConnectionAsync());
+
+        var response = await SaveMappingAsync(replicationName, m =>
+            m.ReaderOverride = new ReaderConfig { Kind = "Watermark", Options = { ["watermarkColumn"] = "ModifiedAt" } });
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task AMappingOverrideMissingARequiredSetting_IsRefusedNamingTheMapping()
+    {
+        var replicationName = await SaveReplicationForMappingsAsync(await SaveConnectionAsync());
+
+        var response = await SaveMappingAsync(replicationName, m =>
+            m.ReaderOverride = new ReaderConfig { Kind = "Watermark" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("dbo.Orders", body);
+        Assert.Contains("Watermark column", body);
+    }
+
+    [Fact]
+    public async Task AMappingOverrideSupplyingASettingNobodyDeclared_IsRefused()
+    {
+        var replicationName = await SaveReplicationForMappingsAsync(await SaveConnectionAsync());
+
+        var response = await SaveMappingAsync(replicationName, m =>
+            m.WriterOverride = new WriterConfig { Kind = "Scd2", Options = { ["naturlKey"] = "Id" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("naturlKey", await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// An override exists only to name something other than what would otherwise run. Naming something
+    /// that cannot run makes the mapping silently unrunnable, so unlike at the replication level this
+    /// is refused rather than left to the first pass.
+    /// </summary>
+    [Fact]
+    public async Task AMappingOverrideNamingAKindTheDriverDoesNotOffer_IsRefused()
+    {
+        var replicationName = await SaveReplicationForMappingsAsync(await SaveConnectionAsync());
+
+        var response = await SaveMappingAsync(replicationName, m =>
+            m.WriterOverride = new WriterConfig { Kind = "NoSuchWriter" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("NoSuchWriter", await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// The SCD Type 2 writer's natural key is auto-derived from the source's primary key since phase
+    /// 68, so an override that states no key at all is a legitimate saved configuration.
+    /// </summary>
+    [Fact]
+    public async Task AnScd2WriterOverrideStatingNoNaturalKey_Saves()
+    {
+        var replicationName = await SaveReplicationForMappingsAsync(await SaveConnectionAsync());
+
+        var response = await SaveMappingAsync(replicationName, m =>
+            m.WriterOverride = new WriterConfig { Kind = "Scd2" });
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// And so is a replication whose writer is SCD Type 2 — where, since phase 68, a natural key
+    /// cannot be stated at all.
+    /// </summary>
+    [Fact]
+    public async Task AReplicationUsingTheScd2WriterWithNoNaturalKey_Saves()
+    {
+        var connectionName = await SaveConnectionAsync();
+        var name = $"param-repl-{Guid.NewGuid():N}";
+
+        var response = await _client.PutAsJsonAsync($"/api/replications/{name}", new ReplicationTaskConfig
+        {
+            Name = name,
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
+            Endpoints = new TaskEndpoints
+            {
+                Source = new EndpointRef { ConnectionName = connectionName, Database = "App" },
+                Target = new EndpointRef { ConnectionName = connectionName, Database = "App" },
+            },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "Scd2" },
+            },
+        }, JsonOptions);
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task AMappingThatOverridesNothing_IsNotCheckedAtAll()
+    {
+        var replicationName = await SaveReplicationForMappingsAsync(await SaveConnectionAsync());
+
+        var response = await SaveMappingAsync(replicationName, _ => { });
+
+        response.EnsureSuccessStatusCode();
+    }
+
     /// <summary>
     /// A replication whose endpoints are not filled in yet names no driver, so there is nothing to
     /// check against — and refusing to save it would mean the endpoints could never be filled in.

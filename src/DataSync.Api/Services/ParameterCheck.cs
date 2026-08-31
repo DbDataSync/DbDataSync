@@ -32,46 +32,122 @@ public sealed class ParameterCheck(DriverRegistry driverRegistry, ConfigReposito
     }
 
     /// <summary>
-    /// A replication's three stages, against whichever driver its **source** connection uses — which
-    /// is the one that resolves reader Kinds. A replication whose endpoints are not set yet is not
-    /// checked: it cannot name a driver, and refusing to save it would mean the endpoints could never
-    /// be filled in.
+    /// A replication's three stages: the reader against its **source** connection's driver, staging and
+    /// the writer against its **target's**. A replication whose endpoints are not set yet is not
+    /// checked on the side it has not named: it cannot name a driver there, and refusing to save it
+    /// would mean the endpoints could never be filled in.
+    /// <para>
+    /// This checked all three against the source until phase 68 — harmless while reader/staging/writer
+    /// Kinds mostly existed identically on both registered drivers, and wrong in principle the whole
+    /// time. Corrected here rather than left beside the newly-correct per-mapping check below saying
+    /// something different about the same question.
+    /// </para>
     /// </summary>
     public void ThrowIfInvalid(ReplicationTaskConfig task)
     {
-        if (ResolveDriver(task) is not { } capabilities)
-            return;
-
-        var processing = task.ChangeProcessing;
         var problems = new List<string>();
-
-        problems.AddRange(Check(
-            capabilities.Readers.FirstOrDefault(r => r.Kind == processing.Reader.Kind)?.Parameters,
-            processing.Reader.Options, $"Reader '{processing.Reader.Kind}'"));
-
-        problems.AddRange(Check(
-            capabilities.StagingProviders.FirstOrDefault(s => s.Kind == processing.Cache.Kind)?.Parameters,
-            processing.Cache.Options, $"Staging '{processing.Cache.Kind}'"));
-
-        problems.AddRange(Check(
-            capabilities.Writers.FirstOrDefault(w => w.Kind == processing.Writer.Kind)?.Parameters,
-            processing.Writer.Options, $"Writer '{processing.Writer.Kind}'"));
+        Check(
+            ResolveDriver(task.Endpoints?.Source?.ConnectionName),
+            ResolveDriver(task.Endpoints?.Target?.ConnectionName),
+            task.ChangeProcessing.Reader, task.ChangeProcessing.Cache, task.ChangeProcessing.Writer,
+            prefix: "", requireKnownKind: false, problems);
 
         Throw(problems);
     }
 
     /// <summary>
-    /// A Kind this driver does not offer is not this check's business — the pipeline says so at run
-    /// time, with a better message, and reporting it twice from two places would be two things to keep
-    /// in step.
+    /// A table mapping's per-stage overrides, each against the driver that actually resolves it —
+    /// <see cref="TableMappingConfig.ReaderOverride"/> against the source's, the other two against the
+    /// target's, the way <c>RunExecutor</c> itself resolves them. Null overrides are checked against
+    /// nothing, because a stage that inherits was already checked where it is stated.
+    /// <para>
+    /// **A Kind the driver does not offer is an error here**, unlike at the replication level above.
+    /// An override exists only to name something different from what would otherwise run; naming
+    /// something that cannot run makes the mapping silently unrunnable, and the save is the moment
+    /// somebody is still looking at it.
+    /// </para>
+    /// </summary>
+    public void ThrowIfInvalid(ReplicationTaskConfig task, TableMappingConfig mapping)
+    {
+        if (mapping.ReaderOverride is null && mapping.CacheOverride is null && mapping.WriterOverride is null)
+            return;
+
+        var problems = new List<string>();
+        Check(
+            ResolveDriver(ConnectionOf(() => EndpointResolution.ResolveSource(task, mapping.Sources[0]).ConnectionName,
+                task.Endpoints?.Source?.ConnectionName, mapping.Sources.Count)),
+            ResolveDriver(ConnectionOf(() => EndpointResolution.ResolveTarget(task, mapping.Targets[0]).ConnectionName,
+                task.Endpoints?.Target?.ConnectionName, mapping.Targets.Count)),
+            mapping.ReaderOverride, mapping.CacheOverride, mapping.WriterOverride,
+            prefix: $"'{mapping.Name}' ", requireKnownKind: true, problems);
+
+        Throw(problems);
+    }
+
+    /// <summary>
+    /// The connection a side of this mapping resolves to — its own, if it overrides the replication's
+    /// endpoint (phase 16), and the replication's otherwise.
+    /// <para>
+    /// Falls back rather than throwing on a mapping that does not resolve yet: that is
+    /// <c>EndpointResolution.Validate</c>'s error to report, with a message about endpoints rather than
+    /// about parameters, and it runs a moment later in <c>SaveTableMapping</c>.
+    /// </para>
+    /// </summary>
+    private static string? ConnectionOf(Func<string> resolve, string? fallback, int sideCount)
+    {
+        if (sideCount != 1)
+            return fallback;
+
+        try
+        {
+            return resolve();
+        }
+        catch (ConfigValidationException)
+        {
+            return fallback;
+        }
+    }
+
+    /// <summary>The three stages, each against the capabilities of the side that runs it. A stage that
+    /// is null is one this caller has nothing to say about.</summary>
+    private static void Check(
+        DriverCapabilities? source, DriverCapabilities? target,
+        ReaderConfig? reader, CacheConfig? cache, WriterConfig? writer,
+        string prefix, bool requireKnownKind, List<string> problems)
+    {
+        if (source is not null && reader is not null)
+            problems.AddRange(Check(
+                source.Readers.FirstOrDefault(r => r.Kind == reader.Kind)?.Parameters,
+                reader.Options, $"{prefix}Reader '{reader.Kind}'", requireKnownKind));
+
+        if (target is null)
+            return;
+
+        if (cache is not null)
+            problems.AddRange(Check(
+                target.StagingProviders.FirstOrDefault(s => s.Kind == cache.Kind)?.Parameters,
+                cache.Options, $"{prefix}Staging '{cache.Kind}'", requireKnownKind));
+
+        if (writer is not null)
+            problems.AddRange(Check(
+                target.Writers.FirstOrDefault(w => w.Kind == writer.Kind)?.Parameters,
+                writer.Options, $"{prefix}Writer '{writer.Kind}'", requireKnownKind));
+    }
+
+    /// <summary>
+    /// A Kind the driver does not offer is left to run time for a replication — the pipeline says so
+    /// there, with a better message, and reporting it twice from two places would be two things to keep
+    /// in step. For a mapping override it is refused outright; see the caller.
     /// </summary>
     private static IReadOnlyList<string> Check(
-        IReadOnlyList<ParameterDescriptor>? declared, Dictionary<string, string> values, string what) =>
-        declared is null ? [] : ParameterValidation.Validate(declared, values, what);
+        IReadOnlyList<ParameterDescriptor>? declared, Dictionary<string, string> values, string what,
+        bool requireKnownKind) =>
+        declared is not null ? ParameterValidation.Validate(declared, values, what)
+        : requireKnownKind ? [$"{what}: the connection's driver does not offer that."]
+        : [];
 
-    private DriverCapabilities? ResolveDriver(ReplicationTaskConfig task)
+    private DriverCapabilities? ResolveDriver(string? connectionName)
     {
-        var connectionName = task.Endpoints?.Source?.ConnectionName;
         if (string.IsNullOrWhiteSpace(connectionName))
             return null;
 
