@@ -1,3 +1,5 @@
+using System.Data.Common;
+
 namespace DataSync.State;
 
 /// <param name="ExpiresAtUtc">When this stops being accepted. Sliding is deliberately not built:
@@ -24,18 +26,17 @@ public sealed class SessionStore(StateDatabase database)
             userId,
             DateTimeOffset.UtcNow + Lifetime);
 
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 INSERT INTO Sessions (Id, UserId, CreatedAtUtc, ExpiresAtUtc)
                 VALUES ($id, $userId, $createdAt, $expiresAt);
-                """;
-            cmd.Parameters.AddWithValue("$id", session.Id);
-            cmd.Parameters.AddWithValue("$userId", userId);
-            cmd.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$expiresAt", session.ExpiresAtUtc.ToString("O"));
+                """);
+            cmd.Bind(database, "id", session.Id);
+            cmd.Bind(database, "userId", userId);
+            cmd.Bind(database, "createdAt", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Bind(database, "expiresAt", session.ExpiresAtUtc.ToString("O"));
             cmd.ExecuteNonQuery();
         });
 
@@ -48,12 +49,11 @@ public sealed class SessionStore(StateDatabase database)
     /// </summary>
     public UserRecord? Resolve(string sessionId, UserStore users)
     {
-        var userId = SqliteRetry.Execute(() =>
+        var userId = database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT UserId, ExpiresAtUtc FROM Sessions WHERE Id = $id;";
-            cmd.Parameters.AddWithValue("$id", sessionId);
+            using var cmd = database.Command(connection, "SELECT UserId, ExpiresAtUtc FROM Sessions WHERE Id = $id;");
+            cmd.Bind(database, "id", sessionId);
 
             using var reader = cmd.ExecuteReader();
             if (!reader.Read())
@@ -74,24 +74,22 @@ public sealed class SessionStore(StateDatabase database)
     }
 
     public void Delete(string sessionId) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM Sessions WHERE Id = $id;";
-            cmd.Parameters.AddWithValue("$id", sessionId);
+            using var cmd = database.Command(connection, "DELETE FROM Sessions WHERE Id = $id;");
+            cmd.Bind(database, "id", sessionId);
             cmd.ExecuteNonQuery();
         });
 
     /// <summary>Ends every session a user holds — what disabling somebody, or removing their last
     /// credential, has to do to mean anything immediately.</summary>
     public void DeleteAllFor(string userId) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM Sessions WHERE UserId = $userId;";
-            cmd.Parameters.AddWithValue("$userId", userId);
+            using var cmd = database.Command(connection, "DELETE FROM Sessions WHERE UserId = $userId;");
+            cmd.Bind(database, "userId", userId);
             cmd.ExecuteNonQuery();
         });
 }

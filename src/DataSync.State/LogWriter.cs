@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace DataSync.State;
 
@@ -61,24 +61,31 @@ public sealed class LogWriter : IDisposable
         if (batch.Count == 0)
             return;
 
-        SqliteRetry.Execute(() =>
+        _database.Retry(() =>
         {
             using var connection = _database.OpenConnection();
             using var transaction = connection.BeginTransaction();
-            using var cmd = connection.CreateCommand();
-            cmd.Transaction = transaction;
-            // ON CONFLICT DO NOTHING against UX_Logs_SourceKey: a replayed journal entry is dropped,
-            // a live line (SourceKey NULL) never conflicts.
-            cmd.CommandText = """
-                INSERT INTO Logs (RunId, TimestampUtc, Level, Message, SourceKey)
-                VALUES ($runId, $ts, $level, $message, $sourceKey)
-                ON CONFLICT DO NOTHING;
-                """;
-            var runIdParam = cmd.Parameters.Add("$runId", SqliteType.Text);
-            var tsParam = cmd.Parameters.Add("$ts", SqliteType.Text);
-            var levelParam = cmd.Parameters.Add("$level", SqliteType.Text);
-            var messageParam = cmd.Parameters.Add("$message", SqliteType.Text);
-            var sourceKeyParam = cmd.Parameters.Add("$sourceKey", SqliteType.Text);
+            // Insert-or-ignore against UX_Logs_SourceKey: a replayed journal entry is dropped, and a
+            // live line (SourceKey NULL) never conflicts. The conflicting column is named explicitly
+            // — the untargeted form the other two engines allow has no SQL Server equivalent.
+            using var cmd = _database.Command(connection, transaction, _database.Dialect.InsertOrIgnore(
+                "Logs",
+                "RunId, TimestampUtc, Level, Message, SourceKey",
+                "$runId, $ts, $level, $message, $sourceKey",
+                "SourceKey",
+                // UX_Logs_SourceKey is partial — unique only where SourceKey is not null, which is
+                // what lets two genuinely identical live lines both be stored. The predicate has to
+                // travel with the target or the index is not the one being matched against.
+                "SourceKey IS NOT NULL"));
+
+            // One command, bound once and re-executed per line. A batch is the whole point of this
+            // writer, and rebuilding the parameter collection for each of a few hundred lines would
+            // undo it.
+            var runIdParam = Reusable(cmd, "runId");
+            var tsParam = Reusable(cmd, "ts");
+            var levelParam = Reusable(cmd, "level");
+            var messageParam = Reusable(cmd, "message");
+            var sourceKeyParam = Reusable(cmd, "sourceKey");
 
             foreach (var entry in batch)
             {
@@ -92,22 +99,29 @@ public sealed class LogWriter : IDisposable
 
             transaction.Commit();
         });
+
+        DbParameter Reusable(DbCommand cmd, string name)
+        {
+            var parameter = cmd.CreateParameter();
+            parameter.ParameterName = _database.Dialect.ParameterName(name);
+            cmd.Parameters.Add(parameter);
+            return parameter;
+        }
     }
 
     public IReadOnlyList<LogEntryRecord> GetLogs(Guid runId, long? sinceId = null)
     {
         Flush();
 
-        return SqliteRetry.Execute(() =>
+        return _database.Retry(() =>
         {
             using var connection = _database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = sinceId is null
+            using var cmd = _database.Command(connection, sinceId is null
                 ? "SELECT Id, RunId, TimestampUtc, Level, Message FROM Logs WHERE RunId = $runId ORDER BY Id;"
-                : "SELECT Id, RunId, TimestampUtc, Level, Message FROM Logs WHERE RunId = $runId AND Id > $sinceId ORDER BY Id;";
-            cmd.Parameters.AddWithValue("$runId", runId.ToString());
+                : "SELECT Id, RunId, TimestampUtc, Level, Message FROM Logs WHERE RunId = $runId AND Id > $sinceId ORDER BY Id;");
+            cmd.Bind(_database, "runId", runId.ToString());
             if (sinceId is not null)
-                cmd.Parameters.AddWithValue("$sinceId", sinceId.Value);
+                cmd.Bind(_database, "sinceId", sinceId.Value);
 
             using var reader = cmd.ExecuteReader();
             var results = new List<LogEntryRecord>();

@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace DataSync.State;
 
@@ -42,7 +42,7 @@ public sealed class RunMetricsStore(StateDatabase database)
 {
     public RunMetrics Get(
         string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc, RunKind? runKind, int buckets) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
 
@@ -59,12 +59,11 @@ public sealed class RunMetricsStore(StateDatabase database)
                 ReadBuckets(connection, taskName, fromUtc, toUtc, runKind, kindClause, buckets));
         });
 
-    private static (int Runs, int Failures, long RowsRead, long RowsWritten) ReadTotals(
-        SqliteConnection connection, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc,
+    private (int Runs, int Failures, long RowsRead, long RowsWritten) ReadTotals(
+        DbConnection connection, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc,
         RunKind? runKind, string kindClause)
     {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = TotalsSql(kindClause);
+        using var cmd = database.Command(connection, TotalsSql(kindClause));
         Bind(cmd, taskName, fromUtc, toUtc, runKind);
 
         using var reader = cmd.ExecuteReader();
@@ -100,11 +99,10 @@ public sealed class RunMetricsStore(StateDatabase database)
     /// </summary>
     public IReadOnlyList<string> ExplainTotals(
         string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc, RunKind? runKind) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "EXPLAIN QUERY PLAN " + TotalsSql(runKind is null ? "" : " AND RunKind = $runKind");
+            using var cmd = database.Command(connection, "EXPLAIN QUERY PLAN " + TotalsSql(runKind is null ? "" : " AND RunKind = $runKind"));
             Bind(cmd, taskName, fromUtc, toUtc, runKind);
 
             using var reader = cmd.ExecuteReader();
@@ -123,18 +121,17 @@ public sealed class RunMetricsStore(StateDatabase database)
     /// the list is small. Revisit if that stops being true; <c>tools/benchmarks</c> is where.
     /// </para>
     /// </summary>
-    private static List<double> ReadDurations(
-        SqliteConnection connection, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc,
+    private List<double> ReadDurations(
+        DbConnection connection, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc,
         RunKind? runKind, string kindClause)
     {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"""
+        using var cmd = database.Command(connection, $"""
             SELECT (julianday(EndedAtUtc) - julianday(StartedAtUtc)) * 86400000.0
             FROM TaskRuns
             WHERE TaskName = $taskName AND StartedAtUtc >= $from AND StartedAtUtc < $to
               AND EndedAtUtc IS NOT NULL{kindClause}
             ORDER BY 1;
-            """;
+            """);
         Bind(cmd, taskName, fromUtc, toUtc, runKind);
 
         using var reader = cmd.ExecuteReader();
@@ -147,8 +144,8 @@ public sealed class RunMetricsStore(StateDatabase database)
         return durations;
     }
 
-    private static DateTimeOffset? ReadLastCompletedPass(
-        SqliteConnection connection, string taskName, RunKind? runKind, string kindClause)
+    private DateTimeOffset? ReadLastCompletedPass(
+        DbConnection connection, string taskName, RunKind? runKind, string kindClause)
     {
         using var cmd = connection.CreateCommand();
         // No window: "nothing has completed in 24 hours" is the answer this is for, and a query that
@@ -157,9 +154,9 @@ public sealed class RunMetricsStore(StateDatabase database)
             SELECT MAX(EndedAtUtc) FROM TaskRuns
             WHERE TaskName = $taskName AND Status = 'Succeeded' AND EndedAtUtc IS NOT NULL{kindClause};
             """;
-        cmd.Parameters.AddWithValue("$taskName", taskName);
+        cmd.Bind(database, "taskName", taskName);
         if (runKind is not null)
-            cmd.Parameters.AddWithValue("$runKind", runKind.Value.ToString());
+            cmd.Bind(database, "runKind", runKind.Value.ToString());
 
         var result = cmd.ExecuteScalar();
         return result is null or DBNull ? null : DateTimeOffset.Parse((string)result, null, System.Globalization.DateTimeStyles.RoundtripKind);
@@ -169,8 +166,8 @@ public sealed class RunMetricsStore(StateDatabase database)
     /// Bucketed by index rather than by a SQL date function, so the boundaries are exactly the ones
     /// the caller asked for and a bucket cannot land in two places because of rounding.
     /// </summary>
-    private static IReadOnlyList<RunMetricsBucket> ReadBuckets(
-        SqliteConnection connection, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc,
+    private IReadOnlyList<RunMetricsBucket> ReadBuckets(
+        DbConnection connection, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc,
         RunKind? runKind, string kindClause, int buckets)
     {
         buckets = Math.Clamp(buckets, 1, 200);
@@ -218,13 +215,13 @@ public sealed class RunMetricsStore(StateDatabase database)
         return sorted[Math.Clamp(rank, 0, sorted.Count - 1)];
     }
 
-    private static void Bind(
-        SqliteCommand cmd, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc, RunKind? runKind)
+    private void Bind(
+        DbCommand cmd, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc, RunKind? runKind)
     {
-        cmd.Parameters.AddWithValue("$taskName", taskName);
-        cmd.Parameters.AddWithValue("$from", fromUtc.ToString("O"));
-        cmd.Parameters.AddWithValue("$to", toUtc.ToString("O"));
+        cmd.Bind(database, "taskName", taskName);
+        cmd.Bind(database, "from", fromUtc.ToString("O"));
+        cmd.Bind(database, "to", toUtc.ToString("O"));
         if (runKind is not null)
-            cmd.Parameters.AddWithValue("$runKind", runKind.Value.ToString());
+            cmd.Bind(database, "runKind", runKind.Value.ToString());
     }
 }

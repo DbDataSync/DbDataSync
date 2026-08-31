@@ -1,32 +1,33 @@
+using System.Data.Common;
+
 namespace DataSync.State;
 
 public sealed class ChangeWatermarkStore(StateDatabase database)
 {
     public void SetWatermark(string taskName, string sourceTable, string watermark) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO ChangeWatermarks (TaskName, SourceTable, Watermark, UpdatedAtUtc)
-                VALUES ($task, $table, $watermark, $now)
-                ON CONFLICT(TaskName, SourceTable) DO UPDATE SET Watermark = excluded.Watermark, UpdatedAtUtc = excluded.UpdatedAtUtc;
-                """;
-            cmd.Parameters.AddWithValue("$task", taskName);
-            cmd.Parameters.AddWithValue("$table", sourceTable);
-            cmd.Parameters.AddWithValue("$watermark", watermark);
-            cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+            using var cmd = database.Command(connection, database.Dialect.Upsert(
+                "ChangeWatermarks",
+                "TaskName, SourceTable, Watermark, UpdatedAtUtc",
+                "$task, $table, $watermark, $now",
+                "TaskName, SourceTable",
+                "Watermark = EXCLUDED.Watermark, UpdatedAtUtc = EXCLUDED.UpdatedAtUtc"));
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "table", sourceTable);
+            cmd.Bind(database, "watermark", watermark);
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
             cmd.ExecuteNonQuery();
         });
 
     public string? GetWatermark(string taskName, string sourceTable) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT Watermark FROM ChangeWatermarks WHERE TaskName = $task AND SourceTable = $table;";
-            cmd.Parameters.AddWithValue("$task", taskName);
-            cmd.Parameters.AddWithValue("$table", sourceTable);
+            using var cmd = database.Command(connection, "SELECT Watermark FROM ChangeWatermarks WHERE TaskName = $task AND SourceTable = $table;");
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "table", sourceTable);
             return cmd.ExecuteScalar() as string;
         });
 
@@ -41,13 +42,12 @@ public sealed class ChangeWatermarkStore(StateDatabase database)
     /// </summary>
     /// <returns>False when there was nothing stored, so a repeat reads as "already cleared".</returns>
     public bool ClearWatermark(string taskName, string sourceTable) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM ChangeWatermarks WHERE TaskName = $task AND SourceTable = $source;";
-            cmd.Parameters.AddWithValue("$task", taskName);
-            cmd.Parameters.AddWithValue("$source", sourceTable);
+            using var cmd = database.Command(connection, "DELETE FROM ChangeWatermarks WHERE TaskName = $task AND SourceTable = $source;");
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "source", sourceTable);
             return cmd.ExecuteNonQuery() == 1;
         });
 }

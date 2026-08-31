@@ -57,9 +57,8 @@ public sealed class InviteTests(AuthenticatedApiFactory factory) : IClassFixture
 
         var database = factory.Services.GetRequiredService<StateDatabase>();
         using var connection = database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT CodeHash FROM Invites WHERE Id = $id;";
-        cmd.Parameters.AddWithValue("$id", minted.Invite.Id);
+        using var cmd = database.Command(connection, "SELECT CodeHash FROM Invites WHERE Id = $id;");
+        cmd.Bind(database, "id", minted.Invite.Id);
 
         var stored = (string)cmd.ExecuteScalar()!;
         Assert.NotEqual(minted.Code, stored);

@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace DataSync.State;
 
@@ -44,6 +44,15 @@ public sealed record WorkItemKinds(string? ReaderKind = null, string? CacheKind 
 /// </summary>
 public sealed class WorkQueueStore(StateDatabase database)
 {
+    /// <summary>
+    /// What "in flight" means, as the partial unique index UX_WorkQueue_InFlight defines it.
+    /// <para>
+    /// Written once and shared with the enqueue that relies on it, because the two have to agree
+    /// exactly: the index decides which insert collides, and this decides which insert expects to.
+    /// </para>
+    /// </summary>
+    private const string InFlightStatuses = "Status IN ('Pending','Claimed','Running')";
+
     /// <summary>Sentinel for WorkQueue.SegmentLabel when a unit of work has no segment (every Primary
     /// item, and a Backfill's single Full-mode segment) — NOT NULL because this column participates in
     /// a uniqueness constraint, where SQL's every-NULL-is-distinct rule would silently defeat it.</summary>
@@ -63,35 +72,36 @@ public sealed class WorkQueueStore(StateDatabase database)
         string segmentLabel = NoSegment,
         string? segmentJson = null,
         WorkItemKinds? kinds = null) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
             using var transaction = connection.BeginTransaction();
 
             var runId = Guid.NewGuid();
-            using (var cmd = connection.CreateCommand())
+            using (var cmd = database.Command(connection, transaction, database.Dialect.InsertOrIgnore(
+                "WorkQueue",
+                "TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status, " +
+                    "EnqueuedAtUtc, AvailableAtUtc, ReaderKind, CacheKind, WriterKind",
+                "$task, $kind, $mapping, $segment, $segmentJson, $runId, $status, $now, $now, " +
+                    "$readerKind, $cacheKind, $writerKind",
+                "TaskName, RunKind, MappingName, SegmentLabel",
+                InFlightStatuses)))
             {
-                cmd.Transaction = transaction;
-                cmd.CommandText = """
-                    INSERT INTO WorkQueue (TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status,
-                                           EnqueuedAtUtc, AvailableAtUtc, ReaderKind, CacheKind, WriterKind)
-                    VALUES ($task, $kind, $mapping, $segment, $segmentJson, $runId, $status, $now, $now,
-                            $readerKind, $cacheKind, $writerKind)
-                    ON CONFLICT DO NOTHING;
-                    """;
-                // Bare ON CONFLICT DO NOTHING (no explicit target) — UX_WorkQueue_InFlight is the only
-                // unique constraint this table has, so SQLite resolves it unambiguously.
-                cmd.Parameters.AddWithValue("$task", taskName);
-                cmd.Parameters.AddWithValue("$kind", runKind.ToString());
-                cmd.Parameters.AddWithValue("$mapping", mappingName);
-                cmd.Parameters.AddWithValue("$segment", segmentLabel);
-                cmd.Parameters.AddWithValue("$segmentJson", (object?)segmentJson ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("$runId", runId.ToString());
-                cmd.Parameters.AddWithValue("$status", WorkItemStatus.Pending.ToString());
-                cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
-                cmd.Parameters.AddWithValue("$readerKind", (object?)kinds?.ReaderKind ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("$cacheKind", (object?)kinds?.CacheKind ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("$writerKind", (object?)kinds?.WriterKind ?? DBNull.Value);
+                // The uniqueness relied on is UX_WorkQueue_InFlight, which is *partial* — one row per
+                // mapping among the in-flight statuses, not one row ever. The predicate has to be
+                // stated, and not only for syntax: without it this reads as "one row per mapping for
+                // all time", and a mapping that had ever run could never be queued again.
+                cmd.Bind(database, "task", taskName);
+                cmd.Bind(database, "kind", runKind.ToString());
+                cmd.Bind(database, "mapping", mappingName);
+                cmd.Bind(database, "segment", segmentLabel);
+                cmd.Bind(database, "segmentJson", (object?)segmentJson ?? DBNull.Value);
+                cmd.Bind(database, "runId", runId.ToString());
+                cmd.Bind(database, "status", WorkItemStatus.Pending.ToString());
+                cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.Bind(database, "readerKind", (object?)kinds?.ReaderKind ?? DBNull.Value);
+                cmd.Bind(database, "cacheKind", (object?)kinds?.CacheKind ?? DBNull.Value);
+                cmd.Bind(database, "writerKind", (object?)kinds?.WriterKind ?? DBNull.Value);
                 var inserted = cmd.ExecuteNonQuery() == 1;
 
                 if (!inserted)
@@ -103,20 +113,18 @@ public sealed class WorkQueueStore(StateDatabase database)
                 }
             }
 
-            using (var cmd = connection.CreateCommand())
-            {
-                cmd.Transaction = transaction;
-                cmd.CommandText = """
+            using (var cmd = database.Command(connection, transaction, """
                     INSERT INTO TaskRuns (RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, RowsRead, RowsWritten)
                     VALUES ($runId, $taskName, NULL, $status, $runKind, $mapping, $segment, $startedAt, 0, 0);
-                    """;
-                cmd.Parameters.AddWithValue("$runId", runId.ToString());
-                cmd.Parameters.AddWithValue("$taskName", taskName);
-                cmd.Parameters.AddWithValue("$status", RunStatus.Queued.ToString());
-                cmd.Parameters.AddWithValue("$runKind", runKind.ToString());
-                cmd.Parameters.AddWithValue("$mapping", mappingName);
-                cmd.Parameters.AddWithValue("$segment", segmentLabel == NoSegment ? (object)DBNull.Value : segmentLabel);
-                cmd.Parameters.AddWithValue("$startedAt", DateTimeOffset.UtcNow.ToString("O"));
+                    """))
+            {
+                cmd.Bind(database, "runId", runId.ToString());
+                cmd.Bind(database, "taskName", taskName);
+                cmd.Bind(database, "status", RunStatus.Queued.ToString());
+                cmd.Bind(database, "runKind", runKind.ToString());
+                cmd.Bind(database, "mapping", mappingName);
+                cmd.Bind(database, "segment", segmentLabel == NoSegment ? (object)DBNull.Value : segmentLabel);
+                cmd.Bind(database, "startedAt", DateTimeOffset.UtcNow.ToString("O"));
                 cmd.ExecuteNonQuery();
             }
 
@@ -124,18 +132,17 @@ public sealed class WorkQueueStore(StateDatabase database)
             return runId;
         });
 
-    private static Guid GetExistingRunId(SqliteConnection connection, string taskName, RunKind runKind, string mappingName, string segmentLabel)
+    private Guid GetExistingRunId(DbConnection connection, string taskName, RunKind runKind, string mappingName, string segmentLabel)
     {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
+        using var cmd = database.Command(connection, """
             SELECT RunId FROM WorkQueue
             WHERE TaskName = $task AND RunKind = $kind AND MappingName = $mapping AND SegmentLabel = $segment
                 AND Status IN ('Pending','Claimed','Running');
-            """;
-        cmd.Parameters.AddWithValue("$task", taskName);
-        cmd.Parameters.AddWithValue("$kind", runKind.ToString());
-        cmd.Parameters.AddWithValue("$mapping", mappingName);
-        cmd.Parameters.AddWithValue("$segment", segmentLabel);
+            """);
+        cmd.Bind(database, "task", taskName);
+        cmd.Bind(database, "kind", runKind.ToString());
+        cmd.Bind(database, "mapping", mappingName);
+        cmd.Bind(database, "segment", segmentLabel);
         return Guid.Parse((string)cmd.ExecuteScalar()!);
     }
 
@@ -148,11 +155,10 @@ public sealed class WorkQueueStore(StateDatabase database)
     {
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            var candidate = SqliteRetry.Execute(() =>
+            var candidate = database.Retry(() =>
             {
                 using var connection = database.OpenConnection();
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = """
+                using var cmd = database.Command(connection, $"""
                     SELECT Id, TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status,
                            ReaderKind, CacheKind, WriterKind
                     FROM WorkQueue w
@@ -161,10 +167,11 @@ public sealed class WorkQueueStore(StateDatabase database)
                         SELECT 1 FROM WorkQueue w2
                         WHERE w2.TaskName = w.TaskName AND w2.RunKind = w.RunKind AND w2.MappingName = w.MappingName
                           AND w2.Status IN ('Claimed','Running') AND w2.Id <> w.Id)
-                    ORDER BY Priority DESC, EnqueuedAtUtc ASC LIMIT 1;
-                    """;
-                cmd.Parameters.AddWithValue("$task", taskName);
-                cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+                    ORDER BY Priority DESC, EnqueuedAtUtc ASC {database.Limit("take")};
+                    """);
+                cmd.Bind(database, "task", taskName);
+                cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.Bind(database, "take", 1);
                 using var reader = cmd.ExecuteReader();
                 return reader.Read() ? ReadItem(reader) : null;
             });
@@ -172,17 +179,16 @@ public sealed class WorkQueueStore(StateDatabase database)
             if (candidate is null)
                 return null;
 
-            var claimed = SqliteRetry.Execute(() =>
+            var claimed = database.Retry(() =>
             {
                 using var connection = database.OpenConnection();
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = """
+                using var cmd = database.Command(connection, """
                     UPDATE WorkQueue SET Status = 'Claimed', ClaimedAtUtc = $now, ClaimedByWorkerId = $worker
                     WHERE Id = $id AND Status = 'Pending';
-                    """;
-                cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
-                cmd.Parameters.AddWithValue("$worker", workerId);
-                cmd.Parameters.AddWithValue("$id", candidate.Id);
+                    """);
+                cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.Bind(database, "worker", workerId);
+                cmd.Bind(database, "id", candidate.Id);
                 return cmd.ExecuteNonQuery() == 1;
             });
 
@@ -225,7 +231,7 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// <summary>Replications holding Claimed or Running items. What reconciliation needs to ask, because
     /// an item claimed by a worker that died before starting it has no run to be found by.</summary>
     public IReadOnlyList<string> GetTasksWithInFlightWork() =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
@@ -239,30 +245,28 @@ public sealed class WorkQueueStore(StateDatabase database)
         });
 
     public int ReleaseClaimsForTask(string taskName) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 UPDATE WorkQueue
                 SET Status = 'Pending', ClaimedAtUtc = NULL, ClaimedByWorkerId = NULL
                 WHERE TaskName = $task AND Status IN ('Claimed','Running');
-                """;
-            cmd.Parameters.AddWithValue("$task", taskName);
+                """);
+            cmd.Bind(database, "task", taskName);
             return cmd.ExecuteNonQuery();
         });
 
     public int ReleaseClaimsForRun(Guid runId) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 UPDATE WorkQueue
                 SET Status = 'Pending', ClaimedAtUtc = NULL, ClaimedByWorkerId = NULL
                 WHERE RunId = $runId AND Status IN ('Claimed','Running');
-                """;
-            cmd.Parameters.AddWithValue("$runId", runId.ToString());
+                """);
+            cmd.Bind(database, "runId", runId.ToString());
             return cmd.ExecuteNonQuery();
         });
 
@@ -270,39 +274,36 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// already-Claimed/Running item can't be cancelled this way in v1 (see ProcessSupervisor.CancelRun's
     /// fallback to killing the whole worker process — an accepted, documented v1 limitation).</summary>
     public bool TryCancelPending(Guid runId) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "UPDATE WorkQueue SET Status = 'Cancelled' WHERE RunId = $runId AND Status = 'Pending';";
-            cmd.Parameters.AddWithValue("$runId", runId.ToString());
+            using var cmd = database.Command(connection, "UPDATE WorkQueue SET Status = 'Cancelled' WHERE RunId = $runId AND Status = 'Pending';");
+            cmd.Bind(database, "runId", runId.ToString());
             return cmd.ExecuteNonQuery() == 1;
         });
 
     /// <summary>True if any Pending/Claimed/Running item remains for this task — a worker's drain
     /// loop exits once this is false.</summary>
     public bool HasOutstandingWork(string taskName) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM WorkQueue WHERE TaskName = $task AND Status IN ('Pending','Claimed','Running');";
-            cmd.Parameters.AddWithValue("$task", taskName);
+            using var cmd = database.Command(connection, "SELECT COUNT(*) FROM WorkQueue WHERE TaskName = $task AND Status IN ('Pending','Claimed','Running');");
+            cmd.Bind(database, "task", taskName);
             return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
         });
 
     private void SetStatus(long id, WorkItemStatus status) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "UPDATE WorkQueue SET Status = $status WHERE Id = $id;";
-            cmd.Parameters.AddWithValue("$status", status.ToString());
-            cmd.Parameters.AddWithValue("$id", id);
+            using var cmd = database.Command(connection, "UPDATE WorkQueue SET Status = $status WHERE Id = $id;");
+            cmd.Bind(database, "status", status.ToString());
+            cmd.Bind(database, "id", id);
             cmd.ExecuteNonQuery();
         });
 
-    private static WorkItem ReadItem(SqliteDataReader reader) => new(
+    private static WorkItem ReadItem(DbDataReader reader) => new(
         reader.GetInt64(0),
         reader.GetString(1),
         Enum.Parse<RunKind>(reader.GetString(2)),

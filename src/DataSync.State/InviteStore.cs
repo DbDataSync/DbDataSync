@@ -43,21 +43,20 @@ public sealed class InviteStore(StateDatabase database)
             Guid.NewGuid().ToString("N"), role, forUserId, createdByUserId,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow + (lifetime ?? DefaultLifetime), null);
 
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 INSERT INTO Invites (Id, CodeHash, Role, UserId, CreatedByUserId, CreatedAtUtc, ExpiresAtUtc)
                 VALUES ($id, $hash, $role, $userId, $createdBy, $createdAt, $expiresAt);
-                """;
-            cmd.Parameters.AddWithValue("$id", invite.Id);
-            cmd.Parameters.AddWithValue("$hash", Hash(code));
-            cmd.Parameters.AddWithValue("$role", role.ToString());
-            cmd.Parameters.AddWithValue("$userId", (object?)forUserId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$createdBy", (object?)createdByUserId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$createdAt", invite.CreatedAtUtc.ToString("O"));
-            cmd.Parameters.AddWithValue("$expiresAt", invite.ExpiresAtUtc.ToString("O"));
+                """);
+            cmd.Bind(database, "id", invite.Id);
+            cmd.Bind(database, "hash", Hash(code));
+            cmd.Bind(database, "role", role.ToString());
+            cmd.Bind(database, "userId", (object?)forUserId ?? DBNull.Value);
+            cmd.Bind(database, "createdBy", (object?)createdByUserId ?? DBNull.Value);
+            cmd.Bind(database, "createdAt", invite.CreatedAtUtc.ToString("O"));
+            cmd.Bind(database, "expiresAt", invite.ExpiresAtUtc.ToString("O"));
             cmd.ExecuteNonQuery();
         });
 
@@ -70,15 +69,14 @@ public sealed class InviteStore(StateDatabase database)
     /// through guesses.
     /// </summary>
     public InviteRecord? Find(string code) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT Id, Role, UserId, CreatedByUserId, CreatedAtUtc, ExpiresAtUtc, RedeemedAtUtc
                 FROM Invites WHERE CodeHash = $hash;
-                """;
-            cmd.Parameters.AddWithValue("$hash", Hash(code));
+                """);
+            cmd.Bind(database, "hash", Hash(code));
 
             using var reader = cmd.ExecuteReader();
             if (!reader.Read())
@@ -107,41 +105,38 @@ public sealed class InviteStore(StateDatabase database)
     /// </para>
     /// </summary>
     public bool Redeem(string inviteId, string userId) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 UPDATE Invites SET RedeemedAtUtc = $now, RedeemedByUserId = $userId
                 WHERE Id = $id AND RedeemedAtUtc IS NULL;
-                """;
-            cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$userId", userId);
-            cmd.Parameters.AddWithValue("$id", inviteId);
+                """);
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Bind(database, "userId", userId);
+            cmd.Bind(database, "id", inviteId);
             return cmd.ExecuteNonQuery() == 1;
         });
 
     /// <summary>Throws away every unredeemed invite that nobody created — the bootstrap one, once
     /// there is a user and it has stopped being the only way in.</summary>
     public void DeleteBootstrapInvites() =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM Invites WHERE CreatedByUserId IS NULL AND RedeemedAtUtc IS NULL;";
+            using var cmd = database.Command(connection, "DELETE FROM Invites WHERE CreatedByUserId IS NULL AND RedeemedAtUtc IS NULL;");
             cmd.ExecuteNonQuery();
         });
 
     public IReadOnlyList<InviteRecord> ListOutstanding() =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT Id, Role, UserId, CreatedByUserId, CreatedAtUtc, ExpiresAtUtc, RedeemedAtUtc
                 FROM Invites WHERE RedeemedAtUtc IS NULL AND ExpiresAtUtc > $now ORDER BY CreatedAtUtc DESC;
-                """;
-            cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+                """);
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
 
             using var reader = cmd.ExecuteReader();
             var invites = new List<InviteRecord>();

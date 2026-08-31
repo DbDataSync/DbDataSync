@@ -28,20 +28,19 @@ public sealed class RunMetricsStoreTests : IDisposable
         long rowsRead = 0, long rowsWritten = 0, RunKind kind = RunKind.Primary, string taskName = Task)
     {
         using var connection = _database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
+        using var cmd = _database.Command(connection, """
             INSERT INTO TaskRuns (RunId, TaskName, Status, RunKind, MappingName, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten)
             VALUES ($runId, $task, $status, $kind, 'orders', $started, $ended, $read, $written);
-            """;
-        cmd.Parameters.AddWithValue("$runId", Guid.NewGuid().ToString());
-        cmd.Parameters.AddWithValue("$task", taskName);
-        cmd.Parameters.AddWithValue("$status", status.ToString());
-        cmd.Parameters.AddWithValue("$kind", kind.ToString());
-        cmd.Parameters.AddWithValue("$started", startedAt.ToString("O"));
-        cmd.Parameters.AddWithValue("$ended",
+            """);
+        cmd.Bind(_database, "runId", Guid.NewGuid().ToString());
+        cmd.Bind(_database, "task", taskName);
+        cmd.Bind(_database, "status", status.ToString());
+        cmd.Bind(_database, "kind", kind.ToString());
+        cmd.Bind(_database, "started", startedAt.ToString("O"));
+        cmd.Bind(_database, "ended",
             duration is null ? DBNull.Value : (startedAt + duration.Value).ToString("O"));
-        cmd.Parameters.AddWithValue("$read", rowsRead);
-        cmd.Parameters.AddWithValue("$written", rowsWritten);
+        cmd.Bind(_database, "read", rowsRead);
+        cmd.Bind(_database, "written", rowsWritten);
         cmd.ExecuteNonQuery();
     }
 

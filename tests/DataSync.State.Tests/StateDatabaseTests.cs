@@ -13,8 +13,7 @@ public sealed class StateDatabaseTests : IDisposable
         var database = new StateDatabase(dbPath);
 
         using var connection = database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'sqlite_sequence' ORDER BY name;";
+        using var cmd = database.Command(connection, "SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'sqlite_sequence' ORDER BY name;");
         using var reader = cmd.ExecuteReader();
         var tables = new List<string>();
         while (reader.Read())
@@ -47,8 +46,7 @@ public sealed class StateDatabaseTests : IDisposable
     private static long UserVersion(StateDatabase database)
     {
         using var connection = database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "PRAGMA user_version;";
+        using var cmd = database.Command(connection, "PRAGMA user_version;");
         return Convert.ToInt64(cmd.ExecuteScalar());
     }
 
@@ -59,8 +57,7 @@ public sealed class StateDatabaseTests : IDisposable
         // shared-memory coordination proved unreliable in this project's sandboxed dev environment.
         var database = new StateDatabase(Path.Combine(_tempDir, "state.db"));
         using var connection = database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "PRAGMA busy_timeout;";
+        using var cmd = database.Command(connection, "PRAGMA busy_timeout;");
         Assert.Equal(5000L, Convert.ToInt64(cmd.ExecuteScalar()));
     }
 }

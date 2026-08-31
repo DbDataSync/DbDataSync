@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace DataSync.State;
 
@@ -9,17 +9,16 @@ public sealed class TaskRunStore(StateDatabase database)
     /// mapping per tick: a replication can have hundreds of mappings, and N+1 queries at that scale
     /// on every 5-second tick would be the first thing to hurt.</summary>
     public IReadOnlyDictionary<string, DateTimeOffset> GetLastPrimaryStartByMapping(string taskName) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT MappingName, MAX(StartedAtUtc)
                 FROM TaskRuns WHERE TaskName = $taskName AND RunKind = $runKind
                 GROUP BY MappingName;
-                """;
-            cmd.Parameters.AddWithValue("$taskName", taskName);
-            cmd.Parameters.AddWithValue("$runKind", RunKind.Primary.ToString());
+                """);
+            cmd.Bind(database, "taskName", taskName);
+            cmd.Bind(database, "runKind", RunKind.Primary.ToString());
             using var reader = cmd.ExecuteReader();
             var results = new Dictionary<string, DateTimeOffset>();
             while (reader.Read())
@@ -28,17 +27,18 @@ public sealed class TaskRunStore(StateDatabase database)
         });
 
     public void UpsertTask(string taskName, bool enabled) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO Tasks (Name, Enabled, UpdatedAtUtc) VALUES ($name, $enabled, $now)
-                ON CONFLICT(Name) DO UPDATE SET Enabled = excluded.Enabled, UpdatedAtUtc = excluded.UpdatedAtUtc;
-                """;
-            cmd.Parameters.AddWithValue("$name", taskName);
-            cmd.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
-            cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+            using var cmd = database.Command(connection, database.Dialect.Upsert(
+                "Tasks",
+                "Name, Enabled, UpdatedAtUtc",
+                "$name, $enabled, $now",
+                "Name",
+                "Enabled = EXCLUDED.Enabled, UpdatedAtUtc = EXCLUDED.UpdatedAtUtc"));
+            cmd.Bind(database, "name", taskName);
+            cmd.Bind(database, "enabled", enabled ? 1 : 0);
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
             cmd.ExecuteNonQuery();
         });
 
@@ -63,41 +63,35 @@ public sealed class TaskRunStore(StateDatabase database)
     /// deliberately clear the note, and "cleared it" is a different act from "never wrote one".
     /// </param>
     public void SetPaused(string taskName, bool paused, string? note, string performedBy) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
             using var transaction = connection.BeginTransaction();
 
-            using (var cmd = connection.CreateCommand())
+            using (var cmd = database.Command(connection, transaction, database.Dialect.Upsert(
+                "Tasks",
+                "Name, Enabled, Paused, PauseNote, UpdatedAtUtc",
+                "$name, 1, $paused, $note, $now",
+                "Name",
+                "Paused = EXCLUDED.Paused, PauseNote = EXCLUDED.PauseNote, UpdatedAtUtc = EXCLUDED.UpdatedAtUtc")))
             {
-                cmd.Transaction = transaction;
-                cmd.CommandText = """
-                    INSERT INTO Tasks (Name, Enabled, Paused, PauseNote, UpdatedAtUtc)
-                    VALUES ($name, 1, $paused, $note, $now)
-                    ON CONFLICT(Name) DO UPDATE SET
-                        Paused = excluded.Paused,
-                        PauseNote = excluded.PauseNote,
-                        UpdatedAtUtc = excluded.UpdatedAtUtc;
-                    """;
-                cmd.Parameters.AddWithValue("$name", taskName);
-                cmd.Parameters.AddWithValue("$paused", paused ? 1 : 0);
-                cmd.Parameters.AddWithValue("$note", (object?)note ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.Bind(database, "name", taskName);
+                cmd.Bind(database, "paused", paused ? 1 : 0);
+                cmd.Bind(database, "note", (object?)note ?? DBNull.Value);
+                cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
                 cmd.ExecuteNonQuery();
             }
 
-            using (var cmd = connection.CreateCommand())
-            {
-                cmd.Transaction = transaction;
-                cmd.CommandText = """
+            using (var cmd = database.Command(connection, transaction, """
                     INSERT INTO PauseEvents (TaskName, Action, Note, PerformedAtUtc, PerformedBy)
                     VALUES ($name, $action, $note, $now, $by);
-                    """;
-                cmd.Parameters.AddWithValue("$name", taskName);
-                cmd.Parameters.AddWithValue("$action", paused ? PauseActions.Paused : PauseActions.Resumed);
-                cmd.Parameters.AddWithValue("$note", (object?)note ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
-                cmd.Parameters.AddWithValue("$by", performedBy);
+                    """))
+            {
+                cmd.Bind(database, "name", taskName);
+                cmd.Bind(database, "action", paused ? PauseActions.Paused : PauseActions.Resumed);
+                cmd.Bind(database, "note", (object?)note ?? DBNull.Value);
+                cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.Bind(database, "by", performedBy);
                 cmd.ExecuteNonQuery();
             }
 
@@ -111,12 +105,11 @@ public sealed class TaskRunStore(StateDatabase database)
     /// <summary>The current hold and the note that came with it, in one read — what the status
     /// endpoint needs, and one query rather than two.</summary>
     public (bool Paused, string? Note) GetPauseState(string taskName) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT Paused, PauseNote FROM Tasks WHERE Name = $name;";
-            cmd.Parameters.AddWithValue("$name", taskName);
+            using var cmd = database.Command(connection, "SELECT Paused, PauseNote FROM Tasks WHERE Name = $name;");
+            cmd.Bind(database, "name", taskName);
             using var reader = cmd.ExecuteReader();
             if (!reader.Read())
                 return (false, (string?)null);
@@ -137,17 +130,16 @@ public sealed class TaskRunStore(StateDatabase database)
     /// </para>
     /// </summary>
     public IReadOnlyList<PauseEventRecord> GetPauseHistory(string taskName, int limit = 50) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, $"""
                 SELECT Id, TaskName, Action, Note, PerformedAtUtc, PerformedBy
                 FROM PauseEvents WHERE TaskName = $name
-                ORDER BY Id DESC LIMIT $limit;
-                """;
-            cmd.Parameters.AddWithValue("$name", taskName);
-            cmd.Parameters.AddWithValue("$limit", limit);
+                ORDER BY Id DESC {database.Limit("limit")};
+                """);
+            cmd.Bind(database, "name", taskName);
+            cmd.Bind(database, "limit", limit);
             using var reader = cmd.ExecuteReader();
             var results = new List<PauseEventRecord>();
             while (reader.Read())
@@ -167,14 +159,13 @@ public sealed class TaskRunStore(StateDatabase database)
     /// WorkQueueStore.Enqueue, so a queued backlog is visible in run history before any worker exists
     /// to work on it.</summary>
     public void BeginRun(Guid runId, int? pid) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "UPDATE TaskRuns SET Status = $status, Pid = $pid WHERE RunId = $runId;";
-            cmd.Parameters.AddWithValue("$status", RunStatus.Running.ToString());
-            cmd.Parameters.AddWithValue("$pid", (object?)pid ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$runId", runId.ToString());
+            using var cmd = database.Command(connection, "UPDATE TaskRuns SET Status = $status, Pid = $pid WHERE RunId = $runId;");
+            cmd.Bind(database, "status", RunStatus.Running.ToString());
+            cmd.Bind(database, "pid", (object?)pid ?? DBNull.Value);
+            cmd.Bind(database, "runId", runId.ToString());
             cmd.ExecuteNonQuery();
         });
 
@@ -190,11 +181,10 @@ public sealed class TaskRunStore(StateDatabase database)
     public void CompleteRun(
         Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
         string? failureKind = null, RunTiming? timing = null) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 UPDATE TaskRuns
                 SET Status = $status, EndedAtUtc = $endedAt, RowsRead = $rowsRead, RowsWritten = $rowsWritten,
                     ErrorSummary = $error, FailureKind = $failureKind,
@@ -203,34 +193,33 @@ public sealed class TaskRunStore(StateDatabase database)
                     StagingKind = $stagingKind, StagingDurationMs = $stagingDuration,
                     WriterKind = $writerKind, WriterDurationMs = $writerDuration
                 WHERE RunId = $runId;
-                """;
-            cmd.Parameters.AddWithValue("$status", status.ToString());
-            cmd.Parameters.AddWithValue("$endedAt", DateTimeOffset.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("$rowsRead", rowsRead);
-            cmd.Parameters.AddWithValue("$rowsWritten", rowsWritten);
-            cmd.Parameters.AddWithValue("$error", (object?)errorSummary ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$failureKind", (object?)failureKind ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$readerKind", (object?)timing?.ReaderKind ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$timeToFirstRow", (object?)timing?.ReaderTimeToFirstRowMs ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$readerLifetime", (object?)timing?.ReaderLifetimeMs ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$stagingKind", (object?)timing?.StagingKind ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$stagingDuration", (object?)timing?.StagingDurationMs ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$writerKind", (object?)timing?.WriterKind ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$writerDuration", (object?)timing?.WriterDurationMs ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$runId", runId.ToString());
+                """);
+            cmd.Bind(database, "status", status.ToString());
+            cmd.Bind(database, "endedAt", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Bind(database, "rowsRead", rowsRead);
+            cmd.Bind(database, "rowsWritten", rowsWritten);
+            cmd.Bind(database, "error", (object?)errorSummary ?? DBNull.Value);
+            cmd.Bind(database, "failureKind", (object?)failureKind ?? DBNull.Value);
+            cmd.Bind(database, "readerKind", (object?)timing?.ReaderKind ?? DBNull.Value);
+            cmd.Bind(database, "timeToFirstRow", (object?)timing?.ReaderTimeToFirstRowMs ?? DBNull.Value);
+            cmd.Bind(database, "readerLifetime", (object?)timing?.ReaderLifetimeMs ?? DBNull.Value);
+            cmd.Bind(database, "stagingKind", (object?)timing?.StagingKind ?? DBNull.Value);
+            cmd.Bind(database, "stagingDuration", (object?)timing?.StagingDurationMs ?? DBNull.Value);
+            cmd.Bind(database, "writerKind", (object?)timing?.WriterKind ?? DBNull.Value);
+            cmd.Bind(database, "writerDuration", (object?)timing?.WriterDurationMs ?? DBNull.Value);
+            cmd.Bind(database, "runId", runId.ToString());
             cmd.ExecuteNonQuery();
         });
 
     public TaskRunRecord? GetRun(Guid runId) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
                 FROM TaskRuns WHERE RunId = $runId;
-                """;
-            cmd.Parameters.AddWithValue("$runId", runId.ToString());
+                """);
+            cmd.Bind(database, "runId", runId.ToString());
             using var reader = cmd.ExecuteReader();
             return reader.Read() ? ReadRun(reader) : null;
         });
@@ -240,19 +229,18 @@ public sealed class TaskRunStore(StateDatabase database)
     /// due-ness checks must always pass RunKind.Primary explicitly so a Backfill run never perturbs
     /// the incremental schedule's timing.</summary>
     public IReadOnlyList<TaskRunRecord> GetRunHistory(string taskName, RunKind? runKind = null, int limit = 50) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"""
+            using var cmd = database.Command(connection, $"""
                 SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
                 FROM TaskRuns WHERE TaskName = $taskName {(runKind is null ? "" : "AND RunKind = $runKind")}
-                ORDER BY StartedAtUtc DESC LIMIT $limit;
-                """;
-            cmd.Parameters.AddWithValue("$taskName", taskName);
+                ORDER BY StartedAtUtc DESC {database.Limit("limit")};
+                """);
+            cmd.Bind(database, "taskName", taskName);
             if (runKind is not null)
-                cmd.Parameters.AddWithValue("$runKind", runKind.Value.ToString());
-            cmd.Parameters.AddWithValue("$limit", limit);
+                cmd.Bind(database, "runKind", runKind.Value.ToString());
+            cmd.Bind(database, "limit", limit);
             using var reader = cmd.ExecuteReader();
             var results = new List<TaskRunRecord>();
             while (reader.Read())
@@ -263,19 +251,18 @@ public sealed class TaskRunStore(StateDatabase database)
     /// <summary>Run history for one specific table mapping (either RunKind) — used by scheduling
     /// due-ness (RunKind.Primary) and by the SPA's per-mapping history views.</summary>
     public IReadOnlyList<TaskRunRecord> GetMappingRunHistory(string taskName, RunKind runKind, string mappingName, int limit = 50) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, $"""
                 SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
                 FROM TaskRuns WHERE TaskName = $taskName AND RunKind = $runKind AND MappingName = $mapping
-                ORDER BY StartedAtUtc DESC LIMIT $limit;
-                """;
-            cmd.Parameters.AddWithValue("$taskName", taskName);
-            cmd.Parameters.AddWithValue("$runKind", runKind.ToString());
-            cmd.Parameters.AddWithValue("$mapping", mappingName);
-            cmd.Parameters.AddWithValue("$limit", limit);
+                ORDER BY StartedAtUtc DESC {database.Limit("limit")};
+                """);
+            cmd.Bind(database, "taskName", taskName);
+            cmd.Bind(database, "runKind", runKind.ToString());
+            cmd.Bind(database, "mapping", mappingName);
+            cmd.Bind(database, "limit", limit);
             using var reader = cmd.ExecuteReader();
             var results = new List<TaskRunRecord>();
             while (reader.Read())
@@ -286,15 +273,14 @@ public sealed class TaskRunStore(StateDatabase database)
     /// <summary>Runs still marked Running in the store — used to reconcile against live OS processes
     /// on API startup (architecture/detailed-design.md §3.1).</summary>
     public IReadOnlyList<TaskRunRecord> GetRunningRuns() =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
                 FROM TaskRuns WHERE Status = $status;
-                """;
-            cmd.Parameters.AddWithValue("$status", RunStatus.Running.ToString());
+                """);
+            cmd.Bind(database, "status", RunStatus.Running.ToString());
             using var reader = cmd.ExecuteReader();
             var results = new List<TaskRunRecord>();
             while (reader.Read())
@@ -309,15 +295,14 @@ public sealed class TaskRunStore(StateDatabase database)
     /// it. Only possible now that a claimed unit of work can complete in well under a second (no
     /// per-run process spawn overhead) — see phase-008-work-queue-schema.md.</summary>
     public IReadOnlyList<TaskRunRecord> GetRecentlyEndedRuns(DateTimeOffset sinceUtc) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
                 FROM TaskRuns WHERE EndedAtUtc IS NOT NULL AND EndedAtUtc >= $since;
-                """;
-            cmd.Parameters.AddWithValue("$since", sinceUtc.ToString("O"));
+                """);
+            cmd.Bind(database, "since", sinceUtc.ToString("O"));
             using var reader = cmd.ExecuteReader();
             var results = new List<TaskRunRecord>();
             while (reader.Read())
@@ -329,16 +314,15 @@ public sealed class TaskRunStore(StateDatabase database)
     /// one worker process can back many concurrently-active RunIds (Process.HasExited stops being a
     /// meaningful completion signal at that point). See phase-008-work-queue-schema.md.</summary>
     public IReadOnlyList<TaskRunRecord> GetActiveRuns() =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
                 FROM TaskRuns WHERE Status IN ($queued, $running);
-                """;
-            cmd.Parameters.AddWithValue("$queued", RunStatus.Queued.ToString());
-            cmd.Parameters.AddWithValue("$running", RunStatus.Running.ToString());
+                """);
+            cmd.Bind(database, "queued", RunStatus.Queued.ToString());
+            cmd.Bind(database, "running", RunStatus.Running.ToString());
             using var reader = cmd.ExecuteReader();
             var results = new List<TaskRunRecord>();
             while (reader.Read())
@@ -366,7 +350,7 @@ public sealed class TaskRunStore(StateDatabase database)
     /// let the busy one evict the quiet one's entire history.
     /// </param>
     public int PruneRuns(TimeSpan? maxAge, int? maxPerMapping) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             if (maxAge is null && maxPerMapping is null)
                 return 0;
@@ -378,18 +362,14 @@ public sealed class TaskRunStore(StateDatabase database)
             // SQLite's are off unless asked for, and this schema does not. A crash between the two
             // statements would leave log lines belonging to a run that no longer exists, which nothing
             // would ever clean up.
-            using (var cmd = connection.CreateCommand())
+            using (var cmd = database.Command(connection, transaction, $"DELETE FROM Logs WHERE RunId IN ({DoomedRuns});"))
             {
-                cmd.Transaction = transaction;
-                cmd.CommandText = $"DELETE FROM Logs WHERE RunId IN ({DoomedRuns});";
                 AddPruneParameters(cmd, maxAge, maxPerMapping);
                 cmd.ExecuteNonQuery();
             }
 
-            using (var cmd = connection.CreateCommand())
+            using (var cmd = database.Command(connection, transaction, $"DELETE FROM TaskRuns WHERE RunId IN ({DoomedRuns});"))
             {
-                cmd.Transaction = transaction;
-                cmd.CommandText = $"DELETE FROM TaskRuns WHERE RunId IN ({DoomedRuns});";
                 AddPruneParameters(cmd, maxAge, maxPerMapping);
                 var deleted = cmd.ExecuteNonQuery();
                 transaction.Commit();
@@ -416,15 +396,15 @@ public sealed class TaskRunStore(StateDatabase database)
            OR ($maxPerMapping IS NOT NULL AND Recency > $maxPerMapping)
         """;
 
-    private static void AddPruneParameters(SqliteCommand cmd, TimeSpan? maxAge, int? maxPerMapping)
+    private void AddPruneParameters(DbCommand cmd, TimeSpan? maxAge, int? maxPerMapping)
     {
-        cmd.Parameters.AddWithValue(
-            "$cutoff",
-            maxAge is { } age ? (DateTimeOffset.UtcNow - age).ToString("O") : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("$maxPerMapping", (object?)maxPerMapping ?? DBNull.Value);
+        cmd.Bind(
+            database, "cutoff",
+            maxAge is { } age ? (DateTimeOffset.UtcNow - age).ToString("O") : null);
+        cmd.Bind(database, "maxPerMapping", (object?)maxPerMapping ?? DBNull.Value);
     }
 
-    private static TaskRunRecord ReadRun(SqliteDataReader reader) => new(
+    private static TaskRunRecord ReadRun(DbDataReader reader) => new(
         Guid.Parse(reader.GetString(0)),
         reader.GetString(1),
         reader.IsDBNull(2) ? null : reader.GetInt32(2),
@@ -447,7 +427,7 @@ public sealed class TaskRunStore(StateDatabase database)
     /// traced" should get a yes or a no, not a record it has to interrogate field by field to find out.
     /// </para>
     /// </summary>
-    private static RunTiming? ReadTiming(SqliteDataReader reader)
+    private static RunTiming? ReadTiming(DbDataReader reader)
     {
         const int first = 13;
         var traced = false;

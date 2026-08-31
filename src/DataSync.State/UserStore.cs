@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace DataSync.State;
 
@@ -40,23 +40,22 @@ public sealed record UserCredentialRecord(
 public sealed class UserStore(StateDatabase database)
 {
     public UserRecord CreateUser(string displayName, string? email, UserRole role) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             var user = new UserRecord(
                 Guid.NewGuid().ToString("N"), displayName, email, role, Enabled: true, DateTimeOffset.UtcNow);
 
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 INSERT INTO Users (Id, DisplayName, Email, Role, Enabled, CreatedAtUtc)
                 VALUES ($id, $name, $email, $role, $enabled, $createdAt);
-                """;
-            cmd.Parameters.AddWithValue("$id", user.Id);
-            cmd.Parameters.AddWithValue("$name", user.DisplayName);
-            cmd.Parameters.AddWithValue("$email", (object?)user.Email ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$role", user.Role.ToString());
-            cmd.Parameters.AddWithValue("$enabled", 1);
-            cmd.Parameters.AddWithValue("$createdAt", user.CreatedAtUtc.ToString("O"));
+                """);
+            cmd.Bind(database, "id", user.Id);
+            cmd.Bind(database, "name", user.DisplayName);
+            cmd.Bind(database, "email", (object?)user.Email ?? DBNull.Value);
+            cmd.Bind(database, "role", user.Role.ToString());
+            cmd.Bind(database, "enabled", 1);
+            cmd.Bind(database, "createdAt", user.CreatedAtUtc.ToString("O"));
             cmd.ExecuteNonQuery();
 
             return user;
@@ -64,78 +63,73 @@ public sealed class UserStore(StateDatabase database)
 
     public void AddCredential(
         string userId, string method, string subject, string? secret = null, string? label = null) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 INSERT INTO UserCredentials (Id, UserId, Method, Subject, Secret, Label, CreatedAtUtc)
                 VALUES ($id, $userId, $method, $subject, $secret, $label, $createdAt);
-                """;
-            cmd.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N"));
-            cmd.Parameters.AddWithValue("$userId", userId);
-            cmd.Parameters.AddWithValue("$method", method);
-            cmd.Parameters.AddWithValue("$subject", subject);
-            cmd.Parameters.AddWithValue("$secret", (object?)secret ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$label", (object?)label ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("O"));
+                """);
+            cmd.Bind(database, "id", Guid.NewGuid().ToString("N"));
+            cmd.Bind(database, "userId", userId);
+            cmd.Bind(database, "method", method);
+            cmd.Bind(database, "subject", subject);
+            cmd.Bind(database, "secret", (object?)secret ?? DBNull.Value);
+            cmd.Bind(database, "label", (object?)label ?? DBNull.Value);
+            cmd.Bind(database, "createdAt", DateTimeOffset.UtcNow.ToString("O"));
             cmd.ExecuteNonQuery();
         });
 
     /// <summary>The user a credential belongs to, or null. Records the use, because "when did this key
     /// last work" is the question a user-management screen exists to answer.</summary>
     public UserRecord? FindByCredential(string method, string subject) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
 
-            using (var touch = connection.CreateCommand())
+            using (var touch = database.Command(connection, """
+                UPDATE UserCredentials SET LastUsedAtUtc = $now
+                WHERE Method = $method AND Subject = $subject;
+                """))
             {
-                touch.CommandText = """
-                    UPDATE UserCredentials SET LastUsedAtUtc = $now
-                    WHERE Method = $method AND Subject = $subject;
-                    """;
-                touch.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
-                touch.Parameters.AddWithValue("$method", method);
-                touch.Parameters.AddWithValue("$subject", subject);
+                touch.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+                touch.Bind(database, "method", method);
+                touch.Bind(database, "subject", subject);
                 touch.ExecuteNonQuery();
             }
 
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT u.Id, u.DisplayName, u.Email, u.Role, u.Enabled, u.CreatedAtUtc
                 FROM Users u
                 JOIN UserCredentials c ON c.UserId = u.Id
                 WHERE c.Method = $method AND c.Subject = $subject;
-                """;
-            cmd.Parameters.AddWithValue("$method", method);
-            cmd.Parameters.AddWithValue("$subject", subject);
+                """);
+            cmd.Bind(database, "method", method);
+            cmd.Bind(database, "subject", subject);
 
             using var reader = cmd.ExecuteReader();
             return reader.Read() ? Read(reader) : null;
         });
 
     public UserRecord? Get(string id) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT Id, DisplayName, Email, Role, Enabled, CreatedAtUtc FROM Users WHERE Id = $id;
-                """;
-            cmd.Parameters.AddWithValue("$id", id);
+                """);
+            cmd.Bind(database, "id", id);
             using var reader = cmd.ExecuteReader();
             return reader.Read() ? Read(reader) : null;
         });
 
     public IReadOnlyList<UserRecord> List() =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT Id, DisplayName, Email, Role, Enabled, CreatedAtUtc FROM Users ORDER BY DisplayName;
-                """;
+                """);
             using var reader = cmd.ExecuteReader();
             var users = new List<UserRecord>();
             while (reader.Read())
@@ -145,24 +139,25 @@ public sealed class UserStore(StateDatabase database)
 
     /// <summary>Whether anybody exists at all. What decides a fresh install is a fresh install.</summary>
     public bool Any() =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT 1 FROM Users LIMIT 1;";
-            return cmd.ExecuteScalar() is not null;
+            // Not "SELECT 1 ... LIMIT 1": SQL Server's row limiting needs an ORDER BY, and there is
+            // no meaningful order in which to ask whether anybody exists. EXISTS is the question.
+            using var cmd = database.Command(
+                connection, "SELECT CASE WHEN EXISTS (SELECT 1 FROM Users) THEN 1 ELSE 0 END;");
+            return Convert.ToInt32(cmd.ExecuteScalar()) == 1;
         });
 
     public IReadOnlyList<UserCredentialRecord> CredentialsOf(string userId) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT Id, UserId, Method, Subject, Secret, Label, CreatedAtUtc, LastUsedAtUtc
                 FROM UserCredentials WHERE UserId = $userId ORDER BY CreatedAtUtc;
-                """;
-            cmd.Parameters.AddWithValue("$userId", userId);
+                """);
+            cmd.Bind(database, "userId", userId);
 
             using var reader = cmd.ExecuteReader();
             var credentials = new List<UserCredentialRecord>();
@@ -183,29 +178,28 @@ public sealed class UserStore(StateDatabase database)
     public void SetEnabled(string userId, bool enabled) => Update(userId, "Enabled", enabled ? 1 : 0);
 
     public bool RemoveCredential(string userId, string credentialId) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM UserCredentials WHERE Id = $id AND UserId = $userId;";
-            cmd.Parameters.AddWithValue("$id", credentialId);
-            cmd.Parameters.AddWithValue("$userId", userId);
+            using var cmd = database.Command(connection, "DELETE FROM UserCredentials WHERE Id = $id AND UserId = $userId;");
+            cmd.Bind(database, "id", credentialId);
+            cmd.Bind(database, "userId", userId);
             return cmd.ExecuteNonQuery() == 1;
         });
 
     private void Update(string userId, string column, object value) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
             using var cmd = connection.CreateCommand();
             // The column name is one of two literals chosen above, never operator input.
             cmd.CommandText = $"UPDATE Users SET {column} = $value WHERE Id = $id;";
-            cmd.Parameters.AddWithValue("$value", value);
-            cmd.Parameters.AddWithValue("$id", userId);
+            cmd.Bind(database, "value", value);
+            cmd.Bind(database, "id", userId);
             cmd.ExecuteNonQuery();
         });
 
-    private static UserRecord Read(SqliteDataReader reader) => new(
+    private static UserRecord Read(DbDataReader reader) => new(
         reader.GetString(0),
         reader.GetString(1),
         reader.IsDBNull(2) ? null : reader.GetString(2),

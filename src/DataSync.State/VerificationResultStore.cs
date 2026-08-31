@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace DataSync.State;
 
@@ -14,54 +14,53 @@ public sealed class VerificationResultStore(StateDatabase database)
     /// duplicate row pointing at one result.
     /// </summary>
     public void Record(VerificationResultRecord result) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO VerificationResults
-                    (RunId, TaskName, MappingName, CheckName, CompletedAtUtc, SourceReadAtUtc, TargetReadAtUtc,
-                     GroupsCompared, DifferingGroups, ResultPath)
-                VALUES ($runId, $task, $mapping, $check, $completed, $sourceRead, $targetRead,
-                        $groups, $differing, $path)
-                ON CONFLICT (RunId, CheckName) DO UPDATE SET
-                    CompletedAtUtc = excluded.CompletedAtUtc,
-                    SourceReadAtUtc = excluded.SourceReadAtUtc,
-                    TargetReadAtUtc = excluded.TargetReadAtUtc,
-                    GroupsCompared = excluded.GroupsCompared,
-                    DifferingGroups = excluded.DifferingGroups,
-                    ResultPath = excluded.ResultPath;
-                """;
-            cmd.Parameters.AddWithValue("$runId", result.RunId.ToString());
-            cmd.Parameters.AddWithValue("$task", result.TaskName);
-            cmd.Parameters.AddWithValue("$mapping", result.MappingName);
-            cmd.Parameters.AddWithValue("$check", result.CheckName);
-            cmd.Parameters.AddWithValue("$completed", result.CompletedAtUtc.ToString("O"));
-            cmd.Parameters.AddWithValue("$sourceRead", result.SourceReadAtUtc.ToString("O"));
-            cmd.Parameters.AddWithValue("$targetRead", result.TargetReadAtUtc.ToString("O"));
-            cmd.Parameters.AddWithValue("$groups", result.GroupsCompared);
-            cmd.Parameters.AddWithValue("$differing", result.DifferingGroups);
-            cmd.Parameters.AddWithValue("$path", result.ResultPath);
+            using var cmd = database.Command(connection, database.Dialect.Upsert(
+                "VerificationResults",
+                "RunId, TaskName, MappingName, CheckName, CompletedAtUtc, SourceReadAtUtc, TargetReadAtUtc, " +
+                    "GroupsCompared, DifferingGroups, ResultPath",
+                "$runId, $task, $mapping, $check, $completed, $sourceRead, $targetRead, " +
+                    "$groups, $differing, $path",
+                "RunId, CheckName",
+                """
+                CompletedAtUtc = EXCLUDED.CompletedAtUtc,
+                SourceReadAtUtc = EXCLUDED.SourceReadAtUtc,
+                TargetReadAtUtc = EXCLUDED.TargetReadAtUtc,
+                GroupsCompared = EXCLUDED.GroupsCompared,
+                DifferingGroups = EXCLUDED.DifferingGroups,
+                ResultPath = EXCLUDED.ResultPath
+                """));
+            cmd.Bind(database, "runId", result.RunId.ToString());
+            cmd.Bind(database, "task", result.TaskName);
+            cmd.Bind(database, "mapping", result.MappingName);
+            cmd.Bind(database, "check", result.CheckName);
+            cmd.Bind(database, "completed", result.CompletedAtUtc.ToString("O"));
+            cmd.Bind(database, "sourceRead", result.SourceReadAtUtc.ToString("O"));
+            cmd.Bind(database, "targetRead", result.TargetReadAtUtc.ToString("O"));
+            cmd.Bind(database, "groups", result.GroupsCompared);
+            cmd.Bind(database, "differing", result.DifferingGroups);
+            cmd.Bind(database, "path", result.ResultPath);
             cmd.ExecuteNonQuery();
         });
 
     /// <summary>Most recent first, which is the order anybody asks in.</summary>
     public IReadOnlyList<VerificationResultRecord> List(string taskName, string? mappingName = null, int limit = 50) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = $"""
+            using var cmd = database.Command(connection, $"""
                 SELECT Id, RunId, TaskName, MappingName, CheckName, CompletedAtUtc, SourceReadAtUtc,
                        TargetReadAtUtc, GroupsCompared, DifferingGroups, ResultPath
                 FROM VerificationResults
                 WHERE TaskName = $task {(mappingName is null ? "" : "AND MappingName = $mapping")}
-                ORDER BY CompletedAtUtc DESC LIMIT $limit;
-                """;
-            cmd.Parameters.AddWithValue("$task", taskName);
+                ORDER BY CompletedAtUtc DESC {database.Limit("limit")};
+                """);
+            cmd.Bind(database, "task", taskName);
             if (mappingName is not null)
-                cmd.Parameters.AddWithValue("$mapping", mappingName);
-            cmd.Parameters.AddWithValue("$limit", limit);
+                cmd.Bind(database, "mapping", mappingName);
+            cmd.Bind(database, "limit", limit);
 
             using var reader = cmd.ExecuteReader();
             var results = new List<VerificationResultRecord>();
@@ -71,16 +70,15 @@ public sealed class VerificationResultStore(StateDatabase database)
         });
 
     public VerificationResultRecord? Get(long id) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
+            using var cmd = database.Command(connection, """
                 SELECT Id, RunId, TaskName, MappingName, CheckName, CompletedAtUtc, SourceReadAtUtc,
                        TargetReadAtUtc, GroupsCompared, DifferingGroups, ResultPath
                 FROM VerificationResults WHERE Id = $id;
-                """;
-            cmd.Parameters.AddWithValue("$id", id);
+                """);
+            cmd.Bind(database, "id", id);
 
             using var reader = cmd.ExecuteReader();
             return reader.Read() ? Read(reader) : null;
@@ -93,16 +91,15 @@ public sealed class VerificationResultStore(StateDatabase database)
     /// <returns>False when there was no such row, so a double-delete reads as "already gone" rather
     /// than as a failure.</returns>
     public bool Delete(long id) =>
-        SqliteRetry.Execute(() =>
+        database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM VerificationResults WHERE Id = $id;";
-            cmd.Parameters.AddWithValue("$id", id);
+            using var cmd = database.Command(connection, "DELETE FROM VerificationResults WHERE Id = $id;");
+            cmd.Bind(database, "id", id);
             return cmd.ExecuteNonQuery() == 1;
         });
 
-    private static VerificationResultRecord Read(SqliteDataReader reader) => new(
+    private static VerificationResultRecord Read(DbDataReader reader) => new(
         reader.GetInt64(0),
         Guid.Parse(reader.GetString(1)),
         reader.GetString(2),

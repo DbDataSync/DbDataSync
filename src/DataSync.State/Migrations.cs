@@ -1,52 +1,132 @@
 namespace DataSync.State;
 
 /// <summary>
-/// Schema versioned via SQLite's built-in <c>PRAGMA user_version</c> — each entry is applied once,
-/// in order, the first time a database is opened at a lower version. See
-/// architecture/detailed-design.md §3.7 for the table rationale.
+/// The schema, as a numbered list of scripts applied once each, in order, the first time a database is
+/// opened at a lower version. See architecture/detailed-design.md §3.7 for the table rationale.
+/// <para>
+/// **Written once, in tokens, rather than once per engine.** The three engines disagree about four
+/// things in DDL — how an auto-assigned key is declared, what unbounded text is called, what bounded
+/// text is called, and what an integer is called — and nothing else in these ten tables. Three copies
+/// of this file would triple the cost of every future migration and guarantee that one of the copies
+/// eventually drifts; the tokens keep the schema, and every word of reasoning attached to it, in one
+/// place. See <see cref="StateDialect"/> for what each renders to.
+/// </para>
+/// <para>
+/// <c>{{key}}</c> rather than <c>{{text}}</c> marks every column that participates in a primary key, a
+/// foreign key or an index. That distinction exists for SQL Server alone, which cannot index an
+/// <c>NVARCHAR(MAX)</c> — the other two treat both the same. It is stated in the schema rather than
+/// inferred, because "is this column indexed" is a question about the whole file (an index added three
+/// migrations later still counts) and the answer has to be maintained deliberately.
+/// </para>
 /// </summary>
 internal static class Migrations
 {
-    public static readonly string[] Scripts =
+    /// <summary>Each script's statements, rendered for one engine and split so they can be executed
+    /// one at a time — some engines refuse several DDL statements in a single command.</summary>
+    public static IReadOnlyList<IReadOnlyList<string>> ScriptsFor(StateDialect dialect) =>
+        [.. Templates.Select(template => SplitStatements(Render(template, dialect)))];
+
+    private static string Render(string template, StateDialect dialect) => template
+        .Replace("{{text}}", dialect.Text)
+        .Replace("{{key}}", dialect.KeyText)
+        .Replace("{{int}}", dialect.Integer)
+        .Replace("{{addcolumn}}", dialect.AddColumn)
+        .Replace("{{identity:Id}}", dialect.IdentityKey("Id"));
+
+    /// <summary>
+    /// Splits a script into statements on top-level semicolons.
+    /// <para>
+    /// Comment-aware, and not optionally: these scripts carry more prose than DDL, and several of
+    /// those comments contain a semicolon mid-sentence. Splitting naively would cut a statement in
+    /// half at a word boundary inside a comment and produce two fragments that are each a syntax
+    /// error.
+    /// </para>
+    /// </summary>
+    private static IReadOnlyList<string> SplitStatements(string script)
+    {
+        var statements = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var inLineComment = false;
+        var inString = false;
+
+        for (var i = 0; i < script.Length; i++)
+        {
+            var c = script[i];
+
+            if (inLineComment)
+            {
+                if (c == '\n') inLineComment = false;
+            }
+            else if (inString)
+            {
+                // '' is an escaped quote inside a literal, not the end of one.
+                if (c == '\'' && (i + 1 >= script.Length || script[i + 1] != '\'')) inString = false;
+                else if (c == '\'') { current.Append(c); i++; }
+            }
+            else if (c == '-' && i + 1 < script.Length && script[i + 1] == '-') inLineComment = true;
+            else if (c == '\'') inString = true;
+            else if (c == ';')
+            {
+                Flush();
+                continue;
+            }
+
+            current.Append(c);
+        }
+
+        Flush();
+        return statements;
+
+        void Flush()
+        {
+            var statement = current.ToString().Trim();
+            current.Clear();
+            // A trailing fragment of nothing but comments is not a statement.
+            if (statement.Split('\n').Any(line => line.TrimStart().Length > 0 && !line.TrimStart().StartsWith("--")))
+                statements.Add(statement);
+        }
+    }
+
+    private static readonly string[] Templates =
     [
         """
         CREATE TABLE Tasks (
-            Name TEXT PRIMARY KEY,
-            Enabled INTEGER NOT NULL,
-            UpdatedAtUtc TEXT NOT NULL
+            Name {{key}} PRIMARY KEY,
+            Enabled {{int}} NOT NULL,
+            UpdatedAtUtc {{text}} NOT NULL
         );
 
         CREATE TABLE TaskRuns (
-            RunId TEXT PRIMARY KEY,
-            TaskName TEXT NOT NULL,
-            Pid INTEGER NULL,
-            Status TEXT NOT NULL,
-            RunKind TEXT NOT NULL DEFAULT 'Primary',
-            MappingName TEXT NOT NULL DEFAULT '',
-            SegmentLabel TEXT NULL,
-            StartedAtUtc TEXT NOT NULL,
-            EndedAtUtc TEXT NULL,
-            RowsRead INTEGER NOT NULL DEFAULT 0,
-            RowsWritten INTEGER NOT NULL DEFAULT 0,
-            ErrorSummary TEXT NULL
+            RunId {{key}} PRIMARY KEY,
+            TaskName {{key}} NOT NULL,
+            Pid {{int}} NULL,
+            Status {{text}} NOT NULL,
+            RunKind {{key}} NOT NULL DEFAULT 'Primary',
+            MappingName {{key}} NOT NULL DEFAULT '',
+            SegmentLabel {{text}} NULL,
+            StartedAtUtc {{key}} NOT NULL,
+            EndedAtUtc {{text}} NULL,
+            RowsRead {{int}} NOT NULL DEFAULT 0,
+            RowsWritten {{int}} NOT NULL DEFAULT 0,
+            ErrorSummary {{text}} NULL
         );
         CREATE INDEX IX_TaskRuns_TaskName ON TaskRuns(TaskName);
         CREATE INDEX IX_TaskRuns_TaskName_RunKind_MappingName ON TaskRuns(TaskName, RunKind, MappingName);
 
         CREATE TABLE ChangeWatermarks (
-            TaskName TEXT NOT NULL,
-            SourceTable TEXT NOT NULL,
-            Watermark TEXT NOT NULL,
-            UpdatedAtUtc TEXT NOT NULL,
+            TaskName {{key}} NOT NULL,
+            SourceTable {{key}} NOT NULL,
+            Watermark {{text}} NOT NULL,
+            UpdatedAtUtc {{text}} NOT NULL,
             PRIMARY KEY (TaskName, SourceTable)
         );
 
         CREATE TABLE Logs (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            RunId TEXT NOT NULL,
-            TimestampUtc TEXT NOT NULL,
-            Level TEXT NOT NULL,
-            Message TEXT NOT NULL
+            {{identity:Id}},
+            RunId {{key}} NOT NULL,
+            TimestampUtc {{text}} NOT NULL,
+            Level {{text}} NOT NULL,
+            Message {{text}} NOT NULL
         );
         CREATE INDEX IX_Logs_RunId ON Logs(RunId);
 
@@ -54,11 +134,11 @@ internal static class Migrations
         -- incremental pass, exactly like RunKind.Backfill is scoped to one mapping's reload — neither
         -- kind is "the whole replication" anymore. See phase-008-work-queue-schema.md.
         CREATE TABLE RunLocks (
-            TaskName TEXT NOT NULL,
-            RunKind TEXT NOT NULL,
-            MappingName TEXT NOT NULL,
-            RunId TEXT NOT NULL,
-            AcquiredAtUtc TEXT NOT NULL,
+            TaskName {{key}} NOT NULL,
+            RunKind {{key}} NOT NULL,
+            MappingName {{key}} NOT NULL,
+            RunId {{text}} NOT NULL,
+            AcquiredAtUtc {{text}} NOT NULL,
             PRIMARY KEY (TaskName, RunKind, MappingName)
         );
 
@@ -73,19 +153,19 @@ internal static class Migrations
         -- row per mapping" (Primary rows have no segment). '' is the sentinel for "no segment"
         -- (Primary rows, and a Backfill's single Full-mode segment); real segments get a real label.
         CREATE TABLE WorkQueue (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            TaskName TEXT NOT NULL,
-            RunKind TEXT NOT NULL,
-            MappingName TEXT NOT NULL,
-            SegmentLabel TEXT NOT NULL DEFAULT '',
-            SegmentJson TEXT NULL,
-            RunId TEXT NOT NULL,
-            Status TEXT NOT NULL,
-            Priority INTEGER NOT NULL DEFAULT 0,
-            EnqueuedAtUtc TEXT NOT NULL,
-            AvailableAtUtc TEXT NOT NULL,
-            ClaimedAtUtc TEXT NULL,
-            ClaimedByWorkerId TEXT NULL
+            {{identity:Id}},
+            TaskName {{key}} NOT NULL,
+            RunKind {{key}} NOT NULL,
+            MappingName {{key}} NOT NULL,
+            SegmentLabel {{key}} NOT NULL DEFAULT '',
+            SegmentJson {{text}} NULL,
+            RunId {{text}} NOT NULL,
+            Status {{key}} NOT NULL,
+            Priority {{int}} NOT NULL DEFAULT 0,
+            EnqueuedAtUtc {{text}} NOT NULL,
+            AvailableAtUtc {{key}} NOT NULL,
+            ClaimedAtUtc {{text}} NULL,
+            ClaimedByWorkerId {{text}} NULL
         );
         CREATE INDEX IX_WorkQueue_Claim ON WorkQueue(TaskName, Status, AvailableAtUtc);
         CREATE UNIQUE INDEX UX_WorkQueue_InFlight
@@ -102,9 +182,9 @@ internal static class Migrations
         -- reconciling writer for itself, so which Kinds to use is a property of the unit of work, not
         -- of the replication. NULL means "use whatever the replication's ChangeProcessing config
         -- says", which is every Primary item. See phase-010-batch-reload-trigger-and-spa.md.
-        ALTER TABLE WorkQueue ADD COLUMN ReaderKind TEXT NULL;
-        ALTER TABLE WorkQueue ADD COLUMN CacheKind TEXT NULL;
-        ALTER TABLE WorkQueue ADD COLUMN WriterKind TEXT NULL;
+        ALTER TABLE WorkQueue {{addcolumn}} ReaderKind {{text}} NULL;
+        ALTER TABLE WorkQueue {{addcolumn}} CacheKind {{text}} NULL;
+        ALTER TABLE WorkQueue {{addcolumn}} WriterKind {{text}} NULL;
         """,
 
         """
@@ -117,7 +197,7 @@ internal static class Migrations
         --
         -- NULL for every live line, and NULL is distinct from NULL for uniqueness in SQLite, so two
         -- genuinely identical lines logged in the same tick are still two lines. See phase 39.
-        ALTER TABLE Logs ADD COLUMN SourceKey TEXT NULL;
+        ALTER TABLE Logs {{addcolumn}} SourceKey {{key}} NULL;
         CREATE UNIQUE INDEX UX_Logs_SourceKey ON Logs(SourceKey) WHERE SourceKey IS NOT NULL;
         """,
 
@@ -138,17 +218,17 @@ internal static class Migrations
         -- nothing reads it transactionally, so putting it behind the single writer would cost
         -- responsiveness for nothing. This is the index that makes one findable.
         CREATE TABLE VerificationResults (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            RunId TEXT NOT NULL,
-            TaskName TEXT NOT NULL,
-            MappingName TEXT NOT NULL,
-            CheckName TEXT NOT NULL,
-            CompletedAtUtc TEXT NOT NULL,
-            SourceReadAtUtc TEXT NOT NULL,
-            TargetReadAtUtc TEXT NOT NULL,
-            GroupsCompared INTEGER NOT NULL,
-            DifferingGroups INTEGER NOT NULL,
-            ResultPath TEXT NOT NULL
+            {{identity:Id}},
+            RunId {{key}} NOT NULL,
+            TaskName {{key}} NOT NULL,
+            MappingName {{text}} NOT NULL,
+            CheckName {{key}} NOT NULL,
+            CompletedAtUtc {{key}} NOT NULL,
+            SourceReadAtUtc {{text}} NOT NULL,
+            TargetReadAtUtc {{text}} NOT NULL,
+            GroupsCompared {{int}} NOT NULL,
+            DifferingGroups {{int}} NOT NULL,
+            ResultPath {{text}} NOT NULL
         );
         CREATE INDEX IX_VerificationResults_Task ON VerificationResults(TaskName, CompletedAtUtc);
 
@@ -166,7 +246,7 @@ internal static class Migrations
         -- did not happen — and giving it its own status would have quietly dropped it out of every
         -- "how many failed" count in the app. What is different is the remedy, and that is what this
         -- names. See PositionExpiredException.
-        ALTER TABLE TaskRuns ADD COLUMN FailureKind TEXT NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} FailureKind {{text}} NULL;
         """,
 
         """
@@ -176,12 +256,12 @@ internal static class Migrations
         -- access-control list in a git history the UI diffs on screen would publish it to everyone
         -- who can read the repo.
         CREATE TABLE Users (
-            Id           TEXT PRIMARY KEY,   -- opaque; never a login name, which people change
-            DisplayName  TEXT NOT NULL,
-            Email        TEXT NULL,          -- for git attribution, where there is one
-            Role         TEXT NOT NULL,      -- Admin | Viewer
-            Enabled      INTEGER NOT NULL,
-            CreatedAtUtc TEXT NOT NULL
+            Id           {{key}} PRIMARY KEY,   -- opaque; never a login name, which people change
+            DisplayName  {{text}} NOT NULL,
+            Email        {{text}} NULL,          -- for git attribution, where there is one
+            Role         {{text}} NOT NULL,      -- Admin | Viewer
+            Enabled      {{int}} NOT NULL,
+            CreatedAtUtc {{text}} NOT NULL
         );
 
         -- A credential per method, all pointing at one user. That shape is what makes "one person,
@@ -189,15 +269,15 @@ internal static class Migrations
         -- passkey to an account that already signs in with Windows is inserting a row. Columns named
         -- WindowsSid and PasskeyPublicKey on Users would have made the same requirement a migration.
         CREATE TABLE UserCredentials (
-            Id            TEXT PRIMARY KEY,
-            UserId        TEXT NOT NULL REFERENCES Users(Id),
-            Method        TEXT NOT NULL,      -- Windows | Passkey
+            Id            {{key}} PRIMARY KEY,
+            UserId        {{key}} NOT NULL REFERENCES Users(Id),
+            Method        {{key}} NOT NULL,      -- Windows | Passkey
             -- Windows: the account SID. Passkey: the credential id. What a sign-in is looked up by.
-            Subject       TEXT NOT NULL,
-            Secret        TEXT NULL,          -- a passkey's *public* key; null for Windows
-            Label         TEXT NULL,
-            CreatedAtUtc  TEXT NOT NULL,
-            LastUsedAtUtc TEXT NULL
+            Subject       {{key}} NOT NULL,
+            Secret        {{text}} NULL,          -- a passkey's *public* key; null for Windows
+            Label         {{text}} NULL,
+            CreatedAtUtc  {{text}} NOT NULL,
+            LastUsedAtUtc {{text}} NULL
         );
 
         CREATE UNIQUE INDEX UX_UserCredentials_Subject ON UserCredentials(Method, Subject);
@@ -206,10 +286,10 @@ internal static class Migrations
         -- Server-side, so signing somebody out — or disabling them — takes effect on their next
         -- request rather than whenever a token would have expired.
         CREATE TABLE Sessions (
-            Id           TEXT PRIMARY KEY,
-            UserId       TEXT NOT NULL REFERENCES Users(Id),
-            CreatedAtUtc TEXT NOT NULL,
-            ExpiresAtUtc TEXT NOT NULL
+            Id           {{key}} PRIMARY KEY,
+            UserId       {{key}} NOT NULL REFERENCES Users(Id),
+            CreatedAtUtc {{text}} NOT NULL,
+            ExpiresAtUtc {{text}} NOT NULL
         );
 
         CREATE INDEX IX_Sessions_User ON Sessions(UserId);
@@ -222,15 +302,15 @@ internal static class Migrations
         -- over chat or email and is worth exactly what a password is worth, and a database somebody
         -- can read is a database somebody can sign in from.
         CREATE TABLE Invites (
-            Id               TEXT PRIMARY KEY,
-            CodeHash         TEXT NOT NULL,
-            Role             TEXT NOT NULL,   -- what the invited user becomes
-            UserId           TEXT NULL,       -- set when adding a credential to an existing user
-            CreatedByUserId  TEXT NULL,       -- null for the bootstrap invite: nobody made it
-            CreatedAtUtc     TEXT NOT NULL,
-            ExpiresAtUtc     TEXT NOT NULL,
-            RedeemedAtUtc    TEXT NULL,
-            RedeemedByUserId TEXT NULL
+            Id               {{key}} PRIMARY KEY,
+            CodeHash         {{key}} NOT NULL,
+            Role             {{text}} NOT NULL,   -- what the invited user becomes
+            UserId           {{text}} NULL,       -- set when adding a credential to an existing user
+            CreatedByUserId  {{text}} NULL,       -- null for the bootstrap invite: nobody made it
+            CreatedAtUtc     {{text}} NOT NULL,
+            ExpiresAtUtc     {{text}} NOT NULL,
+            RedeemedAtUtc    {{text}} NULL,
+            RedeemedByUserId {{text}} NULL
         );
 
         CREATE UNIQUE INDEX UX_Invites_CodeHash ON Invites(CodeHash);
@@ -244,19 +324,19 @@ internal static class Migrations
         -- its time waiting on the source") and a log line cannot be aggregated. Every one is nullable
         -- and stays null for a mapping that never asked, so tracing costs an unopted-in run nothing —
         -- not even a zero.
-        ALTER TABLE TaskRuns ADD COLUMN ReaderKind TEXT NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} ReaderKind {{text}} NULL;
 
         -- Two numbers, not one, because they mean different things: how long the source took to
         -- *start* answering, and how long it took to finish. A slow first row is a source planning or
         -- queueing; a slow lifetime with a fast first row is volume, or a consumer that cannot keep up.
-        ALTER TABLE TaskRuns ADD COLUMN ReaderTimeToFirstRowMs INTEGER NULL;
-        ALTER TABLE TaskRuns ADD COLUMN ReaderLifetimeMs INTEGER NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} ReaderTimeToFirstRowMs {{int}} NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} ReaderLifetimeMs {{int}} NULL;
 
-        ALTER TABLE TaskRuns ADD COLUMN StagingKind TEXT NULL;
-        ALTER TABLE TaskRuns ADD COLUMN StagingDurationMs INTEGER NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} StagingKind {{text}} NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} StagingDurationMs {{int}} NULL;
 
-        ALTER TABLE TaskRuns ADD COLUMN WriterKind TEXT NULL;
-        ALTER TABLE TaskRuns ADD COLUMN WriterDurationMs INTEGER NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} WriterKind {{text}} NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} WriterDurationMs {{int}} NULL;
         """,
 
         """
@@ -270,8 +350,8 @@ internal static class Migrations
         --
         -- On Tasks rather than in its own current-state table because the scheduler reads it on every
         -- tick, for every replication, and the row is already being read.
-        ALTER TABLE Tasks ADD COLUMN Paused INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE Tasks ADD COLUMN PauseNote TEXT NULL;
+        ALTER TABLE Tasks {{addcolumn}} Paused {{int}} NOT NULL DEFAULT 0;
+        ALTER TABLE Tasks {{addcolumn}} PauseNote {{text}} NULL;
 
         -- The append-only history behind those two columns. Tasks says what is true now; this says how
         -- it got there, one row per action, written in the same transaction as the Tasks update so the
@@ -283,12 +363,12 @@ internal static class Migrations
         -- separate, see architecture/planning/todo/pause-history-ui.md — but the history has to exist
         -- before it can be shown, and a table added later starts empty.
         CREATE TABLE PauseEvents (
-            Id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            TaskName       TEXT NOT NULL,
-            Action         TEXT NOT NULL,   -- 'Paused' | 'Resumed'
-            Note           TEXT NULL,
-            PerformedAtUtc TEXT NOT NULL,
-            PerformedBy    TEXT NOT NULL
+            {{identity:Id}},
+            TaskName       {{key}} NOT NULL,
+            Action         {{text}} NOT NULL,   -- 'Paused' | 'Resumed'
+            Note           {{text}} NULL,
+            PerformedAtUtc {{text}} NOT NULL,
+            PerformedBy    {{text}} NOT NULL
         );
         CREATE INDEX IX_PauseEvents_TaskName ON PauseEvents(TaskName);
         """,

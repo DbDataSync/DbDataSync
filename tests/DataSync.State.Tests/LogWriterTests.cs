@@ -38,8 +38,7 @@ public sealed class LogWriterTests : IDisposable
         writer.Log(runId, LogSeverity.Info, "buffered line");
 
         using var connection = _database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM Logs;";
+        using var cmd = _database.Command(connection, "SELECT COUNT(*) FROM Logs;");
         Assert.Equal(0L, Convert.ToInt64(cmd.ExecuteScalar()));
     }
 
@@ -53,8 +52,7 @@ public sealed class LogWriterTests : IDisposable
             writer.Log(runId, LogSeverity.Info, $"line {i}");
 
         using var connection = _database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM Logs;";
+        using var cmd = _database.Command(connection, "SELECT COUNT(*) FROM Logs;");
         Assert.Equal(50L, Convert.ToInt64(cmd.ExecuteScalar()));
     }
 
@@ -67,9 +65,8 @@ public sealed class LogWriterTests : IDisposable
         writer.Dispose();
 
         using var connection = _database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT Message FROM Logs WHERE RunId = $runId;";
-        cmd.Parameters.AddWithValue("$runId", runId.ToString());
+        using var cmd = _database.Command(connection, "SELECT Message FROM Logs WHERE RunId = $runId;");
+        cmd.Bind(_database, "runId", runId.ToString());
         Assert.Equal("last line before dispose", Convert.ToString(cmd.ExecuteScalar()));
     }
 
@@ -98,9 +95,8 @@ public sealed class LogWriterTests : IDisposable
         }
 
         using var connection = _database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM Logs WHERE RunId = $runId;";
-        cmd.Parameters.AddWithValue("$runId", runId.ToString());
+        using var cmd = _database.Command(connection, "SELECT COUNT(*) FROM Logs WHERE RunId = $runId;");
+        cmd.Bind(_database, "runId", runId.ToString());
         Assert.Equal((long)(writerCount * linesPerWriter), Convert.ToInt64(cmd.ExecuteScalar()));
     }
 }

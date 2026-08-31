@@ -57,10 +57,9 @@ public sealed class RunPruningTests : IDisposable
     private void Backdate(Guid runId, TimeSpan age)
     {
         using var connection = _database.OpenConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "UPDATE TaskRuns SET StartedAtUtc = $started WHERE RunId = $runId;";
-        cmd.Parameters.AddWithValue("$started", (DateTimeOffset.UtcNow - age).ToString("O"));
-        cmd.Parameters.AddWithValue("$runId", runId.ToString());
+        using var cmd = _database.Command(connection, "UPDATE TaskRuns SET StartedAtUtc = $started WHERE RunId = $runId;");
+        cmd.Bind(_database, "started", (DateTimeOffset.UtcNow - age).ToString("O"));
+        cmd.Bind(_database, "runId", runId.ToString());
         cmd.ExecuteNonQuery();
     }
 
