@@ -63,7 +63,10 @@ export function ReplicationsPage() {
     if (!canCreate) return
     const task: ReplicationTaskConfig = {
       name,
-      enabled: true,
+      // New replications start disabled — an operator saving one for the first time hasn't necessarily
+      // finished configuring mappings/endpoints yet, and shouldn't have it eligible for scheduling
+      // before they explicitly turn it on. See phase 69.
+      enabled: false,
       scheduling: mode === 'Continuous'
         ? { mode, frequencySeconds, cronExpression: null }
         : { mode, frequencySeconds: null, cronExpression },
