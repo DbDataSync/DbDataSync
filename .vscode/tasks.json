@@ -71,7 +71,7 @@
         "Backend: dotnet run (API)",
         "Frontend: npm run dev (SPA)"
       ],
-      "dependsOrder": "parallel",
+      "dependsOrder": "sequence",
       "problemMatcher": [],
       "runOptions": {
         "instanceLimit": 1
