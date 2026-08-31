@@ -16,6 +16,7 @@ export function mappingTabs(base: string, mappingName: string | undefined, pendi
     { path: 'transforms', label: 'Custom Transforms', testId: 'mapping-tab-transforms' },
     { path: 'segmenting', label: 'Backfill', testId: 'mapping-tab-segmenting' },
     { path: 'provisioning', label: 'Provisioning', testId: 'mapping-tab-provisioning', badge: pendingSteps },
+    { path: 'pipeline', label: 'Pipeline', testId: 'mapping-tab-pipeline' },
     { path: 'diagnostics', label: 'Diagnostics', testId: 'mapping-tab-diagnostics' },
   ]
 

@@ -14,8 +14,8 @@ import {
 } from './pages/replication-detail/OverviewPanel'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
 import {
-  ColumnMappingTab, MappingDiagnosticsTab, MappingNotesTab, MappingProvisioningTab,
-  MappingSegmentingTab, MappingTransformsTab,
+  ColumnMappingTab, MappingDiagnosticsTab, MappingNotesTab, MappingPipelineTab,
+  MappingProvisioningTab, MappingSegmentingTab, MappingTransformsTab,
 } from './pages/replication-detail/TableMappingForm'
 import { MappingsOverview } from './pages/replication-detail/MappingsOverview'
 import { MappingPreview } from './pages/replication-detail/MappingPreview'
@@ -36,6 +36,7 @@ const MAPPING_EDITOR_TABS = (
     <Route path="transforms" element={<MappingTransformsTab />} />
     <Route path="segmenting" element={<MappingSegmentingTab />} />
     <Route path="provisioning" element={<MappingProvisioningTab />} />
+    <Route path="pipeline" element={<MappingPipelineTab />} />
     <Route path="diagnostics" element={<MappingDiagnosticsTab />} />
   </>
 )

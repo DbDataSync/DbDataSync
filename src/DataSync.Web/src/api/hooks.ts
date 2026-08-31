@@ -31,6 +31,8 @@ const keys = {
     ['replications', replicationName, 'table-mappings', mappingName, 'provisioning'] as const,
   inferredColumnTypes: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'inferred-column-types'] as const,
+  inferredNaturalKey: (replicationName: string, mappingName: string) =>
+    ['replications', replicationName, 'table-mappings', mappingName, 'inferred-natural-key'] as const,
   preview: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'preview'] as const,
   replicationStatus: (replicationName: string) =>
@@ -656,6 +658,23 @@ export function useInferredColumnTypes(replicationName: string | undefined, mapp
     queryKey: keys.inferredColumnTypes(replicationName ?? '', mappingName ?? ''),
     queryFn: () => api.provisioning.inferredColumnTypes(replicationName!, mappingName!),
     enabled: !!replicationName && !!mappingName,
+    retry: false,
+  })
+}
+
+/**
+ * What this mapping's natural key would be derived as — the mapping Pipeline tab's read path for the
+ * SCD Type 2 writer (phase 68).
+ *
+ * Same shape as `useInferredColumnTypes` beside it, and `retry: false` for the same reason: a source
+ * table that is not there yet 404s, which is normal during setup and not worth three attempts.
+ */
+export function useInferredNaturalKey(
+  replicationName: string | undefined, mappingName: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: keys.inferredNaturalKey(replicationName ?? '', mappingName ?? ''),
+    queryFn: () => api.provisioning.inferredNaturalKey(replicationName!, mappingName!),
+    enabled: enabled && !!replicationName && !!mappingName,
     retry: false,
   })
 }

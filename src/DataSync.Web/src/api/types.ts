@@ -158,6 +158,16 @@ export interface RenameStep {
  * because the canonical type system lives there: the SPA has no way to know that a SQL Server
  * `nvarchar(50)` lands as a Postgres `varchar(50)`.
  */
+/**
+ * What the SCD Type 2 writer's natural key would be for a mapping if nobody stated one — derived from
+ * the source's primary key, said in the target's column names.
+ */
+export interface InferredNaturalKey {
+  /** Empty when nothing could be derived, in which case `problem` says why. */
+  columns: string[]
+  problem: string | null
+}
+
 export interface InferredColumnType {
   sourceColumn: string
   sourceType: string
@@ -197,6 +207,16 @@ export interface TableMappingConfig {
   /** Markdown, git-tracked. Not inherited from the replication — a note that applied to every mapping
    * would be a note about the replication, and that field exists too. */
   notes?: string | null
+
+  /**
+   * This mapping's own pipeline stages, in place of the replication's. Null or absent inherits the
+   * replication's stage entirely — Kind and options together, never merged (phase 68).
+   *
+   * Each is independent: a mapping can override just the writer and still inherit reader and cache.
+   */
+  readerOverride?: ReaderConfig | null
+  cacheOverride?: CacheConfig | null
+  writerOverride?: WriterConfig | null
 }
 
 export interface TableMetadata {

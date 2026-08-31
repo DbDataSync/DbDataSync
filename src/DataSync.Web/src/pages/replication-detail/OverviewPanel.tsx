@@ -11,6 +11,7 @@ import { SegmentingStrategiesCard } from './SegmentingStrategiesCard'
 import { NotesPanel } from '../../components/NotesPanel'
 import { SubTabs, type SubTab } from '../../components/SubTabs'
 import { readerNotes } from '../../api/readerNotes'
+import { versionsRows, withoutNaturalKey } from './naturalKey'
 import { useConnections, useReplication, useReplicationCapabilities, useScripts, useTableMappings } from '../../api/hooks'
 import type { ParameterDescriptor, ProvisioningConfig, ReplicationTaskConfig } from '../../api/types'
 
@@ -128,7 +129,13 @@ export function PipelineTab() {
     draft.changeProcessing.writer.kind === 'Scd2'
     && capabilities.readers.find((r) => r.kind === draft.changeProcessing.reader.kind)?.detectsDeletes === false
 
+  // The natural key is not a question this level can answer since phase 68: one replication syncs
+  // many tables, and each has its own. Declared settings minus that one, and static text in its place.
+  const historizing = stage === 'writer' && versionsRows(draft.changeProcessing.writer.kind)
+
   const current = draft.changeProcessing[stage]
+  const declared = parametersFor(stage, current.kind)
+  const editable = historizing ? withoutNaturalKey(declared) : declared
   const options = kindsFor(stage)
   const known = options.some((o) => o.kind === current.kind)
   const stageLabel = STAGES.find((s) => s.id === stage)!.label
@@ -195,17 +202,34 @@ export function PipelineTab() {
             </span>
           )}
 
+          {/* No field to type one into, deliberately. A replication-wide natural key was only ever
+              correct for a replication that syncs one table; each mapping derives its own from that
+              table's primary key, and a mapping's own Pipeline tab is where one can still be stated
+              by hand. See phase 68. */}
+          {historizing && (
+            <span className="hint" data-testid="natural-key-auto-derived">
+              <strong>Natural key:</strong> auto-derived from each mapping's primary key. Which columns
+              identify a row across its versions differs per table, so it is answered on each table
+              mapping's own Pipeline tab — where it can also be overridden by hand.
+            </span>
+          )}
+
           {/* The declared settings, plus whatever else is already in the bag. A Kind that
               declares nothing still gets the free-form table, because an option a driver reads
               but has not declared is still an option somebody set. */}
-          <ParameterForm
-            parameters={parametersFor(stage, current.kind)}
-            values={current.options}
-            onChange={(next) => setStageValue(stage, { options: next })}
-            options={{ script: scripts?.map((s) => s.manifest.name) ?? [] }}
-            testIdPrefix={`${stage}-options`}
-          />
-          {parametersFor(stage, current.kind).length === 0 && (
+          {editable.length > 0 && (
+            <ParameterForm
+              parameters={editable}
+              values={current.options}
+              onChange={(next) => setStageValue(stage, { options: next })}
+              options={{ script: scripts?.map((s) => s.manifest.name) ?? [] }}
+              testIdPrefix={`${stage}-options`}
+            />
+          )}
+          {/* The unfiltered count, not the rendered one: a Kind whose only declared setting this tab
+              renders itself has not become a Kind that declares nothing, and offering the free-form
+              table here would put the field back that the line above just removed. */}
+          {declared.length === 0 && (
             <KeyValueTable
               value={current.options}
               onChange={(next) => setStageValue(stage, { options: next })}

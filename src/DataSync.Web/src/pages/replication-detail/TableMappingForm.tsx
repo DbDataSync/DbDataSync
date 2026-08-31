@@ -22,6 +22,7 @@ import { mappingTabs } from './mappingTabs'
 import { ProvisioningCard } from './ProvisioningCard'
 import { DefaultSegmentingCard } from './DefaultSegmentingCard'
 import { SourceFilterCard } from './SourceFilterCard'
+import { MappingPipelineCard, type PipelineOverrides } from './MappingPipelineCard'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
 const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
@@ -75,6 +76,13 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   const [defaultSegmenting, setDefaultSegmenting] = useState<BatchReloadSegment[]>(
     structuredClone(existing?.defaultSegmenting ?? []),
   )
+  // Null on each, not an empty stage: a mapping that has never been asked inherits the replication's
+  // pipeline entirely, which is not the same as one that overrides it with nothing (phase 68).
+  const [pipeline, setPipeline] = useState<PipelineOverrides>({
+    readerOverride: structuredClone(existing?.readerOverride ?? null),
+    cacheOverride: structuredClone(existing?.cacheOverride ?? null),
+    writerOverride: structuredClone(existing?.writerOverride ?? null),
+  })
 
   /**
    * Choosing a source fills in the two things that follow from it.
@@ -155,7 +163,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
         // being dropped by a save from here.
         ...existing,
         name, sources: [source], targets: [target], columnMappings, scripts, provisioning,
-        defaultSegmenting, notes, traceTiming,
+        defaultSegmenting, notes, traceTiming, ...pipeline,
       },
     })
     onSaved(name)
@@ -249,6 +257,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
             scripts, setScripts,
             defaultSegmenting, setDefaultSegmenting,
             provisioning, setProvisioning,
+            pipeline, setPipeline,
             notes, setNotes,
             traceTiming, setTraceTiming,
             target,
@@ -277,6 +286,8 @@ export interface MappingEditorContext {
   setDefaultSegmenting: (next: BatchReloadSegment[]) => void
   provisioning: ProvisioningConfig
   setProvisioning: (next: ProvisioningConfig) => void
+  pipeline: PipelineOverrides
+  setPipeline: (next: PipelineOverrides) => void
   notes: string | null
   setNotes: (next: string | null) => void
   traceTiming: boolean
@@ -369,6 +380,32 @@ export function MappingProvisioningTab() {
       inherited={task?.provisioning}
       onChangeProvisioning={setProvisioning}
       stale={targetChangedSinceSave}
+    />
+  )
+}
+
+/**
+ * Which reader, staging provider and writer this table runs — phase 68.
+ *
+ * **Its own tab rather than a card on one of the others**, mirroring the replication's Overview,
+ * because it is the same question asked one level down. An operator who has set the pipeline on the
+ * replication and wants to know why one table behaves differently looks for the word they already
+ * know, in the place the rest of this mapping's behaviour is configured.
+ */
+export function MappingPipelineTab() {
+  const {
+    replicationName, existing, task, resolvedSource, resolvedTarget, pipeline, setPipeline,
+  } = useOutletContext<MappingEditorContext>()
+
+  return (
+    <MappingPipelineCard
+      replicationName={replicationName}
+      mappingName={existing?.name}
+      task={task}
+      source={resolvedSource}
+      target={resolvedTarget}
+      overrides={pipeline}
+      onChange={setPipeline}
     />
   )
 }

@@ -13,6 +13,7 @@ import type {
   BulkCreateRequest,
   BulkCreateResult,
   InferredColumnType,
+  InferredNaturalKey,
   AuthStatus,
   UserSummary,
   DriverType,
@@ -165,6 +166,11 @@ export const api = {
       request<InferredColumnType[]>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}` +
           `/provisioning/inferred-column-types`,
+      ),
+    inferredNaturalKey: (replicationName: string, mappingName: string) =>
+      request<InferredNaturalKey>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}` +
+          `/provisioning/inferred-natural-key`,
       ),
     apply: (replicationName: string, mappingName: string, action: string) =>
       request<ApplyResult>(
