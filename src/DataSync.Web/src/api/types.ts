@@ -690,6 +690,35 @@ export interface TaskRunRecord {
    * the history this pass needed, and the fix is a resync rather than a retry. Null for the ordinary
    * case, which is nearly all of them. */
   failureKind: string | null
+  /**
+   * What this pass actually did and how long each stage took — null unless the mapping opted into
+   * tracing (phase 59's `TraceTiming`).
+   *
+   * Nested rather than seven fields on the run, matching the API: null is a clean "this run was never
+   * measured", which is what lets an untraced row render exactly as it always has.
+   */
+  timing: RunTiming | null
+}
+
+/**
+ * One traced pass's stage timings.
+ *
+ * The Kinds travel with the numbers because a unit of work may override the replication's configured
+ * pipeline — so "which reader produced this number" is not answerable from the replication's config
+ * after the fact.
+ */
+export interface RunTiming {
+  readerKind: string | null
+  /** From the read starting to the first row arriving. Always a prefix of the lifetime. */
+  readerTimeToFirstRowMs: number | null
+  /** From the same start to the row stream being disposed. */
+  readerLifetimeMs: number | null
+  stagingKind: string | null
+  /** The whole staging call — longer than the reader's lifetime for a provider that does work after
+   * the stream is exhausted, which is the difference worth seeing. */
+  stagingDurationMs: number | null
+  writerKind: string | null
+  writerDurationMs: number | null
 }
 
 export type LogSeverity = 'Trace' | 'Debug' | 'Info' | 'Warning' | 'Error'

@@ -16,6 +16,7 @@ export function mappingTabs(base: string, mappingName: string | undefined, pendi
     { path: 'transforms', label: 'Custom Transforms', testId: 'mapping-tab-transforms' },
     { path: 'segmenting', label: 'Reload Segmenting', testId: 'mapping-tab-segmenting' },
     { path: 'provisioning', label: 'Provisioning', testId: 'mapping-tab-provisioning', badge: pendingSteps },
+    { path: 'diagnostics', label: 'Diagnostics', testId: 'mapping-tab-diagnostics' },
   ]
 
   // Both need a saved mapping to be about. An unsaved one has nothing to preview and nothing to

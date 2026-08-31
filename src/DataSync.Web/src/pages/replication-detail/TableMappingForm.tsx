@@ -64,6 +64,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(existing?.columnMappings ?? [])
   const [scripts, setScripts] = useState<ScriptBindings>(structuredClone(existing?.scripts ?? {}))
   const [notes, setNotes] = useState<string | null>(existing?.notes ?? null)
+  const [traceTiming, setTraceTiming] = useState(existing?.traceTiming ?? false)
   const [provisioning, setProvisioning] = useState<ProvisioningConfig>(
     existing?.provisioning
       // Null, not false: a mapping that has never been asked inherits, and a mapping that was asked
@@ -154,7 +155,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
         // being dropped by a save from here.
         ...existing,
         name, sources: [source], targets: [target], columnMappings, scripts, provisioning,
-        defaultSegmenting, notes,
+        defaultSegmenting, notes, traceTiming,
       },
     })
     onSaved(name)
@@ -249,6 +250,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
             defaultSegmenting, setDefaultSegmenting,
             provisioning, setProvisioning,
             notes, setNotes,
+            traceTiming, setTraceTiming,
             target,
           } satisfies MappingEditorContext}
         />
@@ -334,6 +336,8 @@ export interface MappingEditorContext {
   setProvisioning: (next: ProvisioningConfig) => void
   notes: string | null
   setNotes: (next: string | null) => void
+  traceTiming: boolean
+  setTraceTiming: (next: boolean) => void
   target: TableSpec
 }
 
@@ -423,5 +427,53 @@ export function MappingProvisioningTab() {
       onChangeProvisioning={setProvisioning}
       stale={targetChangedSinceSave}
     />
+  )
+}
+
+/**
+ * What this mapping measures about its own passes — phase 62, surfacing phase 59's opt-in trace.
+ *
+ * **Its own tab rather than folded into one of the others**, and the reason is what the other tabs
+ * are: Column Mapping, Custom Transforms, Reload Segmenting and Provisioning all describe what this
+ * mapping *is* and what it will do. Tracing describes how it is *observed* — it changes no behaviour
+ * and produces no different result, only numbers about the pass. It sits beside Preview SQL and
+ * Verify, which are the other two answers to "what is this mapping actually doing", and it is where
+ * the aggregate view phase 59 deliberately deferred would go when somebody builds it.
+ *
+ * No INHERITED badge: mapping-level only, per phase 59. Tracing is something an operator turns on for
+ * the one table behaving oddly, which is not a thing to inherit from a replication.
+ */
+export function MappingDiagnosticsTab() {
+  const { traceTiming, setTraceTiming } = useOutletContext<MappingEditorContext>()
+
+  return (
+    <div className="card" data-testid="mapping-diagnostics">
+      <div className="card-head">
+        <span className="card-title">Diagnostics</span>
+        <span className="card-note">what this mapping records about its own passes</span>
+      </div>
+      <div className="card-body" style={{ gap: 12 }}>
+        <div className="row" style={{ gap: 9 }}>
+          <button
+            type="button"
+            className={`toggle ${traceTiming ? 'on' : ''}`}
+            onClick={() => setTraceTiming(!traceTiming)}
+            aria-pressed={traceTiming}
+            data-testid="trace-timing-toggle"
+          />
+          <span style={{ font: '500 12.5px var(--ui)', color: 'var(--ink-2)' }}>Trace stage timing</span>
+        </div>
+        <span className="hint">
+          Records how long the reader, staging and writer each took, onto every run this mapping
+          produces — visible by expanding that run in Run history. Off means <em>not measured</em>
+          rather than measured and discarded: the reader's rows are only wrapped when this is on, so a
+          mapping that never asked pays nothing for it.
+        </span>
+        <span className="hint">
+          Worth turning on for one table that is behaving oddly, and worth turning off again
+          afterwards. Runs already traced keep their numbers.
+        </span>
+      </div>
+    </div>
   )
 }

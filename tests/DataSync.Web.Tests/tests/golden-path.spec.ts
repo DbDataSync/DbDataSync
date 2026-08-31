@@ -1975,4 +1975,96 @@ public sealed class Shout : IValueColumnExpression
     expect(querySql(`SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.[${TARGET_TABLE}];`, DB_NAME))
       .toContain('2')
   })
+
+  interface TimingFields { readerTimeToFirstRowMs: number | null; readerLifetimeMs: number }
+
+  test('42 - a mapping can be told to time its own passes, and one run shows where the time went', async ({ page }) => {
+    // Phase 59 built the trace end to end and nothing in the SPA referenced any of it — the flag could
+    // only be turned on by hand-editing config, and the seven columns were never read.
+    //
+    // Its own tab, beside Preview SQL and Verify: every other tab describes what this mapping *is*,
+    // and tracing describes how it is observed — it changes no behaviour and produces no different
+    // result, only numbers about the pass (phase 62).
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/diagnostics`)
+    await expect(page.getByTestId('mapping-diagnostics')).toBeVisible({ timeout: 20_000 })
+
+    const toggle = page.getByTestId('trace-timing-toggle')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await toggle.click()
+    await page.getByTestId('save-mapping-button').click()
+
+    await expect.poll(async () => (await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()).traceTiming,
+      { timeout: 15_000 }).toBe(true)
+    await shot(page, '47-trace-timing-toggle.png')
+
+    // Touch the source so the next pass has something to read and therefore something to time.
+    runSql(`UPDATE dbo.[${SOURCE_TABLE}] SET Name = Name;`, DB_NAME)
+
+    await page.goto(`/replications/${REPLICATION_NAME}/runs`)
+    await page.getByTestId('trigger-run-button').click()
+    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 40_000 })
+
+    // The traced run — found by asking the API which one carries timing, rather than assuming the
+    // newest row is it: this replication runs continuously, and other mappings' passes land here too.
+    const findTraced = async (): Promise<{ runId: string; timing: TimingFields } | undefined> => {
+      const runs = await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/runs?limit=50`)).json()
+      return runs.find((r: { mappingName: string; timing: unknown }) =>
+        r.mappingName === MAPPING_NAME && r.timing)
+    }
+
+    await expect.poll(async () => (await findTraced()) !== undefined, { timeout: 30_000 }).toBe(true)
+    const traced = (await findTraced())!
+    const tracedRunId = traced.runId
+
+    await page.reload()
+
+    // Only a traced run gets the affordance. Tracing is opt-in, so most rows have nothing to open and
+    // a chevron on every line would be the table advertising a feature it is not using.
+    const expand = page.getByTestId(`run-timing-toggle-${tracedRunId}`)
+    await expect(expand).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId(`run-timing-${tracedRunId}`)).toHaveCount(0)
+
+    await expand.click()
+    const detail = page.getByTestId(`run-timing-${tracedRunId}`)
+    await expect(detail).toBeVisible()
+    // Stage names are uppercased by CSS, so assert the text that is actually in the DOM.
+    await expect(detail).toContainText('Reader')
+    await expect(detail).toContainText('Staging')
+    await expect(detail).toContainText('Writer')
+    await expect(detail).toContainText('to first row')
+    // Each stage names the component that produced its number: a unit of work can override the
+    // replication's pipeline, so "which reader was this" is not answerable from config afterwards.
+    await expect(detail).toContainText(/MsSql/)
+    await shot(page, '48-run-timing-detail.png')
+
+    // Phase 59's own invariant, asserted rather than assumed: time to first row is a prefix of the
+    // reader's lifetime.
+    //
+    // Conditional, because a pass that read no rows never had a first row — the reader has a lifetime
+    // and no time-to-first-row, and null there means "there was no first row" rather than "nobody
+    // measured". The panel renders that as an em dash, which is the distinction phase 59 kept the
+    // columns nullable for; a zero would have claimed the first row arrived instantly.
+    if (traced.timing.readerTimeToFirstRowMs === null) {
+      await expect(detail).toContainText('— to first row')
+    } else {
+      expect(traced.timing.readerTimeToFirstRowMs).toBeLessThanOrEqual(traced.timing.readerLifetimeMs)
+      await expect(detail).toContainText('of the read spent waiting for the first row')
+    }
+
+    // Turning it off stops new runs carrying timing, and the runs already traced keep theirs.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/diagnostics`)
+    await expect(page.getByTestId('trace-timing-toggle')).toHaveAttribute('aria-pressed', 'true',
+      { timeout: 20_000 })
+    await page.getByTestId('trace-timing-toggle').click()
+    await page.getByTestId('save-mapping-button').click()
+
+    await expect.poll(async () => (await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()).traceTiming,
+      { timeout: 15_000 }).toBe(false)
+
+    await page.goto(`/replications/${REPLICATION_NAME}/runs`)
+    await expect(page.getByTestId(`run-timing-toggle-${tracedRunId}`)).toBeVisible({ timeout: 20_000 })
+  })
 })
