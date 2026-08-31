@@ -29,16 +29,17 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **068** — per-mapping pipeline settings, and an auto-derived SCD2 natural key | a real, reachable bug — the SCD2 writer's natural key currently only works if every table in a replication shares the same one |
+| 1 | **067a** — Preview/Verify's header keeps diverging, and the mappings sidebar's overflow | tiny, on screens just touched by 067 |
 | 2 | **034** — PostgreSQL logical replication | |
 | 3 | **035** — config history diff and revert | |
 | 4 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-31; 032, 033, 036, 037, 039–055 and 056–060 done and removed; 068 moved to the top. What is
-left below it is the three engine phases that have been waiting since distribution and auth moved above
-them — with 032 and 033 done there were three change-tracking mechanisms and no way for anyone outside
-this repo to install any of them, and nothing guarding the port. A phase moving up or down is an
-ordinary decision and only this table changes.
+Set 2026-08-31; 032, 033, 036, 037, 039–055, 056–060 and 068 done and removed; 067a added at the top.
+What is left below it is the three engine phases that have been waiting since distribution and auth
+moved above them — with 032 and 033 done there were three change-tracking mechanisms and no way for
+anyone outside this repo to install
+any of them, and nothing guarding the port. A phase moving
+up or down is an ordinary decision and only this table changes.
 
 ## What counts as a phase
 
