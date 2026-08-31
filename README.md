@@ -119,9 +119,44 @@ other reason — a bad deploy, an out-of-band edit, a mapping that was wrong for
 backfill: **Runs → Backfill…**, which re-reads the source and makes the target match it.
 
 A backfill is scoped to one table mapping and, optionally, to one segment of it — a list of values, a
-range, or "split this column's range into N buckets," where each bucket becomes its own independently
-queued run. It never advances the incremental watermark, so it can be run against a live, scheduled
-replication without disturbing the ongoing sync.
+range, "split this column's range into N buckets," or a **custom segmenting strategy**, where each
+segment becomes its own independently queued run. It never advances the incremental watermark, so it
+can be run against a live, scheduled replication without disturbing the ongoing sync.
+
+A mapping states **how it divides for a reload** on its own editor, under *Default reload segmenting*.
+That default is what the Backfill form opens pre-filled to, and what a scheduled `BatchReload` pass
+processes. Leaving it empty means the whole table, unsegmented.
+
+### Custom segmenting strategies
+
+`Auto` splits a column's value range into evenly-sized buckets, which stops being enough as soon as the
+boundaries have to mean something — a calendar month is not a fixed number of days. A replication can
+define named strategies (**Overview → Settings**) that propose segments instead, authored four ways:
+
+- **DuckDB SQL** — runs against an ephemeral in-memory DuckDB and touches neither database. Good for
+  a table whose write pattern you already know:
+
+  ```sql
+  SELECT strftime(d, '%Y-%m')       AS label,
+         d                          AS range_start,
+         d + INTERVAL 1 MONTH       AS range_end,
+         d >= current_date - INTERVAL 3 MONTH AS selected
+  FROM generate_series(DATE '2020-01-01', current_date, INTERVAL 1 MONTH) AS t(d)
+  ```
+
+- **Source SQL** / **Target SQL** — the same four columns, queried from the live source or from a
+  control table on the target.
+- **C#** — a bound `ISegmentingStrategy`, handed both connections and the source's metadata.
+
+`label` names the segment in run history; `range_start`/`range_end` are half-open; `selected` decides
+which candidates start ticked in the Backfill checklist, and — for a mapping whose default is a
+strategy — which segments a *scheduled* pass reloads without anyone asking. A strategy flagging "the
+last three months" is re-evaluated against today on every run, which is a relative-date ETL with no
+extra scheduling concept behind it.
+
+A strategy that queries a real database, bound as a mapping's default, runs on **every scheduled
+pass**. The mapping editor says so beside the picker; whether that is acceptable is your judgement
+about your tables, not something DataSync decides for you.
 
 The reader/staging/writer pickers (here and in **Overview → Settings**) are populated from
 `GET /api/connections/{name}/capabilities`, which reports what the connection's registered driver
@@ -129,8 +164,15 @@ actually supports — including which readers can be segmented and which writers
 target rows the source no longer has) rather than only insert and update.
 
 A replication can also be a standalone reload rather than an incremental sync: set its reader to
-`MsSqlBatchReload` and give it a `segments` reader option (a JSON array of segment descriptors, edited
-in **Overview → Settings**) to re-read those segments on its normal schedule.
+`MsSqlBatchReload` and give each mapping a *Default reload segmenting* list, which it re-reads on its
+normal schedule.
+
+> **Breaking change.** The `segments` **reader option** — a JSON array hand-typed into the reader's
+> settings — is no longer read. Segmenting now lives on the table mapping, where it has a real editor.
+> A config still carrying that option behaves as though it had none (full table, unsegmented) until
+> the mapping's *Default reload segmenting* is filled in. There is deliberately no automatic
+> conversion: the two are not quite the same thing, and silently reinterpreting a stored reload scope
+> is a worse failure than an obvious one.
 
 ## Running the tests
 
