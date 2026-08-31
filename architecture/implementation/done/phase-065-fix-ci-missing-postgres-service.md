@@ -1,6 +1,6 @@
-# Phase 65 — CI: `dotnet-integration` has no Postgres service container (planned)
+# Phase 65 — CI: `dotnet-integration` has no Postgres service container
 
-**Status**: Planned, not started — root cause confirmed, fix is small and ready to apply.
+**Status**: Done.
 **Plan reference**: none — small enough to skip a separate planning doc, same precedent as phase 49.
 
 ## The failure
@@ -65,3 +65,12 @@ defaults exactly — no test code changes needed, this is purely a missing CI se
 ## Open questions
 
 None — this is a confirmed, minimal fix.
+
+---
+
+# Outcome — resolved 2026-08-31
+
+Built exactly as planned: the `postgres` service container added verbatim to `dotnet-integration`,
+alongside `mssql-source`/`mssql-target`. Timely — phase 63 (state store on MSSQL/Postgres, landed the
+same day) added its own cross-engine Postgres tests, which would otherwise have been red in CI from the
+moment they merged, for the same pre-existing reason as every other Postgres test. This fix covers both.
