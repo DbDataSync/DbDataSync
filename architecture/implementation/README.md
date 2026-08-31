@@ -29,11 +29,17 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **034** — PostgreSQL logical replication | |
-| 2 | **035** — config history diff and revert | |
-| 3 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **057** — dev harness, multi-table concurrent workload | the volume 056 wants to be verified at, and every later phase's stress rig |
+| 2 | **058** — custom segmenting strategies | |
+| 3 | **059** — reader/staging/writer timing trace | |
+| 4 | **060** — task run and log pruning | |
+| 5 | **034** — PostgreSQL logical replication | |
+| 6 | **035** — config history diff and revert | |
+| 7 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-30; 032, 033, 036, 037 and 039–055 done and removed. What is left is the three engine
+Set 2026-08-30; 032, 033, 036, 037, 039–055 and 056 done and removed. 057–060 go ahead of the three
+engine phases: 056 left a verification step owed to the harness rewrite in 057, and 058–060 are all
+work on machinery that already exists rather than a fourth and fifth engine mechanism to maintain. What is left is the three engine
 phases that were always behind the distribution and auth work. Distribution and auth moved above the
 remaining engine work: with 032 and 033 done there are three change-tracking mechanisms and no way for
 anyone outside this repo to install any of them, and nothing guarding the port. A phase moving up or down is an ordinary
