@@ -19,8 +19,6 @@ src/DataSync.Api/datasync-repo/
 
 # IDE
 .vs/
-.vscode/*
-!.vscode/extensions.json
 .idea/
 
 # OS

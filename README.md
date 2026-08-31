@@ -6,7 +6,9 @@ target in sync — full initial load, then incremental change capture and apply 
 demand.
 
 v1 supports MSSQL → MSSQL. See `architecture/planning/done/overview.md` for the broader ambition and
-`architecture/detailed-design.md` for the full system design.
+`architecture/detailed-design.md` for the full system design. See [CONFIG.md](CONFIG.md) for every CLI
+flag and environment variable across all the ways DataSync can be started — the `datasync` CLI, the
+raw `dotnet run` dev loop, and the container image.
 
 ## Quick start: the dev harness
 
@@ -81,7 +83,9 @@ Listens on `http://localhost:5183`. On first run it creates a local `datasync-re
 (under `src/DataSync.Api/`, gitignored) as its git-backed config store and SQLite state database —
 no separate setup step needed. Override the location via the `DataSync__RepoRoot` and
 `DataSync__StateDbPath` environment variables (or `appsettings.Development.json`) if you'd rather
-keep it elsewhere.
+keep it elsewhere. This is one of several ways to start DataSync — see [CONFIG.md](CONFIG.md) for the
+rest (the `datasync` CLI, the Windows service, the container image) and everything each one can be
+configured with, including authentication.
 
 Secrets (connection passwords) need an OS keychain in production; in a sandboxed/CI environment
 without one, `SecretStore` falls back to environment variables named
