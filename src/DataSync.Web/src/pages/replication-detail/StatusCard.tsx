@@ -25,6 +25,19 @@ export function StatusCard({ replicationName, enabled }: { replicationName: stri
       </div>
 
       <div className="card-body">
+        {/* A hold is the reason a healthy-looking replication is doing nothing, so it is said before
+            the process figures rather than after them — and with the note, because "paused" without
+            "why" sends whoever finds it looking for somebody to ask. The history of pauses is
+            deliberately not here: see architecture/planning/todo/pause-history-ui.md. */}
+        {status?.paused && (
+          <div className="banner warn" role="status" data-testid="replication-paused-notice">
+            <div><strong>Paused.</strong> Nothing new will be scheduled until it is resumed.</div>
+            {status.pauseNote && (
+              <div style={{ marginTop: 4 }} data-testid="replication-pause-note">{status.pauseNote}</div>
+            )}
+          </div>
+        )}
+
         {status?.running ? (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <Figure label="PID" value={String(status.pid)} />

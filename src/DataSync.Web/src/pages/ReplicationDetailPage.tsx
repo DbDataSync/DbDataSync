@@ -8,8 +8,10 @@ import { MetricsCard } from './replication-detail/MetricsCard'
 import { ScheduleCard } from './replication-detail/ScheduleCard'
 import { StatusCard } from './replication-detail/StatusCard'
 import {
-  useDeleteReplication, useReplication, useSetReplicationEnabled, useUpsertReplication,
+  useDeleteReplication, useReplication, useReplicationStatus, useSetReplicationEnabled,
+  useSetReplicationPaused, useUpsertReplication,
 } from '../api/hooks'
+import { PauseDialog } from '../components/PauseDialog'
 import type { ReplicationTaskConfig } from '../api/types'
 import type { RunsCommand } from './replication-detail/RunsPanel'
 
@@ -43,7 +45,17 @@ export function ReplicationDetailPage() {
   const { data: task, error } = useReplication(name)
   const upsert = useUpsertReplication()
   const setEnabled = useSetReplicationEnabled(name ?? '')
+  const setPaused = useSetReplicationPaused(name ?? '')
   const isAdmin = useIsAdmin()
+
+  // The pause lives in state, so the status endpoint is where it is read from — the same query the
+  // Status card already polls, not a second one.
+  const { data: status } = useReplicationStatus(name)
+  const paused = status?.paused ?? false
+
+  // Open in whichever direction the click means, or closed. Not a boolean: the popup has to know
+  // whether it is asking about a pause or a resume before it can label its own button.
+  const [pauseDialog, setPauseDialog] = useState<'pause' | 'resume' | null>(null)
 
   // A command from the chrome down into the Runs panel. The nonce is what makes a repeat of the
   // same command distinguishable from no command at all.
@@ -99,16 +111,36 @@ export function ReplicationDetailPage() {
             {/* Enabled sits in the chrome rather than on the Schedule card, and commits on its own.
                 Two controls that save differently should not sit next to each other looking alike. */}
             <span className="row" style={{ gap: 7, marginRight: 4 }}>
+              {/* Two toggles side by side would read as redundant without saying how they differ,
+                  so each says it. Enabled is a commit; Paused never touches the repo. */}
               <button
                 type="button"
                 className={`toggle ${enabled ? 'on' : ''}`}
                 onClick={() => setEnabled.mutate(!enabled)}
                 aria-pressed={enabled}
                 disabled={setEnabled.isPending || !task}
+                title="Whether this replication runs at all. Saved to config and committed to version history — durable intent, and a change anyone can see in the History tab."
                 data-testid="enabled-toggle"
               />
               <span style={{ font: '500 11.5px var(--ui)', color: 'var(--ink-4)' }}>
                 {enabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </span>
+
+            <span className="row" style={{ gap: 7, marginRight: 4 }}>
+              {/* Clicking it opens the popup rather than acting: the note is edited on every pause
+                  *and* every resume, and nothing about it is decided automatically. */}
+              <button
+                type="button"
+                className={`toggle ${paused ? 'held' : ''}`}
+                onClick={() => setPauseDialog(paused ? 'resume' : 'pause')}
+                aria-pressed={paused}
+                disabled={setPaused.isPending || !status}
+                title="A temporary hold. Stored in the state database, never committed — nothing new is scheduled while it is on, and a pass already running finishes normally."
+                data-testid="paused-toggle"
+              />
+              <span style={{ font: '500 11.5px var(--ui)', color: 'var(--ink-4)' }}>
+                {paused ? 'Paused' : 'Not paused'}
               </span>
             </span>
 
@@ -178,6 +210,19 @@ export function ReplicationDetailPage() {
           {draft && <ScheduleCard draft={draft} enabled={enabled} onChange={setDraft} />}
         </div>
       </div>
+
+      {pauseDialog && (
+        <PauseDialog
+          paused={pauseDialog === 'pause'}
+          note={status?.pauseNote ?? null}
+          busy={setPaused.isPending}
+          onCancel={() => setPauseDialog(null)}
+          onConfirm={async (note) => {
+            await setPaused.mutateAsync({ paused: pauseDialog === 'pause', note })
+            setPauseDialog(null)
+          }}
+        />
+      )}
     </AppShell>
   )
 }

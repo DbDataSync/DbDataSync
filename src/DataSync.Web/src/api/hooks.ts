@@ -300,6 +300,24 @@ export function useSetReplicationEnabled(replicationName: string) {
   })
 }
 
+/**
+ * Holds a replication, or releases it, with whatever note the operator entered.
+ *
+ * Invalidates the status query and nothing else: pausing writes no config, so the replication query
+ * has not changed and refetching it would be a request for an answer nobody asked a new question
+ * about.
+ */
+export function useSetReplicationPaused(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ paused, note }: { paused: boolean; note: string | null }) =>
+      api.replicationStatus.setPaused(replicationName, paused, note),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.replicationStatus(replicationName) })
+    },
+  })
+}
+
 export function useUpsertReplication() {
   const queryClient = useQueryClient()
   return useMutation({

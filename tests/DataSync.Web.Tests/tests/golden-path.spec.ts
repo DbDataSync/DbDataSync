@@ -1768,4 +1768,120 @@ public sealed class Shout : IValueColumnExpression
 
     expect((await page.request.put(`/api/replications/${REPLICATION_NAME}`, { data: before })).ok()).toBeTruthy()
   })
+
+  test('39 - a replication can be held without a commit, and every hold says who and why', async ({ page }) => {
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await expect(page.getByTestId('paused-toggle')).toBeVisible({ timeout: 20_000 })
+
+    // Two toggles side by side, and each says how it differs from the other — Enabled is a commit,
+    // Paused never touches the repo.
+    await expect(page.getByTestId('enabled-toggle')).toHaveAttribute('title', /committed/)
+    await expect(page.getByTestId('paused-toggle')).toHaveAttribute('title', /never committed/)
+
+    const commits = async () =>
+      (await (await page.request.get(`/api/replications/${REPLICATION_NAME}/history`)).json()).length
+    const before = await commits()
+
+    // Clicking asks rather than acting, and cancelling does nothing at all.
+    await page.getByTestId('paused-toggle').click()
+    await expect(page.getByTestId('pause-dialog')).toBeVisible()
+    await page.getByTestId('pause-cancel').click()
+    await expect(page.getByTestId('pause-dialog')).toHaveCount(0)
+    await expect(page.getByTestId('replication-paused-notice')).toHaveCount(0)
+
+    // Pausing with a note. The Status card shows the hold and the reason for it, because "paused"
+    // with no "why" sends whoever finds it looking for somebody to ask.
+    await page.getByTestId('paused-toggle').click()
+    await page.getByTestId('pause-note-input').fill('source is being reindexed')
+    await page.getByTestId('pause-confirm').click()
+
+    await expect(page.getByTestId('replication-paused-notice')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('replication-pause-note')).toContainText('source is being reindexed')
+    await expect(page.getByTestId('paused-toggle')).toHaveAttribute('aria-pressed', 'true')
+    await shot(page, '42-paused-with-a-note.png')
+
+    // The whole reason it lives in state: it is not a config change, so it is not a commit.
+    expect(await commits()).toBe(before)
+    expect((await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()).enabled).toBe(true)
+
+    // And the scheduler agrees — the status endpoint answers the question rather than handing the
+    // SPA two flags to combine for itself.
+    const status = await (await page.request.get(
+      `/api/replications/${REPLICATION_NAME}/status`)).json()
+    expect(status).toMatchObject({ paused: true, enabled: true, shouldRun: false })
+
+    // It survives a reload, which is what makes it a hold rather than a session flag.
+    await page.reload()
+    await expect(page.getByTestId('replication-pause-note')).toContainText('source is being reindexed',
+      { timeout: 20_000 })
+
+    // Resuming opens the same popup, showing the note that is there — and clearing it is a choice
+    // somebody makes, not something that happens to them.
+    await page.getByTestId('paused-toggle').click()
+    await expect(page.getByTestId('pause-note-input')).toHaveValue('source is being reindexed')
+    await page.getByTestId('pause-note-clear').click()
+    await expect(page.getByTestId('pause-note-input')).toHaveValue('')
+    await page.getByTestId('pause-confirm').click()
+
+    await expect(page.getByTestId('replication-paused-notice')).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByTestId('paused-toggle')).toHaveAttribute('aria-pressed', 'false')
+    expect(await commits()).toBe(before)
+  })
+
+  test('40 - notes are Markdown on both the replication and the mapping, and both are tabs', async ({ page }) => {
+    // The bare /overview URL is the Notes tab: no path segment, so a link to a replication opens
+    // what it is for rather than a setting.
+    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await expect(page.getByTestId('overview-tab-notes')).toHaveClass(/active/, { timeout: 20_000 })
+    await expect(page.getByTestId('replication-notes-empty')).toBeVisible()
+
+    // Read by default, written on request — the common visit is somebody finding out what this is.
+    await page.getByTestId('replication-notes-edit-toggle').click()
+    await page.getByTestId('replication-notes-editor').fill(
+      '# Owner\n\nThe warehouse team. Do **not** reload during `month-end` close.')
+    await page.getByTestId('replication-notes-edit-toggle').click()
+
+    const rendered = page.getByTestId('replication-notes-rendered')
+    await expect(rendered.locator('strong')).toContainText('not')
+    await expect(rendered.locator('code')).toContainText('month-end')
+    await expect(rendered.locator('h3')).toContainText('Owner')
+
+    // Config, not state: it commits, and it comes back.
+    await page.getByTestId('save-settings-button').click()
+    await expect.poll(async () =>
+      (await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()).notes,
+      { timeout: 15_000 }).toContain('warehouse team')
+
+    await page.reload()
+    await expect(page.getByTestId('replication-notes-rendered')).toContainText('warehouse team',
+      { timeout: 20_000 })
+    await shot(page, '43-replication-notes.png')
+
+    // The mapping has its own, on the same terms, and its editor's Notes tab is its index too.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+    await expect(page.getByTestId('mapping-tab-notes')).toHaveClass(/active/, { timeout: 20_000 })
+    await page.getByTestId('mapping-notes-edit-toggle').click()
+    await page.getByTestId('mapping-notes-editor').fill('OrderDate is *local* time, not UTC.')
+    await page.getByTestId('save-mapping-button').click()
+
+    await expect.poll(async () =>
+      (await (await page.request.get(
+        `/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`)).json()).notes,
+      { timeout: 15_000 }).toContain('local')
+
+    // Every tab of the mapping editor is a real URL, and Notes is the one with no segment.
+    for (const [testId, path] of [
+      ['mapping-tab-columns', 'columns'],
+      ['mapping-tab-transforms', 'transforms'],
+      ['mapping-tab-segmenting', 'segmenting'],
+      ['mapping-tab-provisioning', 'provisioning'],
+    ] as const) {
+      await page.getByTestId(testId).click()
+      await expect(page).toHaveURL(new RegExp(`/mappings/${MAPPING_NAME}/${path}$`))
+    }
+    await page.getByTestId('mapping-tab-notes').click()
+    await expect(page).toHaveURL(new RegExp(`/mappings/${MAPPING_NAME}$`))
+    await expect(page.getByTestId('mapping-notes-rendered')).toContainText('OrderDate')
+    await shot(page, '44-mapping-tabs.png')
+  })
 })

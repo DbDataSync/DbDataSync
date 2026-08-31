@@ -638,3 +638,27 @@ select.select {
   padding: 9px 11px;
   white-space: pre-wrap;
 }
+
+/* ── Modal (see PauseDialog.tsx) ────────────────────────────────────────────── */
+/* Centred over the whole app rather than anchored to the control that opened it: the pause popup is
+   a decision with a consequence, and something you have to answer reads differently from something
+   that dropped out of a button. */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(28, 26, 23, .32);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.modal {
+  width: min(460px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--card-edge);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(28, 26, 23, .18);
+  max-height: 100%; overflow: auto;
+}
+
+/* The paused toggle wears the same shape as Enabled and a different colour, because they are
+   different questions — an operator glancing at the chrome has to be able to tell which of the two
+   is stopping this replication. */
+.toggle.held { background: var(--warn); border-color: var(--warn); }

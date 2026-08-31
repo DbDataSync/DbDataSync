@@ -232,6 +232,10 @@ export const api = {
       request<ReplicationStatus>(`/api/replications/${encodeURIComponent(name)}/status`),
     setEnabled: (name: string, enabled: boolean) =>
       put<ReplicationTaskConfig>(`/api/replications/${encodeURIComponent(name)}/enabled`, { enabled }),
+    // State, not config — this never commits. The note travels with every action, in both
+    // directions, because the popup asks every time.
+    setPaused: (name: string, paused: boolean, note: string | null) =>
+      put<ReplicationStatus>(`/api/replications/${encodeURIComponent(name)}/paused`, { paused, note }),
   },
   metrics: {
     get: (replicationName: string, window: MetricsWindow) =>
