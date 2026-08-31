@@ -29,17 +29,15 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **060** — task run and log pruning | |
-| 2 | **034** — PostgreSQL logical replication | |
-| 3 | **035** — config history diff and revert | |
-| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **034** — PostgreSQL logical replication | |
+| 2 | **035** — config history diff and revert | |
+| 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-30; 032, 033, 036, 037, 039–055 and 056–059 done and removed. 060 goes ahead of the three
-engine phases: it is work on machinery that already exists rather than a fourth engine mechanism to
-maintain. Behind them sit the three engine phases that have been waiting since
-distribution and auth moved above them — with 032 and 033 done there were three change-tracking
-mechanisms and no way for anyone outside this repo to install any of them, and nothing guarding the
-port. A phase moving up or down is an ordinary decision and only this table changes.
+Set 2026-08-31; 032, 033, 036, 037, 039–055 and 056–060 done and removed. What is left is the three
+engine phases that have been waiting since distribution and auth moved above them — with 032 and 033
+done there were three change-tracking mechanisms and no way for anyone outside this repo to install
+any of them, and nothing guarding the port. A phase moving up or down is an ordinary decision and only
+this table changes.
 
 ## What counts as a phase
 
