@@ -55,6 +55,12 @@ public static class ScriptSlots
     /// </summary>
     public const string VerificationQueryBuilder = "verificationQueryBuilder";
 
+    /// <summary>
+    /// Proposes how a table divides for a reload — see phase 58. Bound by **name**, from the
+    /// strategy that uses it, for the same reason <see cref="VerificationQueryBuilder"/> is.
+    /// </summary>
+    public const string SegmentingStrategy = "segmentingStrategy";
+
     /// <summary>C# that generates the SQL a lifecycle hook point runs — see phase 27. One slot for all
     /// four points: <see cref="ILifecycleHook.DeclarePoints"/> is how a binding says which ones it
     /// wants, not four separate bindings.</summary>
@@ -121,6 +127,9 @@ public static class ScriptSlots
         VerificationQueryBuilder => (
             "Verification query builder",
             "Generates the query a verification check runs, per side, from the table's own metadata. Selected by name from the check."),
+        SegmentingStrategy => (
+            "Segmenting strategy",
+            "Proposes how a table divides for a reload, and which of those segments should run. Selected by name from the strategy."),
         _ => (slot, ""),
     };
 
@@ -129,5 +138,6 @@ public static class ScriptSlots
     /// known but bound by name rather than through the hierarchy.</summary>
     public static bool IsKnown(string slot) =>
         slot == Hook || slot == SourceQueryBuilder || slot == VerificationQueryBuilder
+        || slot == SegmentingStrategy
         || All.Contains(slot, StringComparer.Ordinal);
 }

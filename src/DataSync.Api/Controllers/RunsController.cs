@@ -14,6 +14,7 @@ public sealed class RunsController(
     BackfillService backfillService,
     TaskRunStore taskRunStore,
     ResyncService resyncService,
+    SegmentingPreviewService segmentingPreview,
     LogWriter logWriter) : ControllerBase
 {
     [HttpPost("replications/{name}/runs")]
@@ -47,6 +48,28 @@ public sealed class RunsController(
             TriggerOutcome.Invalid => BadRequest(new { error = result.Reason }),
             _ => StatusCode(500, new { error = result.Reason }),
         };
+    }
+
+    /// <summary>
+    /// What a segmenting strategy proposes for this mapping, right now — the Backfill form's
+    /// checklist. Every candidate, selected or not: the operator is being shown a proposal to
+    /// disagree with, not told what will happen.
+    /// <para>
+    /// A GET, and safe to call on picking a strategy, because a DuckDB one opens nothing. The other
+    /// three do reach a real connection, which the form says out loud before offering them.
+    /// </para>
+    /// </summary>
+    [HttpGet("replications/{name}/mappings/{mappingName}/segmenting/{strategyName}/preview")]
+    public async Task<IActionResult> PreviewSegmenting(
+        string name, string mappingName, string strategyName, CancellationToken cancellationToken)
+    {
+        var result = await segmentingPreview.PreviewAsync(name, mappingName, strategyName, cancellationToken);
+        if (result.NotFound)
+            return NotFound(new { error = "Replication, table mapping or segmenting strategy not found." });
+
+        return result.Error is null
+            ? Ok(new { candidates = result.Candidates })
+            : BadRequest(new { error = result.Error });
     }
 
     [Authorize(Policies.Viewer)]

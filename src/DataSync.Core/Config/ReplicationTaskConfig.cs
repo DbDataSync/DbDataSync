@@ -51,4 +51,16 @@ public sealed class ReplicationTaskConfig
     /// ticked on forty mappings.
     /// </summary>
     public ProvisioningConfig Provisioning { get; set; } = new();
+
+    /// <summary>
+    /// Named ways of dividing a table for reload, referenced by name from any of this replication's
+    /// mappings — see phase 58 and <c>CustomSegment</c>.
+    /// <para>
+    /// At the replication rather than on each mapping because that is the scope at which one is worth
+    /// reusing: a set of tables replicated together usually segments by the same convention, and
+    /// "reload by calendar month" written once beats it written on forty mappings. A mapping still
+    /// chooses whether to use one.
+    /// </para>
+    /// </summary>
+    public List<SegmentingStrategyConfig> SegmentingStrategies { get; set; } = new();
 }

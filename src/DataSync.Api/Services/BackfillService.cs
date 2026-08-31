@@ -1,6 +1,7 @@
 using DataSync.Api.Models;
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
+using DataSync.Scripting;
 using DataSync.State;
 
 namespace DataSync.Api.Services;
@@ -18,7 +19,8 @@ public sealed class BackfillService(
     ConfigRepository configRepository,
     DriverConnectionFactory connections,
     WorkQueueStore workQueueStore,
-    ProcessSupervisor supervisor)
+    ProcessSupervisor supervisor,
+    CustomSegmentExpansion customSegments)
 {
     public async Task<TriggerResult> EnqueueAsync(
         string replicationName, string mappingName, BackfillRequest request, CancellationToken cancellationToken)
@@ -78,7 +80,9 @@ public sealed class BackfillService(
     private async Task<IReadOnlyList<BatchReloadSegment>> ExpandAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, BackfillRequest request, CancellationToken cancellationToken)
     {
-        if (!request.Segments.OfType<AutoSegment>().Any())
+        var needsAuto = request.Segments.OfType<AutoSegment>().Any();
+        var needsCustom = request.Segments.OfType<CustomSegment>().Any();
+        if (!needsAuto && !needsCustom)
             return request.Segments;
 
         var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
@@ -87,6 +91,26 @@ public sealed class BackfillService(
         var (connection, driver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);
         await using (connection)
         {
+            IReadOnlyList<BatchReloadSegment> segments = request.Segments;
+
+            if (needsCustom)
+            {
+                // The target only when something might read it — a strategy that segments from a
+                // control table needs the connection, and one that generates months from the calendar
+                // should not make anyone open one.
+                var target = EndpointResolution.ResolveTarget(task, mapping.Targets[0]);
+                var (targetConnection, _) = await connections.OpenAsync(target.ConnectionName, cancellationToken);
+                await using (targetConnection)
+                {
+                    segments = await customSegments.ExpandAsync(
+                        task, mapping, segments,
+                        new SegmentingConnections(connection, targetConnection), cancellationToken);
+                }
+            }
+
+            if (!segments.OfType<AutoSegment>().Any())
+                return segments;
+
             var reader = driver.Readers.FirstOrDefault(r => r.Kind == readerKind)
                 ?? throw new InvalidOperationException($"Source driver does not support reader kind '{readerKind}'.");
 
@@ -95,7 +119,7 @@ public sealed class BackfillService(
                     $"Reader '{readerKind}' cannot divide a column into buckets, so an Auto segment can't be used with " +
                     "it. Pick a reader that supports segmentation, or specify explicit list/range segments.");
 
-            return await expanding.ExpandAutoSegmentsAsync(connection, source, request.Segments, cancellationToken);
+            return await expanding.ExpandAutoSegmentsAsync(connection, source, segments, cancellationToken);
         }
     }
 }

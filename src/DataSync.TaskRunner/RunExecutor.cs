@@ -520,7 +520,9 @@ public sealed class RunExecutor(
                 task, sourceDriver, sourceConnection, source, targetDriver, targetConnection, target,
                 mapping, item.RunId, cancellationToken);
 
-            var segments = await ResolveSegmentsAsync(reader, sourceConnection, source, item, mapping, cancellationToken);
+            var segments = await ResolveSegmentsAsync(
+                reader, sourceConnection, targetConnection, source, item, task, mapping, sourceScriptDialect,
+                cancellationToken);
             if (segments.Count > 1)
                 Log(item.RunId, LogSeverity.Info, $"Processing {segments.Count} configured segment(s) in this pass.");
 
@@ -966,12 +968,15 @@ public sealed class RunExecutor(
     /// change, deliberately without a migration.
     /// </para>
     /// </summary>
-    private static async Task<IReadOnlyList<BatchReloadSegment?>> ResolveSegmentsAsync(
+    private async Task<IReadOnlyList<BatchReloadSegment?>> ResolveSegmentsAsync(
         IChangeReader reader,
         DbConnection sourceConnection,
+        DbConnection targetConnection,
         SourceTableRef source,
         WorkItem item,
+        ReplicationTaskConfig task,
         TableMappingConfig mapping,
+        IScriptDialect sourceDialect,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(item.SegmentJson))
@@ -982,6 +987,15 @@ public sealed class RunExecutor(
 
         IReadOnlyList<BatchReloadSegment> segments = mapping.DefaultSegmenting;
 
+        // Custom markers first, and every pass, because that is the whole point of one: a strategy
+        // flagging "the last three months" has to be re-evaluated against today, not against the day
+        // somebody configured it. Only its selected candidates run — an unattended pass takes what the
+        // strategy decided, not everything it could imagine.
+        segments = await CustomSegments.ExpandAsync(
+            task, mapping, segments,
+            new SegmentingConnections(sourceConnection, targetConnection, SourceColumnsOrNull: null, sourceDialect),
+            cancellationToken);
+
         // Auto segments are resolved against the source's actual value range, so they're expanded
         // here rather than at config-save time — the range moves as the table does.
         if (reader is ISegmentExpandingReader expanding)
@@ -989,6 +1003,10 @@ public sealed class RunExecutor(
 
         return [.. segments];
     }
+
+    /// <summary>Built from the script host this executor already has, rather than injected: a worker
+    /// that never meets a custom segment never runs anything through it.</summary>
+    private CustomSegmentExpansion CustomSegments => field ??= new(new SegmentingStrategyRunner(scriptHost));
 
     /// <summary>Injects the work item's segment into a per-iteration copy of one role's options under
     /// the well-known key. All three roles get it: the reader needs it to scope what it reads, and a

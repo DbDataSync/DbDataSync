@@ -133,7 +133,10 @@ public static class DataSyncHost
         builder.Services.AddSingleton<PreviewService>();
         builder.Services.AddSingleton<ScriptTestService>();
         builder.Services.AddSingleton<ProcessSupervisor>();
+        builder.Services.AddSingleton<SegmentingStrategyRunner>();
+        builder.Services.AddSingleton<CustomSegmentExpansion>();
         builder.Services.AddSingleton<BackfillService>();
+        builder.Services.AddSingleton<SegmentingPreviewService>();
         builder.Services.AddSingleton<ResyncService>();
         builder.Services.AddHostedService<SchedulerService>();
         builder.Services.AddHostedService<RunMonitorService>();
