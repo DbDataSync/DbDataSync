@@ -102,6 +102,8 @@ export interface ReplicationTaskConfig {
    * because a set of tables replicated together usually segments the same way.
    */
   segmentingStrategies?: SegmentingStrategyConfig[]
+  /** Markdown, git-tracked. What the next person needs to know about this replication. */
+  notes?: string | null
 }
 
 /** One side of a table mapping as configured: null connection/database inherit the replication's
@@ -190,6 +192,11 @@ export interface TableMappingConfig {
   verification?: VerificationCheckConfig[]
   /** How this table divides for a reload. Empty means Full — the whole table, unsegmented. */
   defaultSegmenting?: BatchReloadSegment[]
+  /** Records how long each stage of a pass took, onto the run itself. Off means not measured at all. */
+  traceTiming?: boolean
+  /** Markdown, git-tracked. Not inherited from the replication — a note that applied to every mapping
+   * would be a note about the replication, and that field exists too. */
+  notes?: string | null
 }
 
 export interface TableMetadata {
@@ -485,6 +492,15 @@ export interface ReplicationStatus {
   memoryBytes: number | null
   cpuMilliseconds: number | null
   startedAtUtc: string | null
+  /** Whether the scheduler may enqueue anything: enabled and not paused. The server's answer rather
+   * than the rule, so the two gates are defined in one place — see TaskScheduling.ShouldRun. */
+  shouldRun: boolean
+  /** Config's durable intent, git-tracked. */
+  enabled: boolean
+  /** State's temporary hold. Never committed. */
+  paused: boolean
+  /** Why it is held, when whoever held it said. Null when not paused, and when they cleared it. */
+  pauseNote: string | null
 }
 
 export interface ScriptDiagnostic {

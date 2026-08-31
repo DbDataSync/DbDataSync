@@ -9,6 +9,9 @@ import { ScriptEditPage } from './pages/ScriptEditPage'
 import { ScriptsPage } from './pages/ScriptsPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
+import {
+  CustomTransformsTab, OverviewNotesTab, PipelineTab, TargetProvisioningTab,
+} from './pages/replication-detail/OverviewPanel'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
 import { MappingsOverview } from './pages/replication-detail/MappingsOverview'
 import { MappingPreview } from './pages/replication-detail/MappingPreview'
@@ -49,7 +52,14 @@ export default function App() {
         {/* Overview is the landing tab, so a bare /replications/:name is that rather than a blank
             frame. `replace`, so Back leaves the replication instead of bouncing off the redirect. */}
         <Route index element={<Navigate to="overview" replace />} />
-        <Route path="overview" element={<OverviewTab />} />
+        {/* Overview's own tabs. Notes is the index — no segment — so /overview lands on what the
+            replication is *for* rather than on a setting somebody has to pick. */}
+        <Route path="overview" element={<OverviewTab />}>
+          <Route index element={<OverviewNotesTab />} />
+          <Route path="pipeline" element={<PipelineTab />} />
+          <Route path="provisioning" element={<TargetProvisioningTab />} />
+          <Route path="transforms" element={<CustomTransformsTab />} />
+        </Route>
         <Route path="mappings" element={<MappingsTab />}>
           <Route index element={<MappingsIndex />} />
           {/* The section's landing page for "which of these tables are mapped", beside the

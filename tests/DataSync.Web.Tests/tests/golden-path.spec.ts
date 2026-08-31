@@ -106,13 +106,17 @@ test.describe.serial('golden path: define, configure, and run a replication end-
 
   test('04b - the Overview leads with what a replication is, not with an advanced customisation', async ({ page }) => {
     // Phase 23 put the scripts card first because it was the new thing, which is the oldest reason to
-    // get an ordering wrong. Endpoints are what a replication *is*.
+    // get an ordering wrong. Endpoints are what a replication *is*, and they stay above the tabs
+    // (phase 64) because every tab below is about what happens between those two endpoints.
     await page.goto(`/replications/${REPLICATION_NAME}/overview`)
-    // The endpoints pair is the first thing in the pane; the scripts card is below the pipeline.
-    // (The Status/Schedule rail is chrome now, outside the pane — see phase 46.)
     await expect(page.locator('.pane .card').first()).toHaveAttribute('data-side', 'source', { timeout: 15_000 })
 
+    // Notes is the index tab: the bare /overview URL opens what the replication is for.
+    await expect(page.getByTestId('replication-notes-card')).toBeVisible()
+    await expect(page.getByTestId('overview-tab-notes')).toHaveClass(/active/)
+
     // And the scripts card is one line until it has something to say.
+    await page.getByTestId('overview-tab-transforms').click()
     await expect(page.getByTestId('script-bindings-toggle')).toContainText('Custom transforms and providers')
     await expect(page.getByTestId('script-binding-rowTransform')).toBeHidden()
     await page.getByTestId('script-bindings-toggle').click()
@@ -261,6 +265,7 @@ test.describe.serial('golden path: define, configure, and run a replication end-
   test('11 - settings expose live driver capabilities and per-stage options', async ({ page }) => {
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('tab-overview').click()
+    await page.getByTestId('overview-tab-pipeline').click()
 
     // Offered because the registered driver advertises them, not because they are compiled into the
     // SPA — the reload reader and reconciling writers did not exist when this picker was written.
@@ -559,7 +564,7 @@ public sealed class DropGadgets : IRowTransform
     await expect(page.getByTestId('scripts-table')).toContainText(SCRIPT, { timeout: 15_000 })
 
     // Bound on the replication this time — the middle level, inherited by every mapping under it.
-    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await page.goto(`/replications/${REPLICATION_NAME}/overview/transforms`)
     await expect(page.getByTestId('script-bindings-card')).toBeVisible({ timeout: 15_000 })
     await page.getByTestId('script-bindings-toggle').click()
     await page.getByTestId('script-binding-rowTransform').selectOption(SCRIPT)
@@ -728,7 +733,7 @@ public sealed class DropGadgets : IRowTransform
     // running a pass and reading the log.
     // Reachable from the pipeline card too, which is where the question "what will this actually
     // run" occurs to someone reading which reader and writer are configured.
-    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await page.goto(`/replications/${REPLICATION_NAME}/overview/pipeline`)
     await expect(page.getByTestId('preview-from-pipeline-link')).toBeVisible({ timeout: 15_000 })
 
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
@@ -1062,12 +1067,21 @@ public sealed class Shout : IValueColumnExpression
     // The draft used to live in the Overview panel, which unmounts the moment you click Runs — so a
     // half-finished edit was lost by looking at something else. It is held in the chrome now.
     await page.getByTestId('tab-overview').click()
+    await page.getByTestId('overview-tab-pipeline').click()
     await page.getByTestId('stage-reader').click()
     await page.getByTestId('reader-options-snapshotIsolation').click()
     await expect(page.getByTestId('reader-options-snapshotIsolation')).toHaveAttribute('aria-pressed', 'true')
 
     await page.getByTestId('tab-runs').click()
     await page.getByTestId('tab-overview').click()
+    await page.getByTestId('overview-tab-pipeline').click()
+    await page.getByTestId('stage-reader').click()
+    await expect(page.getByTestId('reader-options-snapshotIsolation')).toHaveAttribute('aria-pressed', 'true')
+
+    // And across the Overview's own tabs, which are routes of their own (phase 64) — the draft is
+    // the layout route's, so moving between them must not reset it either.
+    await page.getByTestId('overview-tab-notes').click()
+    await page.getByTestId('overview-tab-pipeline').click()
     await page.getByTestId('stage-reader').click()
     await expect(page.getByTestId('reader-options-snapshotIsolation')).toHaveAttribute('aria-pressed', 'true')
 
@@ -1189,7 +1203,7 @@ public sealed class Shout : IValueColumnExpression
 
   test('28 - provisioning is set once on the replication and overridden per mapping', async ({ page }) => {
     // One answer in one place beats the same checkbox ticked on forty mappings.
-    await page.goto(`/replications/${REPLICATION_NAME}/overview`)
+    await page.goto(`/replications/${REPLICATION_NAME}/overview/provisioning`)
     const replicationCreate = page.getByTestId('task-provisioning-create')
     await expect(replicationCreate).toBeVisible({ timeout: 15_000 })
 
