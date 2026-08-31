@@ -1078,9 +1078,9 @@ public sealed class Shout : IValueColumnExpression
     // and leaves after its idle timeout, so both are ordinary and neither should read as a fault.
     // Asserted as "says which, and explains it" rather than pinned to one, because which one it is
     // depends on whether this replication happens to be inside its idle window right now.
-    await expect(page.getByTestId('replication-status-state')).toContainText(/^(not )?running$/)
+    await expect(page.getByTestId('replication-status-state')).toContainText(/^(Running|Idle)$/)
     await expect(page.getByTestId('replication-status-card')).toContainText(
-      await page.getByTestId('replication-status-state').textContent() === 'running'
+      await page.getByTestId('replication-status-state').textContent() === 'Running'
         ? 'PID'
         : 'not a broken one')
 

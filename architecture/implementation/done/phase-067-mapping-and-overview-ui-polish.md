@@ -60,3 +60,28 @@ priority) and each item is independently shippable/committable.
 ## Open questions
 
 None — the plan doc is fully specified with file:line references for every item.
+
+---
+
+# Outcome
+
+All seven items built, in three commits (labels/collapse, then the two controls plus the card order,
+then the shared heading). Three judgment calls the plan doc left open:
+
+1. **The heading on Preview SQL and Verify is disabled, not merely reused.** The plan asked for the
+   editor's own `EndpointSidePair`/`MappingSide`/`SourceFilterCard` and explicitly no read-only
+   variant — but those components are pickers, and rendering live pickers whose edits go nowhere on a
+   screen about the mapping *as saved* invites somebody to change a connection and believe they did.
+   They are rendered unchanged inside a disabled `<fieldset>` in the new `SavedMappingHeading`: same
+   components, no second presentation to keep true, and visibly not an editor. `SourceFilterCard` moved
+   out of `TableMappingForm.tsx` into its own file so both callers can reach it.
+2. **The status indicator's third and fourth icons are `DisabledIcon` (circle-slash) and `PulseIcon`
+   (shared by Running and Idle).** The plan settled the states, the priority order and the colours but
+   named only `PauseIcon`; these two follow the same stroke-SVG convention.
+3. **The pause control keeps `data-testid="paused-toggle"` and `aria-pressed`** even though it is a
+   button now rather than a switch — it is still a toggle button in the ARIA sense, and the name is
+   what the Playwright suite reaches for.
+
+Two pieces of now-dead scenery went with the changes: `.toggle.held` in `index.css` (nothing wears it
+since the pause switch became a button) and `script-bindings-toggle`, whose Playwright assertions were
+rewritten to expect the slots rendered immediately rather than after a click.

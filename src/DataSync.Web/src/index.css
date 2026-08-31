@@ -658,11 +658,6 @@ select.select {
   max-height: 100%; overflow: auto;
 }
 
-/* The paused toggle wears the same shape as Enabled and a different colour, because they are
-   different questions — an operator glancing at the chrome has to be able to tell which of the two
-   is stopping this replication. */
-.toggle.held { background: var(--warn); border-color: var(--warn); }
-
 /* ── Run timing detail (see RunsPanel.tsx) ──────────────────────────────────── */
 /* Opens beneath a traced run's row. Deliberately not part of the grid: it spans the whole width
    rather than participating in the table's column tracks, which is what keeps an untraced row —
