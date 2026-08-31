@@ -57,6 +57,50 @@ export function DatabaseIcon() {
   )
 }
 
+/**
+ * Pause — the media control, on the button that pauses and on the status indicator that reports it.
+ * One glyph for both, so pausing something and then seeing it read as paused look like one idea.
+ */
+export function PauseIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...stroke} strokeLinecap="round">
+      <path d="M6 3.5v9" />
+      <path d="M10 3.5v9" />
+    </svg>
+  )
+}
+
+/** Resume — the other half of the media pair. Stroked rather than filled, to match everything else. */
+export function PlayIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...stroke} strokeLinejoin="round">
+      <path d="M5.5 3.4 12.4 8l-6.9 4.6z" />
+    </svg>
+  )
+}
+
+/** Disabled — the circle-slash. Not "off right now", but "turned off". */
+export function DisabledIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...stroke}>
+      <circle cx="8" cy="8" r="5.3" />
+      <path d="M4.3 4.3l7.4 7.4" />
+    </svg>
+  )
+}
+
+/**
+ * Running and Idle both. A pulse line says "this is a live process" without claiming it is busy —
+ * the label, and the colour, are what separate a worker mid-pass from one waiting between passes.
+ */
+export function PulseIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...stroke} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 8h3l2-4 2.6 8L11.4 8h3.1" />
+    </svg>
+  )
+}
+
 /** Scripts — angle brackets around a slash, the universal shorthand for code. */
 export function CodeIcon() {
   return (

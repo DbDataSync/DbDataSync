@@ -20,12 +20,12 @@ const WINDOWS: { id: MetricsWindow; label: string }[] = [
  * hundreds dominates every total it is added to, so it is a different question and gets a different
  * answer. The endpoint takes the kind; this card asks the one an operator means by "is it working".
  */
-export function MetricsCard({ replicationName }: { replicationName: string }) {
+export function MetricsCard({ replicationName, enabled }: { replicationName: string; enabled: boolean }) {
   const [window, setWindow] = useState<MetricsWindow>('24h')
   const { data, isLoading } = useRunMetrics(replicationName, window)
 
   return (
-    <div className="card" data-testid="metrics-card">
+    <div className={`card ${enabled ? 'enabled' : 'disabled'}`} data-testid="metrics-card">
       <div className="card-head">
         <span className="card-title">Last {window}</span>
         <span className="spacer row" style={{ gap: 4 }}>

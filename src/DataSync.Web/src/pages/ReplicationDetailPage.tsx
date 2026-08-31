@@ -12,6 +12,7 @@ import {
   useSetReplicationPaused, useUpsertReplication,
 } from '../api/hooks'
 import { PauseDialog } from '../components/PauseDialog'
+import { PauseIcon, PlayIcon } from '../components/icons'
 import type { ReplicationTaskConfig } from '../api/types'
 import type { RunsCommand } from './replication-detail/RunsPanel'
 
@@ -111,8 +112,9 @@ export function ReplicationDetailPage() {
             {/* Enabled sits in the chrome rather than on the Schedule card, and commits on its own.
                 Two controls that save differently should not sit next to each other looking alike. */}
             <span className="row" style={{ gap: 7, marginRight: 4 }}>
-              {/* Two toggles side by side would read as redundant without saying how they differ,
-                  so each says it. Enabled is a commit; Paused never touches the repo. */}
+              {/* Enabled and the pause control sit next to each other and differ in what they cost,
+                  so each says so in its own title. Enabled is a commit; a pause never touches the
+                  repo. */}
               <button
                 type="button"
                 className={`toggle ${enabled ? 'on' : ''}`}
@@ -127,22 +129,25 @@ export function ReplicationDetailPage() {
               </span>
             </span>
 
-            <span className="row" style={{ gap: 7, marginRight: 4 }}>
-              {/* Clicking it opens the popup rather than acting: the note is edited on every pause
-                  *and* every resume, and nothing about it is decided automatically. */}
-              <button
-                type="button"
-                className={`toggle ${paused ? 'held' : ''}`}
-                onClick={() => setPauseDialog(paused ? 'resume' : 'pause')}
-                aria-pressed={paused}
-                disabled={setPaused.isPending || !status}
-                title="A temporary hold. Stored in the state database, never committed — nothing new is scheduled while it is on, and a pass already running finishes normally."
-                data-testid="paused-toggle"
-              />
-              <span style={{ font: '500 11.5px var(--ui)', color: 'var(--ink-4)' }}>
-                {paused ? 'Paused' : 'Not paused'}
-              </span>
-            </span>
+            {/* A media control rather than a switch like Enabled beside it: this is an action
+                available now, not a durable setting, and the glyph shows what clicking *does* —
+                pause when it is running, play when it is held.
+
+                Clicking it opens the popup rather than acting: the note is edited on every pause
+                *and* every resume, and nothing about it is decided automatically. */}
+            <button
+              type="button"
+              className="btn btn-chrome"
+              style={{ marginRight: 4 }}
+              onClick={() => setPauseDialog(paused ? 'resume' : 'pause')}
+              aria-pressed={paused}
+              disabled={setPaused.isPending || !status}
+              title="A temporary hold. Stored in the state database, never committed — nothing new is scheduled while it is on, and a pass already running finishes normally."
+              data-testid="paused-toggle"
+            >
+              {paused ? <PlayIcon /> : <PauseIcon />}
+              {paused ? 'Resume' : 'Pause'}
+            </button>
 
             {/* The design puts the run controls in the chrome, reachable from any tab — clicking
                 either moves to Runs so the result is visible where it lands.
@@ -206,8 +211,8 @@ export function ReplicationDetailPage() {
         <div className="detail-rail">
           <ErrorBanner error={error ?? upsert.error ?? setEnabled.error} />
           <StatusCard replicationName={name} enabled={enabled} />
-          <MetricsCard replicationName={name} />
           {draft && <ScheduleCard draft={draft} enabled={enabled} onChange={setDraft} />}
+          <MetricsCard replicationName={name} enabled={enabled} />
         </div>
       </div>
 

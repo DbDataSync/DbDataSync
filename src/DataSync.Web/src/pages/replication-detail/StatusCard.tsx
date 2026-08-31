@@ -1,9 +1,11 @@
 import { useReplicationStatus } from '../../api/hooks'
+import { DisabledIcon, PauseIcon, PulseIcon } from '../../components/icons'
+import type { ReplicationStatus } from '../../api/types'
 
 /**
  * What this replication's worker process is doing, right now.
  *
- * **"Not running" is a normal state, and the card says so.** A continuous worker stays up between
+ * **"Idle" is a normal state, and the card says so.** A continuous worker stays up between
  * passes and leaves once it has gone its idle timeout without finding a single changed row — so a
  * replication under load is running, and one that has been quiet for a minute is not. Left
  * unexplained, an idle healthy replication reads as a broken one, and this card would teach an
@@ -19,8 +21,7 @@ export function StatusCard({ replicationName, enabled }: { replicationName: stri
       <div className="card-head">
         <span className="card-title">Replication status</span>
         <span className="status spacer" data-testid="replication-status-state">
-          <span className={`dot ${status?.running ? 'dot-ok' : 'dot-idle'}`} />
-          {status === undefined ? '…' : status.running ? 'running' : 'not running'}
+          {status === undefined ? '…' : <StateIndicator enabled={enabled} status={status} />}
         </span>
       </div>
 
@@ -53,6 +54,32 @@ export function StatusCard({ replicationName, enabled }: { replicationName: stri
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * One indicator, four states, three icons.
+ *
+ * The order matters: a disabled replication can also be paused, and disabled is the more fundamental
+ * fact — a hold on something that was never going to run anyway is not the thing to report. Running
+ * and Idle share the pulse glyph and differ only in colour and word, because they are the same
+ * healthy process seen at two moments; Disabled and Paused are genuinely other situations and look it.
+ *
+ * Before this, all four read as "not running" — a broken-looking sentence for three states that are
+ * nothing like each other.
+ */
+function StateIndicator({ enabled, status }: { enabled: boolean; status: ReplicationStatus }) {
+  const { icon, color, label } =
+    !enabled ? { icon: <DisabledIcon />, color: 'var(--bad)', label: 'Disabled' }
+    : status.paused ? { icon: <PauseIcon />, color: 'var(--warn)', label: 'Paused' }
+    : status.running ? { icon: <PulseIcon />, color: 'var(--ok)', label: 'Running' }
+    : { icon: <PulseIcon />, color: 'var(--idle)', label: 'Idle' }
+
+  return (
+    <>
+      <span style={{ color, display: 'inline-flex' }} aria-hidden="true">{icon}</span>
+      {label}
+    </>
   )
 }
 
