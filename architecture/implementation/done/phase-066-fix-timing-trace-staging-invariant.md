@@ -96,3 +96,16 @@ actually true.
 
 None — (A) is settled. Ready to implement: remove the assertion and its comment at
 `RunExecutorIntegrationTests.cs:420-424`, leaving the four presence/sanity checks above it in place.
+
+---
+
+# Outcome
+
+Done, as planned: option (A). The cross-metric `StagingDurationMs >= ReaderLifetimeMs - 5` assertion and
+its comment are gone from `RunExecutorIntegrationTests.WithTheTraceOption_ARunRecordsEveryStage`; a short
+comment in their place records *why* nothing is asserted between those two clocks, so the next reader
+doesn't re-add it. The four presence checks and the `ReaderTimeToFirstRowMs <= ReaderLifetimeMs` check
+(both sides from one clock) stayed.
+
+No production code changed — `RunExecutor.cs`'s two clocks still start where phase 59/62 put them, which
+is the right place for each measurement on its own; the bug was only in the test claiming they nest.

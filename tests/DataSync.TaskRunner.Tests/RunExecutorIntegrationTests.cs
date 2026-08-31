@@ -417,11 +417,9 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.True(timing.ReaderTimeToFirstRowMs <= timing.ReaderLifetimeMs,
             $"first row at {timing.ReaderTimeToFirstRowMs}ms, lifetime {timing.ReaderLifetimeMs}ms");
 
-        // Today's staging provider consumes the reader as rows arrive, so its call spans the read and
-        // then some. A file-based provider doing work after the stream is exhausted would widen this
-        // gap, which is exactly what the wrapped-call measurement is there to capture.
-        Assert.True(timing.StagingDurationMs >= timing.ReaderLifetimeMs - 5,
-            $"staging {timing.StagingDurationMs}ms was shorter than the read it consumes ({timing.ReaderLifetimeMs}ms)");
+        // Nothing is asserted between the staging clock and the reader's: they start at different
+        // reference points (the reader's before ReadChangesAsync is called, staging's only after it has
+        // returned), so neither span nests inside the other. See phase 66.
     }
 
     [Fact]
