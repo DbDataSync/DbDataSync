@@ -1,10 +1,18 @@
 # Phase 81 — an admin screen for datasync.config.yaml
 
 **Status**: Planned, not started. Depends on phase 79 (`datasync.config.yaml` itself, the secret-store
-convention, and the resolver) landing first — this phase is the SPA/API surface on top of it.
+convention, and the resolver), which has landed — see `architecture/implementation/done/phase-079-standardized-config-file.md`.
 **Plan reference**: none upstream in `architecture/planning/` — resolved directly through clarifying
 questions in conversation on 2026-09-01, recorded here rather than in a separate planning doc since there
 was no unresolved rough thought preceding it.
+
+**Carried over from phase 79's retrospective**: `GitCommitService.GetHistory` filters by a relative path
+*prefix* (e.g. `config/replications/<name>`), and `datasync.config.yaml` sits one level above `config/`
+— it's git-tracked and diffable at the command line, but does **not** currently surface in the Config
+History UI's `config/`-scoped queries. Whether this screen needs its own history/diff view for the file
+(reusing `GitCommitService.GetHistory` with `datasync.config.yaml` as the path), or whether that's better
+left to widening phase 35's scope separately, is this phase's call to make — not assumed here, but not to
+be silently skipped either now that it's known.
 
 ## What this phase will build
 

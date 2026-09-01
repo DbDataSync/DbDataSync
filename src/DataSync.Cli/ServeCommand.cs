@@ -1,4 +1,7 @@
 using DataSync.Api;
+using DataSync.Api.Auth;
+using DataSync.Core.Config;
+using DataSync.Core.Git;
 using LibGit2Sharp;
 
 namespace DataSync.Cli;
@@ -14,9 +17,16 @@ public static class ServeCommand
 {
     public static async Task<int> RunAsync(string[] args)
     {
-        var root = CliOptions.Read(args, "--repo") ?? CliOptions.DefaultRoot;
+        var root = DataSyncRoot.Resolve(args);
         var stateDb = CliOptions.Read(args, "--state-db") ?? Path.Combine(root, "state.db");
-        var url = CliOptions.Read(args, "--url") ?? "http://localhost:5080";
+        // --url / DataSync__Url still override the file, exactly like every other DataSync:* key
+        // (see DataSyncHost.InsertConfigFile) — the file is read here, rather than through
+        // DataSyncHost.Build's own configuration chain, because the translation to --urls, below, has
+        // to happen before that chain exists.
+        var url = CliOptions.Read(args, "--url")
+            ?? Environment.GetEnvironmentVariable("DataSync__Url")
+            ?? DataSyncConfigFile.Read(root).GetValueOrDefault("DataSync:Url")
+            ?? "http://localhost:5080";
 
         try
         {
@@ -55,13 +65,27 @@ public static class ServeCommand
     /// every write commits — and a first run that fails on "not a repository" is a first run that
     /// fails for a reason nobody installed a tool expecting.
     /// </para>
+    /// <para>
+    /// A genuinely fresh root also gets a starter <c>datasync.config.yaml</c>, committed the same way
+    /// every other config write is — never a repo root that already existed before this run, so
+    /// re-running <c>serve</c> against a real deployment can never overwrite an operator's own edits,
+    /// or their decision to delete the file and configure entirely by flag/environment variable.
+    /// </para>
     /// </summary>
-    private static void Prepare(string root)
+    internal static void Prepare(string root)
     {
         Directory.CreateDirectory(Path.Combine(root, "config"));
 
-        if (!Repository.IsValid(root))
+        var isFreshRepo = !Repository.IsValid(root);
+        if (isFreshRepo)
             Repository.Init(root);
+
+        if (isFreshRepo)
+        {
+            DataSyncConfigFile.WriteStarter(root);
+            new GitCommitService(root).CommitChanges(
+                [DataSyncConfigFile.PathIn(root)], "Add starter datasync.config.yaml", CurrentUser.SystemAuthor);
+        }
     }
 
     /// <summary>Arguments this command consumes itself, which the host would otherwise see as its

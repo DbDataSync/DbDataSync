@@ -73,8 +73,14 @@ public static class ConfigValidation
     /// committed, pushed and visible in the Version Control tab forever — which is the whole reason
     /// <see cref="ConnectionConfig.CredentialSecretRef"/> exists. The driver splices the resolved
     /// credential in at connect time instead.
+    /// <para>
+    /// Internal rather than private since phase 79: <c>DataSyncConfigFile</c>'s writer calls this on
+    /// <c>StateConnectionString</c> too, one detector shared rather than a second copy free to drift
+    /// from the first — <c>connectionName</c> doubles as whatever value's name is being checked (a
+    /// connection, or a <c>DataSync:*</c> key).
+    /// </para>
     /// </summary>
-    private static void RejectEmbeddedCredential(string connectionString, string connectionName)
+    internal static void RejectEmbeddedCredential(string connectionString, string connectionName)
     {
         foreach (var segment in connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries))
         {

@@ -27,21 +27,24 @@ public sealed class StateOwnershipTests
             .Order()
             .ToList();
 
-        // The API's composition root, and one named exception.
+        // Phase 79 centralized this further: DataSyncHost.cs and InviteCommand.cs used to construct a
+        // StateDatabase directly (the API's composition root, and one named exception — see below for
+        // why InviteCommand gets one), and now both go through StateDatabase.FromOptions instead, so
+        // there is exactly one legitimate construction site rather than two.
         //
         // The rule exists because *runner processes* are spawned constantly and concurrently, and many
         // writers against one SQLite file is what phase 39 was fixing; they reach state over loopback
         // instead. `datasync invite` is a different risk profile: an operator runs it once, by hand,
         // in the situation where nobody can sign in — which is precisely when an endpoint that needs a
         // session is no help. One occasional writer alongside the API is what SQLite's busy_timeout
-        // and SqliteRetry already handle everywhere else in this codebase.
+        // and SqliteRetry already handle everywhere else in this codebase. FromOptions is what both of
+        // them call now, so the invariant holds without either of them needing an exception of its own.
         //
         // Listed by name rather than by relaxing the rule, so the next file that wants an exception
         // has to argue for it here.
         Assert.Equal(
             [
-                Path.Combine("src", "DataSync.Api", "DataSyncHost.cs"),
-                Path.Combine("src", "DataSync.Cli", "InviteCommand.cs"),
+                Path.Combine("src", "DataSync.State", "StateDatabase.Factory.cs"),
             ],
             offenders);
     }

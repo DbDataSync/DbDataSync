@@ -9,6 +9,16 @@ public static class SecretRefs
     public static string ForConnection(string connectionName) => $"datasync:connection:{connectionName}";
 
     /// <summary>
+    /// The secret ref for a <c>DataSync:*</c> app setting that must never be written into
+    /// <c>datasync.config.yaml</c> itself — <c>StateConnectionString</c>'s password, so far, the only
+    /// one. Fixed and non-overridable: unlike <see cref="ForConnection"/>, this is not a name an
+    /// operator chooses per connection, it is the one ref phase 79's starter file documents, so there
+    /// is exactly one thing to remember and exactly one command that sets it
+    /// (<c>datasync secret set datasync:config:&lt;key&gt; "..."</c>).
+    /// </summary>
+    public static string ForAppSetting(string key) => $"datasync:config:{key}";
+
+    /// <summary>
     /// The environment variable SecretStore falls back to when no OS keyring is available — the
     /// ref uppercased with every non-alphanumeric character replaced, under
     /// <c>CLRKERNEL_SECRET_</c>. Defined here rather than restated per caller because it is the value

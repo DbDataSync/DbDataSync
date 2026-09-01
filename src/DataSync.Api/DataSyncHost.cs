@@ -15,7 +15,8 @@ using DataSync.Drivers.MsSql;
 using DataSync.Scripting;
 using DataSync.Drivers.Postgres;
 using DataSync.State;
-
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
+using Microsoft.Extensions.Configuration.Memory;
 
 namespace DataSync.Api;
 
@@ -33,6 +34,7 @@ public static class DataSyncHost
     public static WebApplication Build(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+        InsertConfigFile(builder);
 
         // Applied only when this process really is a service, so `datasync serve` in a terminal is
         // unaffected — UseWindowsService changes lifetime and logging, and doing that to an
@@ -85,17 +87,9 @@ public static class DataSyncHost
         builder.Services.AddSingleton(sp =>
         {
             var options = sp.GetRequiredService<ApiOptions>();
-            // SQLite keeps its own constructor and its own setting, so a deployment that has never
-            // heard of phase 63 reaches exactly the code it always did.
-            if (options.StateEngine == StateEngine.Sqlite)
-                return new StateDatabase(options.StateDbPath);
-
-            return new StateDatabase(
-                options.StateEngine,
-                options.StateConnectionString
-                    ?? throw new InvalidOperationException(
-                        $"DataSync:StateEngine is '{options.StateEngine}', which needs " +
-                        "DataSync:StateConnectionString. Only SQLite is configured by path."));
+            return StateDatabase.FromOptions(
+                options.StateEngine, options.StateDbPath, options.StateConnectionString,
+                sp.GetRequiredService<SecretStore>());
         });
         builder.Services.AddSingleton(sp => new TaskRunStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunMetricsStore(sp.GetRequiredService<StateDatabase>()));
@@ -249,5 +243,55 @@ public static class DataSyncHost
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// Wires <c>datasync.config.yaml</c> in as an <see cref="IConfigurationSource"/> at the same
+    /// precedence slot <c>appsettings.json</c> occupies — ahead of environment variables and the
+    /// command line, both of which must still be able to override a file value for a one-off run.
+    /// <para>
+    /// **Inserted, not appended.** <c>builder.Configuration.Sources</c> already holds
+    /// appsettings/appsettings.&lt;env&gt;/environment-variables/command-line, in that order, by the
+    /// time <see cref="WebApplication.CreateBuilder(string[])"/> returns — later sources win ties. A
+    /// plain <c>builder.Configuration.AddXyz(...)</c> call here would append this source *last*,
+    /// making it win over an env var or CLI flag, which is backwards: the whole point of the file is
+    /// to hold a default that a one-off <c>--DataSync:Url</c> or <c>DataSync__Url</c> can still
+    /// override. Finding the first <see cref="EnvironmentVariablesConfigurationSource"/> and inserting
+    /// there reproduces appsettings.json's own slot instead.
+    /// </para>
+    /// <para>
+    /// The repo root is read straight off <c>builder.Configuration</c> rather than through
+    /// <see cref="Configuration.ApiOptions"/> — <c>ApiOptions</c> isn't resolvable yet (it comes from
+    /// DI, built later in this method), and by the time <c>CreateBuilder(args)</c> has returned, the
+    /// command-line and environment sources it already added are enough to answer "which repo root" on
+    /// their own. The default mirrors <c>ApiOptions.FromConfiguration</c>'s exactly, so this looks in
+    /// the same place that class will end up saying <c>RepoRoot</c> is.
+    /// </para>
+    /// </summary>
+    private static void InsertConfigFile(WebApplicationBuilder builder)
+    {
+        var repoRoot = builder.Configuration["DataSync:RepoRoot"]
+            ?? Path.Combine(Directory.GetCurrentDirectory(), "datasync-repo");
+
+        if (!File.Exists(DataSyncConfigFile.PathIn(repoRoot)))
+            return;
+
+        var source = new MemoryConfigurationSource { InitialData = DataSyncConfigFile.Read(repoRoot) };
+
+        var sources = builder.Configuration.Sources;
+        var envIndex = -1;
+        for (var i = 0; i < sources.Count; i++)
+        {
+            if (sources[i] is EnvironmentVariablesConfigurationSource)
+            {
+                envIndex = i;
+                break;
+            }
+        }
+
+        if (envIndex < 0)
+            sources.Add(source); // No environment source was registered (unusual host setup) — append.
+        else
+            sources.Insert(envIndex, source);
     }
 }

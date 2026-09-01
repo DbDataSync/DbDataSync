@@ -15,6 +15,7 @@ return command switch
     "service" => ServiceCommand.Run(rest),
     "health" => await HealthCommand.RunAsync(rest),
     "invite" => InviteCommand.Run(rest),
+    "secret" => SecretCommand.Run(rest),
     "version" => Version(),
     _ => Unknown(command),
 };

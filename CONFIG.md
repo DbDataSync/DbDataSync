@@ -36,19 +36,62 @@ The SPA's dev-server proxy (`DATASYNC_API_URL`, below) defaults to `5183` — i.
 Parsing is a simple `--flag value` scan (`CliOptions.Read`/`Has`) — no positional magic, no `=`
 syntax. Run `datasync --help` or any subcommand's `--help` for the same text.
 
+### Repo root resolution (`serve`, `invite`, `health`)
+
+These three commands resolve their repo root the same way, via a shared resolver
+(`DataSyncRoot.Resolve`, phase 79):
+
+1. An explicit `--repo <path>` wins outright.
+2. Otherwise, walk upward from the current directory — the same shape `git` itself uses to find
+   `.git` — looking for `datasync.config.yaml` at each parent in turn.
+3. Otherwise, fall back to `%LOCALAPPDATA%\DataSync` (Windows) / the OS-equivalent local-app-data
+   dir (`CliOptions.DefaultRoot`), unchanged from before this walk-up existed.
+
+`datasync service install` does **not** use this resolver — its `--repo` (and `--url`) keep working
+exactly as before, baked into the registered service's `binPath` at install time; a service that
+should read from a `datasync.config.yaml` gets there because `serve` itself resolves one at each
+start, not because `install` searched for one.
+
+### `datasync.config.yaml`
+
+A git-tracked file at `<RepoRoot>/datasync.config.yaml` (phase 79) — the same `DataSync:*` settings
+this document describes, in the format ASP.NET Core's own `appsettings.json` uses conceptually but
+written as YAML:
+
+```yaml
+DataSync:
+  Url: http://localhost:5080
+  StateEngine: MsSql
+  StateConnectionString: "Server=sql01;Database=DataSyncState;"
+```
+
+It sits in the *same* precedence slot `appsettings.json` occupies — behind environment variables and
+`--DataSync:Key`/CLI arguments, so either still overrides the file for a one-off run, and ahead of
+nothing but the defaults baked into code. `serve --repo <fresh-root>` writes a starter copy the first
+time it `git init`s a repo root (never touching one that already exists) with every key present but
+commented out, as a reference rather than a default silently taking effect.
+
+**No credential is ever written into this file.** `StateConnectionString` is validated the same way
+`ConnectionConfig.ConnectionString` already is (`ConfigValidation.RejectEmbeddedCredential`) — a
+`password`/`pwd`/`passwd`/`secret`/`accountkey`/`apikey` key in the string is rejected outright. The
+password for a non-SQLite state store goes through the secret store instead, under the one fixed ref
+`datasync:config:stateConnectionString` (see "Secrets," below) — the starter file's own comment names
+this, and it and the connection string are spliced together at connect time.
+
 ### `datasync serve`
 
 Starts the API, the scheduler and the web console in one process.
 
 | flag | default |
 | --- | --- |
-| `--repo <path>` | `%LOCALAPPDATA%\DataSync` (Windows) / the OS-equivalent local-app-data dir |
+| `--repo <path>` | see "Repo root resolution," above |
 | `--state-db <path>` | `<repo>/state.db` |
-| `--url <url>` | `http://localhost:5080` |
+| `--url <url>` | `--url` flag, else `DataSync__Url` env var, else the resolved config's `DataSync:Url`, else `http://localhost:5080` |
 
-`--repo` git-inits the config repository if it isn't one already. Internally this becomes
-`--DataSync:RepoRoot`, `--DataSync:StateDbPath` and `--urls`, so it's the exact same configuration
-surface as running the API directly (see below) — just with CLI-flavored names and defaults.
+`--repo` git-inits the config repository if it isn't one already. Internally the resolved values
+become `--DataSync:RepoRoot`, `--DataSync:StateDbPath` and `--urls`, so it's the exact same
+configuration surface as running the API directly (see below) — just with CLI-flavored names and
+defaults.
 
 ### `datasync service install|uninstall|status`
 
@@ -56,8 +99,8 @@ Windows-only; `install` needs an elevated prompt.
 
 | flag | applies to | default |
 | --- | --- | --- |
-| `--repo <path>` | `install` | same as `serve` |
-| `--url <url>` | `install` | same as `serve` |
+| `--repo <path>` | `install` | `%LOCALAPPDATA%\DataSync` — **not** the walk-up resolver; see above |
+| `--url <url>` | `install` | `http://localhost:5080` |
 | `--account <account>` | `install` | `LocalSystem` |
 
 Registers the tool's own installed executable via `sc.exe create`, with `serve --repo ... --url ...`
@@ -71,23 +114,47 @@ process is a service with no console to print to in the first place.
 
 | flag | default |
 | --- | --- |
-| `--repo <path>` | same as `serve` |
+| `--repo <path>` | see "Repo root resolution," above |
 | `--state-db <path>` | same as `serve` |
 | `--url <url>` | same as `serve` |
 | `--role Admin\|Viewer` | `Admin` |
 
 Opens the state database directly rather than calling a running API — the situation it exists for is
-"nobody can sign in," and an endpoint that needs a session is no help there. Requires the state
-database to already exist (i.e., DataSync has been started at least once).
+"nobody can sign in," and an endpoint that needs a session is no help there. Resolves
+`DataSync:StateEngine`/`DataSync:StateConnectionString` the same way `serve` does (the resolved
+config file, then `DataSync__*` environment variables), so it works against a `MsSql`- or
+`Postgres`-backed deployment, not only the SQLite default — before phase 79 it opened SQLite
+unconditionally and had no way to reach the other two. For SQLite, requires the state database file
+to already exist (i.e., DataSync has been started at least once); for the other two engines, it
+connects to whatever `StateEngine`/`StateConnectionString` (plus the secret store, if needed) name.
 
 ### `datasync health`
 
 | flag | default |
 | --- | --- |
-| `--url <url>` | `http://127.0.0.1:8080` (note: matches the *container's* port, not `serve`'s 5080) |
+| `--repo <path>` | see "Repo root resolution," above — used only to find a config file's `DataSync:Url`, nothing else |
+| `--url <url>` | `--url` flag, else the resolved config's `DataSync:Url`, else `http://127.0.0.1:8080` (the *container's* port, not `serve`'s 5080) |
 
 Hits `{url}/api/health`; exits `0` on success, `1` otherwise. This is what the container's
-`HEALTHCHECK` runs.
+`HEALTHCHECK` runs — inside the image there's no config file to find, so it always falls through to
+the hardcoded default unless `--url` is passed (which the image's own `HEALTHCHECK` does).
+
+### `datasync secret set|list|remove`
+
+Thin wrappers over the same secret store connections use (see "Secrets," below) — reachable without
+going through a connection's own save flow. Never prints a stored value back.
+
+| command | does |
+| --- | --- |
+| `datasync secret set <ref> <value>` | stores `value` under `ref` |
+| `datasync secret list [<ref> ...]` | reports whether each given ref is currently set (given none, checks the one fixed ref this build defines: `datasync:config:stateConnectionString`) |
+| `datasync secret remove <ref>` | deletes a stored value |
+
+Example — setting the state store's password for a `datasync.config.yaml`-configured deployment:
+
+```
+datasync secret set datasync:config:stateConnectionString "Password=..."
+```
 
 ### `datasync version`
 
@@ -97,18 +164,22 @@ No flags.
 
 Read through ASP.NET Core's standard configuration chain — so every key below is settable
 interchangeably as a `--DataSync:Key value` CLI argument, a `DataSync__Key` environment variable
-(double underscore), or under `"DataSync": { "Key": ... }` in `appsettings.json` /
-`appsettings.Development.json`. Neither shipped `appsettings*.json` sets any `DataSync:*` key today —
-every default below lives in code.
+(double underscore), under `"DataSync": { "Key": ... }` in `appsettings.json` /
+`appsettings.Development.json`, or (phase 79) under `DataSync:` in `datasync.config.yaml` at the repo
+root. Neither shipped `appsettings*.json` sets any `DataSync:*` key today — every default below lives
+in code. `datasync.config.yaml` sits in the same precedence slot `appsettings.json` occupies — behind
+environment variables and the command line — so a CLI flag or env var still overrides a value the file
+sets; see "`datasync.config.yaml`," above, for the file itself.
 
 ### `DataSync:*`
 
 | key | env var | default | notes |
 | --- | --- | --- | --- |
 | `RepoRoot` | `DataSync__RepoRoot` | `<cwd>/datasync-repo` under raw `dotnet run`; the CLI's `--repo` default under `datasync serve` | git-tracked config store root |
+| `Url` | `DataSync__Url` | none | **CLI-consumed, not an `ApiOptions` field** — `datasync serve`/`datasync health` read this themselves (see above) and translate it to `--urls`/Kestrel's bind address; running the raw API project doesn't read it at all (use `ASPNETCORE_URLS`/`--urls` directly there instead) |
 | `StateDbPath` | `DataSync__StateDbPath` | `<RepoRoot>/state.db` | the SQLite file; ignored when `StateEngine` is `MsSql` or `Postgres` |
 | `StateEngine` | `DataSync__StateEngine` | `Sqlite` | which database backs the state store — `Sqlite`, `MsSql` or `Postgres`; see below |
-| `StateConnectionString` | `DataSync__StateConnectionString` | none | how to reach that engine; required unless `StateEngine` is `Sqlite` |
+| `StateConnectionString` | `DataSync__StateConnectionString` | none | how to reach that engine; required unless `StateEngine` is `Sqlite`; never put a password in it — see "Secrets," below |
 | `TaskRunnerDllPath` | `DataSync__TaskRunnerDllPath` | resolved automatically | see below |
 | `StatePort` | `DataSync__StatePort` | `0` (ephemeral) | loopback-only runner-state listener; set to a fixed port if you'd rather firewall a known one than trust the loopback binding |
 | `RunRetentionDays` | `DataSync__RunRetentionDays` | `90` | finished runs older than this are pruned hourly; `0` = keep forever |

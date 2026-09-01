@@ -23,6 +23,10 @@ public static class Help
                   Exits 0 if a running DataSync answers, 1 if it does not. What the container's
                   health check runs.
 
+              datasync secret set <ref> <value>|list [<ref> ...]|remove <ref>
+                  Stores, checks, or removes a secret in the OS credential store — e.g. the state
+                  database's password: datasync secret set datasync:config:stateConnectionString "Password=..."
+
               datasync version
             """);
     }

@@ -35,4 +35,8 @@
     <ProjectReference Include="..\DataSync.TaskRunner\DataSync.TaskRunner.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataSync.Cli.Tests" />
+  </ItemGroup>
+
 </Project>
