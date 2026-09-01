@@ -19,6 +19,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- So AdminCertificateServiceWindowsTests can drive AdminCertificateService.EvaluateKeyAccess's
+         internal, testable overload directly (the account passed in, not resolved via a real installed
+         Windows service) — the same precedent DataSync.Certificates.csproj already sets for its own
+         internal-but-tested members. -->
+    <InternalsVisibleTo Include="DataSync.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\DataSync.Certificates\DataSync.Certificates.csproj" />
     <ProjectReference Include="..\DataSync.Core\DataSync.Core.csproj" />
     <ProjectReference Include="..\DataSync.Scripting\DataSync.Scripting.csproj" />

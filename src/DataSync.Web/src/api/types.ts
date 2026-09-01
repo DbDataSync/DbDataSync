@@ -935,3 +935,103 @@ export interface AdminConfigEntry {
   masked: boolean
   description: string
 }
+
+// The Certificates section of the Admin screen (phase 83) — a second door onto the operations
+// phase 82's `datasync cert …` already exposes. See src/DataSync.Api/Services/AdminCertificateService.cs.
+
+export interface CurrentCertificateInfo {
+  thumbprint: string
+  subjectCommonName: string
+  dnsNames: string[]
+  issuer: string
+  notBefore: string
+  notAfter: string
+  daysRemaining: number
+  selfSigned: boolean
+}
+
+/** `subject` is null only when nothing has ever been bound. `certificateFound` is false when a bound
+ * subject no longer matches anything in the store — the same case `datasync cert status` reports as an
+ * error, shown here rather than thrown. */
+export interface BindingInfo {
+  subject: string | null
+  store: string
+  location: string
+  allowInvalid: boolean
+  certificateFound: boolean
+}
+
+/**
+ * Three states, because "unknown" is real: on a host with no DataSync Windows service installed (or no
+ * certificate bound yet to check), the question does not apply, and this deliberately does not fall back
+ * to a green "ok" the way the CLI's own convenience default would — see
+ * AdminCertificateService.EvaluateKeyAccess's own doc comment.
+ */
+export type KeyAccessState = 'Ok' | 'Warning' | 'Unknown'
+
+/** `account` is null only for the `Unknown` case caused by no service being installed at all — every
+ * other state, including the other `Unknown` case (no certificate to check), names a real account. */
+export interface KeyAccessInfo {
+  state: KeyAccessState
+  account: string | null
+  detail: string | null
+}
+
+export interface PendingEnrollmentSummary {
+  requestId: string
+  subjectCommonName: string
+  dnsNames: string[]
+  submittedAtUtc: string
+}
+
+/** Why `templates` came back empty — `Available` is the one case it did not (and even then the CA may
+ * legitimately publish zero templates). */
+export type TemplateListReason =
+  | 'Available' | 'CaConfigNotSet' | 'NotDomainJoined' | 'DirectoryUnreachable' | 'AccessDenied' | 'Unknown'
+
+/** Backs the Template field's picker. When `reason` is not `Available`, the field renders as free text
+ * showing `detail` instead — never disabled, and enrollment never blocked on this having worked. */
+export interface TemplateListResult {
+  templates: string[]
+  reason: TemplateListReason
+  detail: string | null
+}
+
+export interface CertificateCandidate {
+  thumbprint: string
+  subjectCommonName: string
+  dnsNames: string[]
+  notAfter: string
+  daysRemaining: number
+  selfSigned: boolean
+}
+
+/** `available` is false on a non-Windows host, in which case every other field but
+ * `unavailableReason` is null/empty — the SPA renders one explanatory line rather than an empty
+ * section. */
+export interface AdminCertificateStatus {
+  available: boolean
+  unavailableReason: string | null
+  certificate: CurrentCertificateInfo | null
+  binding: BindingInfo | null
+  keyAccess: KeyAccessInfo | null
+  pendingEnrollments: PendingEnrollmentSummary[]
+  templates: TemplateListResult | null
+  /** The same threshold the daily expiry check raises a notification at — "days remaining" is coloured
+   * against this number, not a second one the SPA invented. */
+  expiryWarningDays: number
+}
+
+/**
+ * `succeeded` is false only for a genuine failure — the API sends that case as a 400 with `{ error }`,
+ * which `ErrorBanner` already renders, so a mutation's `onError` is what a page actually reads for a
+ * failure. This type is what a *successful* response carries: `requestId` is set only when an
+ * enrollment came back pending (a template requiring approval, not a failure), and `status` is the
+ * refreshed AdminCertificateStatus so the page does not need a second round trip.
+ */
+export interface CertificateActionResult {
+  succeeded: boolean
+  message: string
+  requestId: string | null
+  status: AdminCertificateStatus | null
+}

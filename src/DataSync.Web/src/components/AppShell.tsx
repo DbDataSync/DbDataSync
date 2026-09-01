@@ -58,8 +58,12 @@ export function AppShell({ crumbs, tabs, actions, children }: {
           <GridIcon />
         </span>
         {isAdmin && (
+          // /admin itself, not /admin/config directly — Admin now has two sections (Configuration,
+          // phase 81; Certificate, phase 83), and linking to the bare section root is what lets this
+          // rail item stay lit on either one, the same "stays lit while you are anywhere inside it"
+          // behaviour the comment above already describes for every other rail item.
           <NavLink
-            to="/admin/config"
+            to="/admin"
             className={({ isActive }) => `rail-item ${isActive ? 'active' : ''}`}
             title="Admin"
             data-testid="rail-admin"

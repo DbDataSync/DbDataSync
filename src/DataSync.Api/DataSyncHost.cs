@@ -91,6 +91,7 @@ public static class DataSyncHost
                 sp.GetRequiredService<SecretStore>());
         });
         builder.Services.AddSingleton<AdminConfigService>();
+        builder.Services.AddSingleton<AdminCertificateService>();
 
         builder.Services.AddSingleton(sp =>
         {

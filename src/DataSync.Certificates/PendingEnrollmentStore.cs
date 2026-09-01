@@ -66,6 +66,14 @@ public static class PendingEnrollmentStore
     public static PendingEnrollment? Find(string repoRoot, string requestId) =>
         ReadAll(repoRoot).FirstOrDefault(e => e.RequestId == requestId);
 
+    /// <summary>
+    /// Every enrollment still awaiting collection — not in the original phase 82 doc, added for phase
+    /// 83's admin screen, which needs to show (and hide) "Retrieve pending request" without already
+    /// knowing a request id to look for. <c>datasync cert retrieve</c> never needed this: an operator
+    /// running it already has the request id phase 82's own <c>enroll</c> printed to the console.
+    /// </summary>
+    public static IReadOnlyList<PendingEnrollment> List(string repoRoot) => ReadAll(repoRoot);
+
     public static void Remove(string repoRoot, string requestId)
     {
         var remaining = ReadAll(repoRoot).Where(e => e.RequestId != requestId).ToList();

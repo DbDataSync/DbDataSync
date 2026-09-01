@@ -1,4 +1,5 @@
 import type {
+  AdminCertificateStatus,
   AdminConfigEntry,
   ApplyResult,
   BackfillRequest,
@@ -14,6 +15,8 @@ import type {
   BulkCreateRequest,
   BulkCreateResult,
   MappingLag,
+  CertificateActionResult,
+  CertificateCandidate,
   InferredColumnType,
   InferredNaturalKey,
   AuthStatus,
@@ -227,6 +230,28 @@ export const api = {
       setSecret: (key: string, value: string) =>
         request<void>(`/api/admin/config/${encodeURIComponent(key)}/secret`, {
           method: 'PUT', body: JSON.stringify({ value }),
+        }),
+    },
+    /** The Certificates section (phase 83) — a second door onto `datasync cert …`. None of these ever
+     * return or accept a private key. */
+    certificate: {
+      get: () => request<AdminCertificateStatus>('/api/admin/certificate'),
+      candidates: () => request<CertificateCandidate[]>('/api/admin/certificate/candidates'),
+      createSelfSigned: (dnsNames: string[], validityDays: number | null) =>
+        request<CertificateActionResult>('/api/admin/certificate/self-signed', {
+          method: 'POST', body: JSON.stringify({ dnsNames, validityDays }),
+        }),
+      enroll: (dnsNames: string[], template: string, caConfig: string | null) =>
+        request<CertificateActionResult>('/api/admin/certificate/enroll', {
+          method: 'POST', body: JSON.stringify({ dnsNames, template, caConfig }),
+        }),
+      retrieve: (requestId: string) =>
+        request<CertificateActionResult>('/api/admin/certificate/retrieve', {
+          method: 'POST', body: JSON.stringify({ requestId }),
+        }),
+      bind: (thumbprint: string, allowInvalid: boolean | null) =>
+        request<CertificateActionResult>('/api/admin/certificate/bind', {
+          method: 'POST', body: JSON.stringify({ thumbprint, allowInvalid }),
         }),
     },
   },

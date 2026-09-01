@@ -28,6 +28,23 @@ public sealed class PendingEnrollmentStoreTests : IDisposable
     public void Find_UnknownRequestId_ReturnsNull() =>
         Assert.Null(PendingEnrollmentStore.Find(_root, "never-submitted"));
 
+    /// <summary>Backs phase 83's admin screen: it needs to show (and hide) "Retrieve pending request"
+    /// without already knowing a request id to look for — see <see cref="PendingEnrollmentStore.List"/>'s
+    /// own doc comment.</summary>
+    [Fact]
+    public void List_ReturnsEveryPendingEnrollment_EmptyWhenThereAreNone()
+    {
+        Assert.Empty(PendingEnrollmentStore.List(_root));
+
+        PendingEnrollmentStore.Save(_root, Sample("req-1"));
+        PendingEnrollmentStore.Save(_root, Sample("req-2"));
+
+        var all = PendingEnrollmentStore.List(_root);
+        Assert.Equal(2, all.Count);
+        Assert.Contains(all, e => e.RequestId == "req-1");
+        Assert.Contains(all, e => e.RequestId == "req-2");
+    }
+
     [Fact]
     public void Remove_DropsOnlyTheNamedRequest()
     {

@@ -45,6 +45,8 @@ const keys = {
     ['replications', replicationName, 'verification-results', id] as const,
   notifications: ['notifications'] as const,
   adminConfig: ['admin', 'config'] as const,
+  adminCertificate: ['admin', 'certificate'] as const,
+  adminCertificateCandidates: ['admin', 'certificate', 'candidates'] as const,
 }
 
 /**
@@ -740,5 +742,69 @@ export function useSetAdminConfigSecret() {
   return useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) => api.admin.config.setSecret(key, value),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.adminConfig }),
+  })
+}
+
+/** The bound certificate, its expiry, binding state and key access (phase 83). Not polled, the same
+ * reasoning as useAdminConfig: this is process/host state, not something that changes underneath an
+ * open tab on its own — an action below invalidates it explicitly instead. */
+export function useAdminCertificate() {
+  return useQuery({ queryKey: keys.adminCertificate, queryFn: api.admin.certificate.get })
+}
+
+/** Server-auth certificates already in LocalMachine\My — what the Bind dialog picks from. Fetched only
+ * while that dialog is open (`enabled`), since listing a certificate store is not free and nothing else
+ * on this screen needs it. */
+export function useAdminCertificateCandidates(enabled: boolean) {
+  return useQuery({
+    queryKey: keys.adminCertificateCandidates,
+    queryFn: api.admin.certificate.candidates,
+    enabled,
+  })
+}
+
+/** Every certificate action below invalidates the same query: each one changes what GET reports (a new
+ * certificate installed, a pending enrollment recorded or resolved, a binding written), and the API's
+ * response already carries the refreshed status — invalidating still triggers a real refetch rather than
+ * quietly trusting a POST body forever, the same caution useSetAdminConfig already takes. */
+function invalidateAdminCertificate(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: keys.adminCertificate })
+}
+
+export function useCreateSelfSignedCertificate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ dnsNames, validityDays }: { dnsNames: string[]; validityDays: number | null }) =>
+      api.admin.certificate.createSelfSigned(dnsNames, validityDays),
+    onSuccess: () => invalidateAdminCertificate(queryClient),
+  })
+}
+
+export function useEnrollCertificate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ dnsNames, template, caConfig }: { dnsNames: string[]; template: string; caConfig: string | null }) =>
+      api.admin.certificate.enroll(dnsNames, template, caConfig),
+    onSuccess: () => invalidateAdminCertificate(queryClient),
+  })
+}
+
+export function useRetrieveCertificate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (requestId: string) => api.admin.certificate.retrieve(requestId),
+    onSuccess: () => invalidateAdminCertificate(queryClient),
+  })
+}
+
+export function useBindCertificate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ thumbprint, allowInvalid }: { thumbprint: string; allowInvalid: boolean | null }) =>
+      api.admin.certificate.bind(thumbprint, allowInvalid),
+    onSuccess: () => {
+      invalidateAdminCertificate(queryClient)
+      queryClient.invalidateQueries({ queryKey: keys.adminCertificateCandidates })
+    },
   })
 }

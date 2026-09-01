@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { AdminTabs } from '../components/AdminTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { EditableValue } from '../components/EditableValue'
+import { RestartRequiredBanner } from '../components/RestartRequiredBanner'
 import { useIsAdmin } from '../components/useIsAdmin'
 import { useAdminConfig, useSetAdminConfig, useSetAdminConfigSecret } from '../api/hooks'
 import type { AdminConfigEntry } from '../api/types'
@@ -30,7 +32,7 @@ export function AdminConfigPage() {
   // showing a Viewer a screen of edit controls that would 403 the moment they were used.
   if (!isAdmin) {
     return (
-      <AppShell crumbs={[{ label: 'Admin' }]}>
+      <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
         <div className="pane">
           <div className="empty">This screen is for administrators.</div>
         </div>
@@ -59,7 +61,7 @@ export function AdminConfigPage() {
   }
 
   return (
-    <AppShell crumbs={[{ label: 'Admin' }]}>
+    <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
       <div className="pane">
         <div className="page-head">
           <h1 className="page-title">Configuration</h1>
@@ -69,15 +71,7 @@ export function AdminConfigPage() {
           </span>
         </div>
 
-        {restartNeeded && (
-          <div className="banner" data-testid="restart-required-banner">
-            <span className="mark">!</span>
-            <span>
-              A value was changed. This process resolves its configuration once at startup, so nothing
-              here takes effect until DataSync restarts.
-            </span>
-          </div>
-        )}
+        <RestartRequiredBanner show={restartNeeded} />
 
         <ErrorBanner error={error ?? mutationError} />
 

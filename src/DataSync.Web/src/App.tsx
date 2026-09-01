@@ -7,6 +7,7 @@ import { ConnectionsPage } from './pages/ConnectionsPage'
 import { ReplicationsPage } from './pages/ReplicationsPage'
 import { ScriptEditPage } from './pages/ScriptEditPage'
 import { ScriptsPage } from './pages/ScriptsPage'
+import { AdminCertificatePage } from './pages/AdminCertificatePage'
 import { AdminConfigPage } from './pages/AdminConfigPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
@@ -124,7 +125,13 @@ export default function App() {
       <Route path="/scripts" element={<ScriptsPage />} />
       <Route path="/scripts/:name" element={<ScriptEditPage />} />
 
+      {/* The Admin area's own landing tab is Configuration — the rail's Admin icon points at this bare
+          /admin path, not directly at /admin/config, so it stays lit while a certificate-screen tab is
+          open too (NavLink matches by path prefix, and /admin/certificate is not a prefix match for
+          /admin/config). */}
+      <Route path="/admin" element={<Navigate to="/admin/config" replace />} />
       <Route path="/admin/config" element={<AdminConfigPage />} />
+      <Route path="/admin/certificate" element={<AdminCertificatePage />} />
 
       {/* A mistyped or stale URL lands somewhere real rather than on an empty frame with chrome. */}
       <Route path="*" element={<Navigate to="/replications" replace />} />
