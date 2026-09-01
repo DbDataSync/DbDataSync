@@ -29,18 +29,15 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **081** — an admin screen for datasync.config.yaml | 079, its dependency, is done |
-| 2 | **082** — Windows certificate management | nothing blocks it; 079's config writer is done |
-| 3 | **083** — the Certificates section of the Admin screen | needs both 081 and 082 |
-| 4 | **034** — PostgreSQL logical replication | |
-| 5 | **035** — config history diff and revert | |
-| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **082** — Windows certificate management | 081 is done; nothing else blocks it |
+| 2 | **083** — the Certificates section of the Admin screen | needs both 081 and 082; 081 is done, 082 is next |
+| 3 | **034** — PostgreSQL logical replication | |
+| 4 | **035** — config history diff and revert | now also covers `datasync.config.yaml`'s missing history view, carried forward from 081 |
+| 5 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-09-01; 079 done and removed. 081 was already queued beneath it and moves up to take its place.
-TLS certificate management, raised alongside 081, was resolved the same day and is now two phases —
-082 and 083 — queued directly beneath it, since that is where the thought came from and 083 depends on
-081 anyway. Ahead of the three engine phases by choice, not necessity: nothing in 034/035/038 blocks on
-them, and moving either group is an ordinary decision that changes only this table.
+Set 2026-09-01; 081 done and removed, 082 moves up to take its place. Ahead of the three engine phases by
+choice, not necessity: nothing in 034/035/038 blocks on them, and moving either group is an ordinary
+decision that changes only this table.
 What is left below it is the three engine phases that have been waiting since distribution and auth
 moved above them — with 032 and 033 done there were three change-tracking mechanisms and no way for
 anyone outside this repo to install
