@@ -44,18 +44,37 @@ consistent with how `ChangeWatermarks`/`ChangeCheckHistory` already store versio
 `ChangeCheckHistory.Value` for `SourceKind = ChangeTracking` minus the mapping's own stored
 `ChangeWatermarks` version. Both values already exist; no new fetch, no estimation.
 
-### Change Tracking: estimated figure
+### Change Tracking: time figure — exact via `dm_tran_commit_table`, falling back to an estimate
 
-A method returning `TimeSpan?`, explicitly and separately labeled "estimated" wherever it surfaces
-(API field name, any future UI text) — never merged with or presented identically to CDC's exact figure.
-Scan the mapping's group's `ChangeCheckHistory` rows for `SourceKind = ChangeTracking`, ascending by
-`CheckedAtUtc`, for the first row whose `Value` (parsed as `long` in application code — not compared as
-text in SQL, and not compared as text across engines; see the plan doc's note on why) is `>=` the
+**Try the exact path first.** `sys.dm_tran_commit_table` maps a commit sequence number to its commit
+time, and Change Tracking's `SYS_CHANGE_VERSION` values are commit sequence numbers:
+
+```sql
+SELECT tc.commit_time
+FROM sys.dm_tran_commit_table AS tc
+WHERE tc.commit_ts = @version;
+```
+
+This is exact, the same role `sys.fn_cdc_map_lsn_to_time` plays for CDC — but `dm_tran_commit_table` is
+a DMV holding a bounded, rolling window of recent commits, not indefinite history. A version old enough
+to have aged out returns no row: a real "too old to map" answer, not an error, and the mirror of CDC's
+own `cdc.lsn_time_mapping` retention limit.
+
+**Fall back to the estimate when the DMV has aged the version out — not otherwise.** A method returning
+`TimeSpan?`, explicitly and separately labeled "estimated" wherever it surfaces (API field name, any
+future UI text) — never merged with or presented identically to the exact DMV path or to CDC's exact
+figure. Scan the mapping's group's `ChangeCheckHistory` rows for `SourceKind = ChangeTracking`, ascending
+by `CheckedAtUtc`, for the first row whose `Value` (parsed as `long` in application code — not compared
+as text in SQL, and not compared as text across engines; see the plan doc's note on why) is `>=` the
 mapping's own applied version. That row's `CheckedAtUtc` is the estimate's anchor;
-`estimatedLag = latestGroupCheckedAtUtc - anchorCheckedAtUtc`, same zero-clamp discipline as CDC. No live
-fallback exists for this figure — there's no source-side call that answers "what time did version N
-first exist." A mapping whose group has no history row past its own applied version returns null, not a
-synthesized zero or an exception.
+`estimatedLag = latestGroupCheckedAtUtc - anchorCheckedAtUtc`, same zero-clamp discipline as CDC. A
+mapping with neither a DMV answer nor a usable history row returns null, not a synthesized zero or an
+exception.
+
+**The response shape must say which path answered.** A caller can't treat an exact `dm_tran_commit_table`
+result and a `ChangeCheckHistory`-estimated one as interchangeable — pick a shape (a discriminated
+field, separate nullable properties, whatever fits this codebase's existing API conventions) that makes
+the distinction impossible to lose, not just documented.
 
 ### API
 
@@ -77,10 +96,14 @@ already returned alongside a mapping's run history before adding a parallel endp
 - CDC: non-null `SourceTimeUtc` only for `Cdc` history rows; zero-not-negative clamping; no false growth
   on a quiet caught-up source (the specific bug the naive definition would have); live-fetch fallback
   when no usable history exists.
-- Change Tracking exact: version-count arithmetic against known stored/current values.
-- Change Tracking estimated: a built `ChangeCheckHistory` sequence crossing a mapping's applied version
-  at a known tick, asserting the estimate lands on that exact tick's timestamp; a caught-up mapping
-  reporting zero; a mapping with insufficient history reporting null, not zero or an exception; and a
-  small-numbers case (`Value` like `"9"` vs `"10"`) proving the parse-as-`long` comparison is actually
-  used, not a text comparison that would order them wrong.
+- Change Tracking exact (version count): version-count arithmetic against known stored/current values.
+- Change Tracking time, exact path: a version still within `dm_tran_commit_table`'s window resolves via
+  the DMV join and is labeled exact, not estimated.
+- Change Tracking time, fallback path: a version the DMV no longer holds falls back to the
+  `ChangeCheckHistory` estimate; a built `ChangeCheckHistory` sequence crossing a mapping's applied
+  version at a known tick, asserting the estimate lands on that exact tick's timestamp; a caught-up
+  mapping reporting zero; a mapping with neither a DMV answer nor enough history reporting null, not
+  zero or an exception; a small-numbers case (`Value` like `"9"` vs `"10"`) proving the parse-as-`long`
+  comparison is actually used, not a text comparison that would order them wrong; and a test proving the
+  exact and fallback paths are distinguishable in the response shape, not just in code.
 - Full suite green (`Category!=Integration`, `Category=Integration`), `tsc -b`/SPA build clean.

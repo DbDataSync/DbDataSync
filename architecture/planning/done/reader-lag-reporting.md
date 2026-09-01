@@ -58,23 +58,46 @@ round-trip, no estimation, exact by construction. This is the number an operator
 own change volume can reason about directly ("40 versions behind" on a table that bumps a few times a
 second means something different than on one that bumps daily).
 
-**Estimated — a time, reconstructed from when we happened to observe each version.** Change Tracking has
-no engine-side version-to-time mapping — nothing like `fn_cdc_map_lsn_to_time` exists for it. The only
-source of a time estimate is the `ChangeCheckHistory` rows this system itself already wrote: scan a
-mapping's group's history, ascending by `CheckedAtUtc`, for the *first* row whose `Value` is `>=` the
-mapping's own applied version — that row's `CheckedAtUtc` is the best available estimate of when the
-source reached (at least) that version, bounded above by however long it had already been true before
-that particular poll happened to catch it. `estimatedLag = latestGroupCheckedAtUtc - crossingRowCheckedAtUtc`,
-same zero-clamp discipline as CDC (a mapping caught up to the latest observed version has its own
-crossing row *be* the latest row, giving zero).
+**Time — updated 2026-09-01: a real engine-side mapping exists after all, with a fallback for when it
+doesn't reach far enough back.**
 
-This is explicitly an estimate, and must be labeled as one everywhere it's shown — its precision is
-bounded by how often the gate happens to poll that group, not by anything about the underlying data.
-**No live fallback is possible for this figure specifically** — unlike CDC, there's no source-side call
-that answers "what time did version N first exist," only the polling history. A mapping in a
-replication whose gate hasn't accumulated enough history yet (fresh install, or a group polled too
-infrequently to have a row past the mapping's version) has no usable estimate and should say so — null,
-not a synthesized zero.
+`sys.dm_tran_commit_table` maps a commit sequence number to the wall-clock time it committed, and Change
+Tracking's `SYS_CHANGE_VERSION` values *are* commit sequence numbers — joining
+`dm_tran_commit_table.commit_ts = SYS_CHANGE_VERSION` gives a real, exact commit time for a given
+version, the same role `sys.fn_cdc_map_lsn_to_time` plays for CDC:
+
+```sql
+SELECT tc.commit_time
+FROM sys.dm_tran_commit_table AS tc
+WHERE tc.commit_ts = @version;
+```
+
+**The caveat this doc should state even though the discovery didn't**: `sys.dm_tran_commit_table` is a
+dynamic management view, not a persisted table — it holds a bounded, rolling window of recent commits,
+not indefinite history. A version old enough to have aged out of that window returns no row, which is a
+real, expected answer ("too old to map"), not an error. This is the mirror of CDC's own retention
+caveat (an LSN outside `cdc.lsn_time_mapping`'s retained window also maps to nothing) — same shape,
+different mechanism underneath.
+
+So: **try the DMV join first.** It succeeds for any version recent enough to still be in the window,
+which is the common case for a mapping that's even roughly keeping up. **Fall back to the previously-
+designed estimate** — scan the mapping's group's `ChangeCheckHistory` rows, ascending by `CheckedAtUtc`,
+for the *first* row whose `Value` is `>=` the mapping's own applied version; that row's `CheckedAtUtc` is
+the best available estimate of when the source reached (at least) that version, bounded above by however
+long it had already been true before that poll happened to catch it —
+`estimatedLag = latestGroupCheckedAtUtc - crossingRowCheckedAtUtc`, same zero-clamp discipline as CDC —
+**only when the DMV has aged the version out.** The fallback is still real and still needed; it's no
+longer the only path, and its own doc/comment/field naming should be honest that it's the fallback for
+when the exact answer isn't available, not the primary mechanism.
+
+**The API/response shape needs to say which path answered** — a caller (and eventually a UI) must be
+able to tell an exact DMV-sourced time from an estimated poll-reconstructed one; these are not
+interchangeable precision-wise and must never be presented identically. Exact naming/shape is an
+implementation call, but the distinction itself is not optional.
+
+A mapping whose group has *neither* a DMV answer *nor* enough polling history (fresh install, or a group
+polled too infrequently to have a row past the mapping's version) has no usable time figure and should
+say so — null, not a synthesized zero.
 
 Parse `ChangeCheckHistory.Value` as `long` for the crossing-row scan; do this in application code rather
 than as a numeric comparison in stored SQL — `Value` is stored as text, and a raw text comparison across
@@ -97,11 +120,14 @@ the exact pitfall `ChangeCounters.Compare`'s own doc comment already calls out f
   clamping, no false growth on a quiet caught-up source, live-fetch fallback on missing history.
 - Change Tracking exact: a version-count test against known stored/current values, no estimation
   involved.
-- Change Tracking estimated: a test building a `ChangeCheckHistory` sequence crossing a mapping's applied
-  version at a known tick, asserting the estimate lands on that tick's timestamp, not an earlier or
-  later one. A test asserting a caught-up mapping (applied version equals the group's latest observed
-  version) reports zero. A test asserting a mapping with insufficient history reports null, not zero or
-  an exception.
+- Change Tracking time — exact path: a test asserting a version still within `dm_tran_commit_table`'s
+  window resolves via the DMV join, not the fallback, and is labeled exact in the response shape.
+- Change Tracking time — fallback path: a test asserting a version the DMV no longer holds falls back to
+  the `ChangeCheckHistory` estimate; a test building a `ChangeCheckHistory` sequence crossing a mapping's
+  applied version at a known tick, asserting the estimate lands on that tick's timestamp, not an earlier
+  or later one; a test asserting a caught-up mapping reports zero; a test asserting a mapping with
+  neither a DMV answer nor enough polling history reports null, not zero or an exception — and that the
+  fallback result is labeled estimated, distinguishably from the exact path above.
 - Full suite green (`Category!=Integration`, `Category=Integration`), `tsc -b`/SPA build clean.
 
 **Next step**: ready for an implementation phase doc.
