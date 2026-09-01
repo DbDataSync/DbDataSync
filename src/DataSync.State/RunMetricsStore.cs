@@ -10,14 +10,18 @@ public sealed record RunMetricsBucket(DateTimeOffset StartUtc, int Runs, int Fai
 /// is at its most useful exactly when it is older than the window, because that is the case where a
 /// replication has stopped. Null when there has never been one.
 /// </param>
-/// <param name="DurationP50Ms">
-/// How long the runs themselves took: <c>EndedAtUtc - ClaimedAtUtc</c>, which since phase 72 excludes
-/// the time a run spent queued. Queue wait is its own figure, from the two timestamps on the run —
-/// deliberately not folded back in here, because a slow source and a busy worker pool are different
-/// problems and one number could not tell them apart.
+/// <param name="ProcessingP50Ms">
+/// Processing time: <c>EndedAtUtc - StartedAtUtc</c> — the run itself, with no queue in it. Named for
+/// the span it measures rather than "duration", which was the word that let phase 72 measure it from
+/// the wrong column for a whole phase without anybody noticing.
 /// <para>
-/// Null when nothing in the window finished — a run still going has no duration, and inventing one for
-/// it would put a number in a card that means nothing. Null too when nothing in the window ever began.
+/// Queue time (<c>StartedAtUtc - EnqueuedAtUtc</c>) is deliberately not folded back in, and is not
+/// aggregated here at all: a slow source and a busy worker pool are different problems, and one number
+/// could not tell them apart. It is a per-run figure in the run list.
+/// </para>
+/// <para>
+/// Null when nothing in the window finished — a run still going has no processing time, and inventing
+/// one would put a number in a card that means nothing. Null too when nothing in the window ever began.
 /// </para>
 /// </param>
 public sealed record RunMetrics(
@@ -29,9 +33,9 @@ public sealed record RunMetrics(
     int Failures,
     long RowsRead,
     long RowsWritten,
-    double? DurationP50Ms,
-    double? DurationP95Ms,
-    double? DurationMaxMs,
+    double? ProcessingP50Ms,
+    double? ProcessingP95Ms,
+    double? ProcessingMaxMs,
     DateTimeOffset? LastCompletedPassUtc,
     IReadOnlyList<RunMetricsBucket> Buckets);
 
@@ -56,13 +60,13 @@ public sealed class RunMetricsStore(StateDatabase database)
 
             var kindClause = runKind is null ? "" : " AND RunKind = $runKind";
             var totals = ReadTotals(connection, taskName, fromUtc, toUtc, runKind, kindClause);
-            var durations = ReadDurations(connection, taskName, fromUtc, toUtc, runKind, kindClause);
+            var processing = ReadProcessingTimes(connection, taskName, fromUtc, toUtc, runKind, kindClause);
 
             return new RunMetrics(
                 taskName, runKind, fromUtc, toUtc,
                 totals.Runs, totals.Failures, totals.RowsRead, totals.RowsWritten,
-                Percentile(durations, 0.50), Percentile(durations, 0.95),
-                durations.Count == 0 ? null : durations[^1],
+                Percentile(processing, 0.50), Percentile(processing, 0.95),
+                processing.Count == 0 ? null : processing[^1],
                 ReadLastCompletedPass(connection, taskName, runKind, kindClause),
                 ReadBuckets(connection, taskName, fromUtc, toUtc, runKind, kindClause, buckets));
         });
@@ -97,7 +101,7 @@ public sealed class RunMetricsStore(StateDatabase database)
                SUM(RowsRead),
                SUM(RowsWritten)
         FROM TaskRuns
-        WHERE TaskName = $taskName AND StartedAtUtc >= $from AND StartedAtUtc < $to{kindClause};
+        WHERE TaskName = $taskName AND EnqueuedAtUtc >= $from AND EnqueuedAtUtc < $to{kindClause};
         """;
 
     /// <summary>
@@ -121,14 +125,18 @@ public sealed class RunMetricsStore(StateDatabase database)
         });
 
     /// <summary>
-    /// Every finished run's duration, ascending, for percentiles computed in C#.
+    /// Every finished run's processing time, ascending, for percentiles computed in C#.
     /// <para>
-    /// **Measured from <c>ClaimedAtUtc</c>, not <c>StartedAtUtc</c>** (phase 72). The latter is written
-    /// at enqueue time, so until this changed these percentiles reported the run plus however long it
-    /// had waited for a worker — under a backlog, a "duration" that was mostly queue. A run with no
-    /// <c>ClaimedAtUtc</c> never began, so it contributes no duration at all rather than a wrong one;
-    /// that includes rows written before the column existed, which is why the filter is explicit here
-    /// rather than left to <c>julianday(NULL)</c>.
+    /// **<c>EndedAtUtc - StartedAtUtc</c>**, where <c>StartedAtUtc</c> now means what it says (phase
+    /// 73): the moment <c>BeginRun</c> was called. Phase 72 computed the same idea from
+    /// <c>ClaimedAtUtc</c>, which was then the column <c>BeginRun</c> wrote — the same instant under a
+    /// name that belonged to an earlier one. Before that it measured from the enqueue, so under a
+    /// backlog it reported a "duration" that was mostly queue.
+    /// </para>
+    /// <para>
+    /// A run with no <c>StartedAtUtc</c> never began, so it contributes nothing rather than a wrong
+    /// figure; that includes every row predating this migration, which is why the filter is explicit
+    /// here rather than left to <c>julianday(NULL)</c>.
     /// </para>
     /// <para>
     /// SQLite has no <c>PERCENTILE_CONT</c>, so the choice was this or three <c>ORDER BY … LIMIT 1
@@ -137,27 +145,27 @@ public sealed class RunMetricsStore(StateDatabase database)
     /// the list is small. Revisit if that stops being true; <c>tools/benchmarks</c> is where.
     /// </para>
     /// </summary>
-    private List<double> ReadDurations(
+    private List<double> ReadProcessingTimes(
         DbConnection connection, string taskName, DateTimeOffset fromUtc, DateTimeOffset toUtc,
         RunKind? runKind, string kindClause)
     {
         using var cmd = database.Command(connection, $"""
-            SELECT (julianday(EndedAtUtc) - julianday(ClaimedAtUtc)) * 86400000.0
+            SELECT (julianday(EndedAtUtc) - julianday(StartedAtUtc)) * 86400000.0
             FROM TaskRuns
-            WHERE TaskName = $taskName AND StartedAtUtc >= $from AND StartedAtUtc < $to
-              AND EndedAtUtc IS NOT NULL AND ClaimedAtUtc IS NOT NULL{kindClause}
+            WHERE TaskName = $taskName AND EnqueuedAtUtc >= $from AND EnqueuedAtUtc < $to
+              AND EndedAtUtc IS NOT NULL AND StartedAtUtc IS NOT NULL{kindClause}
             ORDER BY 1;
             """);
         Bind(cmd, taskName, fromUtc, toUtc, runKind);
 
         using var reader = cmd.ExecuteReader();
-        var durations = new List<double>();
+        var processing = new List<double>();
         while (reader.Read())
         {
             if (!reader.IsDBNull(0))
-                durations.Add(Math.Max(0, reader.GetDouble(0)));
+                processing.Add(Math.Max(0, reader.GetDouble(0)));
         }
-        return durations;
+        return processing;
     }
 
     private DateTimeOffset? ReadLastCompletedPass(
@@ -196,20 +204,20 @@ public sealed class RunMetricsStore(StateDatabase database)
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = $"""
-                SELECT StartedAtUtc, Status, RowsWritten FROM TaskRuns
-                WHERE TaskName = $taskName AND StartedAtUtc >= $from AND StartedAtUtc < $to{kindClause};
+                SELECT EnqueuedAtUtc, Status, RowsWritten FROM TaskRuns
+                WHERE TaskName = $taskName AND EnqueuedAtUtc >= $from AND EnqueuedAtUtc < $to{kindClause};
                 """;
             Bind(cmd, taskName, fromUtc, toUtc, runKind);
 
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
-                var startedAt = DateTimeOffset.Parse(
+                var enqueuedAt = DateTimeOffset.Parse(
                     reader.GetString(0), null, System.Globalization.DateTimeStyles.RoundtripKind);
 
                 // The right edge is exclusive in the WHERE above, so this cannot be `buckets`; the
                 // clamp is for a zero-width window, where every run belongs to the only bucket.
-                var index = Math.Clamp((int)((startedAt - fromUtc) / width), 0, buckets - 1);
+                var index = Math.Clamp((int)((enqueuedAt - fromUtc) / width), 0, buckets - 1);
                 counts[index]++;
                 if (reader.GetString(1) == nameof(RunStatus.Failed))
                     failures[index]++;

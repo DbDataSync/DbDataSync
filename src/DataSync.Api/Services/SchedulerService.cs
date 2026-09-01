@@ -68,7 +68,7 @@ public sealed class SchedulerService(
 
     private bool TickContinuous(string name, ReplicationTaskConfig task, List<string> mappingNames)
     {
-        var lastStarts = taskRunStore.GetLastPrimaryStartByMapping(name);
+        var lastStarts = taskRunStore.GetLastPrimaryEnqueueByMapping(name);
         var now = DateTimeOffset.UtcNow;
         var enqueuedAny = false;
 
@@ -87,7 +87,7 @@ public sealed class SchedulerService(
 
     private bool TickPeriodic(string name, ReplicationTaskConfig task, List<string> mappingNames)
     {
-        var lastStarts = taskRunStore.GetLastPrimaryStartByMapping(name);
+        var lastStarts = taskRunStore.GetLastPrimaryEnqueueByMapping(name);
         var lastAny = lastStarts.Count > 0 ? lastStarts.Values.Max() : (DateTimeOffset?)null;
 
         if (!SchedulingEvaluator.IsDue(task.Scheduling, lastAny, DateTimeOffset.UtcNow))

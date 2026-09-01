@@ -134,6 +134,10 @@ public sealed class MsSqlStateDialect : StateDialect
 
     public override string AddColumn => "ADD";
 
+    /// <summary>Index names here are scoped to a table rather than to the schema, so dropping one
+    /// requires saying which table it belongs to.</summary>
+    public override string DropIndex(string index, string table) => $"DROP INDEX {index} ON {table}";
+
     public override int GetSchemaVersion(DbConnection connection)
     {
         using var ensure = connection.CreateCommand();

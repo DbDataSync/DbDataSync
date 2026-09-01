@@ -49,27 +49,40 @@ public sealed record TaskRunRecord(
     string MappingName,
     string? SegmentLabel,
     /// <summary>
-    /// When this run was **enqueued**, not when it started executing — the queue writes the row, and
-    /// this column with it, before any worker has claimed anything. The name predates
-    /// <see cref="ClaimedAtUtc"/> and is knowingly kept (phase 72): renaming it touches every reader
-    /// and the API contract, and its meaning has not changed.
-    /// </summary>
-    DateTimeOffset StartedAtUtc,
-    /// <summary>
-    /// When a worker actually claimed this run and began executing it (phase 72). The genuine "the run
-    /// started" timestamp, and the one duration is measured from — <c>EndedAtUtc - ClaimedAtUtc</c> —
-    /// so that a run's duration is the run rather than the run plus its wait in the queue.
+    /// When the work was queued — written by <c>WorkQueueStore.Enqueue</c>, before any worker exists
+    /// to do it. The one timestamp every run has, since the row is created by the enqueue.
     /// <para>
-    /// Queue wait is the other half: <c>ClaimedAtUtc - StartedAtUtc</c>. Both timestamps are exposed
-    /// raw rather than as a precomputed delta, matching phase 71's watermark pair.
+    /// Null only for a row written before phase 73's migration ran, and that migration backfills it
+    /// from the old <c>StartedAtUtc</c>, which held exactly this value under the wrong name — so in
+    /// practice it is never null.
     /// </para>
+    /// </summary>
+    DateTimeOffset? EnqueuedAtUtc,
+    /// <summary>
+    /// When a worker took this item off the queue — written by <c>WorkQueueStore.TryClaimNext</c>, in
+    /// the same transaction as the <c>WorkQueue</c> row's own claim, so the two tables cannot disagree
+    /// about whether a claim happened.
     /// <para>
-    /// Null for a run that never reached <c>Running</c> — still queued, or cancelled before a worker
-    /// claimed it — and for rows written before this column existed. Such a run has no duration, the
-    /// same as one with no <see cref="EndedAtUtc"/>.
+    /// Null for a run nobody ever claimed — still queued, or cancelled first — and for rows predating
+    /// phase 72's column, which is not backfilled because nothing ever recorded the moment.
     /// </para>
     /// </summary>
     DateTimeOffset? ClaimedAtUtc,
+    /// <summary>
+    /// When the worker began executing it — written by <c>TaskRunStore.BeginRun</c>. The moment the run
+    /// itself starts, and the boundary between the two figures the product reports: queue time is
+    /// <c>StartedAtUtc - EnqueuedAtUtc</c> and processing time is <c>EndedAtUtc - StartedAtUtc</c>.
+    /// <para>
+    /// All four timestamps are exposed raw rather than as precomputed deltas, matching phase 71's
+    /// watermark pair — one rule for this record rather than two.
+    /// </para>
+    /// <para>
+    /// Null for a run that never reached <c>Running</c>, and for every row predating phase 73: this
+    /// column held the enqueue time before then, and that value now lives in
+    /// <see cref="EnqueuedAtUtc"/> rather than being left here to misreport a start.
+    /// </para>
+    /// </summary>
+    DateTimeOffset? StartedAtUtc,
     DateTimeOffset? EndedAtUtc,
     long RowsRead,
     long RowsWritten,

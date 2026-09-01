@@ -35,14 +35,14 @@ public sealed class WatermarkHistoryStoreTests : IDisposable
         return runId;
     }
 
-    /// <summary>History is ordered by StartedAtUtc, which the queue sets to "now" — so runs made in
+    /// <summary>History is ordered by EnqueuedAtUtc, which the queue sets to "now" — so runs made in
     /// the same instant need separating before the order means anything.</summary>
     private void Backdate(Guid runId, TimeSpan age)
     {
         using var connection = _database.OpenConnection();
         using var cmd = _database.Command(
-            connection, "UPDATE TaskRuns SET StartedAtUtc = $started WHERE RunId = $runId;");
-        cmd.Bind(_database, "started", (DateTimeOffset.UtcNow - age).ToString("O"));
+            connection, "UPDATE TaskRuns SET EnqueuedAtUtc = $enqueued WHERE RunId = $runId;");
+        cmd.Bind(_database, "enqueued", (DateTimeOffset.UtcNow - age).ToString("O"));
         cmd.Bind(_database, "runId", runId.ToString());
         cmd.ExecuteNonQuery();
     }

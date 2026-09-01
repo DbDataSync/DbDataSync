@@ -59,33 +59,95 @@ public sealed class TaskRunStoreTests : IDisposable
         Assert.Equal(RunStatus.Queued, run!.Status);
         Assert.Null(run.Pid);
 
-        // Nobody has claimed it, so it has no claim time — the "absent means it never happened" shape
-        // the rest of the optional TaskRuns columns use. A run cancelled while queued keeps this null
-        // forever, and correctly reports no duration.
+        // The enqueue is the only moment that has happened, so it is the only timestamp written
+        // (phase 73). Nobody has claimed it and nothing has started it, and both columns say so —
+        // the "absent means it never happened" shape the rest of the optional TaskRuns columns use.
+        // A run cancelled while queued keeps both null forever, and correctly reports no times.
+        Assert.NotNull(run.EnqueuedAtUtc);
         Assert.Null(run.ClaimedAtUtc);
+        Assert.Null(run.StartedAtUtc);
     }
 
     /// <summary>
-    /// The distinction phase 72 exists for: StartedAtUtc is written by the enqueue, ClaimedAtUtc by
-    /// the worker that picks the item up. The sleep makes the gap real rather than a coincidence of
-    /// clock resolution, so this fails if BeginRun stops writing the column or writes the enqueue time
-    /// into it.
+    /// The distinction phase 73 exists for: the enqueue writes EnqueuedAtUtc, and BeginRun — the call a
+    /// worker makes when it is about to execute — writes StartedAtUtc. The sleep makes the gap real
+    /// rather than a coincidence of clock resolution, so this fails if BeginRun stops writing the
+    /// column, or writes the enqueue time into it, or (as phase 72 did) writes the wrong column.
     /// </summary>
     [Fact]
-    public void BeginRun_RecordsWhenTheWorkerActuallyClaimedTheRun_NotWhenItWasQueued()
+    public void BeginRun_RecordsWhenTheRunActuallyStarted_NotWhenItWasQueued()
     {
         var runId = _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
         var queued = _store.GetRun(runId)!;
         Thread.Sleep(20);
         _store.BeginRun(runId, pid: 7);
 
-        var claimed = _store.GetRun(runId)!;
+        var started = _store.GetRun(runId)!;
 
-        Assert.NotNull(claimed.ClaimedAtUtc);
-        Assert.Equal(queued.StartedAtUtc, claimed.StartedAtUtc); // the enqueue time is left alone
+        Assert.NotNull(started.StartedAtUtc);
+        Assert.Equal(queued.EnqueuedAtUtc, started.EnqueuedAtUtc); // the enqueue time is left alone
         Assert.True(
-            claimed.ClaimedAtUtc!.Value - claimed.StartedAtUtc >= TimeSpan.FromMilliseconds(15),
-            "the queue wait should be visible as the gap between the two timestamps");
+            started.StartedAtUtc!.Value - started.EnqueuedAtUtc!.Value >= TimeSpan.FromMilliseconds(15),
+            "the queue time should be visible as the gap between the two timestamps");
+    }
+
+    /// <summary>
+    /// The claim is written when the item is claimed, by TryClaimNext — not by BeginRun, which happens
+    /// later and now writes StartedAtUtc instead.
+    /// <para>
+    /// The sleeps put a real gap on either side of the claim, so the assertion is that the claim landed
+    /// strictly between the enqueue and the start rather than coinciding with either. Both coincidences
+    /// are exactly the bug this phase fixes, in the two directions it could be wrong.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void TryClaimNext_RecordsTheClaimOnTheRun_BetweenTheEnqueueAndTheStart()
+    {
+        var runId = _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+        Thread.Sleep(20);
+
+        var item = _queue.TryClaimNext("crm-sync", "worker-1");
+        Assert.NotNull(item);
+        Assert.Equal(runId, item!.RunId);
+
+        var claimed = _store.GetRun(runId)!;
+        Assert.NotNull(claimed.ClaimedAtUtc);
+        Assert.Null(claimed.StartedAtUtc); // claimed is not started
+        Assert.True(
+            claimed.ClaimedAtUtc!.Value - claimed.EnqueuedAtUtc!.Value >= TimeSpan.FromMilliseconds(15),
+            "the claim happens after the enqueue, by however long the item waited");
+
+        Thread.Sleep(20);
+        _store.BeginRun(runId, pid: 7);
+
+        var started = _store.GetRun(runId)!;
+        Assert.Equal(claimed.ClaimedAtUtc, started.ClaimedAtUtc); // BeginRun does not touch it
+        Assert.True(
+            started.StartedAtUtc!.Value - started.ClaimedAtUtc!.Value >= TimeSpan.FromMilliseconds(15),
+            "the start happens after the claim, which is what makes them different columns");
+    }
+
+    /// <summary>
+    /// The claim on <c>WorkQueue</c> and the claim on <c>TaskRuns</c> are one transaction, so an item
+    /// that lost the race gets neither — a run must never carry a claim time from a worker that did not
+    /// claim it.
+    /// <para>
+    /// Asserted by racing two workers for one item rather than by inspecting the SQL: the rollback path
+    /// is the one where the two writes could come apart, and it is reachable from the public API.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void TryClaimNext_LosingTheRace_LeavesNoClaimTimeOnTheRun()
+    {
+        var runId = _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+
+        Assert.NotNull(_queue.TryClaimNext("crm-sync", "worker-1"));
+        var stamped = _store.GetRun(runId)!.ClaimedAtUtc;
+        Assert.NotNull(stamped);
+
+        // Nothing left Pending, so the second worker claims nothing — and must not restamp the run.
+        Assert.Null(_queue.TryClaimNext("crm-sync", "worker-2"));
+        Assert.Equal(stamped, _store.GetRun(runId)!.ClaimedAtUtc);
     }
 
     [Fact]
@@ -103,7 +165,7 @@ public sealed class TaskRunStoreTests : IDisposable
     public void GetRunHistory_ReturnsNewestFirst()
     {
         var first = QueueAndBegin("crm-sync", "orders", pid: 1);
-        Thread.Sleep(5); // ensure StartedAtUtc ordering is unambiguous
+        Thread.Sleep(5); // ensure EnqueuedAtUtc ordering is unambiguous
         var second = QueueAndBegin("crm-sync", "customers", pid: 2);
 
         var history = _store.GetRunHistory("crm-sync");
@@ -143,7 +205,7 @@ public sealed class TaskRunStoreTests : IDisposable
     }
 
     [Fact]
-    public void GetLastPrimaryStartByMapping_ReturnsOneEntryPerMapping()
+    public void GetLastPrimaryEnqueueByMapping_ReturnsOneEntryPerMapping()
     {
         QueueAndBegin("crm-sync", "orders");
         Thread.Sleep(5);
@@ -151,13 +213,13 @@ public sealed class TaskRunStoreTests : IDisposable
         QueueAndBegin("crm-sync", "customers");
         QueueAndBegin("crm-sync", "products", runKind: RunKind.Backfill); // Backfill excluded
 
-        var lastStarts = _store.GetLastPrimaryStartByMapping("crm-sync");
+        var lastEnqueues = _store.GetLastPrimaryEnqueueByMapping("crm-sync");
 
-        Assert.Equal(2, lastStarts.Count);
-        Assert.True(lastStarts.ContainsKey("orders"));
-        Assert.True(lastStarts.ContainsKey("customers"));
-        Assert.False(lastStarts.ContainsKey("products"));
-        Assert.Equal(_store.GetRun(latestOrders)!.StartedAtUtc, lastStarts["orders"]);
+        Assert.Equal(2, lastEnqueues.Count);
+        Assert.True(lastEnqueues.ContainsKey("orders"));
+        Assert.True(lastEnqueues.ContainsKey("customers"));
+        Assert.False(lastEnqueues.ContainsKey("products"));
+        Assert.Equal(_store.GetRun(latestOrders)!.EnqueuedAtUtc, lastEnqueues["orders"]);
     }
 
     [Fact]

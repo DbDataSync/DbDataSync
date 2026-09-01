@@ -4,16 +4,37 @@ namespace DataSync.State;
 
 public sealed class TaskRunStore(StateDatabase database)
 {
-    /// <summary>Last Primary-run start time per table mapping, in one query — what
+    /// <summary>
+    /// Every column <see cref="ReadRun"/> reads, in the order it reads them — named once because six
+    /// queries select exactly this list and <see cref="ReadRun"/> addresses it by ordinal. Six copies
+    /// were six chances for one of them to drift by a column and hand the reader the wrong field.
+    /// <para>
+    /// The three timestamps are listed in the order they happen (phase 73), which is also the order
+    /// <c>TaskRunRecord</c> declares them.
+    /// </para>
+    /// </summary>
+    private const string RunColumns =
+        "RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, " +
+        "EnqueuedAtUtc, ClaimedAtUtc, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, " +
+        "ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, " +
+        "StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark";
+
+    /// <summary>Last Primary-run enqueue time per table mapping, in one query — what
     /// SchedulerService's due-ness check needs. One query per replication per tick, not one per
     /// mapping per tick: a replication can have hundreds of mappings, and N+1 queries at that scale
-    /// on every 5-second tick would be the first thing to hurt.</summary>
-    public IReadOnlyDictionary<string, DateTimeOffset> GetLastPrimaryStartByMapping(string taskName) =>
+    /// on every 5-second tick would be the first thing to hurt.
+    /// <para>
+    /// The enqueue time, not the start (phase 73): due-ness asks "has it been N seconds since we last
+    /// asked for this", and asking is the enqueue. Measuring from the start would let a run that
+    /// queued behind a backlog push its own next run further out, so a busy replication would fall
+    /// progressively further behind its own schedule.
+    /// </para></summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> GetLastPrimaryEnqueueByMapping(string taskName) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, """
-                SELECT MappingName, MAX(StartedAtUtc)
+                SELECT MappingName, MAX(EnqueuedAtUtc)
                 FROM TaskRuns WHERE TaskName = $taskName AND RunKind = $runKind
                 GROUP BY MappingName;
                 """);
@@ -159,20 +180,24 @@ public sealed class TaskRunStore(StateDatabase database)
     /// WorkQueueStore.Enqueue, so a queued backlog is visible in run history before any worker exists
     /// to work on it.
     /// <para>
-    /// This is also where <c>ClaimedAtUtc</c> is written (phase 72), and it is written here rather
-    /// than anywhere else for the reason the column exists at all: this call *is* the moment work
-    /// begins. <c>StartedAtUtc</c> was set by the enqueue, possibly long before, so the gap between
-    /// the two is the queue wait — and every duration measured from the earlier of them had been
-    /// quietly charging the run for time it spent waiting.
+    /// This is where <c>StartedAtUtc</c> is written (phase 73), because this call *is* the moment the
+    /// run starts — the enqueue and the claim already happened, and each wrote its own column. One
+    /// statement sets it alongside <c>Status</c>, so a run cannot be <c>Running</c> without a start
+    /// time or the reverse.
+    /// </para>
+    /// <para>
+    /// Phase 72 wrote <c>ClaimedAtUtc</c> here instead, which was the wrong column for this moment: by
+    /// the time a worker calls this it has held the claim since <c>WorkQueueStore.TryClaimNext</c>,
+    /// which is now what writes that one.
     /// </para></summary>
     public void BeginRun(Guid runId, int? pid) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = database.Command(connection, "UPDATE TaskRuns SET Status = $status, Pid = $pid, ClaimedAtUtc = $claimedAt WHERE RunId = $runId;");
+            using var cmd = database.Command(connection, "UPDATE TaskRuns SET Status = $status, Pid = $pid, StartedAtUtc = $startedAt WHERE RunId = $runId;");
             cmd.Bind(database, "status", RunStatus.Running.ToString());
             cmd.Bind(database, "pid", (object?)pid ?? DBNull.Value);
-            cmd.Bind(database, "claimedAt", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Bind(database, "startedAt", DateTimeOffset.UtcNow.ToString("O"));
             cmd.Bind(database, "runId", runId.ToString());
             cmd.ExecuteNonQuery();
         });
@@ -234,8 +259,8 @@ public sealed class TaskRunStore(StateDatabase database)
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = database.Command(connection, """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, ClaimedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
+            using var cmd = database.Command(connection, $"""
+                SELECT {RunColumns}
                 FROM TaskRuns WHERE RunId = $runId;
                 """);
             cmd.Bind(database, "runId", runId.ToString());
@@ -252,9 +277,9 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, $"""
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, ClaimedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
+                SELECT {RunColumns}
                 FROM TaskRuns WHERE TaskName = $taskName {(runKind is null ? "" : "AND RunKind = $runKind")}
-                ORDER BY StartedAtUtc DESC {database.Limit("limit")};
+                ORDER BY EnqueuedAtUtc DESC {database.Limit("limit")};
                 """);
             cmd.Bind(database, "taskName", taskName);
             if (runKind is not null)
@@ -274,9 +299,9 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, $"""
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, ClaimedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
+                SELECT {RunColumns}
                 FROM TaskRuns WHERE TaskName = $taskName AND RunKind = $runKind AND MappingName = $mapping
-                ORDER BY StartedAtUtc DESC {database.Limit("limit")};
+                ORDER BY EnqueuedAtUtc DESC {database.Limit("limit")};
                 """);
             cmd.Bind(database, "taskName", taskName);
             cmd.Bind(database, "runKind", runKind.ToString());
@@ -295,8 +320,8 @@ public sealed class TaskRunStore(StateDatabase database)
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = database.Command(connection, """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, ClaimedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
+            using var cmd = database.Command(connection, $"""
+                SELECT {RunColumns}
                 FROM TaskRuns WHERE Status = $status;
                 """);
             cmd.Bind(database, "status", RunStatus.Running.ToString());
@@ -317,8 +342,8 @@ public sealed class TaskRunStore(StateDatabase database)
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = database.Command(connection, """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, ClaimedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
+            using var cmd = database.Command(connection, $"""
+                SELECT {RunColumns}
                 FROM TaskRuns WHERE EndedAtUtc IS NOT NULL AND EndedAtUtc >= $since;
                 """);
             cmd.Bind(database, "since", sinceUtc.ToString("O"));
@@ -336,8 +361,8 @@ public sealed class TaskRunStore(StateDatabase database)
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = database.Command(connection, """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, ClaimedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
+            using var cmd = database.Command(connection, $"""
+                SELECT {RunColumns}
                 FROM TaskRuns WHERE Status IN ($queued, $running);
                 """);
             cmd.Bind(database, "queued", RunStatus.Queued.ToString());
@@ -406,12 +431,12 @@ public sealed class TaskRunStore(StateDatabase database)
     /// </summary>
     private const string DoomedRuns = """
         SELECT RunId FROM (
-            SELECT RunId, StartedAtUtc,
-                   ROW_NUMBER() OVER (PARTITION BY TaskName, MappingName ORDER BY StartedAtUtc DESC) AS Recency
+            SELECT RunId, EnqueuedAtUtc,
+                   ROW_NUMBER() OVER (PARTITION BY TaskName, MappingName ORDER BY EnqueuedAtUtc DESC) AS Recency
             FROM TaskRuns
             WHERE EndedAtUtc IS NOT NULL
         ) AS Ranked
-        WHERE ($cutoff IS NOT NULL AND StartedAtUtc < $cutoff)
+        WHERE ($cutoff IS NOT NULL AND EnqueuedAtUtc < $cutoff)
            OR ($maxPerMapping IS NOT NULL AND Recency > $maxPerMapping)
         """;
 
@@ -435,16 +460,17 @@ public sealed class TaskRunStore(StateDatabase database)
         Enum.Parse<RunKind>(reader.GetString(4)),
         reader.GetString(5),
         reader.IsDBNull(6) ? null : reader.GetString(6),
-        DateTimeOffset.Parse(reader.GetString(7)),
+        reader.IsDBNull(7) ? null : DateTimeOffset.Parse(reader.GetString(7)),
         reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)),
         reader.IsDBNull(9) ? null : DateTimeOffset.Parse(reader.GetString(9)),
-        reader.Int64(10),
+        reader.IsDBNull(10) ? null : DateTimeOffset.Parse(reader.GetString(10)),
         reader.Int64(11),
-        reader.IsDBNull(12) ? null : reader.GetString(12),
+        reader.Int64(12),
         reader.IsDBNull(13) ? null : reader.GetString(13),
+        reader.IsDBNull(14) ? null : reader.GetString(14),
         ReadTiming(reader),
-        reader.IsDBNull(21) ? null : reader.GetString(21),
-        reader.IsDBNull(22) ? null : reader.GetString(22));
+        reader.IsDBNull(22) ? null : reader.GetString(22),
+        reader.IsDBNull(23) ? null : reader.GetString(23));
 
     /// <summary>
     /// The timing columns as a record, or null when the run was never traced.
@@ -455,7 +481,7 @@ public sealed class TaskRunStore(StateDatabase database)
     /// </summary>
     private static RunTiming? ReadTiming(DbDataReader reader)
     {
-        const int first = 14;
+        const int first = 15;
         var traced = false;
         for (var i = first; i < first + 7; i++)
             traced |= !reader.IsDBNull(i);
@@ -464,12 +490,12 @@ public sealed class TaskRunStore(StateDatabase database)
             return null;
 
         return new RunTiming(
-            reader.IsDBNull(14) ? null : reader.GetString(14),
-            reader.IsDBNull(15) ? null : reader.Int64(15),
+            reader.IsDBNull(15) ? null : reader.GetString(15),
             reader.IsDBNull(16) ? null : reader.Int64(16),
-            reader.IsDBNull(17) ? null : reader.GetString(17),
-            reader.IsDBNull(18) ? null : reader.Int64(18),
-            reader.IsDBNull(19) ? null : reader.GetString(19),
-            reader.IsDBNull(20) ? null : reader.Int64(20));
+            reader.IsDBNull(17) ? null : reader.Int64(17),
+            reader.IsDBNull(18) ? null : reader.GetString(18),
+            reader.IsDBNull(19) ? null : reader.Int64(19),
+            reader.IsDBNull(20) ? null : reader.GetString(20),
+            reader.IsDBNull(21) ? null : reader.Int64(21));
     }
 }

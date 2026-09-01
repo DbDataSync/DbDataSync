@@ -257,7 +257,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Equal(1, after.Runs);
         Assert.Equal(0, after.Failures);
         Assert.Equal(3, after.RowsWritten);
-        Assert.NotNull(after.DurationP50Ms);
+        Assert.NotNull(after.ProcessingP50Ms);
         Assert.NotNull(after.LastCompletedPassUtc);
 
         // The window is a real filter, not decoration: a one-hour window still holds a run from a
@@ -284,7 +284,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
     private sealed record RunMetricsBucketDto(DateTimeOffset StartUtc, int Runs, int Failures, long RowsWritten);
     private sealed record RunMetricsDto(
         int Runs, int Failures, long RowsRead, long RowsWritten,
-        double? DurationP50Ms, double? DurationP95Ms, double? DurationMaxMs,
+        double? ProcessingP50Ms, double? ProcessingP95Ms, double? ProcessingMaxMs,
         DateTimeOffset? LastCompletedPassUtc, List<RunMetricsBucketDto> Buckets);
 
     private async Task<RunMetricsDto> GetMetricsAsync(string window = "24h", string kind = "Primary")

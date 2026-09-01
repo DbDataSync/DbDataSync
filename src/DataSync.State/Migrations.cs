@@ -26,12 +26,19 @@ internal static class Migrations
     public static IReadOnlyList<IReadOnlyList<string>> ScriptsFor(StateDialect dialect) =>
         [.. Templates.Select(template => SplitStatements(Render(template, dialect)))];
 
-    private static string Render(string template, StateDialect dialect) => template
-        .Replace("{{text}}", dialect.Text)
-        .Replace("{{key}}", dialect.KeyText)
-        .Replace("{{int}}", dialect.Integer)
-        .Replace("{{addcolumn}}", dialect.AddColumn)
-        .Replace("{{identity:Id}}", dialect.IdentityKey("Id"));
+    private static string Render(string template, StateDialect dialect) => DropIndexToken.Replace(
+        template
+            .Replace("{{text}}", dialect.Text)
+            .Replace("{{key}}", dialect.KeyText)
+            .Replace("{{int}}", dialect.Integer)
+            .Replace("{{addcolumn}}", dialect.AddColumn)
+            .Replace("{{identity:Id}}", dialect.IdentityKey("Id")),
+        match => dialect.DropIndex(match.Groups["index"].Value, match.Groups["table"].Value));
+
+    /// <summary><c>{{dropindex:IndexName:TableName}}</c> — the table is part of the token because SQL
+    /// Server needs it and the other two do not, so the schema has to state it either way.</summary>
+    private static readonly System.Text.RegularExpressions.Regex DropIndexToken = new(
+        @"\{\{dropindex:(?<index>\w+):(?<table>\w+)\}\}");
 
     /// <summary>
     /// Splits a script into statements on top-level semicolons.
@@ -419,6 +426,44 @@ internal static class Migrations
         -- computed from it does. A rename touches every reader, every query and the API contract, and
         -- is tracked separately.
         ALTER TABLE TaskRuns {{addcolumn}} ClaimedAtUtc {{text}} NULL;
+        """,
+
+        """
+        -- Three timestamps, each recording the moment its name says — see phase 73.
+        --
+        -- The migration above got the column it added right and the moment wrong: BeginRun writes
+        -- ClaimedAtUtc, and BeginRun is what a worker calls once it has *already* claimed an item and
+        -- is starting to execute it. Meanwhile StartedAtUtc has been written by WorkQueueStore.Enqueue
+        -- since phase 8, so it has always meant "enqueued at". Two columns, neither named for what it
+        -- held, on a table sitting next to a WorkQueue whose own EnqueuedAtUtc/ClaimedAtUtc were
+        -- always correct.
+        --
+        -- After this: EnqueuedAtUtc from Enqueue, ClaimedAtUtc from TryClaimNext, StartedAtUtc from
+        -- BeginRun. Neither existing column is renamed — only the write sites move — so there is no
+        -- RENAME COLUMN to spell three ways.
+        --
+        -- EnqueuedAtUtc *is* backfilled, unlike phase 72's ClaimedAtUtc: every existing row's
+        -- StartedAtUtc already holds exactly this value, which is the whole bug. No history is lost.
+        ALTER TABLE TaskRuns {{addcolumn}} EnqueuedAtUtc {{key}} NULL;
+        UPDATE TaskRuns SET EnqueuedAtUtc = StartedAtUtc;
+
+        -- The index follows the meaning, not the name. It exists for the metrics window and the
+        -- prune's recency ranking, both of which ask "when was this work asked for" — EnqueuedAtUtc
+        -- from here on. It also has to go before the column below can be dropped: SQLite refuses to
+        -- drop an indexed column, and has no ALTER COLUMN to relax the constraint instead.
+        {{dropindex:IX_TaskRuns_TaskName_StartedAt:TaskRuns}};
+        CREATE INDEX IX_TaskRuns_TaskName_EnqueuedAt ON TaskRuns(TaskName, EnqueuedAtUtc);
+
+        -- StartedAtUtc is dropped and re-added rather than altered, for two reasons at once. It was
+        -- declared NOT NULL, and a run that is queued but not yet started genuinely has no start —
+        -- writing the enqueue time there again to satisfy the constraint would recreate the very lie
+        -- this phase is removing. And its old values are enqueue times, now safely in EnqueuedAtUtc;
+        -- keeping them under this name would leave every historical row asserting a start that never
+        -- happened. Null instead, on the same reasoning phase 72 gave for not backfilling ClaimedAtUtc:
+        -- the true moment was never recorded, and inventing it would fabricate the figure the column
+        -- exists to measure.
+        ALTER TABLE TaskRuns DROP COLUMN StartedAtUtc;
+        ALTER TABLE TaskRuns {{addcolumn}} StartedAtUtc {{text}} NULL;
         """,
     ];
 }

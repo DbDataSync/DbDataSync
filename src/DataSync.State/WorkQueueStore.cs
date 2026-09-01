@@ -114,8 +114,8 @@ public sealed class WorkQueueStore(StateDatabase database)
             }
 
             using (var cmd = database.Command(connection, transaction, """
-                    INSERT INTO TaskRuns (RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, RowsRead, RowsWritten)
-                    VALUES ($runId, $taskName, NULL, $status, $runKind, $mapping, $segment, $startedAt, 0, 0);
+                    INSERT INTO TaskRuns (RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, EnqueuedAtUtc, RowsRead, RowsWritten)
+                    VALUES ($runId, $taskName, NULL, $status, $runKind, $mapping, $segment, $enqueuedAt, 0, 0);
                     """))
             {
                 cmd.Bind(database, "runId", runId.ToString());
@@ -124,7 +124,11 @@ public sealed class WorkQueueStore(StateDatabase database)
                 cmd.Bind(database, "runKind", runKind.ToString());
                 cmd.Bind(database, "mapping", mappingName);
                 cmd.Bind(database, "segment", segmentLabel == NoSegment ? (object)DBNull.Value : segmentLabel);
-                cmd.Bind(database, "startedAt", DateTimeOffset.UtcNow.ToString("O"));
+                // EnqueuedAtUtc, and nothing else: a queued run has not been claimed and has not
+                // started, so ClaimedAtUtc and StartedAtUtc stay null until the moments they name
+                // actually happen (phase 73). Before that, this wrote the enqueue time into
+                // StartedAtUtc, which is how every "duration" in the product came to include the queue.
+                cmd.Bind(database, "enqueuedAt", DateTimeOffset.UtcNow.ToString("O"));
                 cmd.ExecuteNonQuery();
             }
 
@@ -150,7 +154,12 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// conditional-update so a lost race (another consumer claimed it first) is detected via the
     /// affected-rows check, not a lock. The NOT EXISTS clause skips any mapping that already has
     /// another Claimed/Running item, so a claim never has to be given back for losing a RunLocks race
-    /// in the common case (see RunLockStore — this is a fast pre-filter, not a substitute for it).</summary>
+    /// in the common case (see RunLockStore — this is a fast pre-filter, not a substitute for it).
+    /// <para>
+    /// The claim itself writes two rows in one transaction: the queue item, and <c>ClaimedAtUtc</c> on
+    /// the run it belongs to (phase 73). This is the genuine claim moment — <c>TaskRunStore.BeginRun</c>
+    /// happens later, once the worker is actually starting the work, and writes <c>StartedAtUtc</c>.
+    /// </para></summary>
     public WorkItem? TryClaimNext(string taskName, string workerId)
     {
         for (var attempt = 0; attempt < 5; attempt++)
@@ -182,14 +191,45 @@ public sealed class WorkQueueStore(StateDatabase database)
             var claimed = database.Retry(() =>
             {
                 using var connection = database.OpenConnection();
-                using var cmd = database.Command(connection, """
+                using var transaction = connection.BeginTransaction();
+
+                // One claim moment, written to both tables from one variable — not two calls to
+                // UtcNow, which would disagree by however long the round trip took and make
+                // WorkQueue.ClaimedAtUtc and TaskRuns.ClaimedAtUtc two slightly different answers to
+                // the same question.
+                var now = DateTimeOffset.UtcNow.ToString("O");
+
+                using (var cmd = database.Command(connection, transaction, """
                     UPDATE WorkQueue SET Status = 'Claimed', ClaimedAtUtc = $now, ClaimedByWorkerId = $worker
                     WHERE Id = $id AND Status = 'Pending';
-                    """);
-                cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
-                cmd.Bind(database, "worker", workerId);
-                cmd.Bind(database, "id", candidate.Id);
-                return cmd.ExecuteNonQuery() == 1;
+                    """))
+                {
+                    cmd.Bind(database, "now", now);
+                    cmd.Bind(database, "worker", workerId);
+                    cmd.Bind(database, "id", candidate.Id);
+                    if (cmd.ExecuteNonQuery() != 1)
+                    {
+                        // Lost the race. Rolled back rather than left open, so the TaskRuns row of an
+                        // item somebody else claimed is never stamped with this worker's clock.
+                        transaction.Rollback();
+                        return false;
+                    }
+                }
+
+                // In the same transaction as the claim above, and that is the point of the
+                // transaction (phase 73): a run must never be Claimed in WorkQueue with no claim time
+                // in TaskRuns, which is exactly what two independent statements would allow on a
+                // crash between them.
+                using (var cmd = database.Command(
+                    connection, transaction, "UPDATE TaskRuns SET ClaimedAtUtc = $now WHERE RunId = $runId;"))
+                {
+                    cmd.Bind(database, "now", now);
+                    cmd.Bind(database, "runId", candidate.RunId.ToString());
+                    cmd.ExecuteNonQuery();
+                }
+
+                transaction.Commit();
+                return true;
             });
 
             if (claimed)

@@ -26,7 +26,7 @@ public sealed class RunPruningTests : IDisposable
     /// <summary>
     /// A finished run, backdated so age-based pruning has something to bite on.
     /// <para>
-    /// Backdated by direct UPDATE because StartedAtUtc is set by the queue, which quite reasonably only
+    /// Backdated by direct UPDATE because EnqueuedAtUtc is set by the queue, which quite reasonably only
     /// knows "now". Each run gets a distinct segment label because Enqueue deduplicates on the
     /// in-flight unique index — enqueuing the same (task, kind, mapping, segment) twice returns the
     /// first one's RunId rather than a second row, which is correct for the queue and would silently
@@ -57,8 +57,8 @@ public sealed class RunPruningTests : IDisposable
     private void Backdate(Guid runId, TimeSpan age)
     {
         using var connection = _database.OpenConnection();
-        using var cmd = _database.Command(connection, "UPDATE TaskRuns SET StartedAtUtc = $started WHERE RunId = $runId;");
-        cmd.Bind(_database, "started", (DateTimeOffset.UtcNow - age).ToString("O"));
+        using var cmd = _database.Command(connection, "UPDATE TaskRuns SET EnqueuedAtUtc = $enqueued WHERE RunId = $runId;");
+        cmd.Bind(_database, "enqueued", (DateTimeOffset.UtcNow - age).ToString("O"));
         cmd.Bind(_database, "runId", runId.ToString());
         cmd.ExecuteNonQuery();
     }

@@ -123,6 +123,17 @@ public abstract class StateDialect
     public virtual string AddColumn => "ADD COLUMN";
 
     /// <summary>
+    /// How an index is dropped. SQLite and Postgres name it alone — an index name is unique within the
+    /// schema there. SQL Server scopes index names to their table and insists on being told which.
+    /// <para>
+    /// Needed at all because SQLite cannot drop an indexed column, and phase 73 drops one: a migration
+    /// that changes a column's nullability there has no <c>ALTER COLUMN</c> to reach for, only
+    /// drop-and-re-add, and the index over it has to go first.
+    /// </para>
+    /// </summary>
+    public virtual string DropIndex(string index, string table) => $"DROP INDEX {index}";
+
+    /// <summary>
     /// The applied-migration count, and how it is recorded.
     /// <para>
     /// SQLite has <c>PRAGMA user_version</c>, a single integer that costs nothing to read on every

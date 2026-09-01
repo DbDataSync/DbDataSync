@@ -25,37 +25,53 @@ public sealed class RunMetricsStoreTests : IDisposable
     /// Writes a run directly: these are assertions about a query over rows, and going through the
     /// queue to produce them would test the queue.
     /// </summary>
-    /// <param name="startedAt">When the run was <em>enqueued</em> — what StartedAtUtc has always
-    /// meant, and what the window is still selected on.</param>
-    /// <param name="duration">
-    /// How long the run itself took, measured from the claim. <paramref name="queueWait"/> is added
-    /// before it, so a run's EndedAtUtc is <c>startedAt + queueWait + duration</c> — which is the whole
-    /// point of the distinction: two runs with the same duration and different waits must produce the
-    /// same duration percentile.
+    /// <param name="enqueuedAt">When the work was queued. What the window is selected on.</param>
+    /// <param name="processing">
+    /// How long the run itself took, from its start to its end.
     /// </param>
-    /// <param name="claimed">False writes a run that never reached Running — no ClaimedAtUtc at all,
-    /// which is how a cancelled or still-queued run looks, and how every row written before phase 72
-    /// looks.</param>
+    /// <param name="queueTime">Enqueue to start — the wait, which no processing figure may include.</param>
+    /// <param name="claimLatency">
+    /// Enqueue to <em>claim</em>, which is a third point and not the same as the second (phase 73).
+    /// <para>
+    /// It exists so the three candidate formulas give three different answers. A run built with all
+    /// three distinct has one processing time from <c>EndedAtUtc - StartedAtUtc</c>, a different one
+    /// from <c>EndedAtUtc - ClaimedAtUtc</c> (what phase 72 computed) and a third from
+    /// <c>EndedAtUtc - EnqueuedAtUtc</c> (what came before it) — so an assertion on the figure pins
+    /// which pair of timestamps produced it, rather than passing for whichever of them happened to
+    /// coincide. Defaults to <paramref name="queueTime"/>: claim-to-start is normally sub-millisecond,
+    /// so a test that is not about that gap should not have to state one.
+    /// </para>
+    /// </param>
+    /// <param name="claimed">False writes a run that was never claimed and so never started — a
+    /// cancelled or still-queued row, and every row written before phase 72's column existed.</param>
+    /// <param name="started">False writes a run that was claimed but never began. Also every row
+    /// predating phase 73, whose StartedAtUtc is dropped rather than backfilled with a start that never
+    /// happened.</param>
     private void AddRun(
-        DateTimeOffset startedAt, TimeSpan? duration = null, RunStatus status = RunStatus.Succeeded,
+        DateTimeOffset enqueuedAt, TimeSpan? processing = null, RunStatus status = RunStatus.Succeeded,
         long rowsRead = 0, long rowsWritten = 0, RunKind kind = RunKind.Primary, string taskName = Task,
-        TimeSpan? queueWait = null, bool claimed = true)
+        TimeSpan? queueTime = null, TimeSpan? claimLatency = null, bool claimed = true, bool started = true)
     {
-        var claimedAt = startedAt + (queueWait ?? TimeSpan.Zero);
+        var startedAt = enqueuedAt + (queueTime ?? TimeSpan.Zero);
+        var claimedAt = enqueuedAt + (claimLatency ?? queueTime ?? TimeSpan.Zero);
+        started &= claimed;
 
         using var connection = _database.OpenConnection();
         using var cmd = _database.Command(connection, """
-            INSERT INTO TaskRuns (RunId, TaskName, Status, RunKind, MappingName, StartedAtUtc, ClaimedAtUtc, EndedAtUtc, RowsRead, RowsWritten)
-            VALUES ($runId, $task, $status, $kind, 'orders', $started, $claimed, $ended, $read, $written);
+            INSERT INTO TaskRuns (RunId, TaskName, Status, RunKind, MappingName, EnqueuedAtUtc, ClaimedAtUtc, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten)
+            VALUES ($runId, $task, $status, $kind, 'orders', $enqueued, $claimed, $started, $ended, $read, $written);
             """);
         cmd.Bind(_database, "runId", Guid.NewGuid().ToString());
         cmd.Bind(_database, "task", taskName);
         cmd.Bind(_database, "status", status.ToString());
         cmd.Bind(_database, "kind", kind.ToString());
-        cmd.Bind(_database, "started", startedAt.ToString("O"));
+        cmd.Bind(_database, "enqueued", enqueuedAt.ToString("O"));
         cmd.Bind(_database, "claimed", claimed ? claimedAt.ToString("O") : DBNull.Value);
+        cmd.Bind(_database, "started", started ? startedAt.ToString("O") : DBNull.Value);
         cmd.Bind(_database, "ended",
-            duration is null ? DBNull.Value : (claimedAt + duration.Value).ToString("O"));
+            // Written even for a run with no recorded start — that is exactly the pre-migration row
+            // the null-guard exists for: it ended, and nothing says when it began.
+            processing is null ? DBNull.Value : (startedAt + processing.Value).ToString("O"));
         cmd.Bind(_database, "read", rowsRead);
         cmd.Bind(_database, "written", rowsWritten);
         cmd.ExecuteNonQuery();
@@ -81,8 +97,8 @@ public sealed class RunMetricsStoreTests : IDisposable
 
         // Durations are the exception, and deliberately: no run finished, so there is no duration.
         // Zero would claim runs took no time.
-        Assert.Null(metrics.DurationP50Ms);
-        Assert.Null(metrics.DurationMaxMs);
+        Assert.Null(metrics.ProcessingP50Ms);
+        Assert.Null(metrics.ProcessingMaxMs);
     }
 
     [Fact]
@@ -121,61 +137,88 @@ public sealed class RunMetricsStoreTests : IDisposable
         var metrics = Get(TimeSpan.FromHours(24));
 
         // Millisecond tolerance: the duration comes from julianday arithmetic, which is a double.
-        Assert.InRange(metrics.DurationP50Ms!.Value, 99, 101);
-        Assert.InRange(metrics.DurationP95Ms!.Value, 9_999, 10_001);
-        Assert.InRange(metrics.DurationMaxMs!.Value, 9_999, 10_001);
+        Assert.InRange(metrics.ProcessingP50Ms!.Value, 99, 101);
+        Assert.InRange(metrics.ProcessingP95Ms!.Value, 9_999, 10_001);
+        Assert.InRange(metrics.ProcessingMaxMs!.Value, 9_999, 10_001);
     }
 
     [Fact]
-    public void ARunStillGoing_CountsButHasNoDuration()
+    public void ARunStillGoing_CountsButHasNoProcessingTime()
     {
-        AddRun(_now.AddMinutes(-5), duration: null, status: RunStatus.Running);
+        AddRun(_now.AddMinutes(-5), processing: null, status: RunStatus.Running);
 
         var metrics = Get(TimeSpan.FromHours(24));
 
         Assert.Equal(1, metrics.Runs);
-        Assert.Null(metrics.DurationP50Ms);
+        Assert.Null(metrics.ProcessingP50Ms);
     }
 
     /// <summary>
-    /// The change phase 72 is: duration is the run, not the run plus its wait for a worker.
+    /// Processing time is the run, not the run plus its wait for a worker (phase 72's change, kept).
     /// <para>
     /// Two runs that each executed for 100ms, one of which sat in the queue for a minute first. Under
-    /// the old <c>EndedAtUtc - StartedAtUtc</c> the max would have been ~60,100ms and the p50 somewhere
-    /// between the two — a backlog would have looked exactly like a slow source. Both figures now say
-    /// 100ms, and the spread between p50 and max is zero, which is the assertion: the wait is not in
-    /// this number at all, not merely reduced.
+    /// <c>EndedAtUtc - EnqueuedAtUtc</c> the max would have been ~60,100ms and the p50 somewhere between
+    /// the two — a backlog would have looked exactly like a slow source. Both figures say 100ms, and the
+    /// spread between p50 and max is zero, which is the assertion: the wait is not in this number at
+    /// all, not merely reduced.
     /// </para>
     /// </summary>
     [Fact]
-    public void Duration_ExcludesTimeTheRunSpentWaitingInTheQueue()
+    public void ProcessingTime_ExcludesTimeTheRunSpentWaitingInTheQueue()
     {
         AddRun(_now.AddMinutes(-10), TimeSpan.FromMilliseconds(100));
-        AddRun(_now.AddMinutes(-20), TimeSpan.FromMilliseconds(100), queueWait: TimeSpan.FromMinutes(1));
+        AddRun(_now.AddMinutes(-20), TimeSpan.FromMilliseconds(100), queueTime: TimeSpan.FromMinutes(1));
 
         var metrics = Get(TimeSpan.FromHours(24));
 
         Assert.Equal(2, metrics.Runs);
         // Millisecond tolerance: julianday arithmetic is a double.
-        Assert.InRange(metrics.DurationP50Ms!.Value, 99, 101);
-        Assert.InRange(metrics.DurationMaxMs!.Value, 99, 101);
+        Assert.InRange(metrics.ProcessingP50Ms!.Value, 99, 101);
+        Assert.InRange(metrics.ProcessingMaxMs!.Value, 99, 101);
     }
 
     /// <summary>
-    /// A run nobody ever claimed has no duration to contribute — not a zero, and not the wait itself.
-    /// This is also every row written before ClaimedAtUtc existed, which is why it matters that the
-    /// answer is "absent" rather than "computed from what is there".
+    /// The distinction phase 73 exists for, as a number: processing time is measured from the
+    /// <em>start</em>, and the claim is a different, earlier moment.
+    /// <para>
+    /// One run, three ordered points: queued, claimed a minute later, started five seconds after that,
+    /// ran for 100ms. Three formulas, three answers — ~65,100ms from the enqueue, ~5,100ms from the
+    /// claim (what phase 72 computed, and would still compute if only the write site had moved), and
+    /// 100ms from the start. Only the last is asserted, so nothing here can pass by two timestamps
+    /// happening to coincide.
+    /// </para>
     /// </summary>
     [Fact]
-    public void ARunThatWasNeverClaimed_ContributesNoDuration()
+    public void ProcessingTime_IsMeasuredFromTheStart_NotFromTheClaimBeforeIt()
     {
-        AddRun(_now.AddMinutes(-5), TimeSpan.FromSeconds(30), claimed: false);
+        AddRun(
+            _now.AddMinutes(-10), TimeSpan.FromMilliseconds(100),
+            queueTime: TimeSpan.FromSeconds(65), claimLatency: TimeSpan.FromSeconds(60));
 
         var metrics = Get(TimeSpan.FromHours(24));
 
         Assert.Equal(1, metrics.Runs);
-        Assert.Null(metrics.DurationP50Ms);
-        Assert.Null(metrics.DurationMaxMs);
+        Assert.InRange(metrics.ProcessingP50Ms!.Value, 99, 101);
+        Assert.InRange(metrics.ProcessingMaxMs!.Value, 99, 101);
+    }
+
+    /// <summary>
+    /// A run that never started has no processing time to contribute — not a zero, and not the wait
+    /// itself. This is also every row written before this migration, whose StartedAtUtc is null because
+    /// the moment was never recorded, which is why the answer has to be "absent" rather than "computed
+    /// from what is there".
+    /// </summary>
+    [Fact]
+    public void ARunThatNeverStarted_ContributesNoProcessingTime()
+    {
+        AddRun(_now.AddMinutes(-5), TimeSpan.FromSeconds(30), claimed: false);
+        AddRun(_now.AddMinutes(-6), TimeSpan.FromSeconds(30), started: false);
+
+        var metrics = Get(TimeSpan.FromHours(24));
+
+        Assert.Equal(2, metrics.Runs);
+        Assert.Null(metrics.ProcessingP50Ms);
+        Assert.Null(metrics.ProcessingMaxMs);
     }
 
     /// <summary>
@@ -265,7 +308,7 @@ public sealed class RunMetricsStoreTests : IDisposable
 
         var plan = _metrics.ExplainTotals(Task, _now.AddHours(-24), _now, RunKind.Primary);
 
-        Assert.Contains(plan, line => line.Contains("IX_TaskRuns_TaskName_StartedAt"));
+        Assert.Contains(plan, line => line.Contains("IX_TaskRuns_TaskName_EnqueuedAt"));
         Assert.DoesNotContain(plan, line => line.StartsWith("SCAN"));
     }
 }
