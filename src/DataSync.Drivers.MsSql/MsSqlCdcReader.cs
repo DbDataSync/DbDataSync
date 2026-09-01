@@ -213,6 +213,14 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         [
             new PreviewStatement(
                 PreviewStages.SourceRead,
+                "Ask the source for its current maximum LSN, which bounds this pass",
+                MsSqlCdcCatalog.MaxLsnStatement,
+                PreviewOrigin.BuiltIn,
+                "Taken before the changes are read, not derived from them — the window ends where the " +
+                "capture job had reached when the pass began, and anything captured after that arrives " +
+                "on the next one."),
+            new PreviewStatement(
+                PreviewStages.SourceRead,
                 $"Incremental read of changes after LSN {request.PreviousWatermark}",
                 MsSqlCdcStatement.BuildRead(
                     instance.CaptureInstance, function, ColumnsFor(instance, request.ColumnMappings),

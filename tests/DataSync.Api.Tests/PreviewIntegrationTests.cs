@@ -181,9 +181,16 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         await TriggerAndWaitAsync();
 
         var after = await GetPreviewAsync();
-        var read = Assert.Single(after.Statements.Where(s => s.Stage == "Source read" && s.Sql is not null));
-        Assert.StartsWith("Incremental read of changes after version", read.Title);
-        Assert.Contains("CHANGETABLE", read.Sql!);
+        var reads = after.Statements.Where(s => s.Stage == "Source read" && s.Sql is not null).ToList();
+
+        // Two statements, in the order a pass issues them: the bounded window's end position is asked
+        // for first, and the read that uses it comes second. Showing only the second one left the
+        // version in it looking like a number nobody could account for.
+        Assert.Equal(2, reads.Count);
+        Assert.Contains("CHANGE_TRACKING_CURRENT_VERSION()", reads[0].Sql!);
+        Assert.StartsWith("Ask the source for its current change-tracking version", reads[0].Title);
+        Assert.StartsWith("Incremental read of changes after version", reads[1].Title);
+        Assert.Contains("CHANGETABLE", reads[1].Sql!);
     }
 
     /// <summary>

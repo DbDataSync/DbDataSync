@@ -96,6 +96,12 @@ public static class MsSqlCdcCatalog
     }
 
     /// <summary>
+    /// The statement <see cref="GetMaxLsnAsync"/> issues. Shared so a preview can show the same text a
+    /// pass actually runs, rather than a second copy that could drift from it.
+    /// </summary>
+    public const string MaxLsnStatement = "SELECT sys.fn_cdc_get_max_lsn();";
+
+    /// <summary>
     /// The high-water mark for this database, or null when the capture job has not run.
     /// <para>
     /// **Null is not "no changes".** <c>fn_cdc_get_max_lsn()</c> returns null when the capture job has
@@ -107,7 +113,7 @@ public static class MsSqlCdcCatalog
     public static async Task<byte[]?> GetMaxLsnAsync(DbConnection connection, CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT sys.fn_cdc_get_max_lsn();";
+        cmd.CommandText = MaxLsnStatement;
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is null or DBNull ? null : (byte[])result;
     }

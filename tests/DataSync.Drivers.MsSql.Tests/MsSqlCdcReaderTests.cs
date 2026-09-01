@@ -378,4 +378,35 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         Assert.All(rows, r => Assert.Equal(ChangeOperation.Update, r.Operation));
         Assert.Equal(["b", "c"], rows.Select(r => (string)r["Name"]!));
     }
+
+    /// <summary>
+    /// The preview has to show how the pass finds its window's end, not just the read that uses it.
+    /// Showing only the read left <c>@toLsn</c> resolved to a number with nothing accounting for
+    /// where it came from — the one query an operator asking "how does it check for changes?" wants.
+    /// </summary>
+    [Fact]
+    public async Task ThePreviewShowsTheMaxLsnQuery_BeforeTheReadThatUsesIt()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+        var start = await SettleAsync((await ReadAsync(null)).NewWatermark);
+
+        var statements = await _reader.DescribeAsync(
+            new PreviewRequest(
+                _connection, Source(), new TableRef
+                {
+                    ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = "Target",
+                },
+                [], new Dictionary<string, string>(), start),
+            CancellationToken.None);
+
+        Assert.Equal(2, statements.Count);
+        Assert.Contains("sys.fn_cdc_get_max_lsn()", statements[0].Sql!);
+        Assert.StartsWith("Ask the source for its current maximum LSN", statements[0].Title);
+
+        // Unchanged by the addition: the read still declares both parameters as real values, so it
+        // still pastes into a query tool and runs.
+        Assert.StartsWith("Incremental read of changes after LSN", statements[1].Title);
+        Assert.Contains("@toLsn", statements[1].DeclaredParameters!);
+        Assert.Contains("@storedLsn", statements[1].DeclaredParameters!);
+    }
 }

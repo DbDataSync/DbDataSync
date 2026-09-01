@@ -162,6 +162,14 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         [
             new PreviewStatement(
                 PreviewStages.SourceRead,
+                "Ask the source for its current change-tracking version, which bounds this pass",
+                CurrentVersionStatement,
+                PreviewOrigin.BuiltIn,
+                "Taken before the changes are read, not derived from them — a change committed during " +
+                "the pass is above this version and must be picked up by the next one rather than " +
+                "silently skipped."),
+            new PreviewStatement(
+                PreviewStages.SourceRead,
                 $"Incremental read of changes after version {request.PreviousWatermark}",
                 MsSqlChangeTrackingStatement.BuildIncremental(
                     request.Source.Schema, request.Source.Table, pkColumns,
@@ -177,10 +185,16 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         options.TryGetValue(SnapshotIsolationOption, out var raw)
         && (string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) || raw == "1");
 
+    /// <summary>
+    /// The statement <see cref="GetCurrentVersionAsync"/> issues. Shared so a preview can show the same
+    /// text a pass actually runs, rather than a second copy that could drift from it.
+    /// </summary>
+    private const string CurrentVersionStatement = "SELECT CHANGE_TRACKING_CURRENT_VERSION();";
+
     private static async Task<long> GetCurrentVersionAsync(DbConnection connection, CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT CHANGE_TRACKING_CURRENT_VERSION();";
+        cmd.CommandText = CurrentVersionStatement;
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is null or DBNull ? 0 : Convert.ToInt64(result);
     }
