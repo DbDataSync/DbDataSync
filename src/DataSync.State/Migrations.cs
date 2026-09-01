@@ -395,5 +395,30 @@ internal static class Migrations
         ALTER TABLE TaskRuns {{addcolumn}} PreviousWatermark {{text}} NULL;
         ALTER TABLE TaskRuns {{addcolumn}} NewWatermark {{text}} NULL;
         """,
+
+        """
+        -- When a worker actually started executing this run — see phase 72.
+        --
+        -- StartedAtUtc is written by WorkQueueStore.Enqueue, before any worker exists to do the work,
+        -- so it has always meant "enqueued at" despite its name. Every duration computed as
+        -- EndedAtUtc - StartedAtUtc therefore silently included however long the run sat queued. This
+        -- column is the missing half: BeginRun writes it at the moment the item is claimed and begins,
+        -- so duration becomes EndedAtUtc - ClaimedAtUtc and queue wait becomes ClaimedAtUtc -
+        -- StartedAtUtc — two numbers that were previously one, added together, called by the name of
+        -- only one of them.
+        --
+        -- Named to match WorkQueue.ClaimedAtUtc, which has always meant exactly this.
+        --
+        -- Null for a run that never reached Running: still queued, or cancelled before a worker
+        -- claimed it. Such a run has no duration to report, the same as one with no EndedAtUtc. Rows
+        -- that predate this column are null too, and are not backfilled — there is nothing to
+        -- backfill from, and inventing a claim time would fabricate the very figure this exists to
+        -- measure.
+        --
+        -- StartedAtUtc is deliberately NOT renamed here. Its meaning does not change; only what is
+        -- computed from it does. A rename touches every reader, every query and the API contract, and
+        -- is tracked separately.
+        ALTER TABLE TaskRuns {{addcolumn}} ClaimedAtUtc {{text}} NULL;
+        """,
     ];
 }

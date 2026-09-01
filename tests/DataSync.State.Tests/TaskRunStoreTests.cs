@@ -58,6 +58,34 @@ public sealed class TaskRunStoreTests : IDisposable
         Assert.NotNull(run);
         Assert.Equal(RunStatus.Queued, run!.Status);
         Assert.Null(run.Pid);
+
+        // Nobody has claimed it, so it has no claim time — the "absent means it never happened" shape
+        // the rest of the optional TaskRuns columns use. A run cancelled while queued keeps this null
+        // forever, and correctly reports no duration.
+        Assert.Null(run.ClaimedAtUtc);
+    }
+
+    /// <summary>
+    /// The distinction phase 72 exists for: StartedAtUtc is written by the enqueue, ClaimedAtUtc by
+    /// the worker that picks the item up. The sleep makes the gap real rather than a coincidence of
+    /// clock resolution, so this fails if BeginRun stops writing the column or writes the enqueue time
+    /// into it.
+    /// </summary>
+    [Fact]
+    public void BeginRun_RecordsWhenTheWorkerActuallyClaimedTheRun_NotWhenItWasQueued()
+    {
+        var runId = _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+        var queued = _store.GetRun(runId)!;
+        Thread.Sleep(20);
+        _store.BeginRun(runId, pid: 7);
+
+        var claimed = _store.GetRun(runId)!;
+
+        Assert.NotNull(claimed.ClaimedAtUtc);
+        Assert.Equal(queued.StartedAtUtc, claimed.StartedAtUtc); // the enqueue time is left alone
+        Assert.True(
+            claimed.ClaimedAtUtc!.Value - claimed.StartedAtUtc >= TimeSpan.FromMilliseconds(15),
+            "the queue wait should be visible as the gap between the two timestamps");
     }
 
     [Fact]

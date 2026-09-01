@@ -21,24 +21,41 @@ public sealed class RunMetricsStoreTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
-    /// <summary>Writes a run directly: these are assertions about a query over rows, and going through
-    /// the queue to produce them would test the queue.</summary>
+    /// <summary>
+    /// Writes a run directly: these are assertions about a query over rows, and going through the
+    /// queue to produce them would test the queue.
+    /// </summary>
+    /// <param name="startedAt">When the run was <em>enqueued</em> — what StartedAtUtc has always
+    /// meant, and what the window is still selected on.</param>
+    /// <param name="duration">
+    /// How long the run itself took, measured from the claim. <paramref name="queueWait"/> is added
+    /// before it, so a run's EndedAtUtc is <c>startedAt + queueWait + duration</c> — which is the whole
+    /// point of the distinction: two runs with the same duration and different waits must produce the
+    /// same duration percentile.
+    /// </param>
+    /// <param name="claimed">False writes a run that never reached Running — no ClaimedAtUtc at all,
+    /// which is how a cancelled or still-queued run looks, and how every row written before phase 72
+    /// looks.</param>
     private void AddRun(
         DateTimeOffset startedAt, TimeSpan? duration = null, RunStatus status = RunStatus.Succeeded,
-        long rowsRead = 0, long rowsWritten = 0, RunKind kind = RunKind.Primary, string taskName = Task)
+        long rowsRead = 0, long rowsWritten = 0, RunKind kind = RunKind.Primary, string taskName = Task,
+        TimeSpan? queueWait = null, bool claimed = true)
     {
+        var claimedAt = startedAt + (queueWait ?? TimeSpan.Zero);
+
         using var connection = _database.OpenConnection();
         using var cmd = _database.Command(connection, """
-            INSERT INTO TaskRuns (RunId, TaskName, Status, RunKind, MappingName, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten)
-            VALUES ($runId, $task, $status, $kind, 'orders', $started, $ended, $read, $written);
+            INSERT INTO TaskRuns (RunId, TaskName, Status, RunKind, MappingName, StartedAtUtc, ClaimedAtUtc, EndedAtUtc, RowsRead, RowsWritten)
+            VALUES ($runId, $task, $status, $kind, 'orders', $started, $claimed, $ended, $read, $written);
             """);
         cmd.Bind(_database, "runId", Guid.NewGuid().ToString());
         cmd.Bind(_database, "task", taskName);
         cmd.Bind(_database, "status", status.ToString());
         cmd.Bind(_database, "kind", kind.ToString());
         cmd.Bind(_database, "started", startedAt.ToString("O"));
+        cmd.Bind(_database, "claimed", claimed ? claimedAt.ToString("O") : DBNull.Value);
         cmd.Bind(_database, "ended",
-            duration is null ? DBNull.Value : (startedAt + duration.Value).ToString("O"));
+            duration is null ? DBNull.Value : (claimedAt + duration.Value).ToString("O"));
         cmd.Bind(_database, "read", rowsRead);
         cmd.Bind(_database, "written", rowsWritten);
         cmd.ExecuteNonQuery();
@@ -118,6 +135,47 @@ public sealed class RunMetricsStoreTests : IDisposable
 
         Assert.Equal(1, metrics.Runs);
         Assert.Null(metrics.DurationP50Ms);
+    }
+
+    /// <summary>
+    /// The change phase 72 is: duration is the run, not the run plus its wait for a worker.
+    /// <para>
+    /// Two runs that each executed for 100ms, one of which sat in the queue for a minute first. Under
+    /// the old <c>EndedAtUtc - StartedAtUtc</c> the max would have been ~60,100ms and the p50 somewhere
+    /// between the two — a backlog would have looked exactly like a slow source. Both figures now say
+    /// 100ms, and the spread between p50 and max is zero, which is the assertion: the wait is not in
+    /// this number at all, not merely reduced.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Duration_ExcludesTimeTheRunSpentWaitingInTheQueue()
+    {
+        AddRun(_now.AddMinutes(-10), TimeSpan.FromMilliseconds(100));
+        AddRun(_now.AddMinutes(-20), TimeSpan.FromMilliseconds(100), queueWait: TimeSpan.FromMinutes(1));
+
+        var metrics = Get(TimeSpan.FromHours(24));
+
+        Assert.Equal(2, metrics.Runs);
+        // Millisecond tolerance: julianday arithmetic is a double.
+        Assert.InRange(metrics.DurationP50Ms!.Value, 99, 101);
+        Assert.InRange(metrics.DurationMaxMs!.Value, 99, 101);
+    }
+
+    /// <summary>
+    /// A run nobody ever claimed has no duration to contribute — not a zero, and not the wait itself.
+    /// This is also every row written before ClaimedAtUtc existed, which is why it matters that the
+    /// answer is "absent" rather than "computed from what is there".
+    /// </summary>
+    [Fact]
+    public void ARunThatWasNeverClaimed_ContributesNoDuration()
+    {
+        AddRun(_now.AddMinutes(-5), TimeSpan.FromSeconds(30), claimed: false);
+
+        var metrics = Get(TimeSpan.FromHours(24));
+
+        Assert.Equal(1, metrics.Runs);
+        Assert.Null(metrics.DurationP50Ms);
+        Assert.Null(metrics.DurationMaxMs);
     }
 
     /// <summary>

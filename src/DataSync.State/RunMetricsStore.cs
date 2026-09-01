@@ -10,8 +10,16 @@ public sealed record RunMetricsBucket(DateTimeOffset StartUtc, int Runs, int Fai
 /// is at its most useful exactly when it is older than the window, because that is the case where a
 /// replication has stopped. Null when there has never been one.
 /// </param>
-/// <param name="DurationP50Ms">Null when nothing in the window finished — a run still going has no
-/// duration, and inventing one for it would put a number in a card that means nothing.</param>
+/// <param name="DurationP50Ms">
+/// How long the runs themselves took: <c>EndedAtUtc - ClaimedAtUtc</c>, which since phase 72 excludes
+/// the time a run spent queued. Queue wait is its own figure, from the two timestamps on the run —
+/// deliberately not folded back in here, because a slow source and a busy worker pool are different
+/// problems and one number could not tell them apart.
+/// <para>
+/// Null when nothing in the window finished — a run still going has no duration, and inventing one for
+/// it would put a number in a card that means nothing. Null too when nothing in the window ever began.
+/// </para>
+/// </param>
 public sealed record RunMetrics(
     string TaskName,
     RunKind? RunKind,
@@ -115,6 +123,14 @@ public sealed class RunMetricsStore(StateDatabase database)
     /// <summary>
     /// Every finished run's duration, ascending, for percentiles computed in C#.
     /// <para>
+    /// **Measured from <c>ClaimedAtUtc</c>, not <c>StartedAtUtc</c>** (phase 72). The latter is written
+    /// at enqueue time, so until this changed these percentiles reported the run plus however long it
+    /// had waited for a worker — under a backlog, a "duration" that was mostly queue. A run with no
+    /// <c>ClaimedAtUtc</c> never began, so it contributes no duration at all rather than a wrong one;
+    /// that includes rows written before the column existed, which is why the filter is explicit here
+    /// rather than left to <c>julianday(NULL)</c>.
+    /// </para>
+    /// <para>
     /// SQLite has no <c>PERCENTILE_CONT</c>, so the choice was this or three <c>ORDER BY … LIMIT 1
     /// OFFSET n</c> queries. One column of one index scan beats three scans of the same index, the
     /// result is exact rather than interpolated, and at the size this is asked about — a week of runs —
@@ -126,10 +142,10 @@ public sealed class RunMetricsStore(StateDatabase database)
         RunKind? runKind, string kindClause)
     {
         using var cmd = database.Command(connection, $"""
-            SELECT (julianday(EndedAtUtc) - julianday(StartedAtUtc)) * 86400000.0
+            SELECT (julianday(EndedAtUtc) - julianday(ClaimedAtUtc)) * 86400000.0
             FROM TaskRuns
             WHERE TaskName = $taskName AND StartedAtUtc >= $from AND StartedAtUtc < $to
-              AND EndedAtUtc IS NOT NULL{kindClause}
+              AND EndedAtUtc IS NOT NULL AND ClaimedAtUtc IS NOT NULL{kindClause}
             ORDER BY 1;
             """);
         Bind(cmd, taskName, fromUtc, toUtc, runKind);

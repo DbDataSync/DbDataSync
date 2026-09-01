@@ -48,7 +48,28 @@ public sealed record TaskRunRecord(
     RunKind RunKind,
     string MappingName,
     string? SegmentLabel,
+    /// <summary>
+    /// When this run was **enqueued**, not when it started executing — the queue writes the row, and
+    /// this column with it, before any worker has claimed anything. The name predates
+    /// <see cref="ClaimedAtUtc"/> and is knowingly kept (phase 72): renaming it touches every reader
+    /// and the API contract, and its meaning has not changed.
+    /// </summary>
     DateTimeOffset StartedAtUtc,
+    /// <summary>
+    /// When a worker actually claimed this run and began executing it (phase 72). The genuine "the run
+    /// started" timestamp, and the one duration is measured from — <c>EndedAtUtc - ClaimedAtUtc</c> —
+    /// so that a run's duration is the run rather than the run plus its wait in the queue.
+    /// <para>
+    /// Queue wait is the other half: <c>ClaimedAtUtc - StartedAtUtc</c>. Both timestamps are exposed
+    /// raw rather than as a precomputed delta, matching phase 71's watermark pair.
+    /// </para>
+    /// <para>
+    /// Null for a run that never reached <c>Running</c> — still queued, or cancelled before a worker
+    /// claimed it — and for rows written before this column existed. Such a run has no duration, the
+    /// same as one with no <see cref="EndedAtUtc"/>.
+    /// </para>
+    /// </summary>
+    DateTimeOffset? ClaimedAtUtc,
     DateTimeOffset? EndedAtUtc,
     long RowsRead,
     long RowsWritten,
