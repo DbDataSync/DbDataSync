@@ -174,3 +174,9 @@ implementation doc for this section. Recorded so scope stays deliberate:
 - Multi-node/remote Task Runner execution (flagged as out of scope in `detailed-design.md` §7).
 - Near-real-time replication refinements (lower-latency continuous mode, dedup/ordering guarantees
   beyond what Change Tracking/CDC provide natively).
+- **Rename `TaskRuns.StartedAtUtc` to `EnqueuedAtUtc`.** It is written by `WorkQueueStore.Enqueue`, so
+  it has always meant "enqueued at" and never "started at". Phase 72 fixed the consequence — nothing
+  computes a duration from it any more, `ClaimedAtUtc` does that — but deliberately not the name, which
+  touches every reader, the prune's ranking, the scheduler's due-ness check, the metrics window and the
+  SPA's `TaskRunRecord`. Recorded here so the half-fixed naming is a known debt rather than a surprise
+  for whoever reads the column next.
