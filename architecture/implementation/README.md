@@ -29,13 +29,12 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **082** — Windows certificate management | 081 is done; nothing else blocks it |
-| 2 | **083** — the Certificates section of the Admin screen | needs both 081 and 082; 081 is done, 082 is next |
-| 3 | **034** — PostgreSQL logical replication | |
-| 4 | **035** — config history diff and revert | now also covers `datasync.config.yaml`'s missing history view, carried forward from 081 |
-| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **083** — the Certificates section of the Admin screen | 081 and 082, its two dependencies, are both done |
+| 2 | **034** — PostgreSQL logical replication | |
+| 3 | **035** — config history diff and revert | now also covers `datasync.config.yaml`'s missing history view, carried forward from 081 |
+| 4 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-09-01; 081 done and removed, 082 moves up to take its place. Ahead of the three engine phases by
+Set 2026-09-01; 082 done and removed, 083 moves up to take its place. Ahead of the three engine phases by
 choice, not necessity: nothing in 034/035/038 blocks on them, and moving either group is an ordinary
 decision that changes only this table.
 What is left below it is the three engine phases that have been waiting since distribution and auth
