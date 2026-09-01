@@ -465,5 +465,46 @@ internal static class Migrations
         ALTER TABLE TaskRuns DROP COLUMN StartedAtUtc;
         ALTER TABLE TaskRuns {{addcolumn}} StartedAtUtc {{text}} NULL;
         """,
+
+        """
+        -- Watermarks keyed by the mapping that reads, not by the table it reads — see phase 74.
+        --
+        -- The old key was (TaskName, SourceTable). A replication may have any number of table mappings
+        -- pointing at the same physical source table, and nothing makes them read it the same way, so
+        -- one row was serving two readers with incompatible notions of a position. Two mappings on one
+        -- table, one using Change Tracking and one using the generic Watermark reader, overwrote each
+        -- other with values neither could parse. Two generic ones with different watermarkColumn
+        -- options did something quieter and worse: no parse error, just the wrong position.
+        --
+        -- SourceTable stays in the key beside MappingName. It is redundant for telling mappings apart,
+        -- but it is what makes a mapping repointed at a different source table read from the beginning
+        -- rather than resume from a position belonging to a table it no longer reads.
+        --
+        -- **Every stored watermark is discarded, and none is backfilled.** Not a shortcut — there is
+        -- no way to recover which mapping an old row belonged to, and the case where it matters is
+        -- exactly the case where more than one shared it. Every replication using CDC, Change Tracking
+        -- or the generic Watermark reader reads its source from scratch on its next pass after this
+        -- migration. Backfilling by guessing a mapping would silently hand one mapping another's
+        -- position, which is the bug this exists to remove.
+        --
+        -- The same drop also pays for WatermarkKey.Build's format change, which is why the two ship
+        -- together. Build now qualifies the schema and table through the source's own dialect instead
+        -- of interpolating dots, so schema 'a.b' table 'c' no longer keys identically to schema 'a'
+        -- table 'b.c'. That reinterprets every stored key too; done in the same migration it costs
+        -- nothing beyond a resync already being paid for, and done separately it would cost a second.
+        --
+        -- Dropped and recreated rather than altered because the change is to the primary key, which
+        -- none of the three engines can alter in place, and because there is nothing in the table
+        -- worth carrying across.
+        DROP TABLE ChangeWatermarks;
+        CREATE TABLE ChangeWatermarks (
+            TaskName {{key}} NOT NULL,
+            MappingName {{key}} NOT NULL,
+            SourceTable {{key}} NOT NULL,
+            Watermark {{text}} NOT NULL,
+            UpdatedAtUtc {{text}} NOT NULL,
+            PRIMARY KEY (TaskName, MappingName, SourceTable)
+        );
+        """,
     ];
 }

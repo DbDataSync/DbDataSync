@@ -513,8 +513,10 @@ public sealed class RunExecutor(
             // Only a Primary pass ever advances the incremental watermark — a Backfill must never be
             // able to disturb the cursor a replication's ongoing incremental sync depends on,
             // regardless of which reader/writer Kind it happens to use internally.
-            var watermarkKey = WatermarkKey.Build(source);
-            var previousWatermark = item.RunKind == RunKind.Primary ? state.GetWatermark(task.Name, watermarkKey) : null;
+            var watermarkKey = WatermarkKey.Build(source, ResolveDialect(sourceDriver));
+            var previousWatermark = item.RunKind == RunKind.Primary
+                ? state.GetWatermark(task.Name, mapping.Name, watermarkKey)
+                : null;
 
             // Resolved once per pass, not per statement: the script generates an expression in exactly
             // the form a hand-written transform takes, and phase 22's projection does the rest —
@@ -727,7 +729,7 @@ public sealed class RunExecutor(
             // same as taking any of them. An ordinary incremental pass has exactly one segment (none).
             if (item.RunKind == RunKind.Primary && newWatermark is not null)
             {
-                state.SetWatermark(task.Name, watermarkKey, newWatermark);
+                state.SetWatermark(task.Name, mapping.Name, watermarkKey, newWatermark);
 
                 // Recorded from inside the same gate that writes the current value, not beside it, so
                 // the history on TaskRuns cannot claim an advance ChangeWatermarks did not take.

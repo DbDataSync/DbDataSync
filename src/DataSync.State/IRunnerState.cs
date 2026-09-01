@@ -30,7 +30,7 @@ public interface IRunnerState
 
     bool TryAcquireLock(string taskName, RunKind runKind, string mappingName, Guid runId);
 
-    string? GetWatermark(string taskName, string sourceTable);
+    string? GetWatermark(string taskName, string mappingName, string sourceTable);
 
     void BeginRun(Guid runId, int? pid);
 
@@ -66,7 +66,7 @@ public interface IRunnerState
     /// whole run model rests on. That is what makes it safe to journal: its presence in a journal is
     /// itself the evidence the write succeeded.
     /// </summary>
-    void SetWatermark(string taskName, string sourceTable, string watermark);
+    void SetWatermark(string taskName, string mappingName, string sourceTable, string watermark);
 
     /// <summary>
     /// Where a verification result was written. An outcome like any other — the work is already done

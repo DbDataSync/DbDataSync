@@ -119,7 +119,21 @@ public sealed class JournalRecovery(
             case JournalOperation.SetWatermark when StateJournal.PayloadOf<SetWatermarkRequest>(entry) is { } s:
                 // Safe to replay by construction: a watermark only reaches a journal after the target
                 // write committed, so its presence here is the evidence that it did.
-                state.SetWatermark(s.TaskName, s.SourceTable, s.Watermark);
+                //
+                // Except when the entry predates phase 74 and names no mapping. There is nothing to
+                // recover the mapping from — that ambiguity is the whole reason the key changed — and
+                // replaying it under an invented one would hand some mapping a position that is not
+                // its own. Skipped instead, which costs the same re-read the migration already cost.
+                if (s.MappingName is null)
+                {
+                    logger.LogWarning(
+                        "Skipping journalled watermark for run {RunId}: it names no mapping, so it was written " +
+                        "before the watermark key included one. The mapping re-reads from its stored position.",
+                        runId);
+                    break;
+                }
+
+                state.SetWatermark(s.TaskName, s.MappingName, s.SourceTable, s.Watermark);
                 break;
 
             default:

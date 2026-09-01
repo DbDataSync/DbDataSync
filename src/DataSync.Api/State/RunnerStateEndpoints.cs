@@ -41,8 +41,8 @@ public static class RunnerStateEndpoints
         group.MapPost("/try-acquire-lock", (TryAcquireLockRequest r) =>
             new BoolResponse(state.TryAcquireLock(r.TaskName, r.RunKind, r.MappingName, r.RunId)));
 
-        group.MapGet("/watermark", (string taskName, string sourceTable) =>
-            new WatermarkResponse(state.GetWatermark(taskName, sourceTable)));
+        group.MapGet("/watermark", (string taskName, string mappingName, string sourceTable) =>
+            new WatermarkResponse(state.GetWatermark(taskName, mappingName, sourceTable)));
 
         group.MapPost("/begin-run", (BeginRunRequest r) =>
         {
@@ -73,7 +73,13 @@ public static class RunnerStateEndpoints
 
         group.MapPost("/set-watermark", (SetWatermarkRequest r) =>
         {
-            state.SetWatermark(r.TaskName, r.SourceTable, r.Watermark);
+            // A request without a mapping comes from a runner older than phase 74. There is no mapping
+            // to guess and no row it could safely land in, and the migration discarded whatever it
+            // would have overwritten anyway — so it is refused rather than written somewhere wrong.
+            if (r.MappingName is null)
+                return Results.BadRequest("set-watermark requires a mapping name.");
+
+            state.SetWatermark(r.TaskName, r.MappingName, r.SourceTable, r.Watermark);
             return Results.Ok();
         });
 

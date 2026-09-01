@@ -24,6 +24,7 @@ namespace DataSync.Api.Services;
 /// </summary>
 public sealed class ResyncService(
     ConfigRepository configRepository,
+    DriverRegistry driverRegistry,
     TaskRunStore taskRunStore,
     ChangeWatermarkStore watermarks,
     BackfillService backfill)
@@ -45,28 +46,39 @@ public sealed class ResyncService(
 
         ReplicationTaskConfig task;
         TableMappingConfig mapping;
+        SourceTableRef source;
+        ConnectionConfig sourceConnection;
         try
         {
             task = configRepository.LoadReplicationTask(run.TaskName);
             mapping = configRepository.LoadTableMapping(run.TaskName, run.MappingName);
+
+            if (mapping.Sources.Count != 1)
+                return TriggerResult.Invalid(
+                    $"Table mapping '{run.MappingName}' has {mapping.Sources.Count} sources; resync supports 1:1 mappings.");
+
+            // Loaded for its driver, not to connect: the watermark key is spelled by the source
+            // engine's dialect, so clearing the row means knowing which engine wrote it. Reading the
+            // connection's *configuration* rather than opening it keeps a resync possible for a source
+            // that is unreachable — which is a plausible way to have arrived here in the first place.
+            source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
+            sourceConnection = configRepository.LoadConnection(source.ConnectionName);
         }
         catch (FileNotFoundException)
         {
             return TriggerResult.NotFound();
         }
 
-        if (mapping.Sources.Count != 1)
-            return TriggerResult.Invalid(
-                $"Table mapping '{run.MappingName}' has {mapping.Sources.Count} sources; resync supports 1:1 mappings.");
-
-        var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
+        var sourceDialect = (driverRegistry.Get(sourceConnection.DriverType) as IDialectProvider)?.Dialect
+            ?? throw new InvalidOperationException(
+                $"The '{sourceConnection.DriverType}' driver does not name a SQL dialect.");
 
         // Cleared before the reload is enqueued, not after. If this process dies in between, a
         // replication whose watermark is gone reads the table from the beginning on its next pass —
         // which is slow and correct. The other order leaves a reload running against a watermark that
         // is still expired, so the next incremental pass fails again and the operator is told to do
         // the thing they just did.
-        watermarks.ClearWatermark(run.TaskName, WatermarkKey.Build(source));
+        watermarks.ClearWatermark(run.TaskName, run.MappingName, WatermarkKey.Build(source, sourceDialect));
 
         // The reload reader, because the configured one reports changes since a watermark and there
         // is no usable watermark — that is the whole problem. The engine-neutral one: a resync is not

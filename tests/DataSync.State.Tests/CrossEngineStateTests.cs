@@ -89,11 +89,11 @@ public sealed class CrossEngineStateTests : IDisposable
         var database = Open(engine);
         var watermarks = new ChangeWatermarkStore(database);
 
-        watermarks.SetWatermark("crm-sync", "dbo.Orders", "100");
-        watermarks.SetWatermark("crm-sync", "dbo.Orders", "200");
+        watermarks.SetWatermark("crm-sync", "orders", "dbo.Orders", "100");
+        watermarks.SetWatermark("crm-sync", "orders", "dbo.Orders", "200");
 
-        Assert.Equal("200", watermarks.GetWatermark("crm-sync", "dbo.Orders"));
-        Assert.Null(watermarks.GetWatermark("crm-sync", "dbo.Customers"));
+        Assert.Equal("200", watermarks.GetWatermark("crm-sync", "orders", "dbo.Orders"));
+        Assert.Null(watermarks.GetWatermark("crm-sync", "orders", "dbo.Customers"));
     }
 
     /// <summary>

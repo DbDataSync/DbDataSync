@@ -121,14 +121,14 @@ public sealed class RunnerStateEndpointTests : IClassFixture<TestApiFactory>
         remote.BeginRun(claimed.RunId, pid: 4242);
         remote.MarkRunning(claimed.Id);
         remote.Log(claimed.RunId, LogSeverity.Info, "hello from a runner");
-        remote.SetWatermark(taskName, "dbo.Orders", "1234");
+        remote.SetWatermark(taskName, "orders", "dbo.Orders", "1234");
         remote.MarkDone(claimed.Id);
         remote.CompleteRun(claimed.RunId, RunStatus.Succeeded, 7, 7, null);
         remote.ReleaseLock(taskName, RunKind.Primary, "Orders");
         remote.Flush();
 
         // Read back through the owner, which is the only thing that ever touched the file.
-        Assert.Equal("1234", owner.GetWatermark(taskName, "dbo.Orders"));
+        Assert.Equal("1234", owner.GetWatermark(taskName, "orders", "dbo.Orders"));
         Assert.False(remote.HasOutstandingWork(taskName));
 
         var run = _factory.Services.GetRequiredService<TaskRunStore>().GetRun(claimed.RunId);

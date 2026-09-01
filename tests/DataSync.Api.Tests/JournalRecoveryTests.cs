@@ -13,6 +13,7 @@ namespace DataSync.Api.Tests;
 public sealed class JournalRecoveryTests : IDisposable
 {
     private const string TaskName = "sales";
+    private const string MappingName = "orders";
 
     private readonly string _root = Directory.CreateTempSubdirectory("datasync-journal-recovery-").FullName;
     private readonly StateDatabase _database;
@@ -76,13 +77,13 @@ public sealed class JournalRecoveryTests : IDisposable
 
         var path = WriteJournal(runId,
             (JournalOperation.Log, new LogRequest(runId, LogSeverity.Info, "wrote 7 rows", DateTimeOffset.UtcNow)),
-            (JournalOperation.SetWatermark, new SetWatermarkRequest(TaskName, "dbo.Orders", "1234")),
+            (JournalOperation.SetWatermark, new SetWatermarkRequest(TaskName, "dbo.Orders", "1234", MappingName)),
             (JournalOperation.MarkDone, new WorkItemRequest(item.Id)),
             (JournalOperation.CompleteRun, new CompleteRunRequest(runId, RunStatus.Succeeded, 7, 7, null)));
 
         _recovery.Recover(TaskName);
 
-        Assert.Equal("1234", _state.GetWatermark(TaskName, "dbo.Orders"));
+        Assert.Equal("1234", _state.GetWatermark(TaskName, MappingName, "dbo.Orders"));
         Assert.Equal(RunStatus.Succeeded, _taskRuns.GetRun(runId)!.Status);
         Assert.Contains(_logs.GetLogs(runId), l => l.Message == "wrote 7 rows");
         Assert.False(_workQueue.HasOutstandingWork(TaskName));
@@ -174,12 +175,12 @@ public sealed class JournalRecoveryTests : IDisposable
         var runId = _workQueue.Enqueue(TaskName, RunKind.Primary, "Orders");
 
         var path = WriteJournal(runId,
-            (JournalOperation.SetWatermark, new SetWatermarkRequest(TaskName, "dbo.Orders", "1234")));
+            (JournalOperation.SetWatermark, new SetWatermarkRequest(TaskName, "dbo.Orders", "1234", MappingName)));
         File.AppendAllText(path, """{"sequence":2,"operation":"Comp""");
 
         _recovery.Recover(TaskName);
 
-        Assert.Equal("1234", _state.GetWatermark(TaskName, "dbo.Orders"));
+        Assert.Equal("1234", _state.GetWatermark(TaskName, MappingName, "dbo.Orders"));
         Assert.Contains(_logger.Entries, e => e.Message.Contains("unreadable line"));
     }
 

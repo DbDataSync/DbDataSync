@@ -62,9 +62,11 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
     public bool TryAcquireLock(string taskName, RunKind runKind, string mappingName, Guid runId) =>
         Required<BoolResponse>("try-acquire-lock", new TryAcquireLockRequest(taskName, runKind, mappingName, runId)).Value;
 
-    public string? GetWatermark(string taskName, string sourceTable) =>
+    public string? GetWatermark(string taskName, string mappingName, string sourceTable) =>
         Required<WatermarkResponse>(
-            $"watermark?taskName={Uri.EscapeDataString(taskName)}&sourceTable={Uri.EscapeDataString(sourceTable)}").Watermark;
+            $"watermark?taskName={Uri.EscapeDataString(taskName)}" +
+            $"&mappingName={Uri.EscapeDataString(mappingName)}" +
+            $"&sourceTable={Uri.EscapeDataString(sourceTable)}").Watermark;
 
     public void BeginRun(Guid runId, int? pid) => Required("begin-run", new BeginRunRequest(runId, pid));
 
@@ -94,8 +96,10 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
                 previousWatermark, newWatermark),
             JournalOperation.CompleteRun);
 
-    public void SetWatermark(string taskName, string sourceTable, string watermark) =>
-        Outcome("set-watermark", new SetWatermarkRequest(taskName, sourceTable, watermark), JournalOperation.SetWatermark);
+    public void SetWatermark(string taskName, string mappingName, string sourceTable, string watermark) =>
+        Outcome(
+            "set-watermark", new SetWatermarkRequest(taskName, sourceTable, watermark, mappingName),
+            JournalOperation.SetWatermark);
 
     public void RecordVerificationResult(VerificationResultRecord result) =>
         Outcome("record-verification-result", new RecordVerificationResultRequest(result),

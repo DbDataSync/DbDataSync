@@ -46,7 +46,12 @@ public sealed record CompleteRunRequest(
     /// the two above are — a journal entry written before these existed has to replay.</summary>
     string? PreviousWatermark = null,
     string? NewWatermark = null);
-public sealed record SetWatermarkRequest(string TaskName, string SourceTable, string Watermark);
+/// <param name="MappingName">Which mapping's position this is (phase 74). Defaulted, and nullable,
+/// for the reason <see cref="CompleteRunRequest.FailureKind"/> is: an entry journalled before this
+/// existed still has to deserialize. Recovery skips such an entry rather than inventing a mapping for
+/// it — see <c>JournalRecovery</c>.</param>
+public sealed record SetWatermarkRequest(
+    string TaskName, string SourceTable, string Watermark, string? MappingName = null);
 public sealed record RecordVerificationResultRequest(VerificationResultRecord Result);
 public sealed record LogRequest(Guid RunId, LogSeverity Level, string Message, DateTimeOffset TimestampUtc);
 

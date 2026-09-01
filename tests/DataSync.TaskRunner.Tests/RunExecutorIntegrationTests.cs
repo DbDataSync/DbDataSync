@@ -1,5 +1,6 @@
 using ClrKernel.Core.Secrets;
 using DataSync.Core.Config;
+using DataSync.Core.Sql;
 using DataSync.Scripting;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
@@ -306,9 +307,12 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         return results;
     }
 
-    private string WatermarkFor(string table) =>
-        _watermarkStore.GetWatermark("e2e-sync", WatermarkKey.Build(
-            new SourceTableRef { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = table }))!;
+    private string WatermarkFor(string table) => WatermarkFor("e2e-sync", "main", table)!;
+
+    private string? WatermarkFor(string taskName, string mappingName, string table) =>
+        _watermarkStore.GetWatermark(taskName, mappingName, WatermarkKey.Build(
+            new SourceTableRef { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = table },
+            MsSqlDialect.Instance));
 
     /// <summary>
     /// The invariant the whole run model rests on: a watermark records "everything up to here is at
@@ -638,8 +642,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
 
         // Not pruned, and no watermark stored — the two go together, and that pairing is the invariant.
         Assert.True(await ShadowRowCountAsync() > 0);
-        Assert.Null(_watermarkStore.GetWatermark(
-            "trg-fail", $"src-conn/{_databaseName}/dbo.{_sourceTable}"));
+        Assert.Null(WatermarkFor("trg-fail", "main", _sourceTable));
     }
 
     #endregion

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DataSync.Core.Config;
+using DataSync.Core.Sql;
 using DataSync.State;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -27,6 +28,21 @@ public sealed class ResyncTests(TestApiFactory factory) : IClassFixture<TestApiF
     private async Task<(string Replication, string Mapping)> SetUpAsync()
     {
         var replicationName = $"resync-{Guid.NewGuid():N}";
+
+        // A real connection, never opened. The resync has to know which engine spelled the stored
+        // watermark key before it can clear the right row, and that comes from the connection's
+        // driver type — see ResyncService.
+        (await _client.PutAsJsonAsync("/api/connections/src", new ConnectionInput
+        {
+            Name = "src",
+            DriverType = ConnectionDriverType.MsSql,
+            Host = "localhost",
+            Database = "App",
+            AuthMode = AuthMode.SqlAuth,
+            UserId = "sa",
+            Password = "DataSync_Test_Pw1",
+        }, JsonOptions)).EnsureSuccessStatusCode();
+
         (await _client.PutAsJsonAsync($"/api/replications/{replicationName}", new ReplicationTaskConfig
         {
             Name = replicationName,
@@ -88,16 +104,15 @@ public sealed class ResyncTests(TestApiFactory factory) : IClassFixture<TestApiF
     {
         var (replication, mapping) = await SetUpAsync();
         var watermarks = factory.Services.GetRequiredService<ChangeWatermarkStore>();
-        var key = WatermarkKey.Build(new SourceTableRef
-        {
-            ConnectionName = "src", Database = "App", Schema = "dbo", Table = "Orders",
-        });
-        watermarks.SetWatermark(replication, key, "41");
+        var key = WatermarkKey.Build(
+            new SourceTableRef { ConnectionName = "src", Database = "App", Schema = "dbo", Table = "Orders" },
+            MsSqlDialect.Instance);
+        watermarks.SetWatermark(replication, mapping, key, "41");
 
         var runId = RecordFailedRun(replication, mapping, RunFailureKinds.PositionExpired);
         (await _client.PostAsync($"/api/runs/{runId}/resync", null)).EnsureSuccessStatusCode();
 
-        Assert.Null(watermarks.GetWatermark(replication, key));
+        Assert.Null(watermarks.GetWatermark(replication, mapping, key));
     }
 
     /// <summary>

@@ -25,7 +25,8 @@ public sealed class LocalRunnerState(
     public bool TryAcquireLock(string taskName, RunKind runKind, string mappingName, Guid runId) =>
         runLocks.TryAcquire(taskName, runKind, mappingName, runId);
 
-    public string? GetWatermark(string taskName, string sourceTable) => watermarks.GetWatermark(taskName, sourceTable);
+    public string? GetWatermark(string taskName, string mappingName, string sourceTable) =>
+        watermarks.GetWatermark(taskName, mappingName, sourceTable);
 
     public void BeginRun(Guid runId, int? pid) => taskRuns.BeginRun(runId, pid);
 
@@ -50,8 +51,8 @@ public sealed class LocalRunnerState(
             runId, status, rowsRead, rowsWritten, errorSummary, failureKind, timing,
             previousWatermark, newWatermark);
 
-    public void SetWatermark(string taskName, string sourceTable, string watermark) =>
-        watermarks.SetWatermark(taskName, sourceTable, watermark);
+    public void SetWatermark(string taskName, string mappingName, string sourceTable, string watermark) =>
+        watermarks.SetWatermark(taskName, mappingName, sourceTable, watermark);
 
     public void RecordVerificationResult(VerificationResultRecord result) => verificationResults.Record(result);
 

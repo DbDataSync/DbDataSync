@@ -1,3 +1,5 @@
+using DataSync.Core.Sql;
+
 namespace DataSync.Core.Config;
 
 /// <summary>
@@ -13,16 +15,23 @@ namespace DataSync.Core.Config;
 public static class WatermarkKey
 {
     /// <summary>
-    /// Two source tables collide here if one's schema ends where the other's table begins — a schema
-    /// literally named <c>a.b</c> with table <c>c</c> keys the same as schema <c>a</c> with table
-    /// <c>b.c</c>. Both are legal quoted identifiers.
+    /// Built through the source's own dialect rather than by interpolating dots, so the schema and
+    /// table cannot be misread as each other.
     /// <para>
-    /// Left as it is, deliberately. Changing the format orphans every watermark already stored, which
-    /// means a silent full resync of every replication on upgrade — a certain, universal cost against
-    /// a collision that needs two dotted identifiers arranged to overlap. Worth fixing behind a
-    /// migration if anything ever makes it more than theoretical; not worth a resync today.
+    /// The format this replaced keyed schema <c>a.b</c> table <c>c</c> identically to schema <c>a</c>
+    /// table <c>b.c</c> — both legal identifiers, one string. A quoted identifier cannot contain its
+    /// own closing quote unescaped (see <see cref="SqlDialect.SplitQualifiedName"/>, which states the
+    /// same rule from the parsing side), so the two are now distinct strings by construction rather
+    /// than by anyone agreeing not to name a schema that way.
+    /// </para>
+    /// <para>
+    /// The database is quoted for the same reason and at the same cost: it is a SQL identifier too,
+    /// and <c>conn</c>/<c>db/x</c> would otherwise key the same as <c>conn/db</c>/<c>x</c>. The
+    /// connection name is left bare — it is a DataSync config name, not an identifier in any engine,
+    /// and there is no dialect that could meaningfully quote it.
     /// </para>
     /// </summary>
-    public static string Build(SourceTableRef source) =>
-        $"{source.ConnectionName}/{source.Database}/{source.Schema}.{source.Table}";
+    public static string Build(SourceTableRef source, SqlDialect dialect) =>
+        $"{source.ConnectionName}/{dialect.QuoteIdentifier(source.Database)}/" +
+        $"{dialect.QualifyTable(source.Schema, source.Table)}";
 }

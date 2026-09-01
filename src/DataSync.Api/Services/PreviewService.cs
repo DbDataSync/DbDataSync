@@ -76,7 +76,8 @@ public sealed class PreviewService(
                 task, mapping, targetConnectionConfig, source, target, sourceDialect, targetDialect, problems));
 
             var processing = task.ChangeProcessing;
-            var previousWatermark = watermarks.GetWatermark(task.Name, WatermarkKey.Build(source));
+            var previousWatermark = watermarks.GetWatermark(
+                task.Name, mapping.Name, WatermarkKey.Build(source, sourceDialect));
 
             await DescribeAsync(
                 driverRegistry.FindReader(sourceDriver.DriverType, processing.Reader.Kind),
