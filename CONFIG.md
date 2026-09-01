@@ -10,8 +10,8 @@ distinction matters more than any individual setting below, so it's worth readin
   path in the main [README](README.md), and the only one it currently documents.
 - **`datasync`** — a dotnet global tool (`src/DataSync.Cli`, `PackAsTool=true`,
   `ToolCommandName=datasync`). This is the actual product distribution: `datasync serve`,
-  `datasync service install|uninstall|status`, `datasync invite`, `datasync health`,
-  `datasync version`. It's also what the Docker image runs.
+  `datasync service install|uninstall|status`, `datasync cert ...`, `datasync invite`,
+  `datasync health`, `datasync version`. It's also what the Docker image runs.
 
 Both ultimately call the same `DataSyncHost.Build(args)` composition root
 (`src/DataSync.Api/DataSyncHost.cs`), so a setting documented under "DataSync.Api process config"
@@ -106,6 +106,31 @@ Windows-only; `install` needs an elevated prompt.
 Registers the tool's own installed executable via `sc.exe create`, with `serve --repo ... --url ...`
 baked into `binPath`. **A connection using integrated authentication connects as this service
 account** — worth deciding `--account` deliberately rather than accepting `LocalSystem`.
+
+### `datasync cert status|list|new-self-signed|enroll|renew|retrieve|templates|bind`
+
+Windows-only (phase 82) — issues, installs, binds, renews and reports on the certificate Kestrel serves
+TLS with, entirely from the CLI so setting up HTTPS never depends on HTTPS already working. Run
+`datasync cert` with no subcommand for the full flag list.
+
+| command | does |
+| --- | --- |
+| `status` | what is bound (thumbprint, SANs, `NotAfter`, days remaining), and whether the resolved service account can read its private key |
+| `list [--location LocalMachine\|CurrentUser]` | server-authentication certificates in `<location>\My` |
+| `new-self-signed --dns <names> [--days] [--account]` | issues and installs a self-signed certificate, in-box .NET (`CertificateRequest.CreateSelfSigned`), no PowerShell |
+| `enroll --dns <names> [--ca] [--template] [--account]` | submits a CSR to an enterprise CA over COM (`ICertRequest`); a template requiring approval reports a request id and exits — not an error |
+| `renew [--ca] [--template] [--account] [--days]` | re-enrolls with the bound certificate's subject and SANs (a fresh request, not a signed AD CS renewal) — works even if the bound certificate has already expired |
+| `retrieve --request-id <id> [--account]` | collects a pending enrollment from `enroll`/`renew` |
+| `templates [--ca]` | best-effort: templates published on the configured CA; empty-plus-a-reason on any failure (not domain-joined, LDAP unreachable, access denied, `CaConfig` unset), never blocking — `--template` stays free text regardless |
+| `bind --thumbprint <thumbprint> [--location] [--allow-invalid\|--no-allow-invalid]` | binds an already-installed certificate by writing the four `Kestrel:Certificates:Default:*` keys (below) into `datasync.config.yaml`, committed the same way every other config write is |
+
+`--account` on the issuing commands, because issuing and granting private-key read access are one
+operation from the operator's point of view — resolved as an explicit `--account`, else the account the
+installed `DataSync` service runs as (read back via `sc.exe qc`), else `LocalSystem` (which needs no
+grant, since `LocalMachine\My`'s default ACL already covers it).
+
+**Nothing takes effect until the process restarts** — `bind` only writes config; Kestrel's certificate
+is resolved once at startup, the same as every other `DataSync:*`/`Kestrel:*` setting.
 
 ### `datasync invite`
 
@@ -241,6 +266,33 @@ requires a real domain name). `Origins` are full URLs, and each one's host must 
 `RelyingPartyId` or a subdomain of it. Checked at startup — a misconfiguration logs a warning naming
 exactly what's wrong, rather than failing silently inside a browser API the first time someone tries
 to enroll a key.
+
+### `DataSync:Certificates:*`
+
+| key | env var | default | meaning |
+| --- | --- | --- | --- |
+| `DataSync:Certificates:ExpiryWarningDays` | `DataSync__Certificates__ExpiryWarningDays` | `30` | how many days before the bound certificate's `NotAfter` the daily expiry check (phase 82) starts raising a `CertificateExpiring` notification; raised at most once a day, and `CertificateExpired` once past `NotAfter` |
+| `DataSync:Certificates:CaConfig` | `DataSync__Certificates__CaConfig` | none | the enterprise CA's `CASERVER\CA Name` string — read by `datasync cert enroll`/`renew`/`templates` (a CLI-process concern; the running API never needs to know which CA a certificate came from, only which one is bound) |
+| `DataSync:Certificates:Template` | `DataSync__Certificates__Template` | none | the certificate template name for `datasync cert enroll`/`renew` |
+
+Windows-only end to end (phase 82) — see `datasync cert`, above, for issuance/installation/binding.
+The daily expiry check is a hosted service in the API process, registered only when
+`OperatingSystem.IsWindows()`, on the same pattern `SchedulerService`/`RunPruningService` already use.
+
+### `Kestrel:Certificates:Default:*`
+
+Not a `DataSync:*` key — ASP.NET Core's own Kestrel configuration, read the same way (config file,
+environment variable, CLI flag), and what `datasync cert bind` writes into `datasync.config.yaml`:
+
+| key | meaning |
+| --- | --- |
+| `Kestrel:Certificates:Default:Subject` | the certificate's simple subject name — a store *lookup*, not a file path, so no certificate password is ever persisted by DataSync and the private key never leaves the Windows store |
+| `Kestrel:Certificates:Default:Store` | always `My`, written by `bind` |
+| `Kestrel:Certificates:Default:Location` | always `LocalMachine`, written by `bind` |
+| `Kestrel:Certificates:Default:AllowInvalid` | `true` for a self-signed certificate (Kestrel validates the chain on load and refuses one it cannot build otherwise); `bind` reports this and leaves it as configured on every subsequent bind rather than silently clearing it when a CA-issued certificate replaces a self-signed one — use `--no-allow-invalid` to turn it off explicitly |
+
+**Nothing takes effect until the process restarts** — resolved once at startup, same as every other
+`DataSync:*` setting.
 
 ### Standard ASP.NET Core variables
 

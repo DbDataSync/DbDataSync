@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/DataSync.Api/DataSync.Api.csproj" />
+    <Project Path="src/DataSync.Certificates/DataSync.Certificates.csproj" />
     <Project Path="src/DataSync.Cli/DataSync.Cli.csproj" />
     <Project Path="src/DataSync.Core/DataSync.Core.csproj" />
     <Project Path="src/DataSync.Drivers.Abstractions/DataSync.Drivers.Abstractions.csproj" />
@@ -19,6 +20,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DataSync.Api.Tests/DataSync.Api.Tests.csproj" />
+    <Project Path="tests/DataSync.Certificates.Tests/DataSync.Certificates.Tests.csproj" />
     <Project Path="tests/DataSync.Cli.Tests/DataSync.Cli.Tests.csproj" />
     <Project Path="tests/DataSync.Core.Tests/DataSync.Core.Tests.csproj" />
     <Project Path="tests/DataSync.Drivers.Abstractions.Tests/DataSync.Drivers.Abstractions.Tests.csproj" />

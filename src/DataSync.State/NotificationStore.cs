@@ -17,6 +17,18 @@ public static class NotificationKinds
     /// phase 80. A run failure with a known fix, so it is its own kind rather than a
     /// <see cref="RunFailed"/> row whose message happens to say so.</summary>
     public const string PositionExpired = "PositionExpired";
+
+    /// <summary>The bound Windows certificate is within its configured warning window of
+    /// <c>NotAfter</c> — phase 82, raised by <c>DataSync.Api.Services.CertificateExpiryService</c> at
+    /// most once a day.</summary>
+    public const string CertificateExpiring = "CertificateExpiring";
+
+    /// <summary>The bound Windows certificate is past <c>NotAfter</c> — phase 82. Its own kind rather
+    /// than a louder repeat of <see cref="CertificateExpiring"/>, the same way <see
+    /// cref="PositionExpired"/> is its own kind rather than a <see cref="RunFailed"/> in disguise: past
+    /// expiry is a different, worse state (the site is actively broken for every browser, not merely
+    /// approaching it) and a feed should be able to find those without matching on prose.</summary>
+    public const string CertificateExpired = "CertificateExpired";
 }
 
 /// <param name="Kind">One of <see cref="NotificationKinds"/> — but read as an open set: a row written
@@ -91,6 +103,24 @@ public sealed class NotificationStore(StateDatabase database)
         cmd.Bind(database, "message", message);
         cmd.ExecuteNonQuery();
     }
+
+    /// <summary>
+    /// Raises a notification with nothing to be atomic with — the public counterpart to
+    /// <see cref="Insert"/>, for the one shape of producer that is not itself writing another table in
+    /// the same transaction. <see cref="Insert"/>'s own doc comment explains why every other producer
+    /// goes through it as a joint write instead ("a public 'notify about anything' entry point would
+    /// invite a second write from a caller with nothing to be atomic with"); phase 82's daily
+    /// certificate-expiry check (<c>DataSync.Api.Services.CertificateExpiryService</c>) is the first
+    /// caller that is genuinely standalone — it is not itself writing a row anywhere else this event
+    /// could be paired with, so its own connection is the right shape rather than a second "insert on
+    /// someone else's transaction" caller with no transaction to give it.
+    /// </summary>
+    public void Raise(string kind, string message, string? taskName = null, string? mappingName = null, Guid? runId = null) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            Insert(database, connection, transaction: null, kind, message, taskName, mappingName, runId);
+        });
 
     /// <summary>
     /// Everything newer than <paramref name="sinceId"/>, oldest first. Null is the initial load —

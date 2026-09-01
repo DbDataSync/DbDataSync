@@ -72,6 +72,7 @@ public static class DataSyncHost
         builder.Services.AddSingleton<CurrentUser>();
         builder.Services.AddSingleton(sp => PasskeyOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
         builder.Services.AddSingleton<PasskeyService>();
+        builder.Services.AddSingleton(sp => CertificateOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
 
         builder.Services.AddSingleton(new SecretStore(true));
 
@@ -164,6 +165,12 @@ public static class DataSyncHost
         builder.Services.AddHostedService<RunMonitorService>();
         builder.Services.AddHostedService<RunPruningService>();
         builder.Services.AddHostedService<BootstrapInvite>();
+
+        // Windows-only, registered only there — the same gating this file already uses a few lines
+        // down for Negotiate authentication, not a new idiom. Certificate management is Windows-only
+        // end to end (phase 82), so a Linux host never constructs this hosted service at all.
+        if (OperatingSystem.IsWindows())
+            builder.Services.AddHostedService<CertificateExpiryService>();
 
         // One scheme for every request — controllers and the hub alike — so there is one answer to
         // "who is this". Negotiate is registered alongside it and used by exactly one endpoint, which

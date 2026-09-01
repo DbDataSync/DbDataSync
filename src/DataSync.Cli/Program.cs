@@ -13,6 +13,7 @@ return command switch
 {
     "serve" => await ServeCommand.RunAsync(rest),
     "service" => ServiceCommand.Run(rest),
+    "cert" => CertCommand.Run(rest),
     "health" => await HealthCommand.RunAsync(rest),
     "invite" => InviteCommand.Run(rest),
     "secret" => SecretCommand.Run(rest),

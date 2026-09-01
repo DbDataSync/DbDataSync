@@ -248,6 +248,33 @@ public sealed class NotificationStoreTests : IDisposable
     }
 
     [Fact]
+    public void Raise_WritesANotificationWithNoPairedEvent()
+    {
+        // Phase 82's certificate-expiry check is the first producer with nothing to be atomic with —
+        // see Raise's own doc comment. Unlike every _runs.CompleteRun/_runs.SetPaused call above, this
+        // one has no other table write alongside it.
+        _store.Raise(NotificationKinds.CertificateExpiring, "The bound certificate expires in 12 days.");
+
+        var notification = Assert.Single(_store.List());
+        Assert.Equal(NotificationKinds.CertificateExpiring, notification.Kind);
+        Assert.Null(notification.TaskName);
+        Assert.Null(notification.MappingName);
+        Assert.Null(notification.RunId);
+        Assert.Contains("12 days", notification.Message);
+    }
+
+    [Fact]
+    public void Raise_CertificateExpired_IsItsOwnKind_DistinctFromExpiring()
+    {
+        _store.Raise(NotificationKinds.CertificateExpiring, "expires soon");
+        _store.Raise(NotificationKinds.CertificateExpired, "already expired");
+
+        Assert.Equal(
+            [NotificationKinds.CertificateExpiring, NotificationKinds.CertificateExpired],
+            _store.List().Select(n => n.Kind));
+    }
+
+    [Fact]
     public void PruningTheFeed_LeavesCursorsAlone()
     {
         _runs.CompleteRun(QueueAndBegin("old", "one"), RunStatus.Failed, 0, 0, "ancient");

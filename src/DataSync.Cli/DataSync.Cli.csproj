@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DataSync.Api\DataSync.Api.csproj" />
+    <ProjectReference Include="..\DataSync.Certificates\DataSync.Certificates.csproj" />
     <ProjectReference Include="..\DataSync.State\DataSync.State.csproj" />
     <!-- Referenced so the worker lands in the same output directory as the host that spawns it,
          which is what ApiOptions' beside-the-assembly resolution then finds. -->

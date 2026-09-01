@@ -15,6 +15,10 @@ public static class Help
                   Registers this tool as a Windows service. Windows only, and install needs an
                   elevated prompt.
 
+              datasync cert status|list|new-self-signed|enroll|renew|retrieve|templates|bind
+                  Issues, installs, binds and renews the certificate Kestrel serves TLS with. Windows
+                  only; run `datasync cert` with no subcommand to see every subcommand's flags.
+
               datasync invite [--role Admin|Viewer] [--repo <path>] [--url <url>]
                   Prints a fresh single-use invitation URL. For when the first-run one has scrolled
                   away, or the process is a service with nowhere to print it.

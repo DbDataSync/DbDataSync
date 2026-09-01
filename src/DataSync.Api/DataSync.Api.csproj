@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\DataSync.Certificates\DataSync.Certificates.csproj" />
     <ProjectReference Include="..\DataSync.Core\DataSync.Core.csproj" />
     <ProjectReference Include="..\DataSync.Scripting\DataSync.Scripting.csproj" />
     <ProjectReference Include="..\DataSync.Drivers.Abstractions\DataSync.Drivers.Abstractions.csproj" />
