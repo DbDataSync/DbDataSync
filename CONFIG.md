@@ -185,6 +185,7 @@ sets; see "`datasync.config.yaml`," above, for the file itself.
 | `RunRetentionDays` | `DataSync__RunRetentionDays` | `90` | finished runs older than this are pruned hourly; `0` = keep forever |
 | `RunRetentionMaxPerMapping` | `DataSync__RunRetentionMaxPerMapping` | `1000` | most recent N finished runs kept, *per table mapping* (not global); `0` = no cap |
 | `RunPruningIntervalMinutes` | `DataSync__RunPruningIntervalMinutes` | `60` | how often the retention sweep runs |
+| `ChangeCheckRetentionDays` | `DataSync__ChangeCheckRetentionDays` | `7` | how long the scheduler's change-check history (phase 75) is kept; `0` = keep forever |
 
 `TaskRunnerDllPath` resolves in this order: (1) beside the running assembly — true for the tool, the
 container, and any plain `dotnet publish`; (2) a dev-repo-layout guess (swaps `DataSync.Api/bin` for

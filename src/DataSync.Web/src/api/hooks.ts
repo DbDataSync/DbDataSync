@@ -44,6 +44,7 @@ const keys = {
   verificationResult: (replicationName: string, id: number) =>
     ['replications', replicationName, 'verification-results', id] as const,
   notifications: ['notifications'] as const,
+  adminConfig: ['admin', 'config'] as const,
 }
 
 /**
@@ -713,5 +714,31 @@ export function useApplyProvisioning(replicationName: string, mappingName: strin
   return useMutation({
     mutationFn: (action: string) => api.provisioning.apply(replicationName, mappingName, action),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.provisioning(replicationName, mappingName) }),
+  })
+}
+
+/** Every DataSync:* key CONFIG.md documents — the admin config screen (phase 81). Not polled: this is
+ * process configuration, not something that changes underneath an open tab. */
+export function useAdminConfig() {
+  return useQuery({ queryKey: keys.adminConfig, queryFn: api.admin.config.list })
+}
+
+/** Writes one key into datasync.config.yaml — a direct edit of a file-sourced row, or "adopt" of one
+ * that is not. Same mutation either way; the page decides which value to send. */
+export function useSetAdminConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) => api.admin.config.set(key, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.adminConfig }),
+  })
+}
+
+/** StateConnectionString's password, through the secret store. A separate mutation from the value
+ * above because it never touches datasync.config.yaml and the page never sees what it sets. */
+export function useSetAdminConfigSecret() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) => api.admin.config.setSecret(key, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.adminConfig }),
   })
 }

@@ -104,3 +104,15 @@ one to build the pattern on.
   "restore everything at this commit" should exist is a separate and much larger question.
 - **Diff size.** A first commit that creates forty mappings is a large patch. Monaco handles it; the
   API should probably cap it rather than stream megabytes into a browser.
+- **`datasync.config.yaml` at the repo root has no history view anywhere**, carried forward from phase
+  81's retrospective (`architecture/implementation/done/phase-081-admin-config-screen.md`). It sits one
+  level above `config/`, so it is git-tracked and diffable at the command line but invisible to
+  `GitCommitService.GetHistory`'s `config/`-prefixed queries — and, unlike a replication's directory,
+  `GetHistory`'s prefix match (`path.StartsWith(prefix.TrimEnd('/') + "/")`) does not match a bare
+  top-level file at all: `datasync.config.yaml` normalizes to `datasync.config.yaml/`, which the file's
+  own (no-trailing-segment) path never starts with. Widening this phase's diff/revert to also cover that
+  one file — its own small history view, or folded into wherever this phase ends up putting the Version
+  Control tab's per-replication one — needs that one-line fix (also match the bare path, not only a
+  prefix of it) plus deciding where in the UI a repo-root file's history belongs, since it is not any one
+  replication's. Phase 81 judged this out of scope for itself specifically because this phase already
+  existed to take it.

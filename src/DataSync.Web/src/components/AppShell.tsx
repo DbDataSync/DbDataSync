@@ -2,7 +2,8 @@ import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { NotificationBell } from './NotificationBell'
 import { SignedInAs } from './SignIn'
-import { CodeIcon, DatabaseIcon, FlowIcon, GridIcon, LogoIcon } from './icons'
+import { useIsAdmin } from './useIsAdmin'
+import { CodeIcon, DatabaseIcon, FlowIcon, GearIcon, GridIcon, LogoIcon } from './icons'
 
 /**
  * The chrome every screen sits in: a 46px icon rail, a 42px breadcrumb bar and a 46px tab bar.
@@ -17,6 +18,11 @@ export function AppShell({ crumbs, tabs, actions, children }: {
   actions?: ReactNode
   children: ReactNode
 }) {
+  // The API enforces this for real (Policies.Admin on every admin/config endpoint) — hiding the rail
+  // item is only about not offering a Viewer a destination that would 403 on arrival, the same
+  // instinct useIsAdmin's own doc comment states for the Save buttons it gates.
+  const isAdmin = useIsAdmin()
+
   return (
     <>
       <nav className="rail">
@@ -51,6 +57,16 @@ export function AppShell({ crumbs, tabs, actions, children }: {
         <span className="rail-item" style={{ color: 'var(--ink-faint)', cursor: 'default' }} title="Overview">
           <GridIcon />
         </span>
+        {isAdmin && (
+          <NavLink
+            to="/admin/config"
+            className={({ isActive }) => `rail-item ${isActive ? 'active' : ''}`}
+            title="Admin"
+            data-testid="rail-admin"
+          >
+            <GearIcon />
+          </NavLink>
+        )}
       </nav>
 
       <div className="app">

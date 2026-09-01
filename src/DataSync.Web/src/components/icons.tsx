@@ -112,6 +112,16 @@ export function CodeIcon() {
   )
 }
 
+/** Admin — a gear, the universal mark for "settings" and nothing this app already uses elsewhere. */
+export function GearIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" {...stroke} strokeLinejoin="round">
+      <circle cx="8" cy="8" r="2.3" />
+      <path d="M8 2.3v1.6M8 12.1v1.6M13.7 8h-1.6M3.9 8H2.3M12.1 3.9l-1.1 1.1M5 10l-1.1 1.1M12.1 12.1l-1.1-1.1M5 6l-1.1-1.1" />
+    </svg>
+  )
+}
+
 /** Notifications — a bell, drawn open-bottomed so the badge can sit over its shoulder. */
 export function BellIcon({ size = 15 }: { size?: number }) {
   return (

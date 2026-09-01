@@ -16,7 +16,6 @@ using DataSync.Scripting;
 using DataSync.Drivers.Postgres;
 using DataSync.State;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
-using Microsoft.Extensions.Configuration.Memory;
 
 namespace DataSync.Api;
 
@@ -75,14 +74,22 @@ public static class DataSyncHost
         builder.Services.AddSingleton<PasskeyService>();
 
         builder.Services.AddSingleton(new SecretStore(true));
+
+        // One GitCommitService per process, not one per consumer — its own doc comment explains why:
+        // the in-process write lock that makes concurrent commits safe only holds if every writer to
+        // this repo root shares the same instance. Phase 81 added a second writer (AdminConfigService,
+        // for datasync.config.yaml) alongside ConfigRepository, which is what made this worth pulling
+        // out of ConfigRepository's own registration rather than each constructing its own.
+        builder.Services.AddSingleton(sp => new GitCommitService(sp.GetRequiredService<ApiOptions>().RepoRoot));
         builder.Services.AddSingleton(sp =>
         {
             var options = sp.GetRequiredService<ApiOptions>();
             return new ConfigRepository(
                 Path.Combine(options.RepoRoot, "config"),
-                new GitCommitService(options.RepoRoot),
+                sp.GetRequiredService<GitCommitService>(),
                 sp.GetRequiredService<SecretStore>());
         });
+        builder.Services.AddSingleton<AdminConfigService>();
 
         builder.Services.AddSingleton(sp =>
         {
@@ -276,7 +283,7 @@ public static class DataSyncHost
         if (!File.Exists(DataSyncConfigFile.PathIn(repoRoot)))
             return;
 
-        var source = new MemoryConfigurationSource { InitialData = DataSyncConfigFile.Read(repoRoot) };
+        var source = new DataSyncConfigFileSource { InitialData = DataSyncConfigFile.Read(repoRoot) };
 
         var sources = builder.Configuration.Sources;
         var envIndex = -1;

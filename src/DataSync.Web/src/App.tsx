@@ -7,6 +7,7 @@ import { ConnectionsPage } from './pages/ConnectionsPage'
 import { ReplicationsPage } from './pages/ReplicationsPage'
 import { ScriptEditPage } from './pages/ScriptEditPage'
 import { ScriptsPage } from './pages/ScriptsPage'
+import { AdminConfigPage } from './pages/AdminConfigPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
 import {
@@ -122,6 +123,8 @@ export default function App() {
 
       <Route path="/scripts" element={<ScriptsPage />} />
       <Route path="/scripts/:name" element={<ScriptEditPage />} />
+
+      <Route path="/admin/config" element={<AdminConfigPage />} />
 
       {/* A mistyped or stale URL lands somewhere real rather than on an empty frame with chrome. */}
       <Route path="*" element={<Navigate to="/replications" replace />} />

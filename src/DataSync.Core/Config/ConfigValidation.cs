@@ -82,6 +82,30 @@ public static class ConfigValidation
     /// </summary>
     internal static void RejectEmbeddedCredential(string connectionString, string connectionName)
     {
+        if (FindCredentialKeySegment(connectionString) is not { } segment)
+            return;
+
+        var separator = segment.IndexOf('=');
+        throw new ConfigValidationException(
+            $"Connection '{connectionName}' has '{segment[..separator].Trim()}' in its connection string. " +
+            "Connections are stored in git and shown in the Version Control tab, so a credential there " +
+            "would be committed and visible forever — set the password field instead and it is kept in " +
+            "the secret store and applied when connecting.");
+    }
+
+    /// <summary>
+    /// The non-throwing half of the same check — phase 81's admin screen needs to know whether a value
+    /// it did **not** write (an environment variable or CLI argument an operator supplied directly)
+    /// carries a credential, so it can mask it before it ever reaches the browser, without treating
+    /// "carries a credential" itself as an error the way a write through this codebase's own config
+    /// paths does. Same detector as <see cref="RejectEmbeddedCredential"/>, so the two can never
+    /// disagree about what counts as a credential.
+    /// </summary>
+    public static bool ContainsEmbeddedCredential(string connectionString) =>
+        FindCredentialKeySegment(connectionString) is not null;
+
+    private static string? FindCredentialKeySegment(string connectionString)
+    {
         foreach (var segment in connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
             var separator = segment.IndexOf('=');
@@ -89,15 +113,11 @@ public static class ConfigValidation
                 continue;
 
             var key = segment[..separator].Trim().Replace(" ", "").Replace("_", "").ToLowerInvariant();
-            if (!CredentialKeys.Contains(key))
-                continue;
-
-            throw new ConfigValidationException(
-                $"Connection '{connectionName}' has '{segment[..separator].Trim()}' in its connection string. " +
-                "Connections are stored in git and shown in the Version Control tab, so a credential there " +
-                "would be committed and visible forever — set the password field instead and it is kept in " +
-                "the secret store and applied when connecting.");
+            if (CredentialKeys.Contains(key))
+                return segment;
         }
+
+        return null;
     }
 
     /// <summary>

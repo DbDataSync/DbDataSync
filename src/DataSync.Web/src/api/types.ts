@@ -892,3 +892,21 @@ export interface UserSummary {
   enabled: boolean
   credentials: UserCredentialSummary[]
 }
+
+/**
+ * One row of the admin config screen (phase 81) — a DataSync:* key CONFIG.md documents, its live
+ * effective value and where that came from, and what this screen can do about it.
+ *
+ * `value` is null both for a genuinely unset key and — StateConnectionString only — when `masked` is
+ * true: the server never sends a raw credential it found in a non-file source, so the two cases are
+ * indistinguishable from `value` alone and the SPA must check `masked` to tell them apart.
+ */
+export interface AdminConfigEntry {
+  key: string
+  value: string | null
+  source: 'file' | 'environment variable' | 'command line' | 'appsettings.json' | 'default'
+  editable: boolean
+  canAdopt: boolean
+  masked: boolean
+  description: string
+}

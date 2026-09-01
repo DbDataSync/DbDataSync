@@ -1,4 +1,5 @@
 import type {
+  AdminConfigEntry,
   ApplyResult,
   BackfillRequest,
   SegmentCandidate,
@@ -208,6 +209,21 @@ export const api = {
           `&displayName=${encodeURIComponent(displayName)}&email=${encodeURIComponent(email ?? '')}`,
         { method: 'POST', body: JSON.stringify(attestation) },
       ),
+  },
+  admin: {
+    config: {
+      list: () => request<AdminConfigEntry[]>('/api/admin/config'),
+      /** Writes one key into datasync.config.yaml — the same call for a direct edit of a file-sourced
+       * key and an "adopt" of one that is not; the caller supplies the current effective value either
+       * way. Does not take effect in the running process until it restarts. */
+      set: (key: string, value: string) =>
+        put<AdminConfigEntry>(`/api/admin/config/${encodeURIComponent(key)}`, { value }),
+      /** StateConnectionString's password only, through the secret store — never through the file. */
+      setSecret: (key: string, value: string) =>
+        request<void>(`/api/admin/config/${encodeURIComponent(key)}/secret`, {
+          method: 'PUT', body: JSON.stringify({ value }),
+        }),
+    },
   },
   users: {
     list: () => request<UserSummary[]>('/api/users'),
