@@ -296,6 +296,120 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.True(run.EndedAtUtc >= run.StartedAtUtc, "a run cannot end before it started");
     }
 
+    #region Phase 74 — two mappings, one source table
+
+    /// <summary>
+    /// Adds a second mapping over the same source table, with its own target and its own reader, and
+    /// returns its name. The shape phase 74 exists for: nothing in the config model stops it, and
+    /// under the old <c>(TaskName, SourceTable)</c> key the two shared one stored position.
+    /// </summary>
+    private async Task<string> AddSecondMappingOnTheSameTableAsync(string name, ReaderConfig readerOverride)
+    {
+        var targetTable = $"Tgt_{Guid.NewGuid():N}";
+        await ExecuteAsync(_adminConnection,
+            $"CREATE TABLE dbo.[{targetTable}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+
+        _configRepository.SaveTableMapping("e2e-sync", new TableMappingConfig
+        {
+            Name = name,
+            Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableSpec { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = targetTable }],
+            ColumnMappings =
+            [
+                new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
+            ],
+            ReaderOverride = readerOverride,
+        }, Author);
+        return name;
+    }
+
+    /// <summary>Drains one pass per named mapping through the real worker.</summary>
+    private async Task DrainMappingsAsync(params string[] mappingNames)
+    {
+        var ids = mappingNames.Select(name => _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, name)).ToList();
+        await _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
+        foreach (var id in ids)
+        {
+            // A failed pass writes no watermark, so without this a broken run reads as "the two
+            // mappings kept separate positions" — null is separate from anything.
+            var run = _taskRunStore.GetRun(id)!;
+            Assert.True(run.Status == RunStatus.Succeeded, $"{run.MappingName}: {run.Status} — {run.ErrorSummary}");
+        }
+    }
+
+    /// <summary>
+    /// The bug that motivated phase 74, through the real worker: two mappings on one physical source
+    /// table, reading it two incompatible ways.
+    /// <para>
+    /// Change Tracking's position is a database-wide version number; the generic Watermark reader's is
+    /// whatever is in its watermark column. Sharing one row, whichever pass ran last overwrote the
+    /// other with a value it could not interpret — the version reader resuming from a row id, or the
+    /// other way round. The Ids here are deliberately far from any plausible change-tracking version,
+    /// so the two positions cannot pass this test by coinciding.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task TwoMappingsOnOneSourceTable_WithDifferentReaders_KeepTheirOwnPositions()
+    {
+        var watermarkMapping = await AddSecondMappingOnTheSameTableAsync(
+            "by-id",
+            new ReaderConfig { Kind = GenericDriverKinds.Watermark, Options = { ["watermarkColumn"] = "Id" } });
+
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (500, 'Alice'), (501, 'Bob');");
+
+        await DrainMappingsAsync("main", watermarkMapping);
+
+        var changeTracking = WatermarkFor("e2e-sync", "main", _sourceTable);
+        var byId = WatermarkFor("e2e-sync", watermarkMapping, _sourceTable);
+
+        // The generic reader records the highest value it saw in its own column; Change Tracking
+        // records the database's version, which is a small counter and not 501.
+        Assert.Equal("501", byId);
+        Assert.NotNull(changeTracking);
+        Assert.NotEqual(byId, changeTracking);
+
+        // And they stay apart across a second pass, which is where a shared row did its damage: the
+        // first mapping's next read would have started from the other's number.
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (502, 'Carol');");
+        await DrainMappingsAsync("main", watermarkMapping);
+
+        Assert.Equal("502", WatermarkFor("e2e-sync", watermarkMapping, _sourceTable));
+        Assert.NotEqual("502", WatermarkFor("e2e-sync", "main", _sourceTable));
+    }
+
+    /// <summary>
+    /// The quieter half of the same bug, and the worse one: the same reader kind on the same table,
+    /// differing only in a per-mapping option. Nothing fails and nothing is unparseable — the two
+    /// simply overwrite each other with positions measured along different columns, so each mapping
+    /// resumes from a place in the table it never reached.
+    /// </summary>
+    [Fact]
+    public async Task TwoMappingsOnOneSourceTable_WithDifferentWatermarkColumns_KeepTheirOwnPositions()
+    {
+        // A second candidate column, an order of magnitude away from Id so a position measured along
+        // one cannot be mistaken for a position along the other.
+        await ExecuteAsync(_adminConnection, $"ALTER TABLE dbo.[{_sourceTable}] ADD Seq INT NULL;");
+
+        var byId = await AddSecondMappingOnTheSameTableAsync(
+            "by-id",
+            new ReaderConfig { Kind = GenericDriverKinds.Watermark, Options = { ["watermarkColumn"] = "Id" } });
+        var bySeq = await AddSecondMappingOnTheSameTableAsync(
+            "by-seq",
+            new ReaderConfig { Kind = GenericDriverKinds.Watermark, Options = { ["watermarkColumn"] = "Seq" } });
+
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name, Seq) VALUES (500, 'Alice', 9000), (501, 'Bob', 9001);");
+
+        await DrainMappingsAsync(byId, bySeq);
+
+        Assert.Equal("501", WatermarkFor("e2e-sync", byId, _sourceTable));
+        Assert.Equal("9001", WatermarkFor("e2e-sync", bySeq, _sourceTable));
+    }
+
+    #endregion
+
     private async Task<Dictionary<int, string>> GetRowsAsync(string table)
     {
         await using var cmd = _adminConnection.CreateCommand();
