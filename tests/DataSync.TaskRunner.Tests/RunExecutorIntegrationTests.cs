@@ -267,28 +267,32 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Phase 72's timestamps, through the real worker rather than through a direct BeginRun call: the
-    /// enqueue writes StartedAtUtc, the worker claiming the item writes ClaimedAtUtc, and the two are
-    /// what duration and queue wait are each measured from.
+    /// All four timestamps, through the real worker rather than through direct store calls: the enqueue
+    /// writes EnqueuedAtUtc, TryClaimNext writes ClaimedAtUtc, BeginRun writes StartedAtUtc and
+    /// CompleteRun writes EndedAtUtc. Each on the path a worker actually takes, which is what a
+    /// unit test calling the stores in order cannot show.
     /// <para>
-    /// The assertion that matters is the ordering — enqueued, then claimed, then ended — because it is
+    /// The assertion that matters is the ordering — enqueued, claimed, started, ended — because it is
     /// the property both derived figures depend on and the one a wrong write site would break. The
-    /// magnitudes are not asserted: this drains the queue immediately, so the real wait here is
-    /// microseconds, and a threshold on it would be a clock-resolution flake rather than a fact about
-    /// the code. The deliberate-gap case is asserted in TaskRunStoreTests.
+    /// magnitudes are not asserted: this drains the queue immediately, so the real gaps here are
+    /// microseconds, and a threshold on them would be a clock-resolution flake rather than a fact about
+    /// the code. The deliberate-gap cases are asserted in TaskRunStoreTests.
     /// </para>
     /// </summary>
     [Fact]
-    public async Task AWorkerClaimingARun_RecordsTheClaimBetweenTheEnqueueAndTheEnd()
+    public async Task AWorkerRunningARun_RecordsEnqueueClaimStartAndEnd_InThatOrder()
     {
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
 
         var run = await EnqueueAndDrainAsync();
 
+        Assert.NotNull(run.EnqueuedAtUtc);
         Assert.NotNull(run.ClaimedAtUtc);
+        Assert.NotNull(run.StartedAtUtc);
         Assert.NotNull(run.EndedAtUtc);
-        Assert.True(run.ClaimedAtUtc >= run.StartedAtUtc, "a run cannot be claimed before it was queued");
-        Assert.True(run.EndedAtUtc >= run.ClaimedAtUtc, "a run cannot end before it was claimed");
+        Assert.True(run.ClaimedAtUtc >= run.EnqueuedAtUtc, "a run cannot be claimed before it was queued");
+        Assert.True(run.StartedAtUtc >= run.ClaimedAtUtc, "a run cannot start before it was claimed");
+        Assert.True(run.EndedAtUtc >= run.StartedAtUtc, "a run cannot end before it started");
     }
 
     private async Task<Dictionary<int, string>> GetRowsAsync(string table)
