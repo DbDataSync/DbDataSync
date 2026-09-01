@@ -423,15 +423,15 @@ export interface RunMetrics {
   rowsRead: number
   rowsWritten: number
   /**
-   * How long the runs themselves took, excluding the time they spent queued waiting for a worker
-   * (phase 72). Queue wait is a separate figure, per run, from `startedAtUtc` and `claimedAtUtc`.
+   * Processing time: `endedAtUtc - startedAtUtc`, so the run itself with no queue in it. Queue time is
+   * a separate figure, per run, from `enqueuedAtUtc` and `startedAtUtc` — not aggregated here.
    *
-   * Null when nothing in the window finished — a run still going has no duration — or when nothing
-   * in it ever started.
+   * Null when nothing in the window finished — a run still going has no processing time — or when
+   * nothing in it ever started.
    */
-  durationP50Ms: number | null
-  durationP95Ms: number | null
-  durationMaxMs: number | null
+  processingP50Ms: number | null
+  processingP95Ms: number | null
+  processingMaxMs: number | null
   /** When the most recent *successful* pass finished, unbounded by the window. */
   lastCompletedPassUtc: string | null
   buckets: RunMetricsBucket[]
@@ -715,22 +715,29 @@ export interface TaskRunRecord {
   mappingName: string
   segmentLabel: string | null
   /**
-   * When the run was **enqueued**, not when it started running — the queue writes the row before any
-   * worker has claimed it. The name is kept for compatibility; `claimedAtUtc` is the one that means
-   * "the run started".
+   * When the work was queued. Written by the enqueue, so every run has one — null only for a row
+   * predating phase 73's migration, which backfills it.
    */
-  startedAtUtc: string
+  enqueuedAtUtc: string | null
   /**
-   * When a worker actually claimed the run and began executing it (phase 72).
+   * When a worker took the item off the queue — earlier than `startedAtUtc` by however long the worker
+   * took to get going, and a different moment from it.
    *
-   * Duration is `endedAtUtc - claimedAtUtc`, and queue wait is `claimedAtUtc - startedAtUtc` — the
-   * two raw timestamps rather than a precomputed delta, matching how the run's watermark pair is
-   * exposed.
-   *
-   * Null for a run that never reached Running — still queued, or cancelled before a worker took it —
-   * and for runs recorded before this was tracked. Such a run has no duration to show.
+   * Null for a run nobody ever claimed: still queued, or cancelled first.
    */
   claimedAtUtc: string | null
+  /**
+   * When the run actually began executing (phase 73 — before that this held the enqueue time, which is
+   * now `enqueuedAtUtc`).
+   *
+   * The boundary between the two figures the run list shows: queue time is
+   * `startedAtUtc - enqueuedAtUtc` and processing time is `endedAtUtc - startedAtUtc`. Raw timestamps
+   * rather than precomputed deltas, matching how the run's watermark pair is exposed.
+   *
+   * Null for a run that never started — still queued, or cancelled before a worker took it — and for
+   * runs recorded before this meant what it says. Such a run has no processing time to show.
+   */
+  startedAtUtc: string | null
   endedAtUtc: string | null
   rowsRead: number
   rowsWritten: number

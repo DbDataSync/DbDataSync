@@ -16,40 +16,40 @@ const COLUMNS = '1.2fr .7fr .9fr .8fr .6fr .7fr .7fr 1fr 78px'
 type Filter = 'all' | 'failed' | 'backfills'
 
 /**
- * How long the run itself took — measured from when a worker claimed it, not from when it was queued.
+ * Processing time: how long the run itself took, from when it started to when it ended.
  *
- * `startedAtUtc` is written at enqueue time, so the old `endedAtUtc - startedAtUtc` was the run plus
- * however long it waited for a worker; a backlog read as slow passes. The wait is still visible, as
- * the column's tooltip, because it is a real number worth seeing — just not this one.
+ * Named for the pair of timestamps it is between, rather than "duration" — which is the word that hid
+ * the fact that it used to be measured from the enqueue, so that a backlog read as slow passes. Queue
+ * time is the other figure, in this cell's tooltip.
  *
- * A run nobody ever claimed has no duration, the same as one that has not ended.
+ * A run that never started has no processing time, the same as one that has not ended.
  */
-function duration(run: TaskRunRecord) {
-  if (!run.endedAtUtc || !run.claimedAtUtc) return '—'
-  const ms = new Date(run.endedAtUtc).getTime() - new Date(run.claimedAtUtc).getTime()
+function processingTime(run: TaskRunRecord) {
+  if (!run.endedAtUtc || !run.startedAtUtc) return '—'
+  const ms = new Date(run.endedAtUtc).getTime() - new Date(run.startedAtUtc).getTime()
   if (ms < 0) return '—'
   return elapsed(ms)
 }
 
 /**
- * How long the run sat queued before a worker picked it up, for the duration cell's tooltip.
+ * Queue time: how long the run sat queued before it started, for the processing cell's tooltip.
  *
  * Null rather than "0ms" when the wait rounds to nothing: the ordinary case is an idle worker taking
  * the item immediately, and a tooltip on every row saying so would be noise on the rows where the
  * answer is boring, and easy to miss on the rows where it is not.
  */
-function queueWait(run: TaskRunRecord): string | null {
-  if (!run.claimedAtUtc) return null
-  const ms = new Date(run.claimedAtUtc).getTime() - new Date(run.startedAtUtc).getTime()
+function queueTime(run: TaskRunRecord): string | null {
+  if (!run.startedAtUtc || !run.enqueuedAtUtc) return null
+  const ms = new Date(run.startedAtUtc).getTime() - new Date(run.enqueuedAtUtc).getTime()
   if (ms < 1000) return null
-  return `Queued ${elapsed(ms)} before a worker picked this up — not counted in the duration.`
+  return `Queued ${elapsed(ms)} before this run started — not counted in the processing time.`
 }
 
 function elapsed(ms: number) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
 }
 
-const clock = (iso: string) => new Date(iso).toLocaleTimeString()
+const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : '—')
 
 export function RunsPanel({ replicationName, command }: { replicationName: string; command: RunsCommand | null }) {
   const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined)
@@ -166,8 +166,10 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
         </div>
 
         <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 12 }}>
-          <span>Started</span><span>Kind</span><span>Mapping</span><span>Segment</span>
-          <span>Read</span><span>Written</span><span>Duration</span><span>Status</span><span />
+          {/* "Queued", not "Started": this column has always shown the enqueue time, and now there is
+              a real start timestamp beside it for the header to have been lying about. */}
+          <span>Queued</span><span>Kind</span><span>Mapping</span><span>Segment</span>
+          <span>Read</span><span>Written</span><span>Processing</span><span>Status</span><span />
         </div>
 
         <div style={{ overflow: 'auto' }}>
@@ -198,14 +200,14 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
                     {expandedRunId === r.runId ? '▾' : '▸'}
                   </button>
                 )}
-                {clock(r.startedAtUtc)}
+                {clock(r.enqueuedAtUtc)}
               </span>
               <span><RunKindBadge kind={r.runKind} /></span>
               <span>{r.mappingName}</span>
               <span className="faint">{r.segmentLabel ?? '—'}</span>
               <span>{r.rowsRead.toLocaleString()}</span>
               <span>{r.rowsWritten.toLocaleString()}</span>
-              <span className="dim" title={queueWait(r) ?? undefined}>{duration(r)}</span>
+              <span className="dim" title={queueTime(r) ?? undefined}>{processingTime(r)}</span>
               <span title={r.errorSummary ?? undefined}><StatusBadge status={r.status} /></span>
               {/* Offered, not performed. A full reload of a table that fell behind can be hours of
                   work, so a pass failing because its source dropped the history it needed reports

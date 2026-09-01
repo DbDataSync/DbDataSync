@@ -861,7 +861,7 @@ public sealed class Shout : IValueColumnExpression
 
     // Real numbers or nothing: several passes have run above, so this is not zero.
     await expect(page.getByTestId('metrics-runs')).not.toContainText('0', { timeout: 15_000 })
-    await expect(page.getByTestId('metrics-duration')).toContainText('p50')
+    await expect(page.getByTestId('metrics-processing')).toContainText('p50')
     await expect(page.getByTestId('metrics-sparkline')).toBeVisible()
 
     // Not "lag" — a pass that ran two minutes ago and found nothing looks identical to one that ran

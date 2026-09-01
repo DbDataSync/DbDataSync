@@ -65,15 +65,15 @@ export function MetricsCard({ replicationName, enabled }: { replicationName: str
             {/* A distribution, not a single figure. One number reads like a target the system is
                 measuring itself against; it is not, it is what happened.
 
-                The passes themselves, not their wait for a worker: since phase 72 this is measured
-                from the claim, so a backlog moves the run list's queue-wait tooltips rather than
-                inflating these percentiles. */}
+                The passes themselves, not their wait for a worker: measured from the start, so a
+                backlog moves the run list's queue-time tooltips rather than inflating these
+                percentiles. */}
             <Figure
-              label="Pass duration"
-              value={data.durationP50Ms === null
+              label="Processing time"
+              value={data.processingP50Ms === null
                 ? 'no completed pass'
-                : `p50 ${formatMs(data.durationP50Ms)} · p95 ${formatMs(data.durationP95Ms!)} · max ${formatMs(data.durationMaxMs!)}`}
-              testId="metrics-duration"
+                : `p50 ${formatMs(data.processingP50Ms)} · p95 ${formatMs(data.processingP95Ms!)} · max ${formatMs(data.processingMaxMs!)}`}
+              testId="metrics-processing"
             />
 
             <Sparkline buckets={data.buckets} />
