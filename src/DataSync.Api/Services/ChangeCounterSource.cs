@@ -43,6 +43,21 @@ public static class ChangeCounters
 }
 
 /// <summary>
+/// What one counter round-trip came back with.
+/// </summary>
+/// <param name="Value">The counter, in the same text encoding <c>ChangeWatermarks</c> uses, or null
+/// when the source has no position to give — <c>fn_cdc_get_max_lsn()</c> before the capture job has
+/// run.</param>
+/// <param name="SourceTimeUtc">
+/// When the engine says <paramref name="Value"/> committed. Filled on the CDC round-trip only, and
+/// null everywhere else — not because Change Tracking has no mapping (it does, through
+/// <c>dm_tran_commit_table</c>) but because CDC's costs nothing here: <c>fn_cdc_map_lsn_to_time</c>
+/// rides along on the round-trip that already fetched the LSN, whereas the DMV lookup is a second
+/// query worth making only when a lag figure is actually asked for. See phase 85.
+/// </param>
+public sealed record ChangeCounterReading(string? Value, DateTimeOffset? SourceTimeUtc = null);
+
+/// <summary>
 /// One source round-trip: the current database-wide change counter for a connection, in the same
 /// text encoding <c>ChangeWatermarks</c> uses.
 /// <para>
@@ -54,12 +69,37 @@ public static class ChangeCounters
 public interface IChangeCounterSource
 {
     /// <summary>
-    /// The counter, or null when the source has no position to give — <c>fn_cdc_get_max_lsn()</c>
-    /// before the capture job has run. Throws if the source is unreachable or the query fails; the
-    /// gate treats that as a reason to fail open, not to stop.
+    /// The current counter, and the time the source puts on it where the mechanism has one. Throws if
+    /// the source is unreachable or the query fails; the gate treats that as a reason to fail open,
+    /// not to stop.
     /// </summary>
-    Task<string?> FetchAsync(
+    Task<ChangeCounterReading> FetchAsync(
         string connectionName, string sourceDatabase, string readerKind, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The time the source puts on an arbitrary stored position, rather than on its current one —
+    /// through the engine's own mapping in both mechanisms: <c>fn_cdc_map_lsn_to_time</c> for an LSN,
+    /// <c>dm_tran_commit_table</c> for a Change Tracking version.
+    /// <para>
+    /// The other half of an exact lag: the group's shared history row says where the database had got
+    /// to, and this says where one mapping's own watermark sits on the same clock. It cannot be
+    /// cached in <c>ChangeCheckHistory</c> beside the first, because the position is the mapping's and
+    /// the row is the group's.
+    /// </para>
+    /// <para>
+    /// **Null is a real answer, and the same one in both mechanisms**: the position is older than
+    /// what the source still holds — outside <c>cdc.lsn_time_mapping</c>'s retained window, or aged
+    /// out of the DMV's rolling one. Change Tracking's caller falls back to an estimate at that
+    /// point; CDC's has none to fall back to. Also null for a reader kind with no counter at all.
+    /// Throws on an unreachable source, like <see cref="FetchAsync"/>.
+    /// </para>
+    /// </summary>
+    Task<DateTimeOffset?> MapSourceTimeAsync(
+        string connectionName,
+        string sourceDatabase,
+        string readerKind,
+        string value,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -77,7 +117,7 @@ public interface IChangeCounterSource
 /// </summary>
 public sealed class DriverChangeCounterSource(DriverConnectionFactory connections) : IChangeCounterSource
 {
-    public async Task<string?> FetchAsync(
+    public async Task<ChangeCounterReading> FetchAsync(
         string connectionName, string sourceDatabase, string readerKind, CancellationToken cancellationToken)
     {
         var (connection, _) = await connections.OpenAsync(connectionName, cancellationToken);
@@ -85,17 +125,63 @@ public sealed class DriverChangeCounterSource(DriverConnectionFactory connection
         {
             connection.ChangeDatabase(sourceDatabase);
 
+            switch (readerKind)
+            {
+                case MsSqlDriverKinds.Cdc:
+                    // Both answers on one round-trip, on the connection that is already open and
+                    // already in the right catalog. The time is only meaningful for the LSN it came
+                    // from, so fetching them apart would be two positions and one of them stale.
+                    if (await MsSqlCdcCatalog.GetMaxLsnAsync(connection, cancellationToken) is not { } lsn)
+                        return new ChangeCounterReading(null);
+
+                    return new ChangeCounterReading(
+                        MsSqlCdcCatalog.ToWatermark(lsn),
+                        await MsSqlCdcCatalog.MapLsnToTimeAsync(connection, lsn, cancellationToken));
+
+                case MsSqlDriverKinds.ChangeTracking:
+                    return new ChangeCounterReading(
+                        (await MsSqlChangeTrackingReader.GetCurrentVersionAsync(connection, cancellationToken))
+                            .ToString());
+
+                default:
+                    throw new InvalidOperationException(
+                        $"'{readerKind}' has no database-wide change counter.");
+            }
+        }
+    }
+
+    public async Task<DateTimeOffset?> MapSourceTimeAsync(
+        string connectionName,
+        string sourceDatabase,
+        string readerKind,
+        string value,
+        CancellationToken cancellationToken)
+    {
+        if (!ChangeCounters.IsGated(readerKind))
+            return null;
+
+        // Change Tracking's version is only a number until it is parsed; a stored value that is not
+        // one is a corrupt watermark, and "cannot place it in time" is a better answer here than an
+        // exception on a status screen.
+        if (readerKind == MsSqlDriverKinds.ChangeTracking && !long.TryParse(value, out _))
+            return null;
+
+        var (connection, _) = await connections.OpenAsync(connectionName, cancellationToken);
+        await using (connection)
+        {
+            connection.ChangeDatabase(sourceDatabase);
+
             return readerKind switch
             {
-                MsSqlDriverKinds.Cdc =>
-                    await MsSqlCdcCatalog.GetMaxLsnAsync(connection, cancellationToken) is { } lsn
-                        ? MsSqlCdcCatalog.ToWatermark(lsn)
-                        : null,
-                MsSqlDriverKinds.ChangeTracking =>
-                    (await MsSqlChangeTrackingReader.GetCurrentVersionAsync(connection, cancellationToken))
-                        .ToString(),
-                _ => throw new InvalidOperationException(
-                    $"'{readerKind}' has no database-wide change counter."),
+                MsSqlDriverKinds.Cdc => await MsSqlCdcCatalog.MapLsnToTimeAsync(
+                    connection, MsSqlCdcCatalog.FromWatermark(value), cancellationToken),
+
+                // Both mechanisms have an engine-side mapping after all — dm_tran_commit_table is
+                // keyed by the same commit sequence number Change Tracking stamps versions with. The
+                // database is switched for the same reason it is above: the DMV answers for the
+                // current one.
+                _ => await MsSqlChangeTrackingReader.MapVersionToTimeAsync(
+                    connection, long.Parse(value), cancellationToken),
             };
         }
     }

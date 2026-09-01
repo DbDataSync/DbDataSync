@@ -160,7 +160,13 @@ public static class DataSyncHost
         // The scheduler's polling gate, and the one piece of it that does I/O behind an interface so
         // the decision logic can be tested without a SQL Server — see phase 75.
         builder.Services.AddSingleton<IChangeCounterSource, DriverChangeCounterSource>();
+        builder.Services.AddSingleton<ChangeSourceResolver>();
         builder.Services.AddSingleton<ChangePollingGate>();
+
+        // Lag reads the same groups the gate writes, through the same resolution, so a mapping is
+        // never grouped one way for the skip decision and another for the figure reported about it —
+        // see phase 85.
+        builder.Services.AddSingleton<ReaderLagService>();
         builder.Services.AddHostedService<SchedulerService>();
         builder.Services.AddHostedService<RunMonitorService>();
         builder.Services.AddHostedService<RunPruningService>();

@@ -1,6 +1,4 @@
 using DataSync.Core.Config;
-using DataSync.Drivers.Abstractions;
-using DataSync.Drivers.Generic;
 using DataSync.State;
 
 namespace DataSync.Api.Services;
@@ -30,8 +28,7 @@ namespace DataSync.Api.Services;
 /// </para>
 /// </summary>
 public sealed class ChangePollingGate(
-    ConfigRepository configRepository,
-    DriverRegistry driverRegistry,
+    ChangeSourceResolver sources,
     IChangeCounterSource counters,
     ChangeWatermarkStore watermarks,
     ChangeCheckStore checks,
@@ -80,10 +77,10 @@ public sealed class ChangePollingGate(
 
         foreach (var (group, members) in groups)
         {
-            string? counter;
+            ChangeCounterReading reading;
             try
             {
-                counter = await counters.FetchAsync(
+                reading = await counters.FetchAsync(
                     group.Connection, group.Database, group.Kind, cancellationToken);
             }
             catch (Exception ex)
@@ -101,11 +98,11 @@ public sealed class ChangePollingGate(
                 continue;
             }
 
-            RecordCheck(group, counter);
+            RecordCheck(group, reading);
 
             foreach (var member in members)
             {
-                if (ShouldDispatch(task.Name, member, counter))
+                if (ShouldDispatch(task.Name, member, reading.Value))
                     admitted.Add(member.MappingName);
             }
         }
@@ -148,17 +145,19 @@ public sealed class ChangePollingGate(
         }
     }
 
-    private void RecordCheck((string Connection, string Database, string Kind) group, string? counter)
+    private void RecordCheck(
+        (string Connection, string Database, string Kind) group, ChangeCounterReading reading)
     {
         try
         {
-            checks.Record(group.Connection, group.Database, group.Kind, counter);
+            checks.Record(
+                group.Connection, group.Database, group.Kind, reading.Value, reading.SourceTimeUtc);
         }
         catch (Exception ex)
         {
-            // History, not mechanism: nothing downstream reads this row, so a state database that is
-            // briefly locked costs an audit line and must not cost a dispatch decision that has
-            // already been made correctly.
+            // History, not mechanism: the dispatch decision this tick has already been made from the
+            // fetched value itself, so a state database that is briefly locked costs an audit line
+            // and a later lag figure's precision, never a mapping's pass.
             logger.LogWarning(
                 ex, "Could not record the change check for '{Connection}'/'{Database}' ({Kind}).",
                 group.Connection, group.Database, group.Kind);
@@ -181,24 +180,11 @@ public sealed class ChangePollingGate(
 
         try
         {
-            var mapping = configRepository.LoadTableMapping(task.Name, mappingName);
-            var readerKind = PipelineResolution.ReaderKind(null, task, mapping);
-            if (!ChangeCounters.IsGated(readerKind) || mapping.Sources.Count != 1)
+            if (sources.Describe(task, mappingName).Source is not { } source)
                 return false;
 
-            var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
-
-            // The dialect from the connection's configured driver rather than from an open connection
-            // — the same read phase 74 moved ResyncService onto, and for the same reason: the key of
-            // a watermark must be computable when the source is down, which is exactly when the gate
-            // is about to fail open and needs to have got this far.
-            var connection = configRepository.LoadConnection(source.ConnectionName);
-            if (driverRegistry.Get(connection.DriverType) is not IDialectProvider dialect)
-                return false;
-
-            group = (source.ConnectionName, source.Database, readerKind);
-            candidate = new Candidate(
-                mappingName, WatermarkKey.Build(source, dialect.Dialect), readerKind);
+            group = (source.ConnectionName, source.SourceDatabase, source.ReaderKind);
+            candidate = new Candidate(mappingName, source.WatermarkKey, source.ReaderKind);
             return true;
         }
         catch (Exception ex)

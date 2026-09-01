@@ -34,40 +34,15 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
 
     private readonly HttpClient _client = factory.CreateClient();
 
-    /// <summary>
-    /// A source that answers from a dictionary and remembers being asked. Recording the calls is the
-    /// point of half these tests: "was this fetched once or twice" is the optimization itself, and it
-    /// is invisible in the gate's return value.
-    /// </summary>
-    private sealed class FakeCounterSource : IChangeCounterSource
-    {
-        public Dictionary<(string Connection, string Database, string Kind), string?> Values { get; } = [];
-        public HashSet<(string Connection, string Database, string Kind)> Unreachable { get; } = [];
-        public List<(string Connection, string Database, string Kind)> Fetches { get; } = [];
-
-        public Task<string?> FetchAsync(
-            string connectionName, string sourceDatabase, string readerKind, CancellationToken cancellationToken)
-        {
-            var key = (connectionName, sourceDatabase, readerKind);
-            Fetches.Add(key);
-
-            if (Unreachable.Contains(key))
-                throw new InvalidOperationException("the source is not answering");
-
-            return Task.FromResult(Values.TryGetValue(key, out var value) ? value : null);
-        }
-    }
-
     /// <summary>An LSN as CDC's own encoding spells it — hex, which is what ChangeWatermarks holds
     /// and therefore what the gate compares.</summary>
     private static string Lsn(params byte[] bytes) => MsSqlCdcCatalog.ToWatermark(bytes);
 
-    private (ChangePollingGate Gate, FakeCounterSource Source) BuildGate()
+    private (ChangePollingGate Gate, FakeChangeCounterSource Source) BuildGate()
     {
-        var source = new FakeCounterSource();
+        var source = new FakeChangeCounterSource();
         var gate = new ChangePollingGate(
-            factory.Services.GetRequiredService<ConfigRepository>(),
-            factory.Services.GetRequiredService<DataSync.Drivers.Abstractions.DriverRegistry>(),
+            factory.Services.GetRequiredService<ChangeSourceResolver>(),
             source,
             factory.Services.GetRequiredService<ChangeWatermarkStore>(),
             factory.Services.GetRequiredService<ChangeCheckStore>(),
@@ -147,7 +122,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
             ("shipments", MsSqlDriverKinds.ChangeTracking));
 
         var (gate, source) = BuildGate();
-        source.Values[("gate-src", "App", MsSqlDriverKinds.ChangeTracking)] = "100";
+        source.Set("gate-src", "App", MsSqlDriverKinds.ChangeTracking, "100");
 
         var admitted = await gate.AdmitAsync(task, ["orders", "shipments"], CancellationToken.None);
 
@@ -165,8 +140,8 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
             ("cdcorders", MsSqlDriverKinds.Cdc));
 
         var (gate, source) = BuildGate();
-        source.Values[("gate-src", "App", MsSqlDriverKinds.ChangeTracking)] = "100";
-        source.Values[("gate-src", "App", MsSqlDriverKinds.Cdc)] = Lsn(0, 0, 0, 42, 0, 0, 0, 171, 0, 3);
+        source.Set("gate-src", "App", MsSqlDriverKinds.ChangeTracking, "100");
+        source.Set("gate-src", "App", MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 171, 0, 3));
 
         await gate.AdmitAsync(task, ["ctorders", "cdcorders"], CancellationToken.None);
 
@@ -203,7 +178,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         SetWatermark(task, "caughtup", "100");
 
         var (gate, source) = BuildGate();
-        source.Values[("gate-src", "App", MsSqlDriverKinds.ChangeTracking)] = "100";
+        source.Set("gate-src", "App", MsSqlDriverKinds.ChangeTracking, "100");
 
         var admitted = await gate.AdmitAsync(task, ["draining", "caughtup"], CancellationToken.None);
 
@@ -221,7 +196,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         SetWatermark(task, "settled", "100");
 
         var (gate, source) = BuildGate();
-        source.Values[("gate-src", "App", MsSqlDriverKinds.ChangeTracking)] = "100";
+        source.Set("gate-src", "App", MsSqlDriverKinds.ChangeTracking, "100");
 
         var admitted = await gate.AdmitAsync(task, ["firstpass", "settled"], CancellationToken.None);
 
@@ -240,7 +215,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         SetWatermark(task, "cdconly", max);
 
         var (gate, source) = BuildGate();
-        source.Values[("gate-src", "App", MsSqlDriverKinds.Cdc)] = max;
+        source.Set("gate-src", "App", MsSqlDriverKinds.Cdc, max);
 
         Assert.Empty(await gate.AdmitAsync(task, ["cdconly"], CancellationToken.None));
 
@@ -284,7 +259,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
 
         var (gate, source) = BuildGate();
         source.Unreachable.Add(("gate-src", "App", MsSqlDriverKinds.ChangeTracking));
-        source.Values[("gate-src", "App", MsSqlDriverKinds.Cdc)] = max;
+        source.Set("gate-src", "App", MsSqlDriverKinds.Cdc, max);
 
         var admitted = await gate.AdmitAsync(
             task, ["ctdown", "ctdown2", "cdcup"], CancellationToken.None);
@@ -309,5 +284,47 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         // reader kind but CDC and Change Tracking schedules exactly as it did before phase 75.
         Assert.Equal(["reload"], admitted);
         Assert.Empty(source.Fetches);
+    }
+
+    /// <summary>
+    /// The composition phase 84 depends on, asserted rather than assumed. CDC reads are now capped by
+    /// default, so a mapping with a backlog drains over many passes — and between those passes nothing
+    /// is written at the source, so the database-wide max LSN does not move at all. Across every one of
+    /// those ticks the gate must keep dispatching the mapping, and then stop the tick it catches up.
+    /// <para>
+    /// This is the failure a cached "last checked" counter would produce and the reason phase 75's gate
+    /// does not keep one: the counter is identical on every tick here, and a gate comparing it against
+    /// its own previous reading would call the first tick busy and every later one quiet, stalling the
+    /// mapping mid-drain for as long as its schedule kept coming round. Several ticks rather than one,
+    /// because a single-tick assertion cannot tell "compares against the mapping" from "compares
+    /// against a counter it has not seen before".
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ACdcMappingDrainingUnderARowCap_IsDispatchedOnEveryTickUntilItCatchesUp()
+    {
+        var task = await SetUpAsync(("draining", MsSqlDriverKinds.Cdc));
+
+        // The source reached LSN 10 some time ago and has been quiet since; the mapping is at 0.
+        var max = Lsn(0, 0, 0, 0, 0, 0, 0, 0, 0, 10);
+        SetWatermark(task, "draining", Lsn(0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+
+        var (gate, source) = BuildGate();
+        source.Set("gate-src", "App", MsSqlDriverKinds.Cdc, max);
+
+        // Five ticks, five capped passes, each advancing the mapping's own watermark by two LSNs —
+        // which is what a bounded read's WatermarkAfterRead does — and never touching the counter.
+        for (byte reached = 2; reached <= 10; reached += 2)
+        {
+            var admitted = await gate.AdmitAsync(task, ["draining"], CancellationToken.None);
+            Assert.Equal(["draining"], admitted);
+
+            SetWatermark(task, "draining", Lsn(0, 0, 0, 0, 0, 0, 0, 0, 0, reached));
+        }
+
+        // Caught up, and only now skipped. The counter is the same value it was on the first tick.
+        Assert.Empty(await gate.AdmitAsync(task, ["draining"], CancellationToken.None));
+        Assert.Equal(6, source.Fetches.Count);
+        Assert.All(source.Fetches, f => Assert.Equal(MsSqlDriverKinds.Cdc, f.Kind));
     }
 }

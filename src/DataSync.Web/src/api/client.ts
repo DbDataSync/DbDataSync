@@ -13,6 +13,7 @@ import type {
   DriverCapabilities,
   BulkCreateRequest,
   BulkCreateResult,
+  MappingLag,
   InferredColumnType,
   InferredNaturalKey,
   AuthStatus,
@@ -142,6 +143,10 @@ export const api = {
     get: (replicationName: string, mappingName: string) =>
       request<TableMappingConfig>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}`,
+      ),
+    lag: (replicationName: string, mappingName: string) =>
+      request<MappingLag>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/lag`,
       ),
     bulkCreate: (replicationName: string, body: BulkCreateRequest) =>
       request<BulkCreateResult>(

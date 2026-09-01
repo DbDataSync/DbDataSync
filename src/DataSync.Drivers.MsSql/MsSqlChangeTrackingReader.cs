@@ -213,6 +213,50 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         return result is null or DBNull ? 0 : Convert.ToInt64(result);
     }
 
+    /// <summary>
+    /// When the commit that produced <paramref name="version"/> happened, according to the engine
+    /// itself — Change Tracking's own answer to the question <c>fn_cdc_map_lsn_to_time</c> answers for
+    /// CDC (phase 85).
+    /// <para>
+    /// The join is sound because a <c>SYS_CHANGE_VERSION</c> *is* a commit sequence number:
+    /// <c>sys.dm_tran_commit_table</c> is keyed by <c>commit_ts</c>, which is the same counter Change
+    /// Tracking stamps rows with. Nothing here is estimated; a version this returns a time for is as
+    /// exactly placed as a CDC LSN is.
+    /// </para>
+    /// </summary>
+    /// <returns>
+    /// Null when the DMV no longer holds the version, which is an expected answer rather than a
+    /// failure — see the remarks. Callers that need a figure anyway fall back to their own estimate.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// **This is a dynamic management view, not a persisted table.** It holds a bounded, rolling
+    /// window of recent commits — the window Change Tracking's own cleanup keeps — so a version old
+    /// enough to have aged out of it simply has no row, and no error. This is the exact mirror of
+    /// CDC's retention limit on <c>cdc.lsn_time_mapping</c>: same shape of answer, different mechanism
+    /// underneath. A caller must treat null as "too old to place", never as "no such version".
+    /// </para>
+    /// <para>
+    /// **The value is the source server's own clock**, for the same reason
+    /// <see cref="MsSqlCdcCatalog.MapLsnToTimeAsync"/>'s is, and it is labelled with a zero offset
+    /// here on the same terms: every use of it is a difference between two values from this same view
+    /// on this same server, where a shared offset cancels.
+    /// </para>
+    /// </remarks>
+    public static async Task<DateTimeOffset?> MapVersionToTimeAsync(
+        DbConnection connection, long version, CancellationToken cancellationToken)
+    {
+        using var cmd = connection.CreateTimedCommand();
+        cmd.CommandText = """
+            SELECT tc.commit_time
+            FROM sys.dm_tran_commit_table AS tc
+            WHERE tc.commit_ts = @version;
+            """;
+        cmd.AddParameter("@version", version);
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return result is null or DBNull ? null : new DateTimeOffset((DateTime)result, TimeSpan.Zero);
+    }
+
     private static async Task<long> GetMinValidVersionAsync(
         DbConnection connection, SourceTableRef source, CancellationToken cancellationToken)
     {

@@ -13,7 +13,7 @@ namespace DataSync.Api.Controllers;
 [Route("api/replications/{replicationName}/table-mappings")]
 public sealed class TableMappingsController(
     ConfigRepository configRepository, CurrentUser currentUser, IHubContext<RunHub> hub,
-    ParameterCheck parameterCheck) : ControllerBase
+    ParameterCheck parameterCheck, ReaderLagService lag) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
@@ -32,6 +32,36 @@ public sealed class TableMappingsController(
         {
             return NotFound();
         }
+    }
+
+    /// <summary>
+    /// How far behind its source this mapping is — see phase 85.
+    /// <para>
+    /// Beside the mapping rather than under a new endpoint of its own, and pulled rather than pushed,
+    /// on the same call <c>{name}/status</c> is made on: this is a figure somebody reads when they go
+    /// looking, and the case where somebody is watching a replication move is a live run, which the
+    /// run hub already covers.
+    /// </para>
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("{mappingName}/lag")]
+    public async Task<ActionResult<MappingLag>> Lag(
+        string replicationName, string mappingName, CancellationToken cancellationToken)
+    {
+        ReplicationTaskConfig task;
+        try
+        {
+            task = configRepository.LoadReplicationTask(replicationName);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+
+        if (!configRepository.ListTableMappings(replicationName).Contains(mappingName, StringComparer.Ordinal))
+            return NotFound();
+
+        return Ok(MappingLag.From(await lag.DescribeAsync(task, mappingName, cancellationToken)));
     }
 
     [HttpPut("{mappingName}")]
@@ -165,3 +195,56 @@ public sealed record BulkCreateProgress(int Done, int Total, string Name);
 /// <param name="Skipped">Tables that already had a mapping. Reported rather than silently dropped, so
 /// "create 40" answering with 12 is explained on screen instead of looking like a failure.</param>
 public sealed record BulkCreateResult(IReadOnlyList<string> Created, IReadOnlyList<string> Skipped);
+
+/// <summary>
+/// A mapping's staleness, over the wire — see <c>ReaderLagService</c> for what each figure is and how
+/// it is arrived at.
+/// <para>
+/// **Three separately named fields rather than one number and a unit.** They are not three encodings
+/// of the same measurement: <c>exactLagMs</c> is what the source engine says, <c>versionsBehind</c> is
+/// a count in a unit only the source's own write rate gives meaning to, and <c>estimatedLagMs</c> is
+/// reconstructed from how often this system happened to look. A single <c>lagMs</c> with a
+/// <c>kind</c> beside it would be one <c>if</c> away, in every consumer ever written against it, from
+/// charting an estimate on the same axis as a fact — and the estimate's error is the poll interval,
+/// which is a property of this system's configuration rather than of the replication. Naming the
+/// estimate is what makes ignoring the distinction a decision instead of an accident.
+/// </para>
+/// <para>
+/// **<c>exactLagMs</c> and <c>estimatedLagMs</c> are never both populated**, and which one arrives is
+/// the answer to "how good is this figure", not an implementation detail: a Change Tracking mapping
+/// resolves through <c>dm_tran_commit_table</c> into the first field while its version is recent
+/// enough for that DMV to hold, and drops into the second once it is not. A consumer reading only
+/// <c>exactLagMs</c> is correct and gets nulls; one reading only <c>estimatedLagMs</c> is correct and
+/// gets nulls; one that coalesces them has said, in writing, that it does not mind.
+/// </para>
+/// </summary>
+/// <param name="Supported">False when the mechanism has no lag to report at all, as opposed to having
+/// none yet. A consumer should render those differently: "not applicable", never a dash that reads
+/// like zero.</param>
+/// <param name="ExactLagMs">
+/// Milliseconds, stated by the source engine at both ends — CDC always, Change Tracking whenever its
+/// version is recent enough for <c>dm_tran_commit_table</c> to place. Milliseconds rather than a
+/// serialised <c>TimeSpan</c>, matching <c>TaskRuns</c>' own
+/// <c>ReaderLifetimeMs</c>/<c>WriterDurationMs</c> — a number a client can do arithmetic on without
+/// parsing <c>"00:04:13.5"</c> first.
+/// </param>
+/// <param name="VersionsBehind">Change Tracking only, and exact. A count, never milliseconds.</param>
+/// <param name="EstimatedLagMs">
+/// Change Tracking's fallback, an estimate whose precision is the gate's polling interval, filled
+/// only when the engine would not place the version. Null when the polling history cannot place it
+/// either — which is a real state on a fresh install, and is not zero.
+/// </param>
+public sealed record MappingLag(
+    string ReaderKind,
+    bool Supported,
+    long? ExactLagMs,
+    long? VersionsBehind,
+    long? EstimatedLagMs)
+{
+    public static MappingLag From(ReaderLag lag) => new(
+        lag.ReaderKind,
+        lag.Supported,
+        (long?)lag.ExactLag?.TotalMilliseconds,
+        lag.ExactVersionsBehind,
+        (long?)lag.EstimatedLag?.TotalMilliseconds);
+}

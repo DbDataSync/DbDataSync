@@ -608,5 +608,35 @@ internal static class Migrations
             PRIMARY KEY (UserId)
         );
         """,
+
+        """
+        -- The time the source itself says its current position was committed — see phase 85.
+        --
+        -- Populated for SourceKind = 'Cdc' only, from sys.fn_cdc_map_lsn_to_time(maxLsn), on the same
+        -- round-trip that already fetches the max LSN and has already switched to the mapping's own
+        -- database — the mapping is free there, on a connection already open and already in the right
+        -- catalog.
+        --
+        -- Change Tracking rows keep this null, and not because that mechanism cannot say: a
+        -- SYS_CHANGE_VERSION is a commit sequence number and sys.dm_tran_commit_table will map it. It
+        -- is null because that lookup is a second query rather than a free rider on the first, and is
+        -- worth making when somebody asks for a lag figure rather than once per group per tick for
+        -- every group whose figure nobody reads. Change Tracking's lag does the mapping on demand.
+        --
+        -- Nullable for two more reasons even on a CDC row, and they must stay distinguishable:
+        -- fn_cdc_map_lsn_to_time returns null for a position outside the retained window, and Value
+        -- itself is null before the capture job has ever run. A reader of this column wants the
+        -- latest row that actually has one, not the latest row.
+        ALTER TABLE ChangeCheckHistory {{addcolumn}} SourceTimeUtc {{text}} NULL;
+
+        -- The index phase 75 deliberately did not add, added now that the reader it was waiting for
+        -- exists. Lag asks two questions of this table, both scoped to one
+        -- (ConnectionName, SourceDatabase, SourceKind) group: the latest row in it, and the earliest
+        -- row in it at or above a version. Without this they are scans of a table written to once per
+        -- group per tick. CheckedAtUtc trails the group columns because both questions order by it
+        -- within a group, never across groups.
+        CREATE INDEX IX_ChangeCheckHistory_Group
+            ON ChangeCheckHistory(ConnectionName, SourceDatabase, SourceKind, CheckedAtUtc);
+        """,
     ];
 }

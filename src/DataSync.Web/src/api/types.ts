@@ -863,6 +863,31 @@ export interface BulkCreateProgress {
   name: string
 }
 
+/**
+ * How far behind its source one mapping is — see phase 85.
+ *
+ * **Three separately named fields, and never one coalesced number.** `exactLagMs` is a duration the
+ * source engine itself stated at both ends; `estimatedLagMs` is reconstructed from how often this
+ * system happened to poll, so its error is the poll interval — a property of our configuration
+ * rather than of the replication; `versionsBehind` is a count whose meaning depends entirely on how
+ * often the source's tables are written to, and is not convertible into a time. A UI rendering any
+ * of these has to say which one it is showing.
+ *
+ * `exactLagMs` and `estimatedLagMs` are never both set. CDC always answers in the first. Change
+ * Tracking answers in the first while its version is recent enough for `sys.dm_tran_commit_table`
+ * to place, and drops to the second once it is not — so the same mapping can move between them as
+ * it falls further behind.
+ */
+export interface MappingLag {
+  readerKind: string
+  /** False when the mechanism has no lag to report at all, as opposed to none yet: render "not
+   * applicable", never a dash that reads like zero. */
+  supported: boolean
+  exactLagMs: number | null
+  versionsBehind: number | null
+  estimatedLagMs: number | null
+}
+
 /** Who the caller is, and how they could sign in. The one endpoint the app can always call — the
  * answer to "am I signed in" cannot itself require being signed in. */
 export interface AuthStatus {

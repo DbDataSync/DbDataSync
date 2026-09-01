@@ -156,6 +156,30 @@ public static class MsSqlCdcCatalog
 
     public static byte[] FromWatermark(string watermark) => Convert.FromHexString(watermark);
 
+    /// <summary>
+    /// When the transaction at <paramref name="lsn"/> committed, according to the engine itself — the
+    /// one thing that turns a CDC position into a time without anybody estimating (phase 85). Null
+    /// when the LSN falls outside what <c>cdc.lsn_time_mapping</c> still holds, which is a real answer:
+    /// a position older than the retained window has no time here any more.
+    /// </summary>
+    /// <remarks>
+    /// **The value is the source server's own clock, not necessarily UTC** — <c>fn_cdc_map_lsn_to_time</c>
+    /// returns a bare <c>datetime</c>, and CDC records commit times in server local time. It is
+    /// labelled with a zero offset here rather than converted, because every use of it is a difference
+    /// between two values from this same function on the same server, where a shared offset cancels.
+    /// Anything that ever wants to render one of these absolutely has to establish the server's zone
+    /// first; nothing does today.
+    /// </remarks>
+    public static async Task<DateTimeOffset?> MapLsnToTimeAsync(
+        DbConnection connection, byte[] lsn, CancellationToken cancellationToken)
+    {
+        using var cmd = connection.CreateTimedCommand();
+        cmd.CommandText = "SELECT sys.fn_cdc_map_lsn_to_time(@lsn);";
+        cmd.AddParameter("@lsn", lsn);
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return result is null or DBNull ? null : new DateTimeOffset((DateTime)result, TimeSpan.Zero);
+    }
+
     /// <summary>Ordering for <c>binary(10)</c> values, which SQL Server compares as unsigned
     /// big-endian and .NET does not compare at all.</summary>
     public static int Compare(byte[] left, byte[] right)

@@ -6,12 +6,21 @@ namespace DataSync.State;
 /// capture job has ever run. Distinct from there being no row, which means the gate never asked or
 /// could not.
 /// </param>
+/// <param name="SourceTimeUtc">
+/// When the source says the position in <paramref name="Value"/> was committed — CDC only, via
+/// <c>sys.fn_cdc_map_lsn_to_time</c> on the round-trip that already fetched the LSN (phase 85). Null
+/// on every Change Tracking row: that mechanism can map a version too, through
+/// <c>sys.dm_tran_commit_table</c>, but only in a query of its own, which lag makes on demand rather
+/// than the gate making it once a tick for every group. Null on a CDC row too when there is no
+/// position to map, or when the position falls outside what the capture instance still retains.
+/// </param>
 public sealed record ChangeCheck(
     string ConnectionName,
     string SourceDatabase,
     string SourceKind,
     string? Value,
-    DateTimeOffset CheckedAtUtc);
+    DateTimeOffset CheckedAtUtc,
+    DateTimeOffset? SourceTimeUtc = null);
 
 /// <summary>
 /// The append-only history of the scheduler's change-counter fetches — see phase 75.
@@ -37,19 +46,28 @@ public sealed class ChangeCheckStore(StateDatabase database)
     /// per tick, however many mappings share that group — the row describes the source round-trip,
     /// not the mappings that benefited from it.
     /// </summary>
-    public void Record(string connectionName, string sourceDatabase, string sourceKind, string? value) =>
+    /// <param name="sourceTimeUtc">The source's own time for <paramref name="value"/>, where the
+    /// fetch could get one for free — CDC's rides along on the same round-trip, Change Tracking's
+    /// would be a second query and is left to be made on demand instead. See phase 85.</param>
+    public void Record(
+        string connectionName,
+        string sourceDatabase,
+        string sourceKind,
+        string? value,
+        DateTimeOffset? sourceTimeUtc = null) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, """
-                INSERT INTO ChangeCheckHistory (ConnectionName, SourceDatabase, SourceKind, Value, CheckedAtUtc)
-                VALUES ($connection, $database, $kind, $value, $now);
+                INSERT INTO ChangeCheckHistory (ConnectionName, SourceDatabase, SourceKind, Value, CheckedAtUtc, SourceTimeUtc)
+                VALUES ($connection, $database, $kind, $value, $now, $sourceTime);
                 """);
             cmd.Bind(database, "connection", connectionName);
             cmd.Bind(database, "database", sourceDatabase);
             cmd.Bind(database, "kind", sourceKind);
             cmd.Bind(database, "value", (object?)value ?? DBNull.Value);
             cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Bind(database, "sourceTime", (object?)sourceTimeUtc?.ToString("O") ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         });
 
@@ -84,8 +102,8 @@ public sealed class ChangeCheckStore(StateDatabase database)
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = database.Command(connection, """
-                SELECT ConnectionName, SourceDatabase, SourceKind, Value, CheckedAtUtc
+            using var cmd = database.Command(connection, $"""
+                SELECT {Columns}
                 FROM ChangeCheckHistory
                 ORDER BY CheckedAtUtc DESC, Id DESC;
                 """);
@@ -93,13 +111,102 @@ public sealed class ChangeCheckStore(StateDatabase database)
             var checks = new List<ChangeCheck>();
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
-                checks.Add(new ChangeCheck(
-                    reader.GetString(0),
-                    reader.GetString(1),
-                    reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3),
-                    DateTimeOffset.Parse(reader.GetString(4))));
+                checks.Add(Read(reader));
 
             return (IReadOnlyList<ChangeCheck>)checks;
         });
+
+    /// <summary>
+    /// The most recent check for one <c>(ConnectionName, SourceDatabase, SourceKind)</c> group, or
+    /// null when the gate has never recorded one for it — see phase 85, which is the first reader of
+    /// this table other than the age purge.
+    /// <para>
+    /// This is what every lag figure is measured *against*: where the source had got to the last time
+    /// anybody looked, never wall-clock now. Comparing a mapping's position to the present makes lag
+    /// climb for ever on a source that is quiet and fully caught up, which is precisely the state
+    /// nothing should be reported about.
+    /// </para>
+    /// </summary>
+    /// <param name="requireSourceTime">
+    /// True to take the most recent row that carries a <c>SourceTimeUtc</c>, skipping any newer rows
+    /// without one. The two nulls this column can hold — the capture job has not run, and the
+    /// position is no longer retained — are recorded rather than hidden, so the caller that needs a
+    /// time asks for the latest row that has one instead of the latest row.
+    /// </param>
+    public ChangeCheck? GetLatestCheck(
+        string connectionName, string sourceDatabase, string sourceKind, bool requireSourceTime = false) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, $"""
+                SELECT {Columns}
+                FROM ChangeCheckHistory
+                WHERE ConnectionName = $connection AND SourceDatabase = $database AND SourceKind = $kind
+                  {(requireSourceTime ? "AND SourceTimeUtc IS NOT NULL" : string.Empty)}
+                ORDER BY CheckedAtUtc DESC, Id DESC;
+                """);
+            cmd.Bind(database, "connection", connectionName);
+            cmd.Bind(database, "database", sourceDatabase);
+            cmd.Bind(database, "kind", sourceKind);
+
+            using var reader = cmd.ExecuteReader();
+            return reader.Read() ? Read(reader) : null;
+        });
+
+    /// <summary>
+    /// The earliest check in a group whose recorded value <paramref name="matches"/> accepts — the
+    /// crossing row a Change Tracking time estimate is anchored on when, and only when, the engine's
+    /// own <c>dm_tran_commit_table</c> mapping has aged the mapping's version out (phase 85).
+    /// </summary>
+    /// <param name="matches">
+    /// **The comparison is a delegate rather than a predicate in the SQL, deliberately.** <c>Value</c>
+    /// is text, and this store runs on SQLite, Postgres and SQL Server; a <c>&gt;=</c> against it in
+    /// SQL is a collation-ordered string comparison in all three, which puts "9" above "10" and would
+    /// anchor the estimate on the wrong row for every group whose version count has just gained a
+    /// digit. Parsing to <c>long</c> in the caller's own language keeps one definition of "further
+    /// on" — the same point <c>ChangeCounters.Compare</c> makes for this table's other reader. Rows
+    /// with no value never reach it.
+    /// </param>
+    /// <remarks>
+    /// Streamed and stopped at the first match rather than materialised: a group is written to once
+    /// per tick, so a week of retention is six figures of rows and the crossing row is usually near
+    /// the far end of them.
+    /// </remarks>
+    public ChangeCheck? FindEarliestCheck(
+        string connectionName, string sourceDatabase, string sourceKind, Func<string, bool> matches) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, $"""
+                SELECT {Columns}
+                FROM ChangeCheckHistory
+                WHERE ConnectionName = $connection AND SourceDatabase = $database AND SourceKind = $kind
+                  AND Value IS NOT NULL
+                ORDER BY CheckedAtUtc, Id;
+                """);
+            cmd.Bind(database, "connection", connectionName);
+            cmd.Bind(database, "database", sourceDatabase);
+            cmd.Bind(database, "kind", sourceKind);
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var check = Read(reader);
+                if (matches(check.Value!))
+                    return check;
+            }
+
+            return null;
+        });
+
+    private const string Columns =
+        "ConnectionName, SourceDatabase, SourceKind, Value, CheckedAtUtc, SourceTimeUtc";
+
+    private static ChangeCheck Read(System.Data.Common.DbDataReader reader) => new(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.GetString(2),
+        reader.IsDBNull(3) ? null : reader.GetString(3),
+        DateTimeOffset.Parse(reader.GetString(4)),
+        reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)));
 }
