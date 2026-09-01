@@ -36,9 +36,9 @@
   asked for that specifically — a real product decision, not an implementation detail this doc should
   settle on its own.
 
-**Not decided here.** (B) is the more correct fix for the naming problem this investigation surfaced, but
-redefining "duration" is bigger than "add queue-wait tracking," and deserves an explicit yes rather than
-being bundled in as a side effect.
+**Resolved 2026-08-31: (B).** Duration gets redefined to `EndedAtUtc - ClaimedAtUtc` — the run itself,
+not the wait before it. Phase 36's percentiles and `RunsPanel`'s duration column both move to the new
+definition; queue wait becomes its own explicit figure alongside it, not folded invisibly into either.
 
 ## Out of scope either way
 
@@ -50,9 +50,18 @@ being bundled in as a side effect.
 
 ## Open questions
 
-1. (A) or (B) above.
-2. If (B): whether `StartedAtUtc` gets renamed in the same pass or left as a known, separately-tracked
-   naming debt.
-3. Where queue-wait shows in the UI, if anywhere beyond being queryable — not asked for explicitly.
+- Whether `StartedAtUtc` gets renamed to something like `EnqueuedAtUtc` in the same pass, or stays a
+  known, separately-tracked naming debt for later — leaning toward leaving it (a column rename touches
+  every reader, migration, and API contract, which is a larger change than this phase needs to make to
+  deliver the actual ask), but worth a line in the implementation phase doc rather than silently deciding.
+- Where queue-wait shows in the UI, if anywhere beyond being queryable via the API. Phase 62 already
+  built an expandable per-run detail in `RunsPanel` for timing data — a natural, low-cost place to add
+  this too, but not mandated; storing and exposing it via the API is the actual ask.
 
-**Next step**: resolve question 1, then this is ready for an implementation phase doc.
+**Next step**: ready for an implementation phase doc.
+
+---
+
+# Outcome
+
+Agreed, as `implementation/todo/phase-072-queue-wait-tracking.md`.
