@@ -29,11 +29,12 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **034** — PostgreSQL logical replication | |
-| 2 | **035** — config history diff and revert | |
-| 3 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **079** — a standardized datasync.config.yaml, and command-shared config resolution | small, and fixes a real bug along the way — `datasync invite` cannot reach a non-SQLite state store today |
+| 2 | **034** — PostgreSQL logical replication | |
+| 3 | **035** — config history diff and revert | |
+| 4 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-31; 032, 033, 036, 037, 039–055, 056–060, 067a and 068 done and removed.
+Set 2026-09-01; 067a and 068 done and removed since the previous note; 079 added at the top.
 What is left below it is the three engine phases that have been waiting since distribution and auth
 moved above them — with 032 and 033 done there were three change-tracking mechanisms and no way for
 anyone outside this repo to install
