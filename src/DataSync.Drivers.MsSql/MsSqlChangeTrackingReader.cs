@@ -43,7 +43,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
             Type = ParameterType.Bool,
             Default = "false",
         },
-        BoundedRead.Descriptor,
+        BoundedRead.CappedDescriptor,
     ];
 
     /// <summary>Snapshot isolation transaction failed because it isn't allowed in this database.</summary>
@@ -86,7 +86,14 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         // The first pass has no version window to bound — it reads the table itself, not CHANGETABLE,
         // and a row cap there would be a partial full load with no resumable position to record it.
         // Bounding starts once there is a change window to take a slice of.
-        var maxRows = previousWatermark is null ? null : BoundedRead.Read(options);
+        //
+        // Capped by default, not on request: CHANGETABLE is ordered by the version column already, so
+        // there is none of the watermark scan's doubt about whether ordering the window is affordable,
+        // and the mapping nobody configured is exactly the one that arrives with an unbounded backlog.
+        // Set the option to 0 to read the whole window in one pass.
+        var maxRows = previousWatermark is null
+            ? null
+            : BoundedRead.Read(options, BoundedRead.DefaultMaxRows);
         var bounded = maxRows is null ? null : new BoundedReadPosition();
 
         var rows = previousWatermark is null
@@ -138,7 +145,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
             ];
         }
 
-        var maxRows = BoundedRead.Read(request.Options);
+        var maxRows = BoundedRead.Read(request.Options, BoundedRead.DefaultMaxRows);
         var notes = new List<string>();
         if (maxRows is { } limit)
             notes.Add($"Capped at {limit} rows, ties on SYS_CHANGE_VERSION included — a pass cut short " +

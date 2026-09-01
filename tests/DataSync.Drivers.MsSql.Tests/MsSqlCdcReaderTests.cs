@@ -409,4 +409,206 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         Assert.Contains("@toLsn", statements[1].DeclaredParameters!);
         Assert.Contains("@storedLsn", statements[1].DeclaredParameters!);
     }
+
+    // ---- Row-bounded reads (phase 84) ----
+
+    private static Dictionary<string, string> Cap(int maxRows) =>
+        new() { [BoundedRead.OptionName] = maxRows.ToString() };
+
+    /// <summary>The whole window, which after this phase is something a pass has to ask for.</summary>
+    private static Dictionary<string, string> Uncapped() => Cap(0);
+
+    private Task<ReadResult> ReadAsync(
+        string? watermark, IReadOnlyDictionary<string, string> options, SourceTableRef? source = null) =>
+        _reader.ReadChangesAsync(
+            _connection, source ?? Source(), watermark, [], options, CancellationToken.None);
+
+    /// <summary>
+    /// Waits until the capture job has caught up to a known number of pending changes, by reading the
+    /// window uncapped and counting it.
+    /// <para>
+    /// A read does not consume anything — the watermark belongs to the caller — so peeking like this
+    /// is free and leaves the position untouched for the capped pass under test. Needed because CDC's
+    /// latency is real: "the capped pass returned two of six" and "the capped pass returned two of the
+    /// two that had been captured so far" are the same observation, and only one of them is the
+    /// behaviour being asserted.
+    /// </para>
+    /// </summary>
+    private async Task WaitForPendingChangesAsync(string watermark, int expected, SourceTableRef? source = null)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var last = -1;
+        while (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(90))
+        {
+            last = (await CollectAsync((await ReadAsync(watermark, Uncapped(), source)).Rows)).Count;
+            if (last >= expected)
+                return;
+
+            await Task.Delay(500);
+        }
+
+        throw new TimeoutException(
+            $"The CDC capture job produced {last} of {expected} expected changes within 90s. " +
+            "Is SQL Server Agent running? (docker-compose.yml sets MSSQL_AGENT_ENABLED.)");
+    }
+
+    /// <summary>
+    /// A pass with more waiting than its cap allows stops partway and says so — and what it says is
+    /// <see cref="ReadResult.WatermarkAfterRead"/>, a position it genuinely reached, not the window's
+    /// end it fixed for itself before reading. Persisting the latter would record six changes as read
+    /// while delivering two, and the four in between would never be seen again.
+    /// </summary>
+    [Fact]
+    public async Task Bounded_StopsAtTheCap_AndReportsAPositionBelowTheWindowsEnd()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'seed');");
+        var start = await SettleAsync((await ReadAsync(null)).NewWatermark);
+
+        // Six statements, so six transactions and six distinct __$start_lsn values. A cap of two must
+        // stop at the second of them.
+        for (var id = 10; id < 16; id++)
+            await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES ({id}, 'r{id}');");
+        await WaitForPendingChangesAsync(start, 6);
+
+        var result = await ReadAsync(start, Cap(2));
+        var rows = await CollectAsync(result.Rows);
+
+        Assert.Equal(2, rows.Count);
+        Assert.True(
+            MsSqlCdcCatalog.Compare(
+                MsSqlCdcCatalog.FromWatermark(result.WatermarkAfterRead),
+                MsSqlCdcCatalog.FromWatermark(result.NewWatermark)) < 0,
+            "a bounded pass must record where it stopped, not the window's end");
+    }
+
+    /// <summary>
+    /// The other half of the same guarantee: the position a capped pass records is one the next pass
+    /// resumes cleanly from. No gap — every change arrives — and no duplicate, which for CDC means the
+    /// boundary LSN is not re-read, because the next window starts at <c>fn_cdc_increment_lsn</c> of it.
+    /// </summary>
+    [Fact]
+    public async Task Bounded_OverSeveralPasses_DeliversEveryChangeExactlyOnce()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'seed');");
+        var watermark = await SettleAsync((await ReadAsync(null)).NewWatermark);
+
+        for (var id = 10; id < 40; id++)
+            await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES ({id}, 'r{id}');");
+        await WaitForPendingChangesAsync(watermark, 30);
+
+        var seen = new List<int>();
+        for (var pass = 0; pass < 20; pass++)
+        {
+            var result = await ReadAsync(watermark, Cap(4));
+            var rows = await CollectAsync(result.Rows);
+            seen.AddRange(rows.Select(r => (int)r["Id"]!));
+            watermark = result.WatermarkAfterRead;
+            if (rows.Count == 0)
+                break;
+        }
+
+        Assert.Equal(Enumerable.Range(10, 30), seen.Order());
+        Assert.Equal(30, seen.Distinct().Count());
+    }
+
+    /// <summary>
+    /// The trap this reader's ordering exists to avoid, and the one place CDC differs from Change
+    /// Tracking. A CDC watermark is an LSN, so an LSN is the finest position a pass can record — and
+    /// every row of one transaction shares one. Tying the cap on <c>(__$start_lsn, __$seqval)</c>,
+    /// which is what the row ordering suggests, would let this pass stop after two of the four,
+    /// record the transaction's LSN, and have the next pass resume strictly past it: two rows gone.
+    /// <para>
+    /// So the tie is on the LSN alone, and the visible consequence — asserted here rather than merely
+    /// argued — is that a transaction larger than the cap comes back whole and over the cap, in
+    /// <c>__$seqval</c> order. This is the all-changes instance because net changes would collapse the
+    /// four updates into the one row that has no ordering to lose.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Bounded_DeliversATransactionLargerThanTheCapWhole_AndInOrder()
+    {
+        var table = $"CdcTxn_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE TABLE dbo.[{table}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+        await ExecuteAsync($"""
+            EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'{table}',
+                 @role_name = NULL, @supports_net_changes = 0;
+            """);
+
+        var source = new SourceTableRef
+        {
+            ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = table,
+        };
+
+        await ExecuteAsync($"INSERT INTO dbo.[{table}] (Id, Name) VALUES (1, 'a');");
+        var start = await SettleAsync((await ReadAsync(null, source)).NewWatermark, source);
+
+        // One transaction, four changes: one __$start_lsn, four __$seqval values.
+        await ExecuteAsync($"""
+            BEGIN TRANSACTION;
+            UPDATE dbo.[{table}] SET Name = 'b' WHERE Id = 1;
+            UPDATE dbo.[{table}] SET Name = 'c' WHERE Id = 1;
+            UPDATE dbo.[{table}] SET Name = 'd' WHERE Id = 1;
+            UPDATE dbo.[{table}] SET Name = 'e' WHERE Id = 1;
+            COMMIT TRANSACTION;
+            """);
+        await WaitForPendingChangesAsync(start, 4, source);
+
+        var result = await ReadAsync(start, Cap(2), source);
+        var rows = await CollectAsync(result.Rows);
+
+        // Four, not two. WITH TIES on __$start_lsn pulls in the rest of the transaction, because
+        // stopping inside it is a position this reader cannot write down.
+        Assert.Equal(["b", "c", "d", "e"], rows.Select(r => (string)r["Name"]!));
+
+        // And having delivered the whole transaction, the pass has nothing left before the window's
+        // end, so it advances there rather than to a boundary it would have to re-read.
+        Assert.Empty(await CollectAsync((await ReadAsync(result.WatermarkAfterRead, Cap(2), source)).Rows));
+    }
+
+    /// <summary>
+    /// The cap is on unless an operator turns it off, which is the change of default this phase makes.
+    /// An unbounded mapping is exactly the one nobody thought to configure, and since phase 76's 1800s
+    /// default command timeout that mapping can now fail outright rather than merely run long.
+    /// </summary>
+    [Fact]
+    public async Task WithNoOptionsAtAll_ThePassIsStillCapped()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'seed');");
+        var start = await SettleAsync((await ReadAsync(null)).NewWatermark);
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
+        await WaitForPendingChangesAsync(start, 1);
+
+        // The default cap is far above anything these tests write, so what this proves is that the
+        // bounded statement is the one a default-configured mapping now runs — the derived table, the
+        // @maxRows parameter and the trailing position column the reader reads its stop point off —
+        // and that it still returns the same rows through it. The cap's arithmetic is asserted above,
+        // against a cap small enough to bite; the default's size is BoundedReadTests' business.
+        var result = await ReadAsync(start, new Dictionary<string, string>());
+        Assert.Single(await CollectAsync(result.Rows));
+
+        // Not cut short, so it advances to the window's end — a quiet table's watermark has to keep
+        // moving or it eventually falls below fn_cdc_get_min_lsn and expires.
+        Assert.Equal(result.NewWatermark, result.WatermarkAfterRead);
+
+        Assert.Equal(BoundedRead.OptionName, Assert.Single(_reader.Parameters).Name);
+    }
+
+    /// <summary>Zero is the escape hatch, and it has to reach the statement: an operator who has read
+    /// the description and typed 0 gets the pre-phase-84 read back.</summary>
+    [Fact]
+    public async Task Uncapped_ReadsTheWholeWindow()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'seed');");
+        var start = await SettleAsync((await ReadAsync(null)).NewWatermark);
+
+        for (var id = 10; id < 15; id++)
+            await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES ({id}, 'r{id}');");
+        await WaitForPendingChangesAsync(start, 5);
+
+        var result = await ReadAsync(start, Uncapped());
+
+        Assert.Equal(5, (await CollectAsync(result.Rows)).Count);
+        Assert.Equal(result.NewWatermark, result.WatermarkAfterRead);
+    }
 }

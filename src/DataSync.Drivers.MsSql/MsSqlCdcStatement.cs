@@ -1,3 +1,6 @@
+using DataSync.Core.Sql;
+using DataSync.Drivers.Abstractions;
+
 namespace DataSync.Drivers.MsSql;
 
 /// <summary>
@@ -10,8 +13,22 @@ public static class MsSqlCdcStatement
     /// <summary>The change-table columns every CDC function returns ahead of the source's own.</summary>
     public const string OperationColumn = "__$operation";
 
+    /// <summary>The commit position of the transaction a change belongs to. Every row of one
+    /// transaction shares it, which is what makes it the only tie-safe boundary CDC has.</summary>
+    public const string StartLsnColumn = "__$start_lsn";
+
+    /// <summary>Orders changes within one <see cref="StartLsnColumn"/>. Only all-changes returns it —
+    /// net changes has already collapsed the transaction it would order inside.</summary>
+    public const string SeqvalColumn = "__$seqval";
+
     /// <summary>Fixed leading ordinal: the operation, then the mapped columns.</summary>
     public const int OperationOrdinal = 0;
+
+    /// <summary>
+    /// Where a bounded read's position column lands: last, after the mapped columns, so every ordinal
+    /// the reader already uses is untouched by turning the cap on.
+    /// </summary>
+    public static int PositionOrdinal(int columnCount) => columnCount + 1;
 
     /// <summary>
     /// The two shapes CDC offers, and the reason the reader prefers one.
@@ -49,14 +66,36 @@ public static class MsSqlCdcStatement
     /// parameterise — which is why <see cref="MsSqlCdcCatalog"/> reads it from the catalog rather than
     /// accepting it from config.
     /// </param>
+    /// <param name="bounded">
+    /// Caps the pass at <see cref="BoundedRead.RowLimitParameter"/> rows and carries the position it
+    /// reached back beside each row under <see cref="BoundedRead.PositionColumn"/>.
+    /// <para>
+    /// **The tie is on <c>__$start_lsn</c> alone, and that is the whole correctness argument.** A CDC
+    /// watermark is an LSN — <c>MsSqlCdcCatalog.ToWatermark</c> stores one, and the next pass resumes at
+    /// <c>fn_cdc_increment_lsn</c> of it — so an LSN is the finest position this reader can *record*.
+    /// Tying on <c>(__$start_lsn, __$seqval)</c>, which is what the ordering suggests, would let a pass
+    /// stop halfway through a transaction, record that transaction's LSN, and have the next pass start
+    /// strictly beyond it: every remaining row of that transaction silently lost. Tying on the LSN
+    /// instead means <c>WITH TIES</c> pulls in the rest of the transaction whatever the cap said, so the
+    /// position reached is always one no row still sits at.
+    /// </para>
+    /// <para>
+    /// The consequence is deliberate and worth stating: a single transaction larger than the cap is
+    /// delivered whole, in one pass, over the cap. The cap bounds the common case rather than
+    /// guaranteeing a ceiling, because the alternative is losing rows.
+    /// </para>
+    /// <para>
+    /// Ordering *within* the boundary still needs <c>__$seqval</c>, which cannot share one <c>ORDER
+    /// BY</c> with a tie on the LSN alone — so the cap is taken in a derived table ordered by the LSN
+    /// and the rows come out of it ordered by both. Two orderings because they answer two different
+    /// questions: where may this pass stop, and in what order did these changes happen.
+    /// </para>
+    /// </param>
     public static string BuildRead(
         string captureInstance, CdcFunction function, IReadOnlyList<string> columns,
-        Func<string, string>? renderColumn = null)
+        Func<string, string>? renderColumn = null, bool bounded = false)
     {
         renderColumn ??= c => SqlIdentifier.Quote(c);
-
-        var selected = new List<string> { OperationColumn };
-        selected.AddRange(columns.Select(renderColumn));
 
         var name = function == CdcFunction.NetChanges
             ? $"cdc.fn_cdc_get_net_changes_{captureInstance}"
@@ -66,18 +105,48 @@ public static class MsSqlCdcStatement
         // *within* a transaction and only all-changes has it, because net changes has already
         // collapsed them. Ordering by it unconditionally is an "Invalid column name" on the mode this
         // reader prefers — found by the integration tests, and not by reading the documentation.
-        var order = function == CdcFunction.NetChanges
-            ? "__$start_lsn"
-            : "__$start_lsn, __$seqval";
+        var hasSeqval = function == CdcFunction.AllChanges;
+
+        var selected = new List<string> { OperationColumn };
+        selected.AddRange(columns.Select(renderColumn));
 
         // 'all' for net changes means "give me the net row and tell me the operation"; 'all' for all
         // changes means "every change, without before-images". Same literal, and both are what this
         // reader wants — before-images are phase 32's explicit non-goal.
+        if (!bounded)
+        {
+            return $"""
+                DECLARE @from binary(10) = sys.fn_cdc_increment_lsn(@storedLsn);
+                SELECT {string.Join(", ", selected)}
+                FROM {name}(@from, @toLsn, N'all')
+                ORDER BY {(hasSeqval ? $"{StartLsnColumn}, {SeqvalColumn}" : StartLsnColumn)};
+                """;
+        }
+
+        var position = SqlIdentifier.Quote(BoundedRead.PositionColumn);
+        var (limit, _) = MsSqlDialect.Instance.RenderTieSafeRowLimit(BoundedRead.RowLimitParameter);
+
+        // The derived table carries __$seqval only so the outer ORDER BY can use it; it is not
+        // projected outwards, which is what keeps the bounded result set the unbounded one plus a
+        // position column and leaves every ordinal the reader reads by unchanged.
+        var inner = new List<string>(selected);
+        if (hasSeqval)
+            inner.Add(SeqvalColumn);
+        inner.Add($"{StartLsnColumn} AS {position}");
+
+        var outer = new List<string> { OperationColumn };
+        outer.AddRange(columns.Select(SqlIdentifier.Quote));
+        outer.Add(position);
+
         return $"""
             DECLARE @from binary(10) = sys.fn_cdc_increment_lsn(@storedLsn);
-            SELECT {string.Join(", ", selected)}
-            FROM {name}(@from, @toLsn, N'all')
-            ORDER BY {order};
+            SELECT {string.Join(", ", outer)}
+            FROM (
+                SELECT {limit}{string.Join(", ", inner)}
+                FROM {name}(@from, @toLsn, N'all')
+                ORDER BY {StartLsnColumn}
+            ) AS capped
+            ORDER BY {(hasSeqval ? $"{position}, {SeqvalColumn}" : position)};
             """;
     }
 

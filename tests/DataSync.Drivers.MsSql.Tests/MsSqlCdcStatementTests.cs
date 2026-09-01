@@ -93,4 +93,104 @@ public sealed class MsSqlCdcStatementTests
     [Fact]
     public void AnUnknownOperation_IsRefused() =>
         Assert.Throws<InvalidOperationException>(() => MsSqlCdcStatement.Operation(9));
+
+    private static string Bounded(
+        MsSqlCdcStatement.CdcFunction function = MsSqlCdcStatement.CdcFunction.NetChanges) =>
+        MsSqlCdcStatement.BuildRead("dbo_Orders", function, ["Id", "Name"], bounded: true);
+
+    [Fact]
+    public void Unbounded_IsUnchanged_SoTurningTheCapOffRestoresTheOldStatement()
+    {
+        Assert.DoesNotContain("TOP", Read());
+        Assert.DoesNotContain("__DS_Position", Read());
+    }
+
+    [Fact]
+    public void Bounded_CapsWithTies_OnTheRowLimitParameter()
+    {
+        Assert.Contains("TOP (@maxRows) WITH TIES", Bounded());
+        Assert.Contains("TOP (@maxRows) WITH TIES", Bounded(MsSqlCdcStatement.CdcFunction.AllChanges));
+    }
+
+    /// <summary>
+    /// The correctness argument of the whole phase, asserted as a shape. A CDC watermark is an LSN, so
+    /// the finest position a pass can *record* is an LSN — which means the tie has to be on
+    /// <c>__$start_lsn</c> alone. Tying on <c>(__$start_lsn, __$seqval)</c>, which is what the row
+    /// ordering suggests and what a first reading of the phase doc says, would let a pass stop halfway
+    /// through a transaction, record that transaction's LSN, and have the next pass resume strictly
+    /// beyond it — losing every remaining row of that transaction with nothing to say so.
+    /// </summary>
+    [Fact]
+    public void Bounded_TiesOnTheLsnAlone_SoATransactionIsNeverSplitAcrossPasses()
+    {
+        // The inner ORDER BY is the one WITH TIES reads its boundary from, so that is the one asserted:
+        // everything between the derived table's parentheses, for the mode that has a __$seqval to be
+        // tempted by.
+        var inner = InnerQuery(Bounded(MsSqlCdcStatement.CdcFunction.AllChanges));
+
+        Assert.EndsWith("ORDER BY __$start_lsn", inner.TrimEnd());
+        Assert.DoesNotContain("ORDER BY __$start_lsn, __$seqval", inner);
+    }
+
+    /// <summary>Everything the derived table wraps — the part <c>WITH TIES</c> applies to.</summary>
+    private static string InnerQuery(string sql)
+    {
+        var open = sql.IndexOf("FROM (", StringComparison.Ordinal) + "FROM (".Length;
+        var close = sql.IndexOf(") AS capped", StringComparison.Ordinal);
+        Assert.True(open > 0 && close > open, "the bounded statement should wrap its cap in a derived table");
+        return sql[open..close];
+    }
+
+    /// <summary>
+    /// Two orderings, because they answer two different questions: where may this pass stop, and in
+    /// what order did these changes happen. The cap is taken in a derived table ordered by the LSN;
+    /// the rows come out of it ordered by the LSN and then by <c>__$seqval</c>, which is what keeps
+    /// row-level ordering inside a transaction that the cap landed in the middle of.
+    /// </summary>
+    [Fact]
+    public void Bounded_StillOrdersWithinATransaction()
+    {
+        Assert.Contains("ORDER BY [__DS_Position], __$seqval;", Bounded(MsSqlCdcStatement.CdcFunction.AllChanges));
+
+        // Net changes has already collapsed the transaction __$seqval would order inside, and selecting
+        // it there is an "Invalid column name" — the same trap the unbounded ordering has.
+        Assert.Contains("ORDER BY [__DS_Position];", Bounded());
+        Assert.DoesNotContain("__$seqval", Bounded());
+    }
+
+    /// <summary>
+    /// The position column is appended last and <c>__$seqval</c> is not projected outwards, so a
+    /// bounded result set is the unbounded one plus one trailing column — which is what lets the reader
+    /// keep reading <c>__$operation</c> at 0 and the mapped columns at 1..n with the cap on or off.
+    /// </summary>
+    [Fact]
+    public void Bounded_AppendsThePositionColumnLast_AndProjectsNothingElseExtra()
+    {
+        var sql = Bounded(MsSqlCdcStatement.CdcFunction.AllChanges);
+
+        Assert.Contains("SELECT __$operation, [Id], [Name], [__DS_Position]", sql);
+        // __$seqval is carried inside the derived table only, for the outer ORDER BY to use.
+        Assert.Contains("__$seqval", InnerQuery(sql));
+        Assert.DoesNotContain("__$seqval", sql[..sql.IndexOf("FROM (", StringComparison.Ordinal)]);
+        Assert.Equal(0, MsSqlCdcStatement.OperationOrdinal);
+        Assert.Equal(3, MsSqlCdcStatement.PositionOrdinal(2));
+    }
+
+    [Fact]
+    public void Bounded_StillIncrementsTheLowerBound()
+    {
+        Assert.Contains("sys.fn_cdc_increment_lsn(@storedLsn)", Bounded());
+        Assert.DoesNotContain("(@storedLsn, @toLsn", Bounded());
+    }
+
+    [Fact]
+    public void Bounded_AppliesATransformInsideTheCap_AndSelectsTheAliasOutside()
+    {
+        var sql = MsSqlCdcStatement.BuildRead(
+            "dbo_Orders", MsSqlCdcStatement.CdcFunction.NetChanges, ["Name"],
+            column => $"UPPER([{column}]) AS [{column}]", bounded: true);
+
+        Assert.Contains("UPPER([Name]) AS [Name]", sql);
+        Assert.Contains("SELECT __$operation, [Name], [__DS_Position]", sql);
+    }
 }

@@ -240,4 +240,41 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
 
         Assert.Equal(["Id", "Name"], rows[0].Schema.ColumnNames);
     }
+
+    /// <summary>
+    /// The other half of phase 84's change of default. Bounding stopped being opt-in for both log-based
+    /// readers at once, not just for CDC: the argument that decided it — the mapping nobody configured
+    /// is the one that arrives with an unbounded backlog — is about the operator, not the mechanism.
+    /// </summary>
+    [Fact]
+    public async Task WithNoOptionsAtAll_ThePassIsStillCapped()
+    {
+        var watermark = await BaselineAsync();
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'a');");
+
+        // The default cap is far above anything this test writes, so what this proves is that the
+        // bounded statement is the one a default-configured mapping now runs, and that it returns the
+        // same rows through it. The cap's arithmetic is asserted above against a cap small enough to
+        // bite; the default's size is BoundedReadTests' business.
+        var result = await _reader.ReadChangesAsync(
+            _connection, Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Single(await CollectAsync(result.Rows));
+
+        // Not cut short, so it still advances to the window's end rather than to its last row.
+        Assert.Equal(result.NewWatermark, result.WatermarkAfterRead);
+    }
+
+    /// <summary>Zero, and only zero, is how an operator asks for the uncapped read back.</summary>
+    [Fact]
+    public async Task Uncapped_ReadsTheWholeWindow()
+    {
+        var watermark = await BaselineAsync();
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'a'), (2, 'b');");
+
+        var result = await _reader.ReadChangesAsync(
+            _connection, Source(), watermark, [], Bounded(0), CancellationToken.None);
+
+        Assert.Equal(2, (await CollectAsync(result.Rows)).Count);
+        Assert.Equal(result.NewWatermark, result.WatermarkAfterRead);
+    }
 }

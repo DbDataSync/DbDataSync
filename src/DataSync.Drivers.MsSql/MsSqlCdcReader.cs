@@ -42,6 +42,13 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
 {
     public string Kind => MsSqlDriverKinds.Cdc;
 
+    /// <summary>
+    /// Declared beside the code that reads it. The shared descriptor rather than one of this reader's
+    /// own: the setting means the same thing here as it does for Change Tracking, and declaring it once
+    /// is what puts it in the SPA's reader-options form for CDC without any frontend change.
+    /// </summary>
+    public IReadOnlyList<ParameterDescriptor> Parameters { get; } = [BoundedRead.CappedDescriptor];
+
     /// <summary>CDC records a delete as its own change carrying the row's key, so a delete at the
     /// source reaches the writer as one.</summary>
     public bool DetectsDeletes => true;
@@ -112,10 +119,25 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         if (MsSqlCdcCatalog.Compare(storedLsn, maxLsn) >= 0)
             return new ReadResult(Empty(), previousWatermark, diagnostics);
 
+        // Capped by default, unlike the watermark scan's opt-in: the ordering column here is the change
+        // table's own clustered key, so bounding costs nothing to order by, and an uncapped pass over a
+        // backlog nobody thought to configure is exactly the pass that holds a worker slot for an
+        // unbounded stretch and — since phase 76's 1800s default command timeout — can now fail outright
+        // rather than merely run long. Set the option to 0 to get the whole window back.
+        //
+        // The first pass above is deliberately not capped: it reads the table itself rather than the
+        // change table, and a row cap there would be a partial full load with no resumable position to
+        // record it — the same reasoning MsSqlChangeTrackingReader states.
+        var maxRows = BoundedRead.Read(options, BoundedRead.DefaultMaxRows);
+        var bounded = maxRows is null ? null : new BoundedReadPosition();
+
         return new ReadResult(
-            ReadIncrementalAsync(sourceConnection, instance, storedLsn, maxLsn, columnMappings, cancellationToken),
+            ReadIncrementalAsync(
+                sourceConnection, instance, storedLsn, maxLsn, columnMappings, maxRows, bounded,
+                cancellationToken),
             MsSqlCdcCatalog.ToWatermark(maxLsn),
-            diagnostics);
+            diagnostics,
+            bounded);
     }
 
     /// <summary>
@@ -201,13 +223,35 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
             ];
         }
 
-        var declaredParameters = MsSqlDialect.Instance.RenderDeclarations(
+        var maxRows = BoundedRead.Read(request.Options, BoundedRead.DefaultMaxRows);
+        List<PreviewParameter> parameters =
         [
             new PreviewParameter(
                 "storedLsn", "binary(10)",
                 MsSqlDialect.Instance.RenderLiteral(MsSqlCdcCatalog.FromWatermark(request.PreviousWatermark))),
             new PreviewParameter("toLsn", "binary(10)", MsSqlDialect.Instance.RenderLiteral(maxLsn)),
-        ]);
+        ];
+        if (maxRows is { } cap)
+            parameters.Add(new PreviewParameter(BoundedRead.RowLimitParameter, "int", cap.ToString()));
+
+        var declaredParameters = MsSqlDialect.Instance.RenderDeclarations(parameters);
+
+        var notes = new List<string>
+        {
+            function == MsSqlCdcStatement.CdcFunction.NetChanges
+                ? "Net changes: one row per key, whatever happened to it in the window."
+                : "All changes: every intermediate change. This capture instance was created " +
+                  "without @supports_net_changes, so net changes are not available for it.",
+        };
+        if (maxRows is { } limit)
+        {
+            notes.Add(
+                $"Capped at {limit} rows, ties on __$start_lsn included — a pass cut short advances " +
+                "only to its last row's LSN, and the rest arrives on the next pass. The tie is on the " +
+                "LSN rather than on (__$start_lsn, __$seqval) because a stored position is an LSN: one " +
+                "transaction's rows are never split across two passes, so a transaction larger than " +
+                "the cap is delivered whole and over it.");
+        }
 
         return
         [
@@ -224,12 +268,9 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
                 $"Incremental read of changes after LSN {request.PreviousWatermark}",
                 MsSqlCdcStatement.BuildRead(
                     instance.CaptureInstance, function, ColumnsFor(instance, request.ColumnMappings),
-                    column => RenderColumn(column, request.ColumnMappings)),
+                    column => RenderColumn(column, request.ColumnMappings), bounded: maxRows is not null),
                 PreviewOrigin.BuiltIn,
-                function == MsSqlCdcStatement.CdcFunction.NetChanges
-                    ? "Net changes: one row per key, whatever happened to it in the window."
-                    : "All changes: every intermediate change. This capture instance was created " +
-                      "without @supports_net_changes, so net changes are not available for it.",
+                string.Join(" ", notes),
                 declaredParameters),
         ];
     }
@@ -302,6 +343,8 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         byte[] storedLsn,
         byte[] maxLsn,
         IReadOnlyList<ColumnMapping> columnMappings,
+        int? maxRows,
+        BoundedReadPosition? bounded,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var columns = ColumnsFor(instance, columnMappings);
@@ -310,13 +353,26 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = MsSqlCdcStatement.BuildRead(
             instance.CaptureInstance, FunctionFor(instance), columns,
-            column => RenderColumn(column, columnMappings));
+            column => RenderColumn(column, columnMappings), bounded: maxRows is not null);
         cmd.AddParameter("@storedLsn", storedLsn);
         cmd.AddParameter("@toLsn", maxLsn);
+        if (maxRows is { } limit)
+            cmd.AddParameter($"@{BoundedRead.RowLimitParameter}", limit);
+
+        // Appended after the mapped columns — see BuildRead — so nothing below shifts when the cap is on.
+        var positionOrdinal = MsSqlCdcStatement.PositionOrdinal(schema.Count);
+        long rowsRead = 0;
+        byte[]? lastLsn = null;
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
+            if (bounded is not null)
+            {
+                rowsRead++;
+                lastLsn = reader.GetFieldValue<byte[]>(positionOrdinal);
+            }
+
             var operation = MsSqlCdcStatement.Operation(reader.GetInt32(MsSqlCdcStatement.OperationOrdinal)) switch
             {
                 MsSqlCdcStatement.ChangeOperationCode.Insert => ChangeOperation.Insert,
@@ -336,5 +392,18 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
 
             yield return new ChangeRow(operation, schema, values);
         }
+
+        // Only a pass the cap actually cut short reports an intermediate position. One that drained its
+        // window advances to maxLsn instead — the position it fixed for itself before reading, which is
+        // still one it genuinely reached. Reporting the last row's LSN there would leave a quiet table's
+        // watermark frozen at its final change, and a frozen watermark eventually falls below
+        // fn_cdc_get_min_lsn and expires.
+        //
+        // WITH TIES means the engine may return more than the cap, so the test is >=. Every row sharing
+        // lastLsn is guaranteed to be in this batch — including the rest of its transaction — which is
+        // what makes stopping here resumable rather than lossy, given that the next pass resumes at
+        // fn_cdc_increment_lsn(lastLsn) and will never look at that LSN again.
+        if (bounded is not null && lastLsn is not null && maxRows is { } cap && rowsRead >= cap)
+            bounded.Reached = MsSqlCdcCatalog.ToWatermark(lastLsn);
     }
 }
