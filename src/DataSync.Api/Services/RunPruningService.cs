@@ -20,6 +20,7 @@ namespace DataSync.Api.Services;
 public sealed class RunPruningService(
     TaskRunStore taskRunStore,
     ChangeCheckStore changeCheckStore,
+    NotificationStore notificationStore,
     ApiOptions options,
     ILogger<RunPruningService> logger) : BackgroundService
 {
@@ -37,6 +38,14 @@ public sealed class RunPruningService(
             ? TimeSpan.FromDays(checkDays)
             : (TimeSpan?)null;
 
+        // Phase 77's notifications sweep on this same tick, as a third table, and share
+        // RunRetentionDays rather than taking a knob of their own. The arithmetic phase 75 did for
+        // ChangeCheckHistory is what settles it: that table writes one row per scheduler tick per
+        // source group — 17,280 a day whether or not anything happens — which is why it needed its
+        // own, much shorter window. This one writes one row per notable event, and every kind of
+        // event it announces is bounded by something RunRetentionDays already governs: a run failure
+        // cannot outnumber runs. A feed that outlived the run history explaining it would be a feed
+        // full of sentences about rows nobody can look up.
         if (maxAge is null && maxPerMapping is null && checkMaxAge is null)
         {
             // Said out loud once at startup rather than silently doing nothing forever. An operator who
@@ -51,7 +60,7 @@ public sealed class RunPruningService(
 
         logger.LogInformation(
             "Pruning history every {Interval}: keeping {Days} and at most {Max} run(s) per mapping, " +
-            "and {CheckDays} of change checks.",
+            "and {CheckDays} of change checks and notifications.",
             options.RunPruningInterval,
             maxAge is { } age ? $"{age.TotalDays:0} day(s)" : "runs of any age",
             maxPerMapping?.ToString() ?? "unlimited",
@@ -68,9 +77,9 @@ public sealed class RunPruningService(
     }
 
     /// <summary>
-    /// One sweep. Public so a test can prove that both histories go in the same pass — the reason
-    /// this table has no background service of its own, and the thing that would silently stop being
-    /// true if the second delete were dropped.
+    /// One sweep. Public so a test can prove that all three histories go in the same pass — the
+    /// reason none of these tables has a background service of its own, and the thing that would
+    /// silently stop being true if one of the deletes were dropped.
     /// </summary>
     public Task PruneAsync(TimeSpan? maxAge, int? maxPerMapping, TimeSpan? checkMaxAge)
     {
@@ -83,6 +92,10 @@ public sealed class RunPruningService(
             var prunedChecks = changeCheckStore.PruneChecks(checkMaxAge);
             if (prunedChecks > 0)
                 logger.LogInformation("Pruned {Count} change check(s) from the polling history.", prunedChecks);
+
+            var prunedNotifications = notificationStore.PruneNotifications(maxAge);
+            if (prunedNotifications > 0)
+                logger.LogInformation("Pruned {Count} notification(s) from the feed.", prunedNotifications);
         }
         catch (Exception ex)
         {

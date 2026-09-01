@@ -105,6 +105,7 @@ public static class DataSyncHost
         builder.Services.AddSingleton(sp => new InviteStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new ChangeWatermarkStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new ChangeCheckStore(sp.GetRequiredService<StateDatabase>()));
+        builder.Services.AddSingleton(sp => new NotificationStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunLockStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new WorkQueueStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new LogWriter(sp.GetRequiredService<StateDatabase>()));

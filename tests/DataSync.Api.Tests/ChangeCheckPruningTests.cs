@@ -21,6 +21,7 @@ public sealed class ChangeCheckPruningTests(TestApiFactory factory) : IClassFixt
     private RunPruningService BuildService() => new(
         factory.Services.GetRequiredService<TaskRunStore>(),
         _checks,
+        factory.Services.GetRequiredService<NotificationStore>(),
         factory.Services.GetRequiredService<ApiOptions>(),
         NullLogger<RunPruningService>.Instance);
 

@@ -225,7 +225,15 @@ public sealed class TaskRunStore(StateDatabase database)
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
-            using var cmd = database.Command(connection, """
+            using var transaction = connection.BeginTransaction();
+
+            // Read before the write, so "was this run already Failed" is answerable — see
+            // NotifyIfNewlyFailed. In one transaction with the update because a notification that
+            // could commit without the failure it announces, or a failure without it, is the pair
+            // phase 77 exists to keep together.
+            var before = ReadOutcomeContext(connection, transaction, runId);
+
+            using var cmd = database.Command(connection, transaction, """
                 UPDATE TaskRuns
                 SET Status = $status, EndedAtUtc = $endedAt, RowsRead = $rowsRead, RowsWritten = $rowsWritten,
                     ErrorSummary = $error, FailureKind = $failureKind,
@@ -253,7 +261,65 @@ public sealed class TaskRunStore(StateDatabase database)
             cmd.Bind(database, "newWatermark", (object?)newWatermark ?? DBNull.Value);
             cmd.Bind(database, "runId", runId.ToString());
             cmd.ExecuteNonQuery();
+
+            NotifyIfNewlyFailed(connection, transaction, runId, status, errorSummary, before);
+
+            transaction.Commit();
         });
+
+    /// <summary>What a run was before it was completed — enough to notify about it, and enough to
+    /// tell a first completion from a repeat of one. Null where the run has no row, which is not a
+    /// case worth failing a completion over but is one worth not announcing.</summary>
+    private (string TaskName, string? MappingName, string Status)? ReadOutcomeContext(
+        DbConnection connection, DbTransaction transaction, Guid runId)
+    {
+        using var cmd = database.Command(connection, transaction,
+            "SELECT TaskName, MappingName, Status FROM TaskRuns WHERE RunId = $runId;");
+        cmd.Bind(database, "runId", runId.ToString());
+        using var reader = cmd.ExecuteReader();
+        return reader.Read()
+            ? (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.GetString(2))
+            : null;
+    }
+
+    /// <summary>
+    /// The run-failure notification — phase 77's one producer.
+    /// <para>
+    /// **Here rather than at the six call sites that complete runs.** A worker completes a run through
+    /// the state channel, a locally-hosted runner completes one directly, the supervisor completes
+    /// orphans and stopped processes on its own, and journal recovery replays completions that a
+    /// worker could not deliver at the time. Every one of those is a failure somebody should be told
+    /// about, and wiring the producer to each would be five chances to miss one and a sixth waiting in
+    /// the next phase that adds a completion path.
+    /// </para>
+    /// <para>
+    /// **On the transition, not on the write.** A completion can legitimately arrive twice — journal
+    /// recovery replaying an entry whose original write did land, or the supervisor reaping a process
+    /// whose own failure report was already in flight — and a second announcement of the same failure
+    /// is noise a reader cannot distinguish from a second failure. A run that is already Failed
+    /// produces nothing.
+    /// </para>
+    /// </summary>
+    private void NotifyIfNewlyFailed(
+        DbConnection connection, DbTransaction transaction, Guid runId, RunStatus status,
+        string? errorSummary, (string TaskName, string? MappingName, string Status)? before)
+    {
+        if (status != RunStatus.Failed || before is not { } run)
+            return;
+
+        if (string.Equals(run.Status, nameof(RunStatus.Failed), StringComparison.Ordinal))
+            return;
+
+        var subject = run.MappingName is { } mapping
+            ? $"'{run.TaskName}' (mapping '{mapping}')"
+            : $"'{run.TaskName}'";
+
+        NotificationStore.Insert(
+            database, connection, transaction,
+            NotificationKinds.RunFailed,
+            $"Run of {subject} failed: {errorSummary ?? "no error was recorded."}",
+            run.TaskName, run.MappingName, runId);
+    }
 
     public TaskRunRecord? GetRun(Guid runId) =>
         database.Retry(() =>
