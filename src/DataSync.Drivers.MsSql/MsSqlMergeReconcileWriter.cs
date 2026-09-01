@@ -38,7 +38,7 @@ public sealed class MsSqlMergeReconcileWriter : IChangeWriter, IStatementPreview
         var shape = await MsSqlTargetShape.LoadAsync(targetConnection, target, columnMappings, cancellationToken);
         var scope = MsSqlSegmentScope.Build(SegmentSerializer.ReadOptional(options), shape.Columns, columnMappings);
 
-        using var cmd = targetConnection.CreateCommand();
+        using var cmd = targetConnection.CreateTimedCommand();
         cmd.CommandText = BuildMerge(shape, scope.Predicate, staged.StagingLocation);
         scope.AddTo(cmd);
 

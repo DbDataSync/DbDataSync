@@ -200,7 +200,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     /// </summary>
     public static async Task<long> GetCurrentVersionAsync(DbConnection connection, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = CurrentVersionStatement;
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is null or DBNull ? 0 : Convert.ToInt64(result);
@@ -209,7 +209,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     private static async Task<long> GetMinValidVersionAsync(
         DbConnection connection, SourceTableRef source, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = "SELECT CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(@qualifiedName));";
         // Each part quoted, not joined raw. OBJECT_ID parses its argument as a multi-part name, so a
         // schema or table containing a literal '.' — which a quoted identifier allows — would be read
@@ -227,7 +227,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         DbConnection connection, SourceTableRef source, string projection,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = MsSqlChangeTrackingStatement.BuildFullLoad(
             source.Schema, source.Table, projection, source.Filter);
 
@@ -260,7 +260,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         // subtracting the two leading bookkeeping columns.
         var schema = new ChangeSchema([.. pkColumns, .. nonKeyColumns]);
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         // The statement joins the table under the alias `base`, so a transform's {{column}} has to
         // resolve to `base.[Col]` and not to a bare name — which for a primary key column would be
         // ambiguous against CHANGETABLE's own copy. This is the reason the token exists.
@@ -424,7 +424,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     {
         try
         {
-            using var cmd = connection.CreateCommand();
+            using var cmd = connection.CreateTimedCommand();
             cmd.CommandText = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED;";
             await cmd.ExecuteNonQueryAsync(CancellationToken.None);
         }

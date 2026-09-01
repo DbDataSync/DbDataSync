@@ -42,7 +42,7 @@ public static class MsSqlIdentityInsert
     private static async Task SetAsync(
         DbConnection connection, DbTransaction? transaction, string quotedTarget, bool on, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = $"SET IDENTITY_INSERT {quotedTarget} {(on ? "ON" : "OFF")};";
         await cmd.ExecuteNonQueryAsync(cancellationToken);

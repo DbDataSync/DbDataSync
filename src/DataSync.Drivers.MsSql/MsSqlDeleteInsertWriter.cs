@@ -38,7 +38,7 @@ public sealed class MsSqlDeleteInsertWriter : IChangeWriter, IStatementPreview
         await using var transaction = await targetConnection.BeginTransactionAsync(cancellationToken);
         try
         {
-            using (var deleteCmd = targetConnection.CreateCommand())
+            using (var deleteCmd = targetConnection.CreateTimedCommand())
             {
                 deleteCmd.Transaction = transaction;
                 deleteCmd.CommandText = BuildDelete(shape, scope.Predicate);
@@ -50,7 +50,7 @@ public sealed class MsSqlDeleteInsertWriter : IChangeWriter, IStatementPreview
                 targetConnection, transaction, shape.QuotedTarget, shape.RequiresIdentityInsert,
                 async () =>
                 {
-                    using var insertCmd = targetConnection.CreateCommand();
+                    using var insertCmd = targetConnection.CreateTimedCommand();
                     insertCmd.Transaction = transaction;
                     insertCmd.CommandText = BuildInsert(shape, staged.StagingLocation);
                     return await insertCmd.ExecuteNonQueryAsync(cancellationToken);

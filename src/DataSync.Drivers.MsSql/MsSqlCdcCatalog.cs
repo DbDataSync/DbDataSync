@@ -1,3 +1,4 @@
+using DataSync.Core.Sql;
 using System.Data.Common;
 using DataSync.Drivers.Generic;
 
@@ -34,7 +35,7 @@ public static class MsSqlCdcCatalog
         if (!await CdcIsEnabledAsync(connection, cancellationToken))
             return null;
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT TOP (1) ct.capture_instance, ct.supports_net_changes
             FROM cdc.change_tables ct
@@ -69,7 +70,7 @@ public static class MsSqlCdcCatalog
     /// </summary>
     public static async Task<bool> CdcIsEnabledAsync(DbConnection connection, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = "SELECT is_cdc_enabled FROM sys.databases WHERE database_id = DB_ID();";
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is not (null or DBNull) && Convert.ToBoolean(result);
@@ -78,7 +79,7 @@ public static class MsSqlCdcCatalog
     private static async Task<IReadOnlyList<string>> CapturedColumnsAsync(
         DbConnection connection, string captureInstance, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT cc.column_name
             FROM cdc.captured_columns cc
@@ -112,7 +113,7 @@ public static class MsSqlCdcCatalog
     /// </summary>
     public static async Task<byte[]?> GetMaxLsnAsync(DbConnection connection, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = MaxLsnStatement;
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is null or DBNull ? null : (byte[])result;
@@ -131,7 +132,7 @@ public static class MsSqlCdcCatalog
     public static async Task<byte[]?> GetMinLsnAsync(
         DbConnection connection, string captureInstance, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = "SELECT sys.fn_cdc_get_min_lsn(@instance);";
         cmd.AddParameter("@instance", captureInstance);
         var result = await cmd.ExecuteScalarAsync(cancellationToken);

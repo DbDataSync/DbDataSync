@@ -23,7 +23,7 @@ public sealed class InformationSchemaQueries(SqlDialect dialect) : ITableCatalog
 {
     public async Task<IReadOnlyList<TableMetadata>> ListTablesAsync(DbConnection connection, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT table_schema, table_name
             FROM information_schema.tables
@@ -43,7 +43,7 @@ public sealed class InformationSchemaQueries(SqlDialect dialect) : ITableCatalog
     {
         var primaryKey = await GetPrimaryKeyAsync(connection, schema, table, cancellationToken);
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = $"""
             SELECT column_name, data_type, character_maximum_length, numeric_precision, numeric_scale, is_nullable
             FROM information_schema.columns
@@ -73,7 +73,7 @@ public sealed class InformationSchemaQueries(SqlDialect dialect) : ITableCatalog
     private async Task<HashSet<string>> GetPrimaryKeyAsync(
         DbConnection connection, string schema, string table, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = $"""
             SELECT k.column_name
             FROM information_schema.table_constraints c

@@ -66,7 +66,7 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
         // keeps concurrent runs — and concurrent segments of one run — from colliding.
         var stagingTable = dialect.QualifyTable(target.Schema, $"DS_STG_{Guid.NewGuid():N}");
 
-        using (var createCmd = targetConnection.CreateCommand())
+        using (var createCmd = targetConnection.CreateTimedCommand())
         {
             createCmd.CommandText = StagingStatement.BuildCreate(dialect, stagingTable, mappedTargetColumns, typeByName);
             await createCmd.ExecuteNonQueryAsync(cancellationToken);
@@ -138,7 +138,7 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
 
     private async Task DropAsync(DbConnection connection, string qualifiedTable, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         // The staging location is a name this provider generated itself, never anything
         // caller-supplied, so interpolating it is safe here in a way it wouldn't be generally.
         cmd.CommandText = dialect.RenderDropTableIfExists(qualifiedTable);
@@ -198,7 +198,7 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
         IReadOnlyList<object?[]> batch,
         CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = StagingStatement.BuildInsert(dialect, stagingTable, mappedTargetColumns, batch.Count);
 
         for (var r = 0; r < batch.Count; r++)

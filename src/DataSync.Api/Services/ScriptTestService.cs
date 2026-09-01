@@ -527,7 +527,7 @@ public sealed class ScriptTestService(
 
             await dialect.UseDatabaseAsync(connection, source.Database, cancellationToken);
 
-            using var cmd = connection.CreateCommand();
+            using var cmd = connection.CreateTimedCommand();
             cmd.CommandText = dialect.RenderSampleSelect(
                 dialect.QualifyTable(source.Schema, source.Table), Math.Clamp(request.SampleRows, 1, MaxLiveRows));
 

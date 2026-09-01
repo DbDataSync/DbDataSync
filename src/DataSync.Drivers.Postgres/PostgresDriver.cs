@@ -64,6 +64,14 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
         if (connection.Port is int port)
             builder.Port = port;
 
+        // Npgsql spells it `Timeout`, and means the same thing SqlClient's ConnectTimeout does. The
+        // setting wins when set; otherwise a connection string that already carried one keeps it, and
+        // only a connection string silent on the subject gets our default.
+        if (connection.ConnectTimeoutSeconds is int connectTimeout)
+            builder.Timeout = connectTimeout;
+        else if (!ConnectionTimeouts.AddressCarriesOwnConnectTimeout(connection, "Timeout"))
+            builder.Timeout = ConnectionTimeouts.DefaultConnectSeconds;
+
         if (connection.AuthMode == AuthMode.None)
         {
             // Whatever the address or the environment provides — a .pgpass file, a certificate, a
@@ -88,7 +96,9 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
         foreach (var (key, value) in connection.Properties)
             builder[key] = value;
 
-        return new NpgsqlConnection(builder.ConnectionString);
+        // Stamped here, at the one moment the config and the connection are in the same hand. Every
+        // command raised through CreateTimedCommand() reads it back off the connection.
+        return new NpgsqlConnection(builder.ConnectionString).WithCommandTimeout(connection);
     }
 
     /// <summary>
@@ -97,7 +107,7 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
     /// </summary>
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(DbConnection connection, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = "SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true ORDER BY datname;";
 
         var results = new List<string>();
@@ -127,7 +137,7 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
         var started = Stopwatch.GetTimestamp();
         try
         {
-            using var cmd = connection.CreateCommand();
+            using var cmd = connection.CreateTimedCommand();
             cmd.CommandText = "SELECT version();";
             var version = await cmd.ExecuteScalarAsync(cancellationToken) as string;
 

@@ -53,7 +53,7 @@ public sealed class MsSqlMergeWriter : IChangeWriter, IStatementPreview
             {
                 foreach (var (after, upTo) in ApplyBatch.Ranges(staged.RowCount, batchSize))
                 {
-                    using var cmd = targetConnection.CreateCommand();
+                    using var cmd = targetConnection.CreateTimedCommand();
                     cmd.CommandText = BuildMerge(shape, staged.StagingLocation, chunked: batchSize is not null);
                     if (batchSize is not null)
                     {

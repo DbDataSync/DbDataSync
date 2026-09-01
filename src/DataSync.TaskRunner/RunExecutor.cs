@@ -868,7 +868,7 @@ public sealed class RunExecutor(
 
         foreach (var step in plan.Steps)
         {
-            using var cmd = targetConnection.CreateCommand();
+            using var cmd = targetConnection.CreateTimedCommand();
             cmd.CommandText = step.CommandText;
             await cmd.ExecuteNonQueryAsync(cancellationToken);
             Log(runId, LogSeverity.Info, $"'{mapping.Name}': target table {what} — {step.CommandText}");
@@ -952,7 +952,7 @@ public sealed class RunExecutor(
         var started = Stopwatch.GetTimestamp();
         try
         {
-            using var cmd = connection.CreateCommand();
+            using var cmd = connection.CreateTimedCommand();
             cmd.CommandText = statement.CommandText;
             foreach (var parameter in statement.Parameters)
                 cmd.AddParameter(dialect.ParameterName(parameter.Name), parameter.Value);

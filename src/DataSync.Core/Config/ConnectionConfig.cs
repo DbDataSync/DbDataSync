@@ -69,6 +69,31 @@ public sealed class ConnectionConfig
     public required AuthMode AuthMode { get; set; }
     public string? UserId { get; set; }
     public string? CredentialSecretRef { get; set; }
+
+    /// <summary>
+    /// How long to wait for the connection itself to open, in seconds. <c>null</c> means the default
+    /// (<see cref="ConnectionTimeouts.DefaultConnectSeconds"/>); <c>0</c> means unlimited; a positive
+    /// value is seconds.
+    /// <para>
+    /// <c>0</c> is not an invented sentinel — <c>Connect Timeout=0</c> is documented as infinite by
+    /// both <c>Microsoft.Data.SqlClient</c> and Npgsql, so the configured value is passed straight to
+    /// the connection-string builder with no translation in between.
+    /// </para>
+    /// </summary>
+    public int? ConnectTimeoutSeconds { get; set; }
+
+    /// <summary>
+    /// How long any one command against this connection may run, in seconds. Same shape as
+    /// <see cref="ConnectTimeoutSeconds"/> — <c>null</c> is the default
+    /// (<see cref="ConnectionTimeouts.DefaultCommandSeconds"/>), <c>0</c> is unlimited.
+    /// <para>
+    /// Unlike connect timeout there is no connection-string key for this on either provider: it is a
+    /// runtime property on each <c>DbCommand</c>. <see cref="ConnectionTimeouts"/> is what carries the
+    /// resolved value from here to every command issued against a source or target.
+    /// </para>
+    /// </summary>
+    public int? CommandTimeoutSeconds { get; set; }
+
     public Dictionary<string, string> Properties { get; set; } = new();
 
     /// <summary>Scripts bound at this level, keyed by slot (see <c>ScriptSlots</c>). An absent key
@@ -102,6 +127,12 @@ public sealed class ConnectionInput
 
     /// <summary>Plaintext password. Null when not changing an existing SqlAuth connection's credential, or when AuthMode is IntegratedAuth.</summary>
     public string? Password { get; set; }
+
+    /// <inheritdoc cref="ConnectionConfig.ConnectTimeoutSeconds"/>
+    public int? ConnectTimeoutSeconds { get; set; }
+
+    /// <inheritdoc cref="ConnectionConfig.CommandTimeoutSeconds"/>
+    public int? CommandTimeoutSeconds { get; set; }
 
     public Dictionary<string, string> Properties { get; set; } = new();
 

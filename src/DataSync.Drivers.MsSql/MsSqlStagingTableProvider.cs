@@ -53,7 +53,7 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
 
         var stagingTable = $"#Staging_{Guid.NewGuid():N}";
 
-        using (var createCmd = targetConnection.CreateCommand())
+        using (var createCmd = targetConnection.CreateTimedCommand())
         {
             createCmd.CommandText = BuildCreateStagingTable(stagingTable, mappedTargetColumns, typeByName);
             await createCmd.ExecuteNonQueryAsync(cancellationToken);
@@ -122,7 +122,7 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
     public async Task CleanupAsync(
         DbConnection targetConnection, StagedChangeSet staged, CancellationToken cancellationToken)
     {
-        using var cmd = targetConnection.CreateCommand();
+        using var cmd = targetConnection.CreateTimedCommand();
         // The staging location is a name this provider generated itself (#Staging_{guid:N}), never
         // anything caller-supplied, so interpolating it is safe here in a way it wouldn't be generally.
         cmd.CommandText = $"DROP TABLE IF EXISTS {staged.StagingLocation};";

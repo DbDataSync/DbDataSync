@@ -88,7 +88,7 @@ public static class PostgresProvisioner
     private static async Task<bool> ObjectExistsAsync(
         DbConnection connection, string schema, string name, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema = @schema AND table_name = @name;";
         cmd.AddParameter("@schema", schema);
         cmd.AddParameter("@name", name);
@@ -98,7 +98,7 @@ public static class PostgresProvisioner
     private static async Task<bool> TriggerExistsAsync(
         DbConnection connection, string schema, string table, string trigger, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT 1 FROM information_schema.triggers
             WHERE trigger_schema = @schema AND event_object_table = @table AND trigger_name = @trigger;
@@ -139,7 +139,7 @@ public static class PostgresProvisioner
     private static async Task<bool> TableExistsAsync(
         DbConnection connection, string schema, string table, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT 1 FROM information_schema.tables
             WHERE table_schema = @schema AND table_name = @table AND table_type = 'BASE TABLE';

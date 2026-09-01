@@ -105,7 +105,7 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
 
-        using var cmd = sourceConnection.CreateCommand();
+        using var cmd = sourceConnection.CreateTimedCommand();
         cmd.CommandText = TriggerAuditStatement.BuildPrune(dialect, source.Schema, source.Table);
         cmd.AddParameter(dialect.ParameterName("throughSequence"), long.Parse(watermark));
         await cmd.ExecuteNonQueryAsync(cancellationToken);
@@ -181,7 +181,7 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
     private async Task<long> GetMaxSequenceAsync(
         DbConnection connection, SourceTableRef source, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = TriggerAuditStatement.BuildMaxSequence(dialect, source.Schema, source.Table);
 
         try
@@ -212,7 +212,7 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
     {
         var filter = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" WHERE {source.Filter}";
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText =
             $"SELECT {projection} FROM {dialect.QualifyTable(source.Schema, source.Table)}{filter};";
 
@@ -234,7 +234,7 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
         var (keys, nonKeys) = await ResolveColumnsAsync(connection, source, cancellationToken);
         var schema = new ChangeSchema([.. keys, .. nonKeys]);
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = TriggerAuditStatement.BuildRead(
             dialect, source.Schema, source.Table, keys, nonKeys,
             column => RenderNonKeyColumn(column, columnMappings));

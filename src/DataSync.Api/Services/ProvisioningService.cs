@@ -66,7 +66,7 @@ public sealed class ProvisioningService(
                 var started = Stopwatch.GetTimestamp();
                 try
                 {
-                    using var cmd = connection.CreateCommand();
+                    using var cmd = connection.CreateTimedCommand();
                     cmd.CommandText = step.CommandText;
                     await cmd.ExecuteNonQueryAsync(cancellationToken);
                     results.Add(new ApplyStepResult(step.Title, true, null, Stopwatch.GetElapsedTime(started).TotalMilliseconds));

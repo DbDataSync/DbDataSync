@@ -125,7 +125,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
     private async Task<(object? Min, object? Max)> GetRangeAsync(
         DbConnection connection, SourceTableRef source, ColumnMetadata column, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = BatchReloadStatement.BuildRange(dialect, source.Schema, source.Table, column.Name, source.Filter);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -142,7 +142,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
         string projection,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = BatchReloadStatement.BuildRead(dialect, source.Schema, source.Table, scope.Predicate, source.Filter, projection);
         scope.AddTo(cmd);
 

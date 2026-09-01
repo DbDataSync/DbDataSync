@@ -122,7 +122,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
     private static async Task<(object? Min, object? Max)> GetRangeAsync(
         DbConnection connection, SourceTableRef source, ColumnMetadata column, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = BatchReloadStatement.BuildRange(
             MsSqlDialect.Instance, source.Schema, source.Table, column.Name, source.Filter);
 
@@ -142,7 +142,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
     {
         // The shared builder rather than a second copy of the same SQL: this reader differs from the
         // generic one in how it discovers columns and binds segment values, not in what it selects.
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = BatchReloadStatement.BuildRead(
             MsSqlDialect.Instance, source.Schema, source.Table, scope.Predicate, source.Filter, projection);
         scope.AddTo(cmd);

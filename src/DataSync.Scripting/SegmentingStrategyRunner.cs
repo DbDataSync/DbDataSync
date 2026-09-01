@@ -1,3 +1,4 @@
+using DataSync.Core.Sql;
 using System.Data.Common;
 using System.Globalization;
 using DataSync.Core.Config;
@@ -90,7 +91,7 @@ public sealed class SegmentingStrategyRunner(ScriptHost scriptHost)
         if (string.IsNullOrWhiteSpace(strategy.Sql))
             throw new InvalidOperationException($"Segmenting strategy '{strategy.Name}' has no SQL to run.");
 
-        await using var command = connection.CreateCommand();
+        await using var command = connection.CreateTimedCommand();
         command.CommandText = strategy.Sql;
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

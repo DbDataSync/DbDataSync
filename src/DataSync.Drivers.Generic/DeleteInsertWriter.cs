@@ -59,7 +59,7 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
         await using var transaction = await targetConnection.BeginTransactionAsync(cancellationToken);
         try
         {
-            using (var deleteCmd = targetConnection.CreateCommand())
+            using (var deleteCmd = targetConnection.CreateTimedCommand())
             {
                 deleteCmd.Transaction = transaction;
                 deleteCmd.CommandText = DeleteInsertStatement.BuildDelete(shape.QuotedTarget, scope.Predicate);
@@ -75,7 +75,7 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
                     var inserted = 0;
                     foreach (var (after, upTo) in ApplyBatch.Ranges(staged.RowCount, batchSize))
                     {
-                        using var insertCmd = targetConnection.CreateCommand();
+                        using var insertCmd = targetConnection.CreateTimedCommand();
                         insertCmd.Transaction = transaction;
                         insertCmd.CommandText = DeleteInsertStatement.BuildInsert(
                             dialect, shape.QuotedTarget, shape.InsertColumnList, staged.StagingLocation,

@@ -255,7 +255,7 @@ public static class MsSqlProvisioner
     private static async Task<bool> TriggerExistsAsync(
         DbConnection connection, string schema, string trigger, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT 1
             FROM sys.triggers t
@@ -305,7 +305,7 @@ public static class MsSqlProvisioner
     private static async Task<bool> TableExistsAsync(
         DbConnection connection, string schema, string table, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id
             WHERE s.name = @schema AND t.name = @table;
@@ -318,7 +318,7 @@ public static class MsSqlProvisioner
     private static async Task<bool> IsChangeTrackingEnabledAtDatabaseAsync(
         DbConnection connection, string database, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = "SELECT 1 FROM sys.change_tracking_databases WHERE database_id = DB_ID(@database);";
         cmd.AddParameter("@database", database);
         return await cmd.ExecuteScalarAsync(cancellationToken) is not null;
@@ -327,7 +327,7 @@ public static class MsSqlProvisioner
     private static async Task<bool> IsChangeTrackingEnabledAtTableAsync(
         DbConnection connection, string qualifiedTable, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = "SELECT 1 FROM sys.change_tracking_tables WHERE object_id = OBJECT_ID(@qualifiedTable);";
         cmd.AddParameter("@qualifiedTable", qualifiedTable);
         return await cmd.ExecuteScalarAsync(cancellationToken) is not null;
@@ -336,7 +336,7 @@ public static class MsSqlProvisioner
     private static async Task<bool> IsSnapshotIsolationEnabledAsync(
         DbConnection connection, string database, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = "SELECT snapshot_isolation_state FROM sys.databases WHERE database_id = DB_ID(@database);";
         cmd.AddParameter("@database", database);
         var result = await cmd.ExecuteScalarAsync(cancellationToken);

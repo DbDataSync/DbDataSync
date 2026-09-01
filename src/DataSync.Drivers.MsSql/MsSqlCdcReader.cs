@@ -287,7 +287,7 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         DbConnection connection, SourceTableRef source, string projection,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = MsSqlCdcStatement.BuildFullLoad(source.Schema, source.Table, projection, source.Filter);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -307,7 +307,7 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         var columns = ColumnsFor(instance, columnMappings);
         var schema = new ChangeSchema(columns);
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = MsSqlCdcStatement.BuildRead(
             instance.CaptureInstance, FunctionFor(instance), columns,
             column => RenderColumn(column, columnMappings));

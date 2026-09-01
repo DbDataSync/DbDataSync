@@ -41,7 +41,7 @@ internal sealed class PostgresCatalog : ITableCatalog
     private static async Task<HashSet<string>> GetAlwaysGeneratedAsync(
         DbConnection connection, string schema, string table, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT column_name
             FROM information_schema.columns

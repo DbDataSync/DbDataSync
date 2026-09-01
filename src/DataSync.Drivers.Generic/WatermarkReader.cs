@@ -179,7 +179,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
     private async Task<string?> GetMaxWatermarkAsync(
         DbConnection connection, SourceTableRef source, string watermarkColumn, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = WatermarkStatement.BuildMaxWatermark(
             dialect, source.Schema, source.Table, watermarkColumn, source.Filter);
 
@@ -198,7 +198,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         BoundedReadPosition? bounded,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = WatermarkStatement.BuildRead(
             dialect, source.Schema, source.Table, watermarkColumn, previousWatermark is not null, source.Filter,
             projection, bounded: maxRows is not null);

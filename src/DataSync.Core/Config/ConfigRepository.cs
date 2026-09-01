@@ -65,6 +65,8 @@ public sealed class ConfigRepository
             AuthMode = input.AuthMode,
             UserId = input.UserId,
             CredentialSecretRef = secretRef,
+            ConnectTimeoutSeconds = input.ConnectTimeoutSeconds,
+            CommandTimeoutSeconds = input.CommandTimeoutSeconds,
             Properties = input.Properties,
             Scripts = input.Scripts,
             Hooks = input.Hooks,

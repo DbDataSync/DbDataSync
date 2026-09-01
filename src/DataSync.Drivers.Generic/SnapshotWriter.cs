@@ -45,7 +45,7 @@ public sealed class SnapshotWriter(SqlDialect dialect, ITableCatalog catalog) : 
         var shape = await TargetShape.LoadAsync(
             dialect, catalog, targetConnection, target, columnMappings, cancellationToken);
 
-        using var cmd = targetConnection.CreateCommand();
+        using var cmd = targetConnection.CreateTimedCommand();
         cmd.CommandText = HistorizedStatement.BuildSnapshotInsert(
             dialect, shape.QuotedTarget, columnMappings, staged.StagingLocation);
         // One value for the whole pass, bound once: rows of one snapshot sharing a marker is what

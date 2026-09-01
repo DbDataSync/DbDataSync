@@ -115,7 +115,7 @@ public sealed class ScriptedQueryReader(ScriptHost scriptHost, SqlDialect dialec
         if (query is null)
             return null;
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         Bind(cmd, query);
         var value = await cmd.ExecuteScalarAsync(cancellationToken);
         return value is null or DBNull ? null : WatermarkValue.Format(value);
@@ -127,7 +127,7 @@ public sealed class ScriptedQueryReader(ScriptHost scriptHost, SqlDialect dialec
         SourceQueryShape shape,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         Bind(cmd, query);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);

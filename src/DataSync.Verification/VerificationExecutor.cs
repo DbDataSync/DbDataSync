@@ -170,7 +170,7 @@ public static class VerificationExecutor
     {
         var readAt = DateTimeOffset.UtcNow;
 
-        using var command = connection.CreateCommand();
+        using var command = connection.CreateTimedCommand();
         command.CommandText = sql;
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

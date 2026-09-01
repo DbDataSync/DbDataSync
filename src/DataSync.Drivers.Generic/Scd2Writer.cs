@@ -91,7 +91,7 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
         await using var transaction = await targetConnection.BeginTransactionAsync(cancellationToken);
         try
         {
-            using (var close = targetConnection.CreateCommand())
+            using (var close = targetConnection.CreateTimedCommand())
             {
                 close.Transaction = transaction;
                 close.CommandText = HistorizedStatement.BuildCloseChanged(
@@ -101,7 +101,7 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
             }
 
             long opened;
-            using (var open = targetConnection.CreateCommand())
+            using (var open = targetConnection.CreateTimedCommand())
             {
                 open.Transaction = transaction;
                 open.CommandText = HistorizedStatement.BuildOpenVersions(

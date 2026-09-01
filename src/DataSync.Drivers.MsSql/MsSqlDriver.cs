@@ -71,6 +71,20 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
 
         ApplyDefaults(builder);
 
+        // The setting wins when it is set, and defers to a connection string that already said
+        // otherwise when it is not — the same rule ApplyDefaults follows above, for the same reason:
+        // an operator who wrote `Connect Timeout=5` into their own connection string meant it, and
+        // silently replacing it with our 30 would be worse than never having had a default.
+        if (connection.ConnectTimeoutSeconds is int connectTimeout)
+            builder.ConnectTimeout = connectTimeout;
+        else if (!ConnectionTimeouts.AddressCarriesOwnConnectTimeout(
+            connection, "Connect Timeout", "Connection Timeout", "ConnectTimeout"))
+        {
+            // All three spellings, because SqlClient accepts all three and an operator who used the
+            // one we did not check would have their value silently replaced.
+            builder.ConnectTimeout = ConnectionTimeouts.DefaultConnectSeconds;
+        }
+
         if (connection.AuthMode == AuthMode.IntegratedAuth)
         {
             builder.IntegratedSecurity = true;
@@ -89,7 +103,9 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         foreach (var (key, value) in connection.Properties)
             builder[key] = value;
 
-        return new SqlConnection(builder.ConnectionString);
+        // Stamped here, at the one moment the config and the connection are in the same hand. Every
+        // command raised through CreateTimedCommand() reads it back off the connection.
+        return new SqlConnection(builder.ConnectionString).WithCommandTimeout(connection);
     }
 
     private static void ApplyDefaults(SqlConnectionStringBuilder builder)
@@ -119,7 +135,7 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
 
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(DbConnection connection, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         // database_id > 4 skips the fixed system databases (master, tempdb, model, msdb).
         cmd.CommandText = "SELECT name FROM sys.databases WHERE database_id > 4 ORDER BY name;";
 
@@ -135,7 +151,7 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
     {
         connection.ChangeDatabase(database);
 
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT s.name, t.name
             FROM sys.tables t
@@ -167,7 +183,7 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         var started = Stopwatch.GetTimestamp();
         try
         {
-            using var cmd = connection.CreateCommand();
+            using var cmd = connection.CreateTimedCommand();
             cmd.CommandText = "SELECT @@VERSION;";
             var version = await cmd.ExecuteScalarAsync(cancellationToken) as string;
 

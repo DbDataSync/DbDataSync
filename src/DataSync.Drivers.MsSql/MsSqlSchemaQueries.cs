@@ -1,3 +1,4 @@
+using DataSync.Core.Sql;
 using System.Data.Common;
 using DataSync.Drivers.Abstractions;
 
@@ -16,7 +17,7 @@ internal static class MsSqlSchemaQueries
     public static async Task<IReadOnlyList<ColumnMetadata>> GetColumnsAsync(
         DbConnection connection, string schema, string table, CancellationToken cancellationToken)
     {
-        using var cmd = connection.CreateCommand();
+        using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = """
             SELECT c.name, ty.name AS TypeName, c.max_length, c.precision, c.scale, c.is_nullable,
                    CASE WHEN pk.column_id IS NOT NULL THEN 1 ELSE 0 END AS IsPrimaryKey, c.is_identity
