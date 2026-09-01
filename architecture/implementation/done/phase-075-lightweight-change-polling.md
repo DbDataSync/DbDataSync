@@ -150,3 +150,150 @@ per revision 1. Every other reader kind is scheduled exactly as today.
   tick, using the same retention window as `TaskRuns`/`Logs` unless revision 2's table-growth check found
   reason to give it its own.
 - Full suite green (`Category!=Integration`, `Category=Integration`), `tsc -b`/SPA build clean.
+
+---
+
+## Outcome
+
+**Shipped** in `63e83f1..5196902`, in two commits: the audit table and its retention, then the gate.
+
+### What was built
+
+`ChangePollingGate` (`src/DataSync.Api/Services/ChangePollingGate.cs`) sits between
+`SchedulerService`'s due-ness arithmetic and its `Enqueue` calls. It takes the tick's due mappings,
+groups them by `(ConnectionName, Database, SourceKind)`, fetches one counter per group through
+`IChangeCounterSource`, records it, and returns the subset that has work waiting — in the order it was
+asked, which grouping would otherwise scramble.
+
+`SchedulerService` gained one collaborator and one funnel. `TickContinuous` and `TickPeriodic` used to
+enqueue inline; both now collect their due mappings and hand them to a shared `EnqueueAsync`, which is
+the single place the gate is consulted. Periodic goes through it too: a cron occurrence firing over a
+source nothing has written to since the last one is the same wasted pass, and it is the mode where a
+hundred mappings arrive at once.
+
+Everything else is what the doc asked for: `ChangeCheckHistory` and `ChangeCheckStore` in
+`DataSync.State`, purged on `RunPruningService`'s existing tick.
+
+### Deviations from the doc
+
+**A second retention knob, `DataSync:ChangeCheckRetentionDays`, defaulting to 7 days.** Revision 2 asked
+for `RunRetentionDays` to be tried first and for the growth to be checked against what that window was
+tuned for. The check fails, by two orders of magnitude. Run history is one row per run; this is one row
+per tick per source-database group, and the tick is every five seconds whether or not anything is due —
+17,280 rows per group per day, so the 90-day default is about 1.5 million rows for a single group and
+tens of millions for a deployment with a handful. That is not a retention policy, it is the unbounded
+growth `RunRetentionDays` exists to prevent arriving through a different table. Seven days is the span
+this history is actually questioned over: "was the source quiet overnight, or did the gate stop looking"
+is asked about last night, never about last quarter. The doc's escape hatch, taken for the reason it was
+offered.
+
+**The column is `SourceDatabase`, not `Database`.** `DATABASE` is reserved in T-SQL, and `Migrations.cs`
+is one file rendered for three engines — a name needing quotes in one of them needs them everywhere or
+nowhere. Cost: a word.
+
+Nothing else departs. No SPA change was needed and none was made; nothing in `DataSync.Web` mentions
+watermarks, counters or the scheduler's dispatch decision.
+
+### Judgment calls
+
+- **`SourceKind` is the reader kind string, not a new enum.** `MsSqlDriverKinds.Cdc` and
+  `.ChangeTracking` already are the vocabulary: they are what config states, what `WorkQueue` and
+  `TaskRuns` record in `ReaderKind`, and what `MsSqlProvisioner` dispatches on. A second vocabulary for
+  "which mechanism" would need translating back to the first at every boundary and would have exactly
+  two values in common with it. `ChangeCounters.IsGated` is the whole of the new type information.
+- **The gate is a collaborator, not more of `SchedulerService`.** The scheduler's body was due-ness
+  arithmetic over local config and state; this is source I/O, grouping, per-mechanism comparison and a
+  fail-open policy. Apart, the gate is testable without an API host — which is what made eight unit
+  tests possible against real config and real state tables — and the scheduler still reads as the
+  schedule it is.
+- **The comparison helpers needed no new dependency.** `DataSync.Api` already references
+  `DataSync.Drivers.MsSql`, so `MsSqlCdcCatalog.Compare`, `FromWatermark` and `GetMaxLsnAsync` were
+  already in scope. One thing had to change: `MsSqlChangeTrackingReader.GetCurrentVersionAsync` was
+  private and is now public. Reused rather than reimplemented deliberately — a gate issuing its own
+  near-equivalent statement would be a second definition of "where has this source got to", free to
+  drift from the one a pass reads against.
+- **Only the counter fetch is behind an interface.** It is the one thing that talks to a source;
+  everything else the gate does is arithmetic over local state, and faking any of it would have made the
+  tests a rehearsal rather than a test.
+
+### The bug this nearly shipped
+
+The counter fetch has to `ChangeDatabase(source.Database)` first, because both readers do
+(`MsSqlChangeTrackingReader.cs:66`, `MsSqlCdcReader.cs:57`). It was written without that step, on a
+grep that had been truncated by `head -20` and appeared to show the readers not switching either.
+
+Neither `fn_cdc_get_max_lsn()` nor `CHANGE_TRACKING_CURRENT_VERSION()` errors in the wrong catalog —
+they answer *about* it, and in a database without the mechanism enabled the answer is null or zero. So a
+gate reading the connection's default database while the reader read the mapping's would have compared
+two databases against one watermark and suppressed real work, silently, in one direction only, for as
+long as the two stayed out of step. It would have looked exactly like the source being quiet.
+
+`ChangeCounterScopeTests` exists for this: one connection, one statement, two catalogs, two different
+answers. It is the only test here whose subject is a fact about SQL Server rather than about this code,
+and it is the only one that would catch the regression.
+
+### The architectural shift
+
+`SchedulerService` now does source-system I/O. Before this phase a tick touched only local config and
+state and could not be slowed by anything outside the process; now an unreachable or distant source is
+inside its loop. Fail-open per group is what keeps that a resilience property: a fetch failure dispatches
+that group's mappings exactly as the scheduler behaved before this phase existed, logs, and leaves every
+other group in the same tick still gated. Nothing throws out of the tick.
+
+Worth stating plainly because the failure mode has changed shape rather than gone away: a source that is
+*slow* rather than down still costs the tick its latency, serially, one group at a time. Nothing here
+bounds that. It has not been a problem to build for — a tick is five seconds and a counter fetch is a
+single scalar query — but it is the thing to look at first if ticks ever start running long, and
+parallelising the per-group fetches is the obvious lever.
+
+### A gap noted, not fixed
+
+`MsSqlChangeTrackingReader.ReadChangesAsync` never compares `targetVersion` to `previousWatermark`
+before issuing its incremental query, where `MsSqlCdcReader` does exactly that short-circuit at
+`MsSqlCdcReader.cs:112`. A caught-up Change-Tracking mapping that reaches the reader therefore issues a
+`CHANGETABLE` query that cannot return rows. This phase's gate makes that rarer but does not close it —
+the gate is skipped for a first pass, fails open for an unreachable source, and does not run at all for
+a Backfill or a manually triggered run. It is a small, separate, per-reader fix; out of scope here per
+the doc, and left as such.
+
+### How it was verified
+
+- `ChangePollingGateTests` (8 tests, `Category!=Integration`), against real `ConfigRepository`, real
+  `DriverRegistry`, real `ChangeWatermarks` and `ChangeCheckHistory`, with only the round-trip faked:
+  - `TwoMappingsOnOneSourceGroup_FetchTheCounterOnce` — the optimization itself, which is invisible in
+    the return value and only observable in the fetch log.
+  - `CdcAndChangeTrackingInOneDatabase_AreTwoGroupsWithTwoAuditRows` — revision 1's collision, asserted
+    as two fetches and two audit rows holding values in their own formats.
+  - `AMappingMidDrainIsDispatched_WhileACaughtUpSiblingIsSkipped` — revision 3, directly: watermark 40
+    and watermark 100 in one group against an unmoved counter of 100, in one tick, opposite outcomes.
+  - `AMappingWithNoWatermarkIsAlwaysDispatched`, `AnLsnAtTheDatabaseMaximum_IsSkipped` (both directions,
+    one byte apart in the low position), `ANullCounterIsNotSilence_AndDispatches`,
+    `AnUngatedReaderKindIsDispatchedUntouched`.
+  - `AnUnreachableSourceFailsOpenForItsOwnGroupOnly` — every mapping caught up as far as local state
+    knows, so anything dispatched is dispatched because the gate could not answer. The failed group goes
+    out whole; the healthy group in the same tick is still gated and still skips.
+- `ChangeCheckStoreTests` (5) — append-only including the repeat reading, the two mechanisms as separate
+  rows, a recorded null, and both prune windows.
+- `ChangeCheckPruningTests` (2) — the claim that justifies this table having no background service of
+  its own: `RunPruningService.PruneAsync` ages out both histories on one call, on independent windows.
+- `RunRetentionOptionsTests` gained 2: the shorter default, and that it does not follow
+  `RunRetentionDays`.
+- `ChangeCounterScopeTests` (1, `Category=Integration`) — see above.
+- Cross-engine coverage came free again: `CrossEngineStateTests`' 39 integration tests run the whole
+  migration set against SQLite, Postgres and SQL Server, and passed first time including the new table
+  and index — which is what confirmed the `SourceDatabase` rename was the right call rather than a
+  guess.
+- Full suite green: `Category!=Integration` **894 passed**, `Category=Integration` **201 passed**, 0
+  failures in either. No frontend change, so no `tsc -b`/SPA run was required; nothing under
+  `src/DataSync.Web` was touched.
+
+### Notes
+
+`RunPruningService.PruneAsync` is public rather than private, for the two-histories-one-sweep test. It
+is the claim that would silently stop being true if the second delete were ever dropped, and there is no
+`InternalsVisibleTo` in this solution to reach it otherwise.
+
+The gate never reads `ChangeCheckHistory` back. That is worth remembering when someone later wants a
+status view of "what did we last see for this source" — the table can answer it, being append-only with
+a timestamp, but it will want its own index on the group columns, deliberately not added here because
+this table's writes are very frequent and its only reader today is the age purge.
