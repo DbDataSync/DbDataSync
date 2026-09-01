@@ -81,7 +81,12 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
     } else if (stored.mode === 'custom') {
       setStrategyName(stored.strategyName)
     }
-  }, [mapping?.name, mapping?.defaultSegmenting])
+    // Keyed on which mapping this is, and nothing else. `defaultSegmenting` is a fresh array on every
+    // refetch, so depending on it meant any background refetch — an invalidation from somewhere else
+    // on the page — re-ran this and reset a mode the operator had just chosen. "Whenever the chosen
+    // mapping changes" is what the pre-fill is for; the identity of a re-fetched array is not that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapping?.name])
 
   const strategy = strategies.find((s) => s.name === strategyName)
   const preview = useSegmentingPreview(
