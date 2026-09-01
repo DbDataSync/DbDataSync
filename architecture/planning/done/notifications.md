@@ -89,18 +89,20 @@ Given the size, this is not one phase:
   (`GET .../notifications?sinceId=`, mark-seen), cleanup wired into `RunPruningService`, a minimal SPA
   surface (a bell/badge with unread count is enough — a full notification-center page is not required to
   prove the pipeline), and the run-failure producer. No email yet.
-- **Phase 78 (follow-on, not yet written)**: SMTP delivery — config surface, a send path, per-user
+- **SMTP delivery (follow-on, not yet numbered/written)**: config surface, a send path, per-user
   opt-in, wired to whatever producers exist by the time it's built.
-- **Phase 79 (follow-on, not yet written)**: the pause and watermark-expiry producers — small once the
-  pipeline exists, likely one phase for both.
-- **Phase 80 (follow-on, not yet written)**: the latency trigger — CDC-only source/target lag, and the
+- **Phase 80 (`implementation/todo/phase-080-notification-pause-and-watermark-expiry-triggers.md`,
+  written)**: the pause and watermark-expiry producers.
+- **The latency trigger (follow-on, not yet numbered/written)**: CDC-only source/target lag, and the
   new worker heartbeat mechanism for check-in latency. The larger of the follow-ons; may want its own
   split once scoped in detail.
 
-(Phase numbers here are provisional — phase 76 is the timeouts work and phase 78 collides with the
-release-automation doc's own provisional numbering; whoever writes each phase doc should re-check both
-`implementation/todo/` and `implementation/done/` immediately before assigning, per this repo's
-established numbering discipline — collisions from concurrent work have happened before.)
+(Phase numbers were provisional when this doc was first written and one collision already happened —
+the original "phase 78" guess for email delivery collided with unrelated release-automation work that
+took that slot first, and the original "phase 79" guess for the pause/watermark-expiry producers
+collided with other concurrent work claiming that number before this doc's phase doc was committed.
+That producers phase was written and committed as phase 80 instead. Going forward: a phase number isn't
+reserved until its doc is committed — don't treat an uncommitted assignment as claimed.)
 
 ## What this phase should not do
 
