@@ -83,6 +83,12 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     // Landing on the replication lands on a tab, not on a bare frame.
     await expect(page).toHaveURL(new RegExp(`/replications/${REPLICATION_NAME}/overview$`))
     await expect(page.getByRole('heading', { name: REPLICATION_NAME })).toBeVisible()
+
+    // Phase 69: creation is not consent to run. A replication with no mappings and endpoints
+    // pointing nowhere should not be eligible for scheduling until somebody says so — the suite
+    // says so itself, in test 25, once there is something to run.
+    await expect(page.getByTestId('enabled-toggle')).toHaveAttribute('aria-pressed', 'false',
+      { timeout: 15_000 })
   })
 
   test('04 - set the replication\'s endpoints', async ({ page }) => {
@@ -1074,11 +1080,22 @@ public sealed class Shout : IValueColumnExpression
       await expect(page.getByTestId('enabled-toggle')).toBeVisible()
     }
 
+    // Enabled first, and here rather than at creation: since phase 69 a new replication starts
+    // disabled, so the status card reads "Disabled" until somebody opts in. Everything up to this
+    // point ran on demand and needed no scheduler; from here the card is supposed to be about a
+    // replication the scheduler owns.
+    if (await page.getByTestId('enabled-toggle').getAttribute('aria-pressed') === 'false') {
+      await page.getByTestId('enabled-toggle').click()
+      await expect(page.getByTestId('enabled-toggle')).toHaveAttribute('aria-pressed', 'true',
+        { timeout: 15_000 })
+    }
+
     // Whichever of the two states it is in, the card names it — a worker stays up between passes now
     // and leaves after its idle timeout, so both are ordinary and neither should read as a fault.
     // Asserted as "says which, and explains it" rather than pinned to one, because which one it is
     // depends on whether this replication happens to be inside its idle window right now.
-    await expect(page.getByTestId('replication-status-state')).toContainText(/^(Running|Idle)$/)
+    await expect(page.getByTestId('replication-status-state')).toContainText(/^(Running|Idle)$/,
+      { timeout: 20_000 })
     await expect(page.getByTestId('replication-status-card')).toContainText(
       await page.getByTestId('replication-status-state').textContent() === 'Running'
         ? 'PID'
