@@ -793,6 +793,35 @@ export interface LogEntryRecord {
   message: string
 }
 
+/**
+ * One notification from the global feed — see phase 77.
+ *
+ * `kind` is an open set: the server may write a kind this build has never heard of, which is why
+ * nothing keys rendering off it. `message` is what the server said at the time, stored rather than
+ * recomposed, so an old row still reads correctly after the run it describes has been pruned.
+ */
+export interface NotificationRecord {
+  id: number
+  kind: string
+  createdAtUtc: string
+  taskName: string | null
+  mappingName: string | null
+  runId: string | null
+  message: string
+}
+
+/**
+ * `personalized` is false where the deployment does not authenticate: there is no user to key a read
+ * cursor to, so everything reads as unread permanently. The bell says so rather than offering a
+ * dismissal that would not stick.
+ */
+export interface NotificationFeed {
+  notifications: NotificationRecord[]
+  lastSeenNotificationId: number | null
+  unreadCount: number
+  personalized: boolean
+}
+
 export interface CommitInfo {
   sha: string
   message: string

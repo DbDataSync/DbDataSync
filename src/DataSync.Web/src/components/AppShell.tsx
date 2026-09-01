@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
+import { NotificationBell } from './NotificationBell'
 import { SignedInAs } from './SignIn'
 import { CodeIcon, DatabaseIcon, FlowIcon, GridIcon, LogoIcon } from './icons'
 
@@ -72,6 +73,9 @@ export function AppShell({ crumbs, tabs, actions, children }: {
               authenticate. */}
           <div className="right">
             {actions}
+            {/* Beside the signed-in identity, on every screen and for the same reason: a
+                notification is about the deployment, not about whichever page happens to be open. */}
+            <NotificationBell />
             <SignedInAs />
           </div>
         </header>

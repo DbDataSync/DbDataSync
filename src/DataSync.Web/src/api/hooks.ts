@@ -43,6 +43,32 @@ const keys = {
     ['replications', replicationName, 'verification-results', mappingName] as const,
   verificationResult: (replicationName: string, id: number) =>
     ['replications', replicationName, 'verification-results', id] as const,
+  notifications: ['notifications'] as const,
+}
+
+/**
+ * The notification feed, polled — see phase 77.
+ *
+ * Polled rather than pushed: the run hub exists for somebody watching one run live, and a bell is the
+ * opposite case, a person who is not looking. Fifteen seconds is well inside the interval at which
+ * anybody notices, and one small query at that rate is nothing next to the scheduler's own tick.
+ */
+export function useNotifications() {
+  return useQuery({
+    queryKey: keys.notifications,
+    queryFn: () => api.notifications.list(),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+/** Advances the read cursor. Only ever moves forward, which the server enforces. */
+export function useMarkNotificationsSeen() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (lastSeenNotificationId: number) => api.notifications.markSeen(lastSeenNotificationId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.notifications }),
+  })
 }
 
 /**

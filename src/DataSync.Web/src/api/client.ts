@@ -32,6 +32,7 @@ import type {
   ScriptTestResult,
   ScriptSlotInfo,
   LogEntryRecord,
+  NotificationFeed,
   ReplicationTaskConfig,
   TableMappingConfig,
   TableMetadata,
@@ -271,6 +272,17 @@ export const api = {
         `/api/replications/${encodeURIComponent(replicationName)}/verification-results/${id}`,
         { method: 'DELETE' },
       ),
+  },
+  notifications: {
+    /** The whole feed by default. `sinceId` exists for a future notification centre that pages
+     * through it; the bell wants the latest and asks for all of it, which retention bounds. */
+    list: (sinceId?: number) =>
+      request<NotificationFeed>(`/api/notifications${sinceId ? `?sinceId=${sinceId}` : ''}`),
+    markSeen: (lastSeenNotificationId: number) =>
+      request<NotificationFeed>('/api/notifications/seen', {
+        method: 'POST',
+        body: JSON.stringify({ lastSeenNotificationId }),
+      }),
   },
   runs: {
     trigger: (replicationName: string) =>
