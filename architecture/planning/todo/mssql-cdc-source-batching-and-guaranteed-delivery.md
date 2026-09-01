@@ -90,3 +90,14 @@ into a loud, distinct failure rather than silent data loss, for both CDC and CT.
 **Next step**: given the mechanism is now confirmed rather than suspected, the same-key PK-collision fix
 (question 2) is probably worth splitting out as its own near-term item rather than waiting on the full
 guaranteed-delivery design.
+
+## Update, 2026-09-01 — Follow-up 1 resolved and scoped, on its own
+
+An independent investigation (`change-queue-fairness-investigation.md`) arrived at this same gap from a
+different direction — an uncapped CDC pass occupying a worker slot indefinitely — and phase 76's new
+30-minute default command timeout raised the stakes further: an unbounded pass can now fail outright,
+not just run long. `architecture/planning/done/cdc-row-bounded-reads.md` resolves Follow-up 1 on its own,
+ahead of and independent of Follow-up 2 (the guaranteed-delivery mode and its PK-collision prerequisite
+fix remain exactly as scoped above, untouched by this). Row-bounding is a real prerequisite for
+guaranteed-delivery's row-by-row same-key handling, but this update ships it for the fairness/timeout
+reason alone — Follow-up 2 doesn't need to be designed further before Follow-up 1 is built.

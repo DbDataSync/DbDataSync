@@ -77,3 +77,15 @@ reload. The "reader declares a capability, with its unit, or says not applicable
 right and should be written with two working examples rather than a table of guesses.
 
 **Next step**: build 32 and 34, then come back.
+
+## Update, 2026-09-01 — CDC's half is being built, on its own
+
+Postgres (34) is still not built, so the general "reader declares a lag capability, with its unit"
+abstraction stays deferred, per this doc's own reasoning. But CDC's half of the table above no longer
+needs to wait alongside it: `architecture/planning/done/cdc-lag-calculation.md` scopes and resolves a
+concrete, CDC-only version of item (2) — reusing `sys.fn_cdc_map_lsn_to_time` and phase 75's
+`ChangeCheckHistory` audit table for the source-side timestamp, motivated by the notifications plan's
+latency trigger needing it, not by this doc. It deliberately does not build the general abstraction
+either — that's still waiting on a second real example. When Postgres eventually provides one, this doc
+gets its two working examples and can go design the capability interface; until then, treat the CDC
+figure as the first concrete precedent to look at, not a competing design.
