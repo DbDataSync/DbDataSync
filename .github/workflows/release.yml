@@ -1,0 +1,103 @@
+name: Release
+
+# A separate workflow from ci.yml because the trigger and the purpose are different: ci.yml proves
+# every push builds, this one publishes one. Pushing a tag under release/v* is the gate — an operator
+# deciding "cut a release now" — and nothing else in the repo cuts one. Ordinary pushes to main are
+# untouched: ci.yml's package job still packs and artifact-uploads exactly as it did before.
+on:
+  push:
+    tags:
+      - "release/v*"
+
+# gh release create writes to the repo. The default GITHUB_TOKEN covers it with this scope; no
+# separate secret is involved, and nothing here needs any other permission.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # The shipped version is computed here, not read out of the tag. The tag's text is a human's
+      # choice of gate name and carries no meaning for the package; deriving the version from the
+      # clock instead means the two can never disagree. YYYY.MM.DD.HHmm in UTC, which is a valid
+      # four-part assembly version (every part is well under the 65534 ceiling) and sorts as a
+      # NuGet version in the same order it was released in.
+      - name: Compute the version
+        id: version
+        run: echo "version=$(date -u +%Y.%m.%d.%H%M)" >> "$GITHUB_OUTPUT"
+
+      # -p:Version is a global MSBuild property, so it overrides the csproj's development default
+      # rather than colliding with it.
+      # NuGet normalizes the version it is handed — leading zeros are stripped, so a 2026.09.01.1805
+      # asked for on the command line ships as 2026.9.1.1805, and that shorter string is what the
+      # package, the filename and `datasync version` all report. Rather than reimplement those
+      # normalization rules here and risk drifting from them, the shipped version is read back off
+      # the filename NuGet chose. That is what the title, the notes and the check below then use.
+      - name: Pack the global tool
+        id: pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          dotnet pack src/DataSync.Cli/DataSync.Cli.csproj \
+            -c Release -o artifacts \
+            -p:Version="$VERSION"
+          nupkg=$(ls artifacts/DataSync.*.nupkg)
+          shipped=$(basename "$nupkg" .nupkg)
+          shipped=${shipped#DataSync.}
+          echo "asked for $VERSION, NuGet shipped $shipped ($nupkg)"
+          echo "shipped=$shipped" >> "$GITHUB_OUTPUT"
+
+      # The same smoke test ci.yml's package job runs, repeated here deliberately: a release is
+      # public and awkward to withdraw, so the package proves it installs and runs before it is
+      # published rather than after. It also confirms the computed version actually reached the
+      # assembly — `datasync version` reflects the assembly's own version, so a silently ignored
+      # -p:Version would still print 0.1.0 and fail this step.
+      - name: Install it into a clean tool root and check it reports the computed version
+        env:
+          SHIPPED: ${{ steps.pack.outputs.shipped }}
+        run: |
+          dotnet tool install --tool-path /tmp/datasync-tool --add-source artifacts DataSync
+          reported=$(/tmp/datasync-tool/datasync version)
+          echo "datasync version said: $reported"
+          case "$reported" in
+            *"$SHIPPED"*) ;;
+            *)
+              echo "expected the packed version $SHIPPED in that output"
+              exit 1
+              ;;
+          esac
+
+      # The nupkg alone. ci.yml's package job builds a container image but only ever tags it
+      # datasync:ci locally and never pushes it to a registry, so there is no published image
+      # reference a release could point at — attaching one would mean first deciding to publish
+      # images somewhere, which is a separate call this phase does not make.
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.pack.outputs.shipped }}
+        run: |
+          # A file rather than an inline --notes argument: the body is multi-line Markdown with
+          # backticks and fences in it, and a heredoc keeps it readable here and out of the way of
+          # the shell's quoting.
+          cat > /tmp/release-notes.md <<EOF
+          The \`datasync\` .NET global tool, packed from \`${GITHUB_SHA}\` and released by the tag \`${GITHUB_REF_NAME}\`.
+
+          The version is the UTC date and time this release was built, not the tag's text — the tag
+          only decides *when* a release is cut.
+
+          Install it from the attached package:
+
+          \`\`\`
+          dotnet tool install --global --add-source . DataSync --version ${VERSION}
+          \`\`\`
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --title "DataSync $VERSION" \
+            --notes-file /tmp/release-notes.md \
+            artifacts/*.nupkg

@@ -10,6 +10,11 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>datasync</ToolCommandName>
     <PackageId>DataSync</PackageId>
+    <!--
+      The version every local and CI build carries. Releases do not use it: .github/workflows/release.yml
+      passes -p:Version=YYYY.MM.DD.HHmm, and a command-line property overrides this one rather than
+      colliding with it. So a 0.1.0 in the wild means a build nobody released.
+    -->
     <Version>0.1.0</Version>
     <Description>Cross-database replication — a git-tracked config repo, a scheduler, and a web console.</Description>
 
