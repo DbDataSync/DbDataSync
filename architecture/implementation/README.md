@@ -29,15 +29,14 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **079** — a standardized datasync.config.yaml, and command-shared config resolution | small, and fixes a real bug along the way — `datasync invite` cannot reach a non-SQLite state store today |
-| 2 | **081** — an admin screen for datasync.config.yaml | depends on 079 landing first |
-| 3 | **034** — PostgreSQL logical replication | |
-| 4 | **035** — config history diff and revert | |
-| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **081** — an admin screen for datasync.config.yaml | 079, its dependency, is done |
+| 2 | **034** — PostgreSQL logical replication | |
+| 3 | **035** — config history diff and revert | |
+| 4 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-09-01; 067a and 068 done and removed since the previous note; 079 added at the top, 081 added
-beneath it (depends on 079). TLS certificate management (raised alongside 081) is not queued here — it's
-still an unresolved planning item, `planning/todo/windows-tls-certificate-management.md`, not a phase.
+Set 2026-09-01; 079 done and removed. 081 was already queued beneath it and moves up to take its place.
+TLS certificate management (raised alongside 081) is not queued here — it's still an unresolved planning
+item, `planning/todo/windows-tls-certificate-management.md`, not a phase.
 What is left below it is the three engine phases that have been waiting since distribution and auth
 moved above them — with 032 and 033 done there were three change-tracking mechanisms and no way for
 anyone outside this repo to install
