@@ -115,3 +115,58 @@ it's ever raised, not bundled into this one.
   reveals the full name; the sidebar's own width and the badge's position are unaffected.
 - The column-count badge stays visible and un-truncated regardless of name length; it still reads
   correctly when a mapping has zero column mappings.
+
+---
+
+# Retrospective (built)
+
+**Status**: Done.
+
+## What was built
+
+- **`mappingTabs` became `useMappingTabs(replicationName, base, mappingName)`.** It calls
+  `useProvisioning` itself and returns the finished `SubTab[]`, badge included. `TableMappingForm` no
+  longer keeps a `pendingSteps` of its own, and Preview SQL and Verify no longer pass a number in at
+  all — which is the point: the hardcoded `0` could only exist because the count was something a
+  caller supplied. Same query, same key, so React Query still serves the editor and the Provisioning
+  card from one fetch.
+- **The MAPPED badge** now renders on Preview SQL and Verify beside the name, as it always did in the
+  editor.
+- **"Back to the mapping"** is gone from both, leaving Verify's "Run checks" as the only `right`-side
+  control there. The tab bar phase 67 gave both screens already navigates back.
+- **The sidebar name** is a `.sidebar-item-name` span — `overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0` — with the full name in `title`. The column count is a `.badge`
+  with `margin-left: auto; flex-shrink: 0`, showing just the number.
+
+## Phase 69's fallout on the golden path, which was real
+
+Task-adjacent but worth recording here, since this phase's run is what found it: phase 69 ("new
+replications start disabled") broke golden-path **test 25**. The test asserts the status card reads
+`Running` or `Idle`; with creation no longer implying consent to run, it read `Disabled`. Because the
+suite is `test.describe.serial`, that one failure took the eighteen tests after it with it — the
+first run here was `1 failed, 18 did not run, 26 passed`, and a static read of the spec had not
+predicted it.
+
+The fix (commit `8bf8725`) puts the new default where it happens rather than working around it:
+test 03 asserts `aria-pressed="false"` straight after creation, so phase 69's behaviour is pinned by
+the test that creates the replication, and test 25 opts in explicitly before it starts asserting
+things about a replication the scheduler is supposed to own. Everything before test 25 runs on
+demand and never needed the scheduler, which is why nothing earlier noticed.
+
+## A second thing the suite found, which was nobody's phase
+
+A later run — after another commit landed and shifted the timing — failed **test 41** instead, timing
+out on `backfill-strategy-select` while the page snapshot showed the Segment select back on "Full"
+after the test had chosen "Custom". `BackfillForm`'s pre-fill effect depended on
+`mapping.defaultSegmenting`, and React Query returns a fresh array on every refetch, so any
+invalidation elsewhere on the page re-ran the pre-fill and reset the mode under whoever was filling
+the form in. The effect is keyed on `mapping?.name` now — "whenever the chosen mapping changes",
+which is what its own comment always claimed. Not a phase 67a or 69 regression: a pre-existing race
+both earlier runs happened to win, and a real bug an operator could hit without a test present.
+
+## Test results
+
+Playwright: 45 passed, 0 failed. `dotnet test --filter "Category!=Integration"`: 859 passed, 0
+failed — run to confirm rather than assume, though this phase touched only the SPA and the browser
+suite. `tsc -b` clean; `oxlint` down from 7 warnings to 5, since keying the backfill effect on the
+mapping name retired one of the `exhaustive-deps` complaints.

@@ -29,12 +29,11 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **067a** — Preview/Verify's header keeps diverging, and the mappings sidebar's overflow | tiny, on screens just touched by 067 |
-| 2 | **034** — PostgreSQL logical replication | |
-| 3 | **035** — config history diff and revert | |
-| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **034** — PostgreSQL logical replication | |
+| 2 | **035** — config history diff and revert | |
+| 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-08-31; 032, 033, 036, 037, 039–055, 056–060 and 068 done and removed; 067a added at the top.
+Set 2026-08-31; 032, 033, 036, 037, 039–055, 056–060, 067a and 068 done and removed.
 What is left below it is the three engine phases that have been waiting since distribution and auth
 moved above them — with 032 and 033 done there were three change-tracking mechanisms and no way for
 anyone outside this repo to install
