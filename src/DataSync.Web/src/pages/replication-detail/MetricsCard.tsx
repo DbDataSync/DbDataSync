@@ -63,7 +63,11 @@ export function MetricsCard({ replicationName, enabled }: { replicationName: str
             <div className="divider" />
 
             {/* A distribution, not a single figure. One number reads like a target the system is
-                measuring itself against; it is not, it is what happened. */}
+                measuring itself against; it is not, it is what happened.
+
+                The passes themselves, not their wait for a worker: since phase 72 this is measured
+                from the claim, so a backlog moves the run list's queue-wait tooltips rather than
+                inflating these percentiles. */}
             <Figure
               label="Pass duration"
               value={data.durationP50Ms === null

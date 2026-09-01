@@ -422,7 +422,13 @@ export interface RunMetrics {
   failures: number
   rowsRead: number
   rowsWritten: number
-  /** Null when nothing in the window finished — a run still going has no duration. */
+  /**
+   * How long the runs themselves took, excluding the time they spent queued waiting for a worker
+   * (phase 72). Queue wait is a separate figure, per run, from `startedAtUtc` and `claimedAtUtc`.
+   *
+   * Null when nothing in the window finished — a run still going has no duration — or when nothing
+   * in it ever started.
+   */
   durationP50Ms: number | null
   durationP95Ms: number | null
   durationMaxMs: number | null
@@ -708,7 +714,23 @@ export interface TaskRunRecord {
   runKind: RunKind
   mappingName: string
   segmentLabel: string | null
+  /**
+   * When the run was **enqueued**, not when it started running — the queue writes the row before any
+   * worker has claimed it. The name is kept for compatibility; `claimedAtUtc` is the one that means
+   * "the run started".
+   */
   startedAtUtc: string
+  /**
+   * When a worker actually claimed the run and began executing it (phase 72).
+   *
+   * Duration is `endedAtUtc - claimedAtUtc`, and queue wait is `claimedAtUtc - startedAtUtc` — the
+   * two raw timestamps rather than a precomputed delta, matching how the run's watermark pair is
+   * exposed.
+   *
+   * Null for a run that never reached Running — still queued, or cancelled before a worker took it —
+   * and for runs recorded before this was tracked. Such a run has no duration to show.
+   */
+  claimedAtUtc: string | null
   endedAtUtc: string | null
   rowsRead: number
   rowsWritten: number
