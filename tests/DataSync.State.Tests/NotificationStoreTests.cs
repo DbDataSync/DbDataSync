@@ -87,6 +87,94 @@ public sealed class NotificationStoreTests : IDisposable
     }
 
     [Fact]
+    public void PausingAReplication_ProducesOneNotification_NamingWhoAndWhy()
+    {
+        _runs.SetPaused("crm-sync", paused: true, note: "target disk full", performedBy: "alice");
+
+        var notification = Assert.Single(_store.List());
+        Assert.Equal(NotificationKinds.ReplicationPaused, notification.Kind);
+        Assert.Equal("crm-sync", notification.TaskName);
+        // No run and no mapping: a pause is about the replication, and inventing either would make the
+        // row link somewhere it does not belong.
+        Assert.Null(notification.MappingName);
+        Assert.Null(notification.RunId);
+        Assert.Contains("crm-sync", notification.Message);
+        Assert.Contains("alice", notification.Message);
+        Assert.Contains("target disk full", notification.Message);
+    }
+
+    [Fact]
+    public void PausingWithNoNote_StillReadsAsASentence()
+    {
+        _runs.SetPaused("crm-sync", paused: true, note: null, performedBy: "alice");
+
+        Assert.DoesNotContain("—", Assert.Single(_store.List()).Message);
+    }
+
+    [Fact]
+    public void ResumingAReplication_ProducesNothing()
+    {
+        _runs.SetPaused("crm-sync", paused: true, note: null, performedBy: "alice");
+        _runs.SetPaused("crm-sync", paused: false, note: "disk extended", performedBy: "alice");
+
+        // Only the pause. A resume is the world going back to how it is supposed to be, which nobody
+        // needs pushed at them — and the PauseEvents row still records it either way.
+        var notification = Assert.Single(_store.List());
+        Assert.Equal(NotificationKinds.ReplicationPaused, notification.Kind);
+        Assert.Equal(2, _runs.GetPauseHistory("crm-sync").Count);
+    }
+
+    [Fact]
+    public void PausingAnAlreadyPausedReplication_AnnouncesOnce()
+    {
+        _runs.SetPaused("crm-sync", paused: true, note: "first look", performedBy: "alice");
+        _runs.SetPaused("crm-sync", paused: true, note: "still looking", performedBy: "bob");
+
+        // The second call is a real act and keeps its own PauseEvents row — re-pausing with a new note
+        // is how an operator updates the reason. It is not news twice, though: announcing it again
+        // would make one stuck replication look like a spreading outage.
+        Assert.Single(_store.List());
+        Assert.Equal(2, _runs.GetPauseHistory("crm-sync").Count);
+    }
+
+    [Fact]
+    public void AnExpiredPosition_IsItsOwnKind_AndSaysWhatExpired()
+    {
+        var runId = QueueAndBegin("crm-sync", "orders");
+
+        // The wording RunExecutor passes through from PositionExpiredException, which already names
+        // the mechanism, the table and both positions.
+        _runs.CompleteRun(
+            runId, RunStatus.Failed, 0, 0,
+            "Change Tracking history for 'dbo.Orders' no longer covers position '42' "
+                + "(the oldest still available is '95').",
+            RunFailureKinds.PositionExpired);
+
+        var notification = Assert.Single(_store.List());
+        Assert.Equal(NotificationKinds.PositionExpired, notification.Kind);
+        Assert.Equal("orders", notification.MappingName);
+        Assert.Equal(runId, notification.RunId);
+        Assert.Contains("dbo.Orders", notification.Message);
+        Assert.Contains("42", notification.Message);
+        Assert.Contains("95", notification.Message);
+    }
+
+    [Fact]
+    public void AnOrdinaryFailureAndAnExpiry_AreDistinguishableWithoutReadingTheMessage()
+    {
+        _runs.CompleteRun(QueueAndBegin("a", "one"), RunStatus.Failed, 0, 0, "Connection reset.");
+        _runs.CompleteRun(
+            QueueAndBegin("b", "two"), RunStatus.Failed, 0, 0, "history no longer covers position",
+            RunFailureKinds.PositionExpired);
+
+        // The expiry is the one failure with a known one-click fix. A feed has to be able to find
+        // those by kind rather than by matching on prose.
+        Assert.Equal(
+            [NotificationKinds.RunFailed, NotificationKinds.PositionExpired],
+            _store.List().Select(n => n.Kind));
+    }
+
+    [Fact]
     public void List_WithSinceId_ReturnsOnlyWhatIsNewer()
     {
         _runs.CompleteRun(QueueAndBegin("a", "one"), RunStatus.Failed, 0, 0, "first");

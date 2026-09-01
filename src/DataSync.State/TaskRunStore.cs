@@ -89,6 +89,10 @@ public sealed class TaskRunStore(StateDatabase database)
             using var connection = database.OpenConnection();
             using var transaction = connection.BeginTransaction();
 
+            // Read before the write, so the notification below can tell a replication being held from
+            // one that already was — see NotifyIfNewlyPaused.
+            var wasPaused = ReadPausedFlag(connection, transaction, taskName);
+
             using (var cmd = database.Command(connection, transaction, database.Dialect.Upsert(
                 "Tasks",
                 "Name, Enabled, Paused, PauseNote, UpdatedAtUtc",
@@ -116,8 +120,60 @@ public sealed class TaskRunStore(StateDatabase database)
                 cmd.ExecuteNonQuery();
             }
 
+            NotifyIfNewlyPaused(connection, transaction, taskName, paused, note, performedBy, wasPaused);
+
             transaction.Commit();
         });
+
+    /// <summary>Whether this replication is currently held, read on a connection somebody else owns.
+    /// A task with no row has never been paused, which is not paused.</summary>
+    private bool ReadPausedFlag(DbConnection connection, DbTransaction transaction, string taskName)
+    {
+        using var cmd = database.Command(
+            connection, transaction, "SELECT Paused FROM Tasks WHERE Name = $name;");
+        cmd.Bind(database, "name", taskName);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() && reader.Int64(0) != 0;
+    }
+
+    /// <summary>
+    /// The pause notification — phase 80.
+    /// <para>
+    /// **Pauses only, never resumes.** A hold is something people who were not in the room need to be
+    /// told about: replication has stopped and will stay stopped until somebody acts. A resume is the
+    /// world going back to how it is supposed to be, which nobody needs pushed at them, and notifying
+    /// on both would double the volume of this kind to say nothing extra. Stated here rather than left
+    /// as an unexplained <c>if</c>, because "why don't resumes notify" is otherwise a question with no
+    /// answer in the code.
+    /// </para>
+    /// <para>
+    /// **On the transition, matching the run-failure producer.** Pausing an already-paused replication
+    /// is reachable — the endpoint does not short-circuit it, and it deliberately still writes its own
+    /// <c>PauseEvents</c> row, because re-pausing with a new note is a real act somebody performed and
+    /// the history is an audit trail. A notification is not an audit trail: "this replication has been
+    /// paused" is not news a second time, and announcing it again would make a stuck retry look like a
+    /// spreading outage.
+    /// </para>
+    /// <para>
+    /// In the transaction that writes <c>Tasks</c> and <c>PauseEvents</c>, so all three commit or none
+    /// do. A notification about a pause that did not happen is the worst of the three outcomes.
+    /// </para>
+    /// </summary>
+    private void NotifyIfNewlyPaused(
+        DbConnection connection, DbTransaction transaction, string taskName, bool paused,
+        string? note, string performedBy, bool wasPaused)
+    {
+        if (!paused || wasPaused)
+            return;
+
+        var reason = string.IsNullOrWhiteSpace(note) ? "" : $" — {note}";
+
+        NotificationStore.Insert(
+            database, connection, transaction,
+            NotificationKinds.ReplicationPaused,
+            $"Replication '{taskName}' was paused by {performedBy}{reason}",
+            taskName, mappingName: null, runId: null);
+    }
 
     /// <summary>Whether this replication is currently held. A task with no row has never been paused,
     /// which is not paused.</summary>
@@ -262,7 +318,7 @@ public sealed class TaskRunStore(StateDatabase database)
             cmd.Bind(database, "runId", runId.ToString());
             cmd.ExecuteNonQuery();
 
-            NotifyIfNewlyFailed(connection, transaction, runId, status, errorSummary, before);
+            NotifyIfNewlyFailed(connection, transaction, runId, status, errorSummary, failureKind, before);
 
             transaction.Commit();
         });
@@ -283,7 +339,7 @@ public sealed class TaskRunStore(StateDatabase database)
     }
 
     /// <summary>
-    /// The run-failure notification — phase 77's one producer.
+    /// The run-failure notification — phase 77's producer, and phase 80's watermark-expiry one.
     /// <para>
     /// **Here rather than at the six call sites that complete runs.** A worker completes a run through
     /// the state channel, a locally-hosted runner completes one directly, the supervisor completes
@@ -299,10 +355,20 @@ public sealed class TaskRunStore(StateDatabase database)
     /// is noise a reader cannot distinguish from a second failure. A run that is already Failed
     /// produces nothing.
     /// </para>
+    /// <para>
+    /// **A position expiry is its own kind**, not a RunFailed row whose message happens to say so. It
+    /// is the one failure with a known one-click fix — the Runs tab already offers the reload off the
+    /// same <c>FailureKind</c> — and a feed should be able to find those without matching on prose.
+    /// Its message carries <c>PositionExpiredException</c>'s own words, which already name the
+    /// mechanism, the table, the position that expired and the oldest one still available, beside the
+    /// mapping this row identifies. Specific by construction rather than by reassembling four fields
+    /// into a worse sentence than the exception already wrote.
+    /// </para>
     /// </summary>
     private void NotifyIfNewlyFailed(
         DbConnection connection, DbTransaction transaction, Guid runId, RunStatus status,
-        string? errorSummary, (string TaskName, string? MappingName, string Status)? before)
+        string? errorSummary, string? failureKind,
+        (string TaskName, string? MappingName, string Status)? before)
     {
         if (status != RunStatus.Failed || before is not { } run)
             return;
@@ -314,11 +380,12 @@ public sealed class TaskRunStore(StateDatabase database)
             ? $"'{run.TaskName}' (mapping '{mapping}')"
             : $"'{run.TaskName}'";
 
+        var (kind, message) = failureKind == RunFailureKinds.PositionExpired
+            ? (NotificationKinds.PositionExpired, $"Source position for {subject} has expired. {errorSummary}")
+            : (NotificationKinds.RunFailed, $"Run of {subject} failed: {errorSummary ?? "no error was recorded."}");
+
         NotificationStore.Insert(
-            database, connection, transaction,
-            NotificationKinds.RunFailed,
-            $"Run of {subject} failed: {errorSummary ?? "no error was recorded."}",
-            run.TaskName, run.MappingName, runId);
+            database, connection, transaction, kind, message, run.TaskName, run.MappingName, runId);
     }
 
     public TaskRunRecord? GetRun(Guid runId) =>

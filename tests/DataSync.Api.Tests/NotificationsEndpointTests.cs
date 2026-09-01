@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using DataSync.Api.Configuration;
+using DataSync.Drivers.Abstractions;
 using DataSync.Api.Services;
 using DataSync.State;
 using Microsoft.Extensions.DependencyInjection;
@@ -141,6 +142,57 @@ public sealed class NotificationsEndpointTests
 
             var next = await client.GetFromJsonAsync<NotificationFeed>($"/api/notifications?sinceId={highest}");
             Assert.Equal("second", Assert.Single(next!.Notifications).Message.Split(": ")[^1]);
+        }
+    }
+
+    /// <summary>
+    /// The watermark-expiry producer — phase 80. Here rather than in <c>DataSync.State.Tests</c>
+    /// because it uses the real <see cref="PositionExpiredException"/>, which that project does not
+    /// reference: the point of the test is that the exception's own wording survives into the
+    /// notification, and a hand-copied message string would only prove that a string was copied.
+    /// <para>
+    /// The failure is recorded the way <c>RunExecutor</c>'s <c>catch</c> block records it — the
+    /// exception's message as the error summary, <c>RunFailureKinds.PositionExpired</c> as the kind —
+    /// the same simulation <c>ResyncTests</c> uses for the same failure.
+    /// </para>
+    /// </summary>
+    public sealed class WatermarkExpiry(TestApiFactory factory) : IClassFixture<TestApiFactory>
+    {
+        [Fact]
+        public void AnExpiredPositionDuringARun_ProducesOneNotification_NamingWhatExpired()
+        {
+            var notifications = factory.Services.GetRequiredService<NotificationStore>();
+            var task = $"crm-{Guid.NewGuid():N}";
+            var before = notifications.List().Count;
+
+            var expired = new PositionExpiredException(
+                tableName: "dbo.Orders",
+                storedPosition: "0x0000002A000000AB0003",
+                oldestAvailable: "0x0000002B0000001C0001",
+                mechanism: "Change Tracking");
+
+            var runId = factory.Services.GetRequiredService<WorkQueueStore>()
+                .Enqueue(task, RunKind.Primary, "orders");
+            var runs = factory.Services.GetRequiredService<TaskRunStore>();
+            runs.BeginRun(runId, pid: null);
+            runs.CompleteRun(
+                runId, RunStatus.Failed, 0, 0, expired.Message, RunFailureKinds.PositionExpired);
+
+            var produced = notifications.List().Skip(before).ToList();
+            var notification = Assert.Single(produced);
+
+            Assert.Equal(NotificationKinds.PositionExpired, notification.Kind);
+            Assert.Equal(task, notification.TaskName);
+            Assert.Equal("orders", notification.MappingName);
+            Assert.Equal(runId, notification.RunId);
+
+            // Specific, not "something expired": the mapping, the table, the position that expired and
+            // the oldest one still available are all in the sentence a bell renders.
+            Assert.Contains("orders", notification.Message);
+            Assert.Contains("dbo.Orders", notification.Message);
+            Assert.Contains(expired.StoredPosition, notification.Message);
+            Assert.Contains(expired.OldestAvailable, notification.Message);
+            Assert.Contains(expired.Mechanism, notification.Message);
         }
     }
 
