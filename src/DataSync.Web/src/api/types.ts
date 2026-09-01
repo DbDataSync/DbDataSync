@@ -20,6 +20,10 @@ export interface ConnectionConfig {
   authMode: AuthMode
   userId: string | null
   credentialSecretRef: string | null
+  /** Seconds to wait for the connection to open. Null means the default (30); 0 means no limit. */
+  connectTimeoutSeconds: number | null
+  /** Seconds any one query may run. Null means the default (1800); 0 means no limit. */
+  commandTimeoutSeconds: number | null
   properties: Record<string, string>
   scripts?: ScriptBindings
   hooks?: Hooks
@@ -35,6 +39,8 @@ export interface ConnectionInput {
   authMode: AuthMode
   userId?: string | null
   password?: string | null
+  connectTimeoutSeconds?: number | null
+  commandTimeoutSeconds?: number | null
   properties?: Record<string, string>
   scripts?: ScriptBindings
   hooks?: Hooks

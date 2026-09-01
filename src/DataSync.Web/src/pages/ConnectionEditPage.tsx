@@ -39,6 +39,8 @@ function toValues(draft: ConnectionInput): Record<string, string> {
   set('connectionString', draft.connectionString)
   set('database', draft.database)
   set('userId', draft.userId)
+  set('connectTimeoutSeconds', draft.connectTimeoutSeconds)
+  set('commandTimeoutSeconds', draft.commandTimeoutSeconds)
 
   // The password is deliberately absent. These values go to the server to ask what a connection
   // takes, and only the two `recalc` settings change that answer — a bag carrying a plaintext
@@ -56,6 +58,11 @@ function fromValues(
 
   const byHost = shown('addressMode') !== 'connectionString'
 
+  // Blank stays null rather than becoming 0 — the two mean opposite things here. Null is "use the
+  // default", 0 is "no limit at all", and `Number('')` is 0, which would quietly turn every
+  // untouched timeout field into an unlimited one.
+  const seconds = (name: string) => (shown(name) === '' ? null : Number(shown(name)))
+
   return {
     ...draft,
     // One mode or the other, never both — the server rejects a connection that sets a host and a
@@ -67,6 +74,8 @@ function fromValues(
     database: shown('database'),
     authMode: shown('authMode') as AuthMode,
     userId: shown('userId'),
+    connectTimeoutSeconds: seconds('connectTimeoutSeconds'),
+    commandTimeoutSeconds: seconds('commandTimeoutSeconds'),
     password: values.password ?? '',
     properties: Object.fromEntries(
       Object.entries(values)
@@ -80,7 +89,10 @@ function fromValues(
 // driver's declared default is what fills it in.
 const empty: ConnectionInput = {
   name: '', driverType: 'MsSql', host: '', port: null, connectionString: null, database: '',
-  authMode: 'SqlAuth', userId: '', password: '', properties: {},
+  authMode: 'SqlAuth', userId: '', password: '',
+  // Null rather than 30/1800: a new connection has not chosen a timeout, and writing today's default
+  // into it would freeze it there if the default ever moves.
+  connectTimeoutSeconds: null, commandTimeoutSeconds: null, properties: {},
 }
 
 /**
@@ -149,6 +161,8 @@ export function ConnectionEditPage() {
       database: existing.database,
       authMode: existing.authMode,
       userId: existing.userId ?? '',
+      connectTimeoutSeconds: existing.connectTimeoutSeconds,
+      commandTimeoutSeconds: existing.commandTimeoutSeconds,
       // Never pre-filled, because the server never sends one back — blank keeps the stored credential.
       // That is the Secret parameter type's contract now, not this screen's special case.
       password: '',

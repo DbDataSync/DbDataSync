@@ -15,6 +15,8 @@ public static class DriverParameters
     public const string AuthMode = "authMode";
     public const string UserId = "userId";
     public const string Password = "password";
+    public const string ConnectTimeoutSeconds = "connectTimeoutSeconds";
+    public const string CommandTimeoutSeconds = "commandTimeoutSeconds";
     public const string Properties = "properties";
 
     public const string HostAddressing = "host";
@@ -22,6 +24,7 @@ public static class DriverParameters
 
     private const string ConnectionCard = "";
     private const string AuthCard = "Authentication";
+    private const string TimeoutCard = "Timeouts";
 
     /// <summary>
     /// The free-form bag appended to a connection string. Every driver has had one since phase 3;
@@ -153,6 +156,34 @@ public static class DriverParameters
                 Visible = sqlAuth,
                 Layout = new ParameterLayout(AuthCard),
             },
+            // Declared here rather than per driver for the same reason addressing and auth are: "how
+            // long before you give up" is not where MsSql and Postgres differ. Each driver's own
+            // connection-string builder spells connect timeout differently, and that is the only part
+            // that lives in the driver.
+            //
+            // No `Default`, deliberately — unlike Port. A default here would be written into every
+            // connection that never thought about it, and a later change to what the default *is*
+            // would then not reach any of them. Blank means "whatever the current default is", which
+            // is the null the config field documents.
+            new ParameterDescriptor
+            {
+                Name = ConnectTimeoutSeconds,
+                Label = "Connect timeout",
+                Description = "Seconds to wait for the connection to open. Blank for the default (30). 0 for no limit.",
+                Type = ParameterType.Number,
+                Layout = new ParameterLayout(TimeoutCard, "timeouts"),
+            },
+            new ParameterDescriptor
+            {
+                Name = CommandTimeoutSeconds,
+                Label = "Command timeout",
+                Description =
+                    "Seconds any one query may run. Blank for the default (1800 — 30 minutes). 0 for no limit. " +
+                    "A snapshot read or a large MERGE can legitimately exceed the 30s the database driver " +
+                    "would otherwise impose.",
+                Type = ParameterType.Number,
+                Layout = new ParameterLayout(TimeoutCard, "timeouts"),
+            },
             ConnectionProperties,
         ];
     }
@@ -179,6 +210,8 @@ public static class DriverParameters
         Set(values, ConnectionString, input.ConnectionString);
         Set(values, Database, input.Database);
         Set(values, UserId, input.UserId);
+        Set(values, ConnectTimeoutSeconds, input.ConnectTimeoutSeconds?.ToString());
+        Set(values, CommandTimeoutSeconds, input.CommandTimeoutSeconds?.ToString());
 
         foreach (var (key, value) in input.Properties)
             values[ParameterValidation.KeyFor(ConnectionProperties, key)] = value;
