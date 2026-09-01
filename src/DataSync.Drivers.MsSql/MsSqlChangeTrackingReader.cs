@@ -191,7 +191,14 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     /// </summary>
     private const string CurrentVersionStatement = "SELECT CHANGE_TRACKING_CURRENT_VERSION();";
 
-    private static async Task<long> GetCurrentVersionAsync(DbConnection connection, CancellationToken cancellationToken)
+    /// <summary>
+    /// This database's current change-tracking version. Public because the scheduler's polling gate
+    /// (phase 75) asks the same question of the same database, once per tick for every mapping that
+    /// shares it, and it has to be the same question: a gate issuing its own near-equivalent
+    /// statement would be a second definition of "where has this source got to", free to drift from
+    /// the one a pass actually reads against.
+    /// </summary>
+    public static async Task<long> GetCurrentVersionAsync(DbConnection connection, CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = CurrentVersionStatement;

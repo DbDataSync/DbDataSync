@@ -153,6 +153,11 @@ public static class DataSyncHost
         builder.Services.AddSingleton<BackfillService>();
         builder.Services.AddSingleton<SegmentingPreviewService>();
         builder.Services.AddSingleton<ResyncService>();
+
+        // The scheduler's polling gate, and the one piece of it that does I/O behind an interface so
+        // the decision logic can be tested without a SQL Server — see phase 75.
+        builder.Services.AddSingleton<IChangeCounterSource, DriverChangeCounterSource>();
+        builder.Services.AddSingleton<ChangePollingGate>();
         builder.Services.AddHostedService<SchedulerService>();
         builder.Services.AddHostedService<RunMonitorService>();
         builder.Services.AddHostedService<RunPruningService>();
