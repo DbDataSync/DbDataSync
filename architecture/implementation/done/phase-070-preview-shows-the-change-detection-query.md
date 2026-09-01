@@ -42,7 +42,7 @@ resolved to real values, still runnable standalone in a query tool.
 - `PreviewIntegrationTests.AfterAPass_ThePreviewShowsTheIncrementalReadRatherThanTheFullLoad` (updated,
   integration, Change Tracking end to end through the API): asserts both statements and their order,
   where it previously asserted a single source-read statement.
-- Full suite: unit 859 passed / 0 failed; integration 269 passed / 0 failed.
+- Full suite: unit 859 passed / 0 failed; integration 196 passed / 0 failed.
 
 ## Decisions and notes
 

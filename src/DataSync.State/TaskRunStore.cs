@@ -178,9 +178,17 @@ public sealed class TaskRunStore(StateDatabase database)
     /// rather than writing zeros — "not measured" and "measured as nothing" are different answers, and
     /// an aggregate over the column has to be able to tell them apart.
     /// </param>
+    /// <param name="previousWatermark">
+    /// Where this pass started from, and where it left off — both null unless the run actually made a
+    /// new position durable (phase 71). A failed run passes null for both even when it had computed a
+    /// position before failing: it never committed one, and recording it here would claim a history
+    /// that did not happen.
+    /// </param>
+    /// <param name="newWatermark">See <paramref name="previousWatermark"/>.</param>
     public void CompleteRun(
         Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
-        string? failureKind = null, RunTiming? timing = null) =>
+        string? failureKind = null, RunTiming? timing = null,
+        string? previousWatermark = null, string? newWatermark = null) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
@@ -191,7 +199,8 @@ public sealed class TaskRunStore(StateDatabase database)
                     ReaderKind = $readerKind, ReaderTimeToFirstRowMs = $timeToFirstRow,
                     ReaderLifetimeMs = $readerLifetime,
                     StagingKind = $stagingKind, StagingDurationMs = $stagingDuration,
-                    WriterKind = $writerKind, WriterDurationMs = $writerDuration
+                    WriterKind = $writerKind, WriterDurationMs = $writerDuration,
+                    PreviousWatermark = $previousWatermark, NewWatermark = $newWatermark
                 WHERE RunId = $runId;
                 """);
             cmd.Bind(database, "status", status.ToString());
@@ -207,6 +216,8 @@ public sealed class TaskRunStore(StateDatabase database)
             cmd.Bind(database, "stagingDuration", (object?)timing?.StagingDurationMs ?? DBNull.Value);
             cmd.Bind(database, "writerKind", (object?)timing?.WriterKind ?? DBNull.Value);
             cmd.Bind(database, "writerDuration", (object?)timing?.WriterDurationMs ?? DBNull.Value);
+            cmd.Bind(database, "previousWatermark", (object?)previousWatermark ?? DBNull.Value);
+            cmd.Bind(database, "newWatermark", (object?)newWatermark ?? DBNull.Value);
             cmd.Bind(database, "runId", runId.ToString());
             cmd.ExecuteNonQuery();
         });
@@ -216,7 +227,7 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
                 FROM TaskRuns WHERE RunId = $runId;
                 """);
             cmd.Bind(database, "runId", runId.ToString());
@@ -233,7 +244,7 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, $"""
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
                 FROM TaskRuns WHERE TaskName = $taskName {(runKind is null ? "" : "AND RunKind = $runKind")}
                 ORDER BY StartedAtUtc DESC {database.Limit("limit")};
                 """);
@@ -255,7 +266,7 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, $"""
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
                 FROM TaskRuns WHERE TaskName = $taskName AND RunKind = $runKind AND MappingName = $mapping
                 ORDER BY StartedAtUtc DESC {database.Limit("limit")};
                 """);
@@ -277,7 +288,7 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
                 FROM TaskRuns WHERE Status = $status;
                 """);
             cmd.Bind(database, "status", RunStatus.Running.ToString());
@@ -299,7 +310,7 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
                 FROM TaskRuns WHERE EndedAtUtc IS NOT NULL AND EndedAtUtc >= $since;
                 """);
             cmd.Bind(database, "since", sinceUtc.ToString("O"));
@@ -318,7 +329,7 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, """
-                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs
+                SELECT RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark
                 FROM TaskRuns WHERE Status IN ($queued, $running);
                 """);
             cmd.Bind(database, "queued", RunStatus.Queued.ToString());
@@ -422,7 +433,9 @@ public sealed class TaskRunStore(StateDatabase database)
         reader.Int64(10),
         reader.IsDBNull(11) ? null : reader.GetString(11),
         reader.IsDBNull(12) ? null : reader.GetString(12),
-        ReadTiming(reader));
+        ReadTiming(reader),
+        reader.IsDBNull(20) ? null : reader.GetString(20),
+        reader.IsDBNull(21) ? null : reader.GetString(21));
 
     /// <summary>
     /// The timing columns as a record, or null when the run was never traced.

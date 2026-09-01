@@ -41,7 +41,11 @@ public sealed record CompleteRunRequest(
     string? FailureKind = null,
     /// <summary>Per-stage timing, for a mapping that opted into tracing. Defaulted for the same reason
     /// <see cref="FailureKind"/> is — a journal entry written before this existed has to replay.</summary>
-    RunTiming? Timing = null);
+    RunTiming? Timing = null,
+    /// <summary>Where this run's watermark started and ended (phase 71). Defaulted for the same reason
+    /// the two above are — a journal entry written before these existed has to replay.</summary>
+    string? PreviousWatermark = null,
+    string? NewWatermark = null);
 public sealed record SetWatermarkRequest(string TaskName, string SourceTable, string Watermark);
 public sealed record RecordVerificationResultRequest(VerificationResultRecord Result);
 public sealed record LogRequest(Guid RunId, LogSeverity Level, string Message, DateTimeOffset TimestampUtc);

@@ -43,8 +43,12 @@ public sealed class LocalRunnerState(
     public void CompleteRun(
         Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
         string? failureKind = null,
-        RunTiming? timing = null) =>
-        taskRuns.CompleteRun(runId, status, rowsRead, rowsWritten, errorSummary, failureKind, timing);
+        RunTiming? timing = null,
+        string? previousWatermark = null,
+        string? newWatermark = null) =>
+        taskRuns.CompleteRun(
+            runId, status, rowsRead, rowsWritten, errorSummary, failureKind, timing,
+            previousWatermark, newWatermark);
 
     public void SetWatermark(string taskName, string sourceTable, string watermark) =>
         watermarks.SetWatermark(taskName, sourceTable, watermark);

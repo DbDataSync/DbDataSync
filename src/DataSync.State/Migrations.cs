@@ -372,5 +372,28 @@ internal static class Migrations
         );
         CREATE INDEX IX_PauseEvents_TaskName ON PauseEvents(TaskName);
         """,
+
+        """
+        -- Watermark history — see phase 71.
+        --
+        -- ChangeWatermarks is current-value only: one row per (TaskName, SourceTable), overwritten
+        -- every pass, so "where did this mapping's position go over the last month" had no answer
+        -- anywhere. These two columns are that history, and they are on TaskRuns rather than in a
+        -- table of their own precisely so they need no retention mechanism: phase 60 already deletes
+        -- whole TaskRuns rows by age and per-mapping count, which purges these with them. A separate
+        -- history table would have been a second pruning policy to build and keep in step with the
+        -- first.
+        --
+        -- Both values, not just the new one, so a row says what the pass actually moved without
+        -- anyone joining it to the row before it — which would be wrong at exactly the interesting
+        -- moments anyway, since the previous row may have been pruned or may belong to a run that
+        -- never advanced the watermark.
+        --
+        -- Null for a run that did not produce a durable watermark: a Backfill or Verification, or any
+        -- failed run. A failure that had already computed a position must not record one, because the
+        -- position was never made durable — the watermark advances only after the write commits.
+        ALTER TABLE TaskRuns {{addcolumn}} PreviousWatermark {{text}} NULL;
+        ALTER TABLE TaskRuns {{addcolumn}} NewWatermark {{text}} NULL;
+        """,
     ];
 }

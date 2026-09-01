@@ -51,10 +51,15 @@ public interface IRunnerState
 
     void ReleaseLock(string taskName, RunKind runKind, string mappingName);
 
+    /// <param name="previousWatermark">Where this run's watermark started, and where it ended — null
+    /// for both unless the run made a new position durable (phase 71). Defaulted, so the failure paths
+    /// and the supervisor's own completions say "no watermark change" by saying nothing.</param>
     void CompleteRun(
         Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
         string? failureKind = null,
-        RunTiming? timing = null);
+        RunTiming? timing = null,
+        string? previousWatermark = null,
+        string? newWatermark = null);
 
     /// <summary>
     /// Only ever called after the target write has committed — the watermark-on-success-only rule the

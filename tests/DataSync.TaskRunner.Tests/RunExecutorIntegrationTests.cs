@@ -239,6 +239,33 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.Equal(new Dictionary<int, string> { [2] = "Robert", [3] = "Carol" }, await GetTargetRowsAsync());
     }
 
+    /// <summary>
+    /// Phase 71's history, end to end. ChangeWatermarks says only where a mapping is *now*; these two
+    /// columns on each run are the only record of how it got there, and each row has to be readable on
+    /// its own — hence recording where the pass started as well as where it ended.
+    /// </summary>
+    [Fact]
+    public async Task EachSuccessfulPass_RecordsTheWatermarkItMovedFromAndTo()
+    {
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        var firstRun = await EnqueueAndDrainAsync();
+
+        // A first pass has nowhere to have come from, which is a different answer from "it did not
+        // move" — so previous is null and new is not.
+        Assert.Null(firstRun.PreviousWatermark);
+        Assert.NotNull(firstRun.NewWatermark);
+
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
+        var secondRun = await EnqueueAndDrainAsync();
+
+        // The chain: the second pass starts exactly where the first one left off, and ends at what
+        // ChangeWatermarks now holds. That equality is what makes the history trustworthy rather than
+        // a parallel number maintained beside the real one.
+        Assert.Equal(firstRun.NewWatermark, secondRun.PreviousWatermark);
+        Assert.Equal(WatermarkFor(_sourceTable), secondRun.NewWatermark);
+    }
+
     private async Task<Dictionary<int, string>> GetRowsAsync(string table)
     {
         await using var cmd = _adminConnection.CreateCommand();
@@ -572,7 +599,13 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         var runId = _workQueueStore.Enqueue("trg-fail", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("trg-fail", degreeOfParallelism: 1, CancellationToken.None);
 
-        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(runId)!.Status);
+        var run = _taskRunStore.GetRun(runId)!;
+        Assert.Equal(RunStatus.Failed, run.Status);
+
+        // Nor in the run's own history: the pass had computed a position before the write failed, and
+        // recording it here would claim an advance that never became durable (phase 71).
+        Assert.Null(run.PreviousWatermark);
+        Assert.Null(run.NewWatermark);
 
         // Not pruned, and no watermark stored — the two go together, and that pairing is the invariant.
         Assert.True(await ShadowRowCountAsync() > 0);

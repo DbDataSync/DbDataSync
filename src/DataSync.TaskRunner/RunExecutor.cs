@@ -261,10 +261,14 @@ public sealed class RunExecutor(
             // A verification run reads both sides and writes nothing, so the reader/staging/writer
             // stages this traces do not exist for it. Null rather than zeros: it was not measured.
             RunTiming? timing = null;
+            // Null for anything that did not advance a durable position — a Verification, a Backfill,
+            // or a pass that found nothing new. See WatermarkChange.
+            WatermarkChange? watermark = null;
             if (item.RunKind == RunKind.Verification)
                 (rowsRead, rowsWritten) = await RunVerificationAsync(task, mapping, item, cancellationToken);
             else
-                (rowsRead, rowsWritten, timing) = await RunMappingAsync(task, mapping, item, cancellationToken);
+                (rowsRead, rowsWritten, timing, watermark) =
+                    await RunMappingAsync(task, mapping, item, cancellationToken);
 
             Log(item.RunId, LogSeverity.Info, item.RunKind == RunKind.Verification
                 ? $"Verification finished: {rowsRead} group(s) compared."
@@ -275,7 +279,9 @@ public sealed class RunExecutor(
             // where a single end-of-process Flush() was always guaranteed to happen first. Log lines
             // must be durable before the status that makes a poller stop looking for them.
             state.Flush();
-            state.CompleteRun(item.RunId, RunStatus.Succeeded, rowsRead, rowsWritten, errorSummary: null, timing: timing);
+            state.CompleteRun(
+                item.RunId, RunStatus.Succeeded, rowsRead, rowsWritten, errorSummary: null, timing: timing,
+                previousWatermark: watermark?.Previous, newWatermark: watermark?.New);
             state.MarkDone(item.Id);
 
             // Idle is "looked for changes and found none", not "the queue is empty" — the queue is
@@ -462,7 +468,7 @@ public sealed class RunExecutor(
         }
     }
 
-    private async Task<(long RowsRead, long RowsWritten, RunTiming? Timing)> RunMappingAsync(
+    private async Task<(long RowsRead, long RowsWritten, RunTiming? Timing, WatermarkChange? Watermark)> RunMappingAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, WorkItem item, CancellationToken cancellationToken)
     {
         var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
@@ -550,6 +556,7 @@ public sealed class RunExecutor(
             long totalRead = 0;
             long totalWritten = 0;
             string? newWatermark = null;
+            WatermarkChange? watermarkChange = null;
 
             // Resolved once per pass. Off means the row stream is never wrapped and no stopwatch is
             // started — a mapping that did not ask pays nothing, which is the difference between an
@@ -722,6 +729,10 @@ public sealed class RunExecutor(
             {
                 state.SetWatermark(task.Name, watermarkKey, newWatermark);
 
+                // Recorded from inside the same gate that writes the current value, not beside it, so
+                // the history on TaskRuns cannot claim an advance ChangeWatermarks did not take.
+                watermarkChange = new WatermarkChange(previousWatermark, newWatermark);
+
                 // After the write committed and after the watermark is durable, never before. A
                 // reader that acknowledges is telling its source it may discard the history behind
                 // this position — do that early and a failed run stops being retryable, which turns
@@ -738,7 +749,7 @@ public sealed class RunExecutor(
                     readerKind, timeToFirstRowMs, readerLifetimeMs, cacheKind, stagingMs, writerKind, writerMs)
                 : null;
 
-            return (totalRead, totalWritten, timing);
+            return (totalRead, totalWritten, timing, watermarkChange);
         }
         finally
         {
@@ -1165,5 +1176,17 @@ public sealed class RunExecutor(
 
     private sealed class ConnectivityException(string connectionName, Exception inner)
         : Exception($"Failed to open connection '{connectionName}': {inner.Message}", inner);
+
+    /// <summary>
+    /// A watermark advance this pass actually made durable, for the history on <c>TaskRuns</c>
+    /// (phase 71).
+    /// <para>
+    /// One nullable value rather than two, so "this run moved the watermark" is a single question with
+    /// a single answer. Two loose strings threaded up from the pass would have made the null cases —
+    /// a Verification, a Backfill, a pass that read nothing new — four states to reason about where
+    /// there is only one that matters.
+    /// </para>
+    /// </summary>
+    private sealed record WatermarkChange(string? Previous, string New);
 }
 

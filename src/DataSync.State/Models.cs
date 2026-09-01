@@ -65,7 +65,14 @@ public sealed record TaskRunRecord(
     /// from the replication's config afterwards.
     /// </para>
     /// </summary>
-    RunTiming? Timing = null);
+    RunTiming? Timing = null,
+    /// <summary>
+    /// Where this run's watermark started and where it ended — the history behind
+    /// <c>ChangeWatermarks</c>' single current value (phase 71). Both null for a run that made no new
+    /// position durable: a Backfill or Verification, or any failed run.
+    /// </summary>
+    string? PreviousWatermark = null,
+    string? NewWatermark = null);
 
 /// <param name="ReaderTimeToFirstRowMs">
 /// From just before <c>ReadChangesAsync</c> to the first row arriving. A prefix of
