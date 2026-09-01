@@ -506,5 +506,50 @@ internal static class Migrations
             PRIMARY KEY (TaskName, MappingName, SourceTable)
         );
         """,
+
+        """
+        -- What the scheduler's polling gate saw, and when — see phase 75.
+        --
+        -- The gate fetches one database-wide change counter per (ConnectionName, SourceDatabase, SourceKind)
+        -- group per tick, in place of every due mapping in that group fetching its own. This table is
+        -- the audit trail of those fetches: one append-only row each, so "was the source actually
+        -- quiet at 03:00, or were we not looking" has an answer. It is history, not mechanism — the
+        -- gate never reads it back. What it decides with is each mapping's own ChangeWatermarks row,
+        -- which is the only thing that can tell a caught-up mapping from one still draining a backlog
+        -- under a row cap with no new source writes behind it.
+        --
+        -- **SourceKind is in the key, and that is the point of it.** CDC's max LSN is a byte[]
+        -- position in the transaction log; Change Tracking's current version is a monotonic bigint.
+        -- One database can have both mechanisms active on different tables, and a row shared between
+        -- them would hold whichever polled last, in a format the other cannot parse — the same
+        -- collision phase 74 removed from ChangeWatermarks one layer down.
+        --
+        -- Value is nullable because absence is a real answer, not an error: fn_cdc_get_max_lsn()
+        -- returns null when the capture job has never run or has been stopped. Recording that as a
+        -- row with no value says "we asked and there was no position", which is exactly what
+        -- happened, and is not the same as no row at all (we never asked, or the source was down).
+        --
+        -- SourceDatabase rather than Database: DATABASE is a reserved word in T-SQL, and this schema
+        -- is one file rendered for three engines, so a name that needs quoting in one of them needs
+        -- quoting everywhere or nowhere. The prefix also matches SourceKind beside it.
+        --
+        -- Stored as text in both cases, in the same encoding ChangeWatermarks uses — hex for an LSN,
+        -- decimal for a version — so the value the gate compares and the value it records are one
+        -- string, not two representations that could disagree.
+        CREATE TABLE ChangeCheckHistory (
+            {{identity:Id}},
+            ConnectionName {{key}} NOT NULL,
+            SourceDatabase {{key}} NOT NULL,
+            SourceKind     {{key}} NOT NULL,
+            Value          {{text}} NULL,
+            CheckedAtUtc   {{key}} NOT NULL
+        );
+
+        -- On CheckedAtUtc alone, because the only reader of this table today is the age purge. The
+        -- group columns are indexed as part of no index deliberately: a status view that wants "the
+        -- latest value for this group" can be given its own index when it exists, and an index
+        -- maintained for a hypothetical reader costs every one of this table's very frequent writes.
+        CREATE INDEX IX_ChangeCheckHistory_CheckedAt ON ChangeCheckHistory(CheckedAtUtc);
+        """,
     ];
 }

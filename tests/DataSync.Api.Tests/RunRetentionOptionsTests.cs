@@ -27,6 +27,31 @@ public sealed class RunRetentionOptionsTests
         Assert.Equal(1_000, options.RunRetentionMaxPerMapping);
     }
 
+    /// <summary>
+    /// The change-check history gets a shorter default than run history, and that gap is the whole
+    /// reason it is a separate knob: it is written once per scheduler tick per source-database group,
+    /// not once per run, so ninety days of it is over a million rows for a single group.
+    /// </summary>
+    [Fact]
+    public void ChangeCheckRetention_DefaultsShorterThanRunRetention()
+    {
+        var options = Read();
+
+        Assert.Equal(7, options.ChangeCheckRetentionDays);
+        Assert.True(options.ChangeCheckRetentionDays < options.RunRetentionDays);
+    }
+
+    [Fact]
+    public void ChangeCheckRetention_ReadsItsOwnKey_AndZeroMeansKeepEverything()
+    {
+        Assert.Equal(30, Read(("ChangeCheckRetentionDays", "30")).ChangeCheckRetentionDays);
+        Assert.Null(Read(("ChangeCheckRetentionDays", "0")).ChangeCheckRetentionDays);
+
+        // And it does not follow RunRetentionDays: an operator who shortens run history has said
+        // nothing about how long they want to be able to ask whether a source went quiet.
+        Assert.Equal(7, Read(("RunRetentionDays", "5")).ChangeCheckRetentionDays);
+    }
+
     [Theory]
     [InlineData("30", 30)]
     [InlineData("1", 1)]

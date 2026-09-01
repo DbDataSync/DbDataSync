@@ -82,6 +82,27 @@ public sealed class ApiOptions
     public int? RunRetentionMaxPerMapping { get; init; }
 
     /// <summary>
+    /// How long the scheduler's change-check history is kept, in days — see phase 75. Null keeps it
+    /// forever.
+    /// <para>
+    /// **A second knob, reluctantly.** Phase 75 was asked to reuse <see cref="RunRetentionDays"/>
+    /// before adding a setting anyone has to learn, and to say so if reuse produced a table that
+    /// outgrew what that window was tuned for. It does, by two orders of magnitude. Run history is
+    /// one row per run; this is one row per scheduler tick per source-database group, and the tick is
+    /// every five seconds whether or not any replication is due — 17,280 rows per group per day, so
+    /// ninety days is roughly 1.5 million rows for a single group and tens of millions for a
+    /// deployment with a handful. That is not a retention policy, it is the unbounded growth
+    /// <see cref="RunRetentionDays"/> exists to prevent, arriving through a different table.
+    /// </para>
+    /// <para>
+    /// Seven days by default, which is the span the history is actually questioned over: "was the
+    /// source quiet overnight, or did the gate stop looking" is asked about last night or last week,
+    /// never about last quarter. Set it to 0 to keep everything, the same way the run caps read 0.
+    /// </para>
+    /// </summary>
+    public int? ChangeCheckRetentionDays { get; init; }
+
+    /// <summary>
     /// How often pruning runs. Hourly, and coarse on purpose: nothing about retention is
     /// time-sensitive, the work is a handful of deletes, and a frequent sweep would be contention with
     /// the writers that matter for no benefit anybody could observe.
@@ -112,6 +133,7 @@ public sealed class ApiOptions
             // no limit says so with 0, which is a decision; silence is not.
             RunRetentionDays = ReadCap(section["RunRetentionDays"], defaultValue: 90),
             RunRetentionMaxPerMapping = ReadCap(section["RunRetentionMaxPerMapping"], defaultValue: 1_000),
+            ChangeCheckRetentionDays = ReadCap(section["ChangeCheckRetentionDays"], defaultValue: 7),
             RunPruningInterval = TimeSpan.FromMinutes(
                 int.TryParse(section["RunPruningIntervalMinutes"], out var minutes) && minutes > 0 ? minutes : 60),
         };

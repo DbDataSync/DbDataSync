@@ -19,6 +19,7 @@ namespace DataSync.Api.Services;
 /// </summary>
 public sealed class RunPruningService(
     TaskRunStore taskRunStore,
+    ChangeCheckStore changeCheckStore,
     ApiOptions options,
     ILogger<RunPruningService> logger) : BackgroundService
 {
@@ -27,40 +28,61 @@ public sealed class RunPruningService(
         var maxAge = options.RunRetentionDays is { } days ? TimeSpan.FromDays(days) : (TimeSpan?)null;
         var maxPerMapping = options.RunRetentionMaxPerMapping;
 
-        if (maxAge is null && maxPerMapping is null)
+        // Phase 75's change-check history sweeps on this same tick rather than in a service of its
+        // own — a second background service would need its own answer to every question phase 39 and
+        // phase 60 already answered, for one more DELETE. Its window is its own, though: see
+        // ApiOptions.ChangeCheckRetentionDays for the arithmetic that made sharing RunRetentionDays
+        // the wrong call.
+        var checkMaxAge = options.ChangeCheckRetentionDays is { } checkDays
+            ? TimeSpan.FromDays(checkDays)
+            : (TimeSpan?)null;
+
+        if (maxAge is null && maxPerMapping is null && checkMaxAge is null)
         {
             // Said out loud once at startup rather than silently doing nothing forever. An operator who
             // turned both caps off should see that reflected somewhere, and an operator who thinks they
             // configured retention and did not should find out here rather than from a disk.
             logger.LogInformation(
-                "Run history pruning is off: neither DataSync:RunRetentionDays nor " +
-                "DataSync:RunRetentionMaxPerMapping is set to a positive value.");
+                "History pruning is off: none of DataSync:RunRetentionDays, " +
+                "DataSync:RunRetentionMaxPerMapping or DataSync:ChangeCheckRetentionDays is set to a " +
+                "positive value.");
             return;
         }
 
         logger.LogInformation(
-            "Pruning run history every {Interval}: keeping {Days} and at most {Max} run(s) per mapping.",
+            "Pruning history every {Interval}: keeping {Days} and at most {Max} run(s) per mapping, " +
+            "and {CheckDays} of change checks.",
             options.RunPruningInterval,
             maxAge is { } age ? $"{age.TotalDays:0} day(s)" : "runs of any age",
-            maxPerMapping?.ToString() ?? "unlimited");
+            maxPerMapping?.ToString() ?? "unlimited",
+            checkMaxAge is { } checkAge ? $"{checkAge.TotalDays:0} day(s)" : "checks of any age");
 
         // Immediately, then on the interval. An API that has just started after being down for a week
         // has a week of runs to catch up on, and waiting an hour to begin is an hour of holding rows
         // that were already past their retention when the process launched.
-        await PruneAsync(maxAge, maxPerMapping);
+        await PruneAsync(maxAge, maxPerMapping, checkMaxAge);
 
         using var timer = new PeriodicTimer(options.RunPruningInterval);
         while (await timer.WaitForNextTickAsync(stoppingToken))
-            await PruneAsync(maxAge, maxPerMapping);
+            await PruneAsync(maxAge, maxPerMapping, checkMaxAge);
     }
 
-    private Task PruneAsync(TimeSpan? maxAge, int? maxPerMapping)
+    /// <summary>
+    /// One sweep. Public so a test can prove that both histories go in the same pass — the reason
+    /// this table has no background service of its own, and the thing that would silently stop being
+    /// true if the second delete were dropped.
+    /// </summary>
+    public Task PruneAsync(TimeSpan? maxAge, int? maxPerMapping, TimeSpan? checkMaxAge)
     {
         try
         {
             var pruned = taskRunStore.PruneRuns(maxAge, maxPerMapping);
             if (pruned > 0)
                 logger.LogInformation("Pruned {Count} run(s) and their log lines from run history.", pruned);
+
+            var prunedChecks = changeCheckStore.PruneChecks(checkMaxAge);
+            if (prunedChecks > 0)
+                logger.LogInformation("Pruned {Count} change check(s) from the polling history.", prunedChecks);
         }
         catch (Exception ex)
         {
