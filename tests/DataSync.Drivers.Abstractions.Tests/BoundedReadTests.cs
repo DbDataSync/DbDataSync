@@ -71,4 +71,78 @@ public sealed class BoundedReadTests
         Assert.Null(BoundedRead.Descriptor.Default);
         Assert.Equal(BoundedRead.DefaultMaxRows.ToString(), BoundedRead.CappedDescriptor.Default);
     }
+
+    // ---- The commit time that travels with the position (phase 87) ------------------------------
+    //
+    // ReadResult carries two positions — the one computed up front and the one a capped pass actually
+    // reached — and now a time for each. The pairing rule is that a caller gets the time belonging to
+    // the position it is going to store, or no time; never the other one's.
+
+    private static ReadResult Result(
+        string newWatermark, DateTimeOffset? newWatermarkTime, BoundedReadPosition? bounded) =>
+        new(Rows(), newWatermark, Diagnostics: null, bounded, newWatermarkTime);
+
+    private static async IAsyncEnumerable<ChangeRow> Rows() { await Task.CompletedTask; yield break; }
+
+    private static readonly DateTimeOffset WindowEnd = new(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset LastRow = new(2026, 3, 1, 11, 30, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void AnUnboundedRead_ReportsTheTimeOfTheWatermarkItComputedUpFront()
+    {
+        var result = Result("100", WindowEnd, bounded: null);
+
+        Assert.Equal("100", result.WatermarkAfterRead);
+        Assert.Equal(WindowEnd, result.WatermarkTimeAfterRead);
+    }
+
+    /// <summary>
+    /// A capped pass that drained its whole window advances to the window's end, so the time it
+    /// reports is the window end's — the same coalesce the position itself makes.
+    /// </summary>
+    [Fact]
+    public void ABoundedReadThatDrainedItsWindow_ReportsTheWindowEndsTime()
+    {
+        var result = Result("100", WindowEnd, new BoundedReadPosition());
+
+        Assert.Equal("100", result.WatermarkAfterRead);
+        Assert.Equal(WindowEnd, result.WatermarkTimeAfterRead);
+    }
+
+    [Fact]
+    public void ABoundedReadTheCapCutShort_ReportsTheTimeOfThePositionItReached()
+    {
+        var result = Result(
+            "100", WindowEnd, new BoundedReadPosition { Reached = "60", ReachedTimeUtc = LastRow });
+
+        Assert.Equal("60", result.WatermarkAfterRead);
+        Assert.Equal(LastRow, result.WatermarkTimeAfterRead);
+    }
+
+    /// <summary>
+    /// **The case a plain null-coalesce would get wrong, and the reason the property keys off
+    /// <c>Reached</c> instead.** A pass cut short at version 60 whose commit time could not be placed
+    /// must report no time — coalescing would hand back the *window end's* time, a figure describing a
+    /// position this pass is not storing. On a mapping draining a backlog under a row cap, that is
+    /// exactly the mapping furthest behind reporting itself as caught up.
+    /// </summary>
+    [Fact]
+    public void ABoundedReadWhosePositionWouldNotMap_ReportsNoTimeRatherThanTheWindowEnds()
+    {
+        var result = Result("100", WindowEnd, new BoundedReadPosition { Reached = "60" });
+
+        Assert.Equal("60", result.WatermarkAfterRead);
+        Assert.Null(result.WatermarkTimeAfterRead);
+    }
+
+    /// <summary>Every other reader leaves the field alone, and gets a null rather than a
+    /// default-valued instant that would read as 1 January year 1.</summary>
+    [Fact]
+    public void AReaderThatCannotPlaceItsPositions_ReportsNoTimeAtAll()
+    {
+        var result = Result("100", newWatermarkTime: null, bounded: null);
+
+        Assert.Equal("100", result.WatermarkAfterRead);
+        Assert.Null(result.WatermarkTimeAfterRead);
+    }
 }

@@ -51,8 +51,13 @@ public sealed class LocalRunnerState(
             runId, status, rowsRead, rowsWritten, errorSummary, failureKind, timing,
             previousWatermark, newWatermark);
 
-    public void SetWatermark(string taskName, string mappingName, string sourceTable, string watermark) =>
-        watermarks.SetWatermark(taskName, mappingName, sourceTable, watermark);
+    public void SetWatermark(
+        string taskName,
+        string mappingName,
+        string sourceTable,
+        string watermark,
+        DateTimeOffset? watermarkTimeUtc = null) =>
+        watermarks.SetWatermark(taskName, mappingName, sourceTable, watermark, watermarkTimeUtc);
 
     public void RecordVerificationResult(VerificationResultRecord result) => verificationResults.Record(result);
 

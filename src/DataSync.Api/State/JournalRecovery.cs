@@ -133,7 +133,13 @@ public sealed class JournalRecovery(
                     break;
                 }
 
-                state.SetWatermark(s.TaskName, s.MappingName, s.SourceTable, s.Watermark);
+                // The cached commit time replays with it, and a journal old enough not to carry one
+                // replays without: an entry from before phase 87 lands as a position with no time,
+                // which is the same "no figure yet" a mapping that has not run since the migration
+                // already reports. Never a reason to hold back the watermark — the position is the
+                // outcome, the time is a convenience for a status screen.
+                state.SetWatermark(
+                    s.TaskName, s.MappingName, s.SourceTable, s.Watermark, s.WatermarkTimeUtc);
                 break;
 
             default:

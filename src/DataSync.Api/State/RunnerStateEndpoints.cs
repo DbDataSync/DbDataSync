@@ -79,7 +79,10 @@ public static class RunnerStateEndpoints
             if (r.MappingName is null)
                 return Results.BadRequest("set-watermark requires a mapping name.");
 
-            state.SetWatermark(r.TaskName, r.MappingName, r.SourceTable, r.Watermark);
+            // The cached time rides along with no check of its own. Unlike the mapping name above
+            // there is no wrong place for it to land: it is written to the row the watermark is
+            // written to, and its absence is already a state a lag report answers for.
+            state.SetWatermark(r.TaskName, r.MappingName, r.SourceTable, r.Watermark, r.WatermarkTimeUtc);
             return Results.Ok();
         });
 

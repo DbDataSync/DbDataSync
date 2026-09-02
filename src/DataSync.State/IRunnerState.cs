@@ -66,7 +66,15 @@ public interface IRunnerState
     /// whole run model rests on. That is what makes it safe to journal: its presence in a journal is
     /// itself the evidence the write succeeded.
     /// </summary>
-    void SetWatermark(string taskName, string mappingName, string sourceTable, string watermark);
+    /// <param name="watermarkTimeUtc">When the source says <paramref name="watermark"/> committed,
+    /// from the reader that just produced it (phase 87). Defaulted, because most readers have no such
+    /// mapping and none is required to have one — a null costs a lag figure, never the position.</param>
+    void SetWatermark(
+        string taskName,
+        string mappingName,
+        string sourceTable,
+        string watermark,
+        DateTimeOffset? watermarkTimeUtc = null);
 
     /// <summary>
     /// Where a verification result was written. An outcome like any other — the work is already done

@@ -162,4 +162,18 @@ public sealed class BoundedReadPosition
     /// </para>
     /// </summary>
     public string? Reached { get; set; }
+
+    /// <summary>
+    /// When the source says <see cref="Reached"/> committed, for a reader whose mechanism can state
+    /// it — set in the same place, on the same connection, from the same last row. See phase 87.
+    /// <para>
+    /// It has to be filled in here rather than derived afterwards for the reason
+    /// <see cref="Reached"/> itself does: the position is not known until the rows have streamed, and
+    /// by the time anyone outside asks, the connection the mapping would need is gone. Null when
+    /// <see cref="Reached"/> is null, and also when the mapping was attempted and did not answer —
+    /// <see cref="ReadResult.WatermarkTimeAfterRead"/> treats both as "no figure" rather than falling
+    /// back to a time belonging to a different position.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? ReachedTimeUtc { get; set; }
 }

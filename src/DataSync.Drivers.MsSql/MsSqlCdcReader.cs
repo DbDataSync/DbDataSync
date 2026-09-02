@@ -102,7 +102,9 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
             // The later of the two: the floor can be ahead of what the job has scanned, and the max
             // can be ahead of the floor once the job has caught up.
             var start = MsSqlCdcCatalog.Compare(floor, maxLsn) > 0 ? floor : maxLsn;
-            return new ReadResult(rows, MsSqlCdcCatalog.ToWatermark(start), diagnostics);
+            return new ReadResult(
+                rows, MsSqlCdcCatalog.ToWatermark(start), diagnostics,
+                NewWatermarkTimeUtc: await MapTimeAsync(sourceConnection, start, cancellationToken));
         }
 
         var minLsn = await MsSqlCdcCatalog.GetMinLsnAsync(sourceConnection, instance.CaptureInstance, cancellationToken);
@@ -116,8 +118,13 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
 
         // Nothing new. Returning the stored position rather than the max keeps the next pass's window
         // starting exactly where this one would have.
+        // Mapped even though the position has not moved: this is the pass that keeps a caught-up
+        // mapping's cached time populated, including for a row written before phase 87 added the
+        // column. A quiet mapping that only ever takes this branch would otherwise never acquire one.
         if (MsSqlCdcCatalog.Compare(storedLsn, maxLsn) >= 0)
-            return new ReadResult(Empty(), previousWatermark, diagnostics);
+            return new ReadResult(
+                Empty(), previousWatermark, diagnostics,
+                NewWatermarkTimeUtc: await MapTimeAsync(sourceConnection, storedLsn, cancellationToken));
 
         // Capped by default, unlike the watermark scan's opt-in: the ordering column here is the change
         // table's own clustered key, so bounding costs nothing to order by, and an uncapped pass over a
@@ -137,7 +144,39 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
                 cancellationToken),
             MsSqlCdcCatalog.ToWatermark(maxLsn),
             diagnostics,
-            bounded);
+            bounded,
+            // For the unbounded case, and for a bounded pass that drains its whole window — both of
+            // which store maxLsn. A pass the cap cuts short overrides this with the time of the
+            // position it actually reached, in the same place it overrides the position itself.
+            await MapTimeAsync(sourceConnection, maxLsn, cancellationToken));
+    }
+
+    /// <summary>
+    /// The time the engine puts on an LSN this pass is about to store, or null if it will not say.
+    /// <para>
+    /// **Free here and only here.** The connection is open, already in the mapping's own database, and
+    /// the position is the one being persisted — which is what lets a status screen later report lag
+    /// out of the state database instead of asking this server again every thirty seconds (phase 87).
+    /// </para>
+    /// <para>
+    /// **Never allowed to fail the pass.** A lag figure is a question about a replication; the
+    /// replication is the thing itself. The same judgement <c>ReaderLagService</c> already makes about
+    /// these calls — an unreachable or unhappy source means "no figure right now", not an error —
+    /// moved to the call site where the value is now produced. The caller records a null and the next
+    /// pass tries again.
+    /// </para>
+    /// </summary>
+    private static async Task<DateTimeOffset?> MapTimeAsync(
+        DbConnection connection, byte[] lsn, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await MsSqlCdcCatalog.MapLsnToTimeAsync(connection, lsn, cancellationToken);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -404,6 +443,13 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         // what makes stopping here resumable rather than lossy, given that the next pass resumes at
         // fn_cdc_increment_lsn(lastLsn) and will never look at that LSN again.
         if (bounded is not null && lastLsn is not null && maxRows is { } cap && rowsRead >= cap)
+        {
             bounded.Reached = MsSqlCdcCatalog.ToWatermark(lastLsn);
+
+            // Beside the position, from the same row, on the connection that just streamed it — the
+            // cap's own answer to the mapping done up front for maxLsn, which this pass is not
+            // storing. See ReadResult.WatermarkTimeAfterRead for why the pair travels together.
+            bounded.ReachedTimeUtc = await MapTimeAsync(connection, lastLsn, cancellationToken);
+        }
     }
 }

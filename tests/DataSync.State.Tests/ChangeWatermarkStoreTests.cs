@@ -82,4 +82,63 @@ public sealed class ChangeWatermarkStoreTests : IDisposable
         Assert.Null(_store.GetWatermark("crm-sync", "orders-by-version", table));
         Assert.Equal("2026-08-31T09:00:00Z", _store.GetWatermark("crm-sync", "orders-by-modified-at", table));
     }
+
+    // ---- The cached commit time beside the position (phase 87) ----------------------------------
+
+    /// <summary>
+    /// The pairing the column exists for: the time a lag report reads back is the one the pass that
+    /// stored *this* position supplied, written in the same statement so the two can never come from
+    /// two different passes.
+    /// </summary>
+    [Fact]
+    public void SetWatermark_StoresTheSourcesTimeForThatPosition_AndReadsItBackWithIt()
+    {
+        var committed = new DateTimeOffset(2026, 3, 1, 11, 55, 0, TimeSpan.Zero);
+        _store.SetWatermark("crm-sync", "orders", "orders-db/App/dbo.Orders", "12345", committed);
+
+        var applied = _store.GetAppliedPosition("crm-sync", "orders", "orders-db/App/dbo.Orders");
+
+        Assert.NotNull(applied);
+        Assert.Equal("12345", applied.Watermark);
+        Assert.Equal(committed, applied.WatermarkTimeUtc);
+    }
+
+    /// <summary>
+    /// A reader that has no position-to-time mapping, or a pass where the engine declined to place
+    /// the position. The position is still the outcome and is still stored; the missing time is a lag
+    /// figure nobody gets this pass, which is what a null says.
+    /// </summary>
+    [Fact]
+    public void SetWatermark_WithNoTime_StoresThePositionAndANullTime()
+    {
+        _store.SetWatermark("crm-sync", "orders", "orders-db/App/dbo.Orders", "12345");
+
+        var applied = _store.GetAppliedPosition("crm-sync", "orders", "orders-db/App/dbo.Orders");
+
+        Assert.NotNull(applied);
+        Assert.Equal("12345", applied.Watermark);
+        Assert.Null(applied.WatermarkTimeUtc);
+    }
+
+    /// <summary>
+    /// **A later pass that cannot state a time clears the earlier one rather than leaving it.** A
+    /// stale time beside a moved position is the one outcome worse than no time at all: it reads as a
+    /// current figure and is silently about a position the mapping has already passed.
+    /// </summary>
+    [Fact]
+    public void SetWatermark_WithoutATime_ClearsATimeAnEarlierPassStored()
+    {
+        var committed = new DateTimeOffset(2026, 3, 1, 11, 55, 0, TimeSpan.Zero);
+        _store.SetWatermark("crm-sync", "orders", "orders-db/App/dbo.Orders", "12345", committed);
+        _store.SetWatermark("crm-sync", "orders", "orders-db/App/dbo.Orders", "67890");
+
+        var applied = _store.GetAppliedPosition("crm-sync", "orders", "orders-db/App/dbo.Orders");
+
+        Assert.Equal("67890", applied!.Watermark);
+        Assert.Null(applied.WatermarkTimeUtc);
+    }
+
+    [Fact]
+    public void GetAppliedPosition_WhenTheMappingHasNeverRun_ReturnsNull() =>
+        Assert.Null(_store.GetAppliedPosition("crm-sync", "orders", "orders-db/App/dbo.Orders"));
 }

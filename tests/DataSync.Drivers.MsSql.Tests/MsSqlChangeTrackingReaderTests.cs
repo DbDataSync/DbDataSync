@@ -277,4 +277,59 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         Assert.Equal(2, (await CollectAsync(result.Rows)).Count);
         Assert.Equal(result.NewWatermark, result.WatermarkAfterRead);
     }
+
+    // ---- The commit time captured beside the version (phase 87) ---------------------------------
+
+    /// <summary>
+    /// The read returns not just the version it is about to store but the engine's own time for it,
+    /// looked up on the connection this pass already had open. That is what lets a lag report later
+    /// be a state-database read: without it, the applied side of every CDC/Change Tracking lag
+    /// figure had to be re-asked of the source on each request.
+    /// </summary>
+    [Fact]
+    public async Task AReadCarriesTheEnginesCommitTimeForTheVersionItIsAboutToStore()
+    {
+        var watermark = await BaselineAsync();
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+
+        var result = await _reader.ReadChangesAsync(
+            _connection, Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
+        await CollectAsync(result.Rows);
+
+        // Not merely non-null: it has to be a time dm_tran_commit_table actually stated for this
+        // version, and the independent lookup of the same version is the only thing that proves the
+        // reader asked about the position it is storing rather than some other one.
+        Assert.NotNull(result.NewWatermarkTimeUtc);
+        Assert.Equal(
+            await MsSqlChangeTrackingReader.MapVersionToTimeAsync(
+                _connection, long.Parse(result.WatermarkAfterRead), CancellationToken.None),
+            result.WatermarkTimeAfterRead);
+    }
+
+    /// <summary>
+    /// **A capped pass reports the time of the version it reached, not the window's end.** The two
+    /// are different positions with different commit times, and the mapping stores the former — a
+    /// mapping draining a backlog under a row cap is exactly the one whose lag would otherwise read
+    /// as caught-up. See <c>ReadResult.WatermarkTimeAfterRead</c>.
+    /// </summary>
+    [Fact]
+    public async Task ABoundedReadCutShort_CarriesTheTimeOfThePositionItReached()
+    {
+        var watermark = await BaselineAsync();
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'a');");
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'b');");
+
+        var result = await _reader.ReadChangesAsync(
+            _connection, Source(), watermark, [], Bounded(1), CancellationToken.None);
+        Assert.Single(await CollectAsync(result.Rows));
+
+        // Cut short, so the stored position is the last row's version — and the time travels with it
+        // rather than with the target version the pass did not reach.
+        Assert.NotEqual(result.NewWatermark, result.WatermarkAfterRead);
+        Assert.NotNull(result.WatermarkTimeAfterRead);
+        Assert.Equal(
+            await MsSqlChangeTrackingReader.MapVersionToTimeAsync(
+                _connection, long.Parse(result.WatermarkAfterRead), CancellationToken.None),
+            result.WatermarkTimeAfterRead);
+    }
 }

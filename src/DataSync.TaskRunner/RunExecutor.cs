@@ -558,6 +558,7 @@ public sealed class RunExecutor(
             long totalRead = 0;
             long totalWritten = 0;
             string? newWatermark = null;
+            DateTimeOffset? newWatermarkTime = null;
             WatermarkChange? watermarkChange = null;
 
             // Resolved once per pass. Off means the row stream is never wrapped and no stopwatch is
@@ -722,6 +723,12 @@ public sealed class RunExecutor(
                 // row-bounded read only knows where it got to once its rows have been through. See
                 // ReadResult.
                 newWatermark = read.WatermarkAfterRead;
+
+                // Taken from the same ReadResult as the position above, and never from anywhere
+                // else: the reader mapped this exact position to a time on the connection this pass
+                // already had open, which is the whole reason a lag report can later cost the source
+                // nothing. Null for every reader that has no such mapping. See phase 87.
+                newWatermarkTime = read.WatermarkTimeAfterRead;
             }
 
             // Segmented passes only ever happen with a reload reader, which has no watermark of its
@@ -729,7 +736,7 @@ public sealed class RunExecutor(
             // same as taking any of them. An ordinary incremental pass has exactly one segment (none).
             if (item.RunKind == RunKind.Primary && newWatermark is not null)
             {
-                state.SetWatermark(task.Name, mapping.Name, watermarkKey, newWatermark);
+                state.SetWatermark(task.Name, mapping.Name, watermarkKey, newWatermark, newWatermarkTime);
 
                 // Recorded from inside the same gate that writes the current value, not beside it, so
                 // the history on TaskRuns cannot claim an advance ChangeWatermarks did not take.

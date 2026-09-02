@@ -49,11 +49,16 @@ public static class ChangeCounters
 /// when the source has no position to give — <c>fn_cdc_get_max_lsn()</c> before the capture job has
 /// run.</param>
 /// <param name="SourceTimeUtc">
-/// When the engine says <paramref name="Value"/> committed. Filled on the CDC round-trip only, and
-/// null everywhere else — not because Change Tracking has no mapping (it does, through
-/// <c>dm_tran_commit_table</c>) but because CDC's costs nothing here: <c>fn_cdc_map_lsn_to_time</c>
-/// rides along on the round-trip that already fetched the LSN, whereas the DMV lookup is a second
-/// query worth making only when a lag figure is actually asked for. See phase 85.
+/// When the engine says <paramref name="Value"/> committed — filled for both mechanisms, and null
+/// only when the engine will not place the position or there is no position to place.
+/// <para>
+/// CDC's mapping rides along on the round-trip that already fetched the LSN; Change Tracking's is a
+/// second query on the same connection, which phase 85 deliberately did not make and phase 87 makes.
+/// The cost of not making it was not zero, it was moved: every lag request became the one asking, and
+/// a status screen refreshing every thirty seconds across every mapping in a replication asks far
+/// more often than a gate tick does. One query per group per tick is the cheaper of the two, and it
+/// catches the version while <c>dm_tran_commit_table</c>'s rolling window is certain to still hold it.
+/// </para>
 /// </param>
 public sealed record ChangeCounterReading(string? Value, DateTimeOffset? SourceTimeUtc = null);
 
@@ -139,9 +144,19 @@ public sealed class DriverChangeCounterSource(DriverConnectionFactory connection
                         await MsSqlCdcCatalog.MapLsnToTimeAsync(connection, lsn, cancellationToken));
 
                 case MsSqlDriverKinds.ChangeTracking:
+                    // A second query rather than CDC's free rider, and made anyway — phase 85 left
+                    // this null on the reasoning that the DMV lookup was "better made on demand", and
+                    // on demand turned out to mean once per mapping per thirty-second refresh of
+                    // every status screen watching this source. Once per group per tick is strictly
+                    // fewer, and it is the moment the version is guaranteed to still be inside
+                    // dm_tran_commit_table's rolling window. See phase 87.
+                    var version =
+                        await MsSqlChangeTrackingReader.GetCurrentVersionAsync(connection, cancellationToken);
+
                     return new ChangeCounterReading(
-                        (await MsSqlChangeTrackingReader.GetCurrentVersionAsync(connection, cancellationToken))
-                            .ToString());
+                        version.ToString(),
+                        await MsSqlChangeTrackingReader.MapVersionToTimeAsync(
+                            connection, version, cancellationToken));
 
                 default:
                     throw new InvalidOperationException(

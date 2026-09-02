@@ -50,8 +50,17 @@ public sealed record CompleteRunRequest(
 /// for the reason <see cref="CompleteRunRequest.FailureKind"/> is: an entry journalled before this
 /// existed still has to deserialize. Recovery skips such an entry rather than inventing a mapping for
 /// it — see <c>JournalRecovery</c>.</param>
+/// <param name="WatermarkTimeUtc">When the source says <paramref name="Watermark"/> committed (phase
+/// 87). Defaulted and nullable for the reason <see cref="MappingName"/> is — an entry journalled
+/// before this existed still has to deserialize — but unlike that one it needs no recovery decision:
+/// an entry without it replays as a watermark with no cached time, which is exactly what a lag report
+/// already knows how to answer.</param>
 public sealed record SetWatermarkRequest(
-    string TaskName, string SourceTable, string Watermark, string? MappingName = null);
+    string TaskName,
+    string SourceTable,
+    string Watermark,
+    string? MappingName = null,
+    DateTimeOffset? WatermarkTimeUtc = null);
 public sealed record RecordVerificationResultRequest(VerificationResultRecord Result);
 public sealed record LogRequest(Guid RunId, LogSeverity Level, string Message, DateTimeOffset TimestampUtc);
 

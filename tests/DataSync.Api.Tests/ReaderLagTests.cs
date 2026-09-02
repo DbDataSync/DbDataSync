@@ -16,17 +16,25 @@ using Xunit;
 namespace DataSync.Api.Tests;
 
 /// <summary>
-/// Reader lag — see phase 85. Three figures over two mechanisms: CDC's real duration from the
-/// engine's own LSN-to-time mapping, Change Tracking's exact version count, and Change Tracking's
-/// duration — exact too while <c>dm_tran_commit_table</c> can still place its versions, and
-/// reconstructed from this system's own polling history once it cannot.
+/// Reader lag — phase 85's three figures over two mechanisms, computed since phase 87 entirely out of
+/// the state database.
 /// <para>
-/// **A test that leaves a version out of the fake's <c>Times</c> is choosing the fallback path**, the
-/// way a real DMV chooses it by ageing the version out. The pair of paths is asserted in both
-/// directions — that an available exact answer is taken and leaves the estimate null, and that an
-/// unavailable one produces an estimate and leaves the exact field null — because a shape whose whole
-/// purpose is to keep two precisions apart is only doing that if neither can be reached through the
-/// other's field.
+/// **The property this file exists to pin is now a fact about the constructor.** <c>ReaderLagService</c>
+/// has no <c>IChangeCounterSource</c> to call and no <c>async</c> method to await, so "a status screen
+/// must not become a second poller of the source" is not a rule these tests check but a shape they
+/// could not violate if they tried. What they check instead is that every figure still comes out
+/// right when both halves of every subtraction are read back from where they were cached — and that
+/// the figure is absent, rather than reconstructed from whatever else is at hand, when one of them
+/// was never written.
+/// </para>
+/// <para>
+/// **Two caches, filled at two different moments.** The group's current position and its commit time
+/// arrive on the polling gate's own tick (<c>ChangeCheckHistory</c>, phase 85 for CDC and phase 87 for
+/// Change Tracking). The mapping's own applied position and *its* commit time arrive on the pass that
+/// stored the watermark (<c>ChangeWatermarks.WatermarkTimeUtc</c>, phase 87). A test writes each
+/// directly, and a test that leaves one out is choosing the fallback path the way a real deployment
+/// chooses it: a mapping that has not run since the column existed, or a gate tick whose capture
+/// failed.
 /// </para>
 /// <para>
 /// **What every one of these is really asserting is that nothing here is measured against now.** The
@@ -35,11 +43,6 @@ namespace DataSync.Api.Tests;
 /// climbs for ever, and an alarm built on it goes off when there is nothing to do. Each figure below
 /// has the source's own last-known position on the other side of the subtraction instead, which is
 /// why <c>OnAQuietCaughtUpSource</c> can assert zero against history written an hour ago.
-/// </para>
-/// <para>
-/// The counter round-trip is the one thing faked, as it is for the gate, and for the same reason.
-/// The config, the driver registry that names the dialect the watermark key is spelled in, and both
-/// state tables are the real ones the API is wired with.
 /// </para>
 /// </summary>
 public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestApiFactory>
@@ -58,17 +61,15 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
     /// is asserting rather than the clock it ran on.</summary>
     private static readonly DateTimeOffset Origin = new(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
 
-    private (ReaderLagService Lag, FakeChangeCounterSource Source) BuildLag()
-    {
-        var source = new FakeChangeCounterSource();
-        var lag = new ReaderLagService(
-            factory.Services.GetRequiredService<ChangeSourceResolver>(),
-            source,
-            factory.Services.GetRequiredService<ChangeWatermarkStore>(),
-            factory.Services.GetRequiredService<ChangeCheckStore>(),
-            NullLogger<ReaderLagService>.Instance);
-        return (lag, source);
-    }
+    /// <summary>
+    /// The service under test, built from the two state stores and nothing else — which is the whole
+    /// of its dependency list since phase 87 removed the counter source from it.
+    /// </summary>
+    private ReaderLagService BuildLag() => new(
+        factory.Services.GetRequiredService<ChangeSourceResolver>(),
+        factory.Services.GetRequiredService<ChangeWatermarkStore>(),
+        factory.Services.GetRequiredService<ChangeCheckStore>(),
+        NullLogger<ReaderLagService>.Instance);
 
     /// <summary>
     /// A replication with one mapping, on a source database named uniquely per test.
@@ -126,15 +127,25 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
             database);
     }
 
-    /// <summary>Writes the mapping's watermark under the key the lag service will read it by — built
-    /// through the source's own dialect, so a change to WatermarkKey.Build cannot leave these passing
-    /// against a key nothing else uses.</summary>
-    private void SetWatermark(ReplicationTaskConfig task, string watermark)
+    /// <summary>
+    /// Writes the mapping's watermark, and the source's own time for it, under the key the lag service
+    /// will read them by — built through the source's own dialect, so a change to
+    /// <c>WatermarkKey.Build</c> cannot leave these passing against a key nothing else uses.
+    /// </summary>
+    /// <param name="watermarkTime">
+    /// What the reader mapped this position to on the pass that stored it. **Omitting it is a test
+    /// choosing the uncached case**, which in production is a row written before phase 87 added the
+    /// column, a reader with no position-to-time mapping, or an engine that declined to place the
+    /// position — three causes, one answer.
+    /// </param>
+    private void SetWatermark(
+        ReplicationTaskConfig task, string watermark, DateTimeOffset? watermarkTime = null)
     {
         var source = EndpointResolution.ResolveSource(
             task, new SourceTableSpec { Schema = "dbo", Table = "orders" });
         factory.Services.GetRequiredService<ChangeWatermarkStore>().SetWatermark(
-            task.Name, "orders", WatermarkKey.Build(source, MsSqlDialect.Instance), watermark);
+            task.Name, "orders", WatermarkKey.Build(source, MsSqlDialect.Instance), watermark,
+            watermarkTime);
     }
 
     /// <summary>
@@ -173,27 +184,20 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
     public async Task CdcLag_IsTheDistanceBetweenTheMappingsPositionAndTheSourcesLastKnownOne()
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
-        var applied = Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1);
-        SetWatermark(task, applied);
 
-        // The source had reached 12:00 when it was last polled; the mapping's own position maps to
-        // 11:55. Five minutes behind, and both ends come from the engine's own mapping function.
+        // The mapping's own position, and the time its own pass mapped that position to: 11:55. The
+        // source had reached 12:00 when the gate last polled it. Five minutes behind, both ends from
+        // fn_cdc_map_lsn_to_time on the same server, neither asked for here.
+        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1), Origin - TimeSpan.FromMinutes(5));
         RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1),
             Origin, sourceTime: Origin);
 
-        var (lag, source) = BuildLag();
-        source.Times[applied] = Origin - TimeSpan.FromMinutes(5);
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         Assert.True(result.Supported);
         Assert.Equal(TimeSpan.FromMinutes(5), result.ExactLag);
         Assert.Null(result.ExactVersionsBehind);
         Assert.Null(result.EstimatedLag);
-
-        // Read out of the history the gate already wrote. A status screen refreshing every few
-        // seconds must not become a second poller of the source.
-        Assert.Empty(source.Fetches);
     }
 
     [Fact]
@@ -201,63 +205,88 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
         var applied = Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1);
-        SetWatermark(task, applied);
 
         // The bug the naive definition would have shipped, written as a test: the last poll was an
         // hour ago and the source has not moved since. Against wall-clock now this reads as an hour
         // behind. Against the source's own position it is what it is — caught up.
         var lastPoll = DateTimeOffset.UtcNow - TimeSpan.FromHours(1);
+        SetWatermark(task, applied, lastPoll);
         RecordCheck(database, MsSqlDriverKinds.Cdc, applied, lastPoll, sourceTime: lastPoll);
 
-        var (lag, source) = BuildLag();
-        source.Times[applied] = lastPoll;
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
-
-        Assert.Equal(TimeSpan.Zero, result.ExactLag);
+        Assert.Equal(TimeSpan.Zero, BuildLag().Describe(task, "orders").ExactLag);
     }
 
     [Fact]
     public async Task CdcLag_ClampsAMappingAheadOfTheLastPollToZero()
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
-        var applied = Lsn(0, 0, 0, 42, 0, 0, 1, 44, 0, 1);
-        SetWatermark(task, applied);
+
+        // Legitimate, not a corruption: a pass ran between two polls and read past the position the
+        // earlier one recorded, so its cached time is *later* than the group's. Negative is not a
+        // lag, and reporting one would be a UI showing a replication as "-90s behind".
+        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 1, 44, 0, 1), Origin + TimeSpan.FromMinutes(90));
         RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1),
             Origin, sourceTime: Origin);
 
-        var (lag, source) = BuildLag();
-
-        // Legitimate, not a corruption: a pass ran between two polls and read past the position the
-        // earlier one recorded. Negative is not a lag, and reporting one would be a UI showing a
-        // replication as "-90s behind".
-        source.Times[applied] = Origin + TimeSpan.FromMinutes(90);
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
-
-        Assert.Equal(TimeSpan.Zero, result.ExactLag);
+        Assert.Equal(TimeSpan.Zero, BuildLag().Describe(task, "orders").ExactLag);
     }
 
     [Fact]
-    public async Task CdcLag_FallsBackToALiveFetchWhenNoHistoryCarriesASourceTime()
+    public async Task CdcLag_MeasuresAgainstTheLatestCheckThatCarriesATime()
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
-        var applied = Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1);
-        SetWatermark(task, applied);
+        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1), Origin - TimeSpan.FromMinutes(5));
+
+        RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1),
+            Origin, sourceTime: Origin);
+
+        // A later poll that found no position at all — the capture job stopped. Taking the latest row
+        // would report nothing and hide a lag that is growing for exactly that reason; taking the
+        // latest row that *has* a time keeps the figure alive on the last reading there was.
+        RecordCheck(database, MsSqlDriverKinds.Cdc, value: null, Origin.AddMinutes(30));
+
+        Assert.Equal(TimeSpan.FromMinutes(5), BuildLag().Describe(task, "orders").ExactLag);
+    }
+
+    [Fact]
+    public async Task CdcLag_ReportsNoDataYetRatherThanFetchingWhenNoCheckCarriesASourceTime()
+    {
+        var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
+        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1), Origin - TimeSpan.FromMinutes(2));
 
         // A row exists, but from before the capture job had produced a position at all — so it has no
-        // time on it, and the group has nothing usable to measure against. The fresh install case.
+        // time on it, and the group has nothing usable to measure against. The fresh install case,
+        // which phase 85 answered with a live fetch through IChangeCounterSource. Phase 87 removed
+        // that branch: a first install resolves itself on the next gate tick, and keeping the branch
+        // meant every status screen retained a path to the source for the sake of one tick's wait.
         RecordCheck(database, MsSqlDriverKinds.Cdc, value: null, Origin);
 
-        var (lag, source) = BuildLag();
-        source.Set("lag-src", database, MsSqlDriverKinds.Cdc,
-            Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1), sourceTime: Origin);
-        source.Times[applied] = Origin - TimeSpan.FromMinutes(2);
+        var result = BuildLag().Describe(task, "orders");
 
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        // Supported, and no figure yet — the same state a mapping that has never read reports, not an
+        // error and not a number.
+        Assert.True(result.Supported);
+        Assert.Null(result.ExactLag);
+    }
 
-        Assert.Equal(TimeSpan.FromMinutes(2), result.ExactLag);
-        Assert.Single(source.Fetches);
+    [Fact]
+    public async Task CdcLag_ReportsNoDataYetForAWatermarkStoredBeforeTheCacheExisted()
+    {
+        var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
+
+        // A position with no cached time: the mapping last ran before phase 87 added the column, and
+        // nothing backfills it — there is nothing to backfill it *from*. The group's own side is
+        // fully populated, so this isolates the mapping's half of the subtraction.
+        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1));
+        RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1),
+            Origin, sourceTime: Origin);
+
+        var result = BuildLag().Describe(task, "orders");
+
+        // Not an exception, not a live lookup, and — the point — not a figure invented from the one
+        // end that is available. One pass from now this mapping reports normally.
+        Assert.True(result.Supported);
+        Assert.Null(result.ExactLag);
     }
 
     [Fact]
@@ -267,44 +296,9 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1),
             Origin, sourceTime: Origin);
 
-        var (lag, _) = BuildLag();
-
         // Supported, and unknown. A first pass has no position to be behind from, and a big number
         // there would read as an alarm about a replication that has simply not started.
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
-
-        Assert.True(result.Supported);
-        Assert.Null(result.ExactLag);
-    }
-
-    [Fact]
-    public async Task CdcLag_IsNullWhenTheMappingsPositionHasAgedOutOfTheMapping()
-    {
-        var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
-        SetWatermark(task, Lsn(0, 0, 0, 1, 0, 0, 0, 1, 0, 1));
-        RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1),
-            Origin, sourceTime: Origin);
-
-        // fn_cdc_map_lsn_to_time answers null for a position outside the retained window. Null out,
-        // rather than a fabricated distance from a time the source declined to state.
-        var (lag, _) = BuildLag();
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
-
-        Assert.Null(result.ExactLag);
-    }
-
-    [Fact]
-    public async Task CdcLag_IsNullRatherThanAnErrorWhenTheSourceCannotBeReached()
-    {
-        var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
-        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1));
-
-        var (lag, source) = BuildLag();
-        source.Unreachable.Add(("lag-src", database, MsSqlDriverKinds.Cdc));
-
-        // Asking how far behind something is must never be able to fail the screen it is on.
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         Assert.True(result.Supported);
         Assert.Null(result.ExactLag);
@@ -313,22 +307,19 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
     // ---- Change Tracking, exact -----------------------------------------------------------------
 
     [Fact]
-    public async Task ChangeTrackingExact_IsTheVersionDifference_WithNoRoundTrip()
+    public async Task ChangeTrackingExact_IsTheVersionDifference_FromTwoStoredNumbers()
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
         SetWatermark(task, "40");
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin);
 
-        var (lag, source) = BuildLag();
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         // Sixty versions, exact by construction: both numbers were already stored, neither is
         // estimated, and no time is claimed about them — what a version is worth depends entirely on
         // how often the source's tables are written to.
         Assert.Equal(60, result.ExactVersionsBehind);
         Assert.Null(result.ExactLag);
-        Assert.Empty(source.Fetches);
     }
 
     [Fact]
@@ -338,32 +329,26 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         SetWatermark(task, "140");
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin);
 
-        var (lag, _) = BuildLag();
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
-
-        Assert.Equal(0, result.ExactVersionsBehind);
+        Assert.Equal(0, BuildLag().Describe(task, "orders").ExactVersionsBehind);
     }
 
-    // ---- Change Tracking, exact time via dm_tran_commit_table -----------------------------------
+    // ---- Change Tracking, exact time from two cached dm_tran_commit_table answers ----------------
 
     [Fact]
-    public async Task ChangeTrackingTime_IsExactWhileTheEngineStillHoldsBothVersions()
+    public async Task ChangeTrackingTime_IsExactWhenBothCommitTimesWereCaptured()
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
-        SetWatermark(task, "40");
 
         // A polling sequence that would produce a 40-minute *estimate* if it were consulted. It is
-        // not, because the DMV can still place both versions, and 25 minutes is what actually
-        // elapsed between the two commits.
+        // not, because both commit times were captured — the mapping's by the pass that stored
+        // version 40, the group's by the gate tick that saw version 100 — and 25 minutes is what
+        // actually elapsed between the two commits.
+        SetWatermark(task, "40", Origin.AddMinutes(5));
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "10", Origin);
-        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(40));
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(40),
+            sourceTime: Origin.AddMinutes(30));
 
-        var (lag, source) = BuildLag();
-        source.Times["40"] = Origin.AddMinutes(5);
-        source.Times["100"] = Origin.AddMinutes(30);
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         // Exact, in the same field CDC's exact figure arrives in, because it is exact in the same
         // sense: both ends are times the engine itself stated for those versions.
@@ -376,23 +361,19 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
     }
 
     [Fact]
-    public async Task ChangeTrackingTime_FallsBackToTheEstimateOnlyOnceTheVersionHasAgedOut()
+    public async Task ChangeTrackingTime_FallsBackToTheEstimateWhenTheMappingsOwnTimeWasNeverCached()
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
-        SetWatermark(task, "40");
 
+        // The mapping last ran before its commit time had anywhere to be stored. The gate's side is
+        // fully populated, and it is still not enough: half an exact answer is not an exact answer.
+        SetWatermark(task, "40");
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "25", Origin);
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "55", Origin.AddMinutes(20));
-        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(60));
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(60),
+            sourceTime: Origin.AddMinutes(60));
 
-        var (lag, source) = BuildLag();
-
-        // The current version is still in the DMV's window; the mapping's own, being older, is not.
-        // This is the ordinary shape of a mapping far enough behind to be worth reporting on, and
-        // it is the condition — the *only* condition — that hands the figure to the estimate.
-        source.Times["100"] = Origin.AddMinutes(60);
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         Assert.Null(result.ExactLag);
         Assert.Equal(TimeSpan.FromMinutes(40), result.EstimatedLag);
@@ -402,64 +383,32 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
     public async Task ChangeTrackingTime_NeverMixesAnEngineTimeWithAPollTime()
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
-        SetWatermark(task, "40");
 
-        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "40", Origin);
-        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(50));
-
-        var (lag, source) = BuildLag();
-
-        // The unlikely half of the window: the mapping's version is placeable and the group's
-        // current one is not. Half an exact answer is available, and taking it would mean
+        // The other half of the same window: the mapping's version is placed and the group's current
+        // one is not — a gate tick whose DMV lookup came back empty, or a row written before the gate
+        // captured this mechanism's time at all. Taking the half that is available would mean
         // subtracting an engine-stated commit time from the wall-clock instant a poll happened to
         // run — a figure whose error is the polling interval, reported in the field that promises
         // there is none. Both ends from the engine, or the estimate, which at least owns its error.
-        source.Times["40"] = Origin.AddMinutes(10);
+        SetWatermark(task, "40", Origin.AddMinutes(10));
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "40", Origin);
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(50));
 
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         Assert.Null(result.ExactLag);
         Assert.Equal(TimeSpan.FromMinutes(50), result.EstimatedLag);
     }
 
     [Fact]
-    public async Task ChangeTrackingTime_FallsBackToTheEstimateWhenTheSourceCannotBeReached()
-    {
-        var (task, database) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
-        SetWatermark(task, "40");
-
-        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "40", Origin);
-        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(15));
-
-        var (lag, source) = BuildLag();
-        source.Unreachable.Add(("lag-src", database, MsSqlDriverKinds.ChangeTracking));
-
-        // Unlike CDC, there is somewhere to go when the source will not answer: the estimate needs
-        // no source at all. An unreachable server costs this figure its precision, not its
-        // existence.
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
-
-        Assert.Null(result.ExactLag);
-        Assert.Equal(TimeSpan.FromMinutes(15), result.EstimatedLag);
-        Assert.Equal(60, result.ExactVersionsBehind);
-    }
-
-    [Fact]
     public async Task TheEndpointReportsAnExactChangeTrackingTimeInTheExactField()
     {
         var (task, database) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
-        SetWatermark(task, "40");
-        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin);
+        SetWatermark(task, "40", Origin.AddMinutes(1));
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin,
+            sourceTime: Origin.AddMinutes(21));
 
-        // Registered directly rather than through the API's own DI, because the endpoint resolves
-        // the real DriverChangeCounterSource and this test is about which field the figure lands in
-        // over the wire, not about reaching a server.
-        var (lag, source) = BuildLag();
-        source.Times["40"] = Origin.AddMinutes(1);
-        source.Times["100"] = Origin.AddMinutes(21);
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
-        var body = MappingLag.From(result);
+        var body = MappingLag.From(BuildLag().Describe(task, "orders"));
 
         // The distinction the shape exists to keep, from the other side: the same mechanism that
         // produced an estimate in TheEndpointReportsTheThreeFiguresUnderThreeSeparateNames produces
@@ -487,14 +436,11 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "80", Origin.AddMinutes(30));
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(60));
 
-        var (lag, source) = BuildLag();
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         Assert.Equal(TimeSpan.FromMinutes(40), result.EstimatedLag);
         Assert.Equal(60, result.ExactVersionsBehind);
         Assert.Null(result.ExactLag);
-        Assert.Empty(source.Fetches);
     }
 
     [Fact]
@@ -511,9 +457,7 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "10", Origin.AddMinutes(20));
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "12", Origin.AddMinutes(30));
 
-        var (lag, _) = BuildLag();
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         Assert.Equal(TimeSpan.FromMinutes(10), result.EstimatedLag);
         Assert.Equal(2, result.ExactVersionsBehind);
@@ -528,9 +472,7 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "60", Origin);
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(30));
 
-        var (lag, _) = BuildLag();
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         // The mapping's crossing row is the latest row, so the two ends of the subtraction are the
         // same instant. Zero — and it stays zero however long the source then stays quiet.
@@ -547,12 +489,10 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "60", Origin);
         RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(30));
 
-        var (lag, _) = BuildLag();
+        var result = BuildLag().Describe(task, "orders");
 
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
-
-        // No live fallback exists for this figure and none can: nothing on the source answers "what
-        // time did version 500 first exist". Null, never a synthesised zero, which would read as
+        // Nothing anywhere answers "what time did version 500 first exist" — not the history, and
+        // since phase 87 not a live query either. Null, never a synthesised zero, which would read as
         // "caught up" — the one thing this mapping is provably not.
         Assert.Null(result.EstimatedLag);
 
@@ -564,15 +504,14 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
     public async Task ChangeTracking_ReportsNothingWhenItsGroupHasNeverBeenPolled()
     {
         var (task, _) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
-        SetWatermark(task, "40");
+        SetWatermark(task, "40", Origin);
 
-        var (lag, _) = BuildLag();
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         Assert.True(result.Supported);
         Assert.Null(result.ExactVersionsBehind);
         Assert.Null(result.EstimatedLag);
+        Assert.Null(result.ExactLag);
     }
 
     // ---- Mechanisms with nothing to say, and the endpoint ---------------------------------------
@@ -587,14 +526,36 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         var (task, _) = await SetUpAsync(
             GenericDriverKinds.Watermark, new Dictionary<string, string> { ["watermarkColumn"] = "ModifiedAt" });
 
-        var (lag, _) = BuildLag();
-
-        var result = await lag.DescribeAsync(task, "orders", CancellationToken.None);
+        var result = BuildLag().Describe(task, "orders");
 
         // "Not applicable" and "nothing yet" are different states, and a consumer must be able to
         // tell them apart without inferring it from three nulls.
         Assert.False(result.Supported);
         Assert.Equal(GenericDriverKinds.Watermark, result.ReaderKind);
+    }
+
+    [Fact]
+    public async Task TheEndpointReportsAnExactFigureWithoutEverReachingTheSource()
+    {
+        var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
+        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1), Origin - TimeSpan.FromMinutes(7));
+        RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1),
+            Origin, sourceTime: Origin);
+
+        // Over HTTP, through the API's real DI — which resolves the real DriverChangeCounterSource
+        // and a 'lag-src' connection pointing at a SQL Server that is not there. Under phase 85 this
+        // exact request had to call fn_cdc_map_lsn_to_time to place the mapping's own position, so it
+        // could only have come back null. An exact seven minutes is the regression test for the whole
+        // phase: the figure is complete and no source was involved in producing it.
+        var response = await _client.GetAsync(
+            $"/api/replications/{task.Name}/table-mappings/orders/lag");
+        response.EnsureSuccessStatusCode();
+
+        var body = await response.Content.ReadFromJsonAsync<MappingLag>(JsonOptions);
+
+        Assert.NotNull(body);
+        Assert.True(body.Supported);
+        Assert.Equal(420_000, body.ExactLagMs);
     }
 
     [Fact]
@@ -622,6 +583,10 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         Assert.Null(body.ExactLagMs);
     }
 
+    /// <summary>
+    /// Unchanged by phase 87, and worth keeping said: dropping the async from the action did not
+    /// turn an unknown mapping into an empty 200 that a screen would render as "no lag data".
+    /// </summary>
     [Fact]
     public async Task TheEndpointIsNotFoundForAMappingThatDoesNotExist()
     {

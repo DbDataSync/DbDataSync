@@ -29,7 +29,7 @@ public sealed class ReplicationLagController(
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
-    public async Task<ActionResult<ReplicationLag>> Get(
+    public ActionResult<ReplicationLag> Get(
         string replicationName, CancellationToken cancellationToken)
     {
         ReplicationTaskConfig task;
@@ -42,16 +42,17 @@ public sealed class ReplicationLagController(
             return NotFound();
         }
 
-        // Sequentially, not in parallel. Most mappings answer out of the polling history the gate
-        // already wrote, but the ones that do not open a connection to the source, and a replication
-        // with forty mappings fanning those out at once would make a status screen a load spike on
-        // the database it is reporting about.
+        // A loop over state-database reads, since phase 87: no mapping in it opens a connection to a
+        // source any more. The comment this replaces explained why the fan-out was sequential rather
+        // than parallel — a replication with forty mappings would otherwise have been a load spike on
+        // the database it was reporting about. That mitigation is no longer holding anything back;
+        // the querying it was rationing is gone. Still sequential, now for no reason more interesting
+        // than that a loop is the simplest thing that reads forty rows.
         var mappings = new Dictionary<string, MappingLag>(StringComparer.Ordinal);
         foreach (var mappingName in configRepository.ListTableMappings(replicationName))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            mappings[mappingName] =
-                MappingLag.From(await lag.DescribeAsync(task, mappingName, cancellationToken));
+            mappings[mappingName] = MappingLag.From(lag.Describe(task, mappingName));
         }
 
         return Ok(ReplicationLag.From(mappings));

@@ -611,4 +611,52 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         Assert.Equal(5, (await CollectAsync(result.Rows)).Count);
         Assert.Equal(result.NewWatermark, result.WatermarkAfterRead);
     }
+
+    // ---- The commit time captured beside the LSN (phase 87) -------------------------------------
+
+    /// <summary>
+    /// The read returns the engine's own time for the LSN it is about to store, mapped on the
+    /// connection this pass already had open. Without it, the applied side of every CDC lag figure
+    /// had to be re-asked of the source on each request — which is what made a status screen a
+    /// recurring load on the database it merely reported about.
+    /// </summary>
+    [Fact]
+    public async Task AReadCarriesTheEnginesCommitTimeForTheLsnItIsAboutToStore()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'seed');");
+        var start = await SettleAsync((await ReadAsync(null)).NewWatermark);
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'next');");
+        await WaitForPendingChangesAsync(start, 1);
+
+        var result = await ReadAsync(start);
+        await CollectAsync(result.Rows);
+
+        // The independent mapping of the stored position is what proves the reader asked about the
+        // LSN it is persisting rather than some other point in the window.
+        Assert.NotNull(result.WatermarkTimeAfterRead);
+        Assert.Equal(
+            await MsSqlCdcCatalog.MapLsnToTimeAsync(
+                _connection, MsSqlCdcCatalog.FromWatermark(result.WatermarkAfterRead), CancellationToken.None),
+            result.WatermarkTimeAfterRead);
+    }
+
+    /// <summary>
+    /// **A quiet mapping still refreshes its cached time.** The nothing-new branch returns the stored
+    /// position unchanged, and if it returned no time with it, a caught-up mapping — including one
+    /// whose row predates the column — would never acquire one and would report "no lag data" for
+    /// ever.
+    /// </summary>
+    [Fact]
+    public async Task AReadWithNothingNew_StillCarriesATimeForTheUnchangedPosition()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'seed');");
+        var start = await SettleAsync((await ReadAsync(null)).NewWatermark);
+
+        var result = await ReadAsync(start);
+
+        Assert.Empty(await CollectAsync(result.Rows));
+        Assert.Equal(start, result.WatermarkAfterRead);
+        Assert.NotNull(result.WatermarkTimeAfterRead);
+    }
 }

@@ -16,12 +16,19 @@ namespace DataSync.Drivers.Abstractions;
 /// capped by row count cannot know its next position before it runs — the position *is* the last row
 /// it emitted — so it fills this in while streaming. See <see cref="BoundedRead"/>.
 /// </para>
+/// <para>
+/// <paramref name="NewWatermarkTimeUtc"/> is what the source itself says about *when*
+/// <paramref name="NewWatermark"/> committed, for the readers whose mechanism can state it — see
+/// phase 87. Optional, and null for every reader that has no such mapping; a null is always "no
+/// figure", never a claim about the position.
+/// </para>
 /// </summary>
 public sealed record ReadResult(
     IAsyncEnumerable<ChangeRow> Rows,
     string NewWatermark,
     ReadDiagnostics? Diagnostics = null,
-    BoundedReadPosition? Bounded = null)
+    BoundedReadPosition? Bounded = null,
+    DateTimeOffset? NewWatermarkTimeUtc = null)
 {
     /// <summary>
     /// The position to store once <see cref="Rows"/> has been fully consumed and written.
@@ -34,6 +41,23 @@ public sealed record ReadResult(
     /// </para>
     /// </summary>
     public string WatermarkAfterRead => Bounded?.Reached ?? NewWatermark;
+
+    /// <summary>
+    /// When the source says <see cref="WatermarkAfterRead"/> committed, or null when no reader here
+    /// can say — the value cached beside the watermark so that reporting lag later costs the source
+    /// nothing. See phase 87.
+    /// <para>
+    /// **Keyed off <see cref="BoundedReadPosition.Reached"/>, not a null-coalesce like the property
+    /// above.** A bounded read stores the position it reached rather than the window's end, and those
+    /// two positions have different times. Coalescing would hand back the window end's time whenever
+    /// mapping the reached one failed — a time belonging to a position this pass did not store, which
+    /// on a mapping draining a backlog under a row cap is exactly the case that would read as
+    /// caught-up while it is furthest behind. A time and a position that disagree about which pass
+    /// they came from are worse than no time at all, so the pairing is structural.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? WatermarkTimeAfterRead =>
+        Bounded?.Reached is null ? NewWatermarkTimeUtc : Bounded.ReachedTimeUtc;
 }
 
 /// <summary>

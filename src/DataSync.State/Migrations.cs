@@ -638,5 +638,38 @@ internal static class Migrations
         CREATE INDEX IX_ChangeCheckHistory_Group
             ON ChangeCheckHistory(ConnectionName, SourceDatabase, SourceKind, CheckedAtUtc);
         """,
+
+        """
+        -- When the source says this mapping's stored position was committed — see phase 87.
+        --
+        -- The other half of every lag figure, and the half that had nowhere to live until now. Phase
+        -- 85 cached the *group's* current position and its time in ChangeCheckHistory, but a mapping's
+        -- own applied position is the mapping's, not the group's, so the time for it was re-asked of
+        -- the source on every lag request: fn_cdc_map_lsn_to_time per CDC mapping, and
+        -- dm_tran_commit_table twice per Change Tracking one. A Monitoring tab polling every thirty
+        -- seconds across every mapping in a replication turned that into recurring live load against
+        -- every source it merely reported on. This column is where the answer is kept instead.
+        --
+        -- **Written in the same statement as Watermark, never in one of its own.** A position and the
+        -- time it committed are one fact; two writes could interleave with a later pass's and leave a
+        -- row whose time belongs to a position it no longer holds, which reads as a confidently wrong
+        -- lag rather than as an absent one.
+        --
+        -- Nullable, and no backfill — there is nothing to backfill it from, the same reasoning every
+        -- phase from 72 on has used here. A mapping that has not run since this shipped has no cached
+        -- time and reports "no data yet" until its next pass, which is one scheduling interval.
+        -- Nullable also for the two live reasons that outlast the migration: a reader with no
+        -- position-to-time mapping at all (Watermark mode, batch reload) never sets it, and a reader
+        -- that has one records null rather than failing a pass when the engine declines to answer.
+        ALTER TABLE ChangeWatermarks {{addcolumn}} WatermarkTimeUtc {{text}} NULL;
+
+        -- No schema change for the other half, but a behaviour change worth recording next to this
+        -- one: ChangeCheckHistory.SourceTimeUtc is now populated for SourceKind = 'ChangeTracking'
+        -- as well as 'Cdc'. The migration that added it says that column stays null for Change
+        -- Tracking because the dm_tran_commit_table lookup is a query of its own, "worth making when
+        -- somebody asks for a lag figure". That is the reasoning this phase reverses — asking on
+        -- demand meant asking once per mapping per thirty-second screen refresh, where the gate asks
+        -- once per group per tick. See DriverChangeCounterSource.FetchAsync.
+        """,
     ];
 }

@@ -45,8 +45,7 @@ public sealed class TableMappingsController(
     /// </summary>
     [Authorize(Policies.Viewer)]
     [HttpGet("{mappingName}/lag")]
-    public async Task<ActionResult<MappingLag>> Lag(
-        string replicationName, string mappingName, CancellationToken cancellationToken)
+    public ActionResult<MappingLag> Lag(string replicationName, string mappingName)
     {
         ReplicationTaskConfig task;
         try
@@ -61,7 +60,7 @@ public sealed class TableMappingsController(
         if (!configRepository.ListTableMappings(replicationName).Contains(mappingName, StringComparer.Ordinal))
             return NotFound();
 
-        return Ok(MappingLag.From(await lag.DescribeAsync(task, mappingName, cancellationToken)));
+        return Ok(MappingLag.From(lag.Describe(task, mappingName)));
     }
 
     [HttpPut("{mappingName}")]

@@ -7,12 +7,14 @@ namespace DataSync.State;
 /// could not.
 /// </param>
 /// <param name="SourceTimeUtc">
-/// When the source says the position in <paramref name="Value"/> was committed — CDC only, via
-/// <c>sys.fn_cdc_map_lsn_to_time</c> on the round-trip that already fetched the LSN (phase 85). Null
-/// on every Change Tracking row: that mechanism can map a version too, through
-/// <c>sys.dm_tran_commit_table</c>, but only in a query of its own, which lag makes on demand rather
-/// than the gate making it once a tick for every group. Null on a CDC row too when there is no
-/// position to map, or when the position falls outside what the capture instance still retains.
+/// When the source says the position in <paramref name="Value"/> was committed — via
+/// <c>sys.fn_cdc_map_lsn_to_time</c> for a CDC row and <c>sys.dm_tran_commit_table</c> for a Change
+/// Tracking one, both captured on the gate's own round-trip (phases 85 and 87).
+/// <para>
+/// Null when there is no position to map, when the engine will not place the one there is, and on
+/// any Change Tracking row written before phase 87 — which is what keeps that mechanism's
+/// polling-history estimate a live fallback rather than dead code.
+/// </para>
 /// </param>
 public sealed record ChangeCheck(
     string ConnectionName,
@@ -46,9 +48,9 @@ public sealed class ChangeCheckStore(StateDatabase database)
     /// per tick, however many mappings share that group — the row describes the source round-trip,
     /// not the mappings that benefited from it.
     /// </summary>
-    /// <param name="sourceTimeUtc">The source's own time for <paramref name="value"/>, where the
-    /// fetch could get one for free — CDC's rides along on the same round-trip, Change Tracking's
-    /// would be a second query and is left to be made on demand instead. See phase 85.</param>
+    /// <param name="sourceTimeUtc">The source's own time for <paramref name="value"/>, captured on
+    /// the same tick that fetched it — for both mechanisms since phase 87, and CDC only before
+    /// that.</param>
     public void Record(
         string connectionName,
         string sourceDatabase,

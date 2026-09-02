@@ -56,30 +56,51 @@ public sealed record ReaderLag(
 /// side of it, so a caught-up mapping reads zero and stays there.
 /// </para>
 /// <para>
-/// **What "the source's current position" means is a history row, not a fresh fetch.** The polling
-/// gate (phase 75) already asks each source group once a tick and writes down what it saw, so a lag
-/// call takes the far end of every subtraction from that rather than polling the source a second
-/// time. CDC falls back to a live fetch when no usable row exists at all, which is a first-install
-/// condition rather than a steady state.
+/// **This service does no I/O against any source, in any path, ever — see phase 87.** It has no
+/// <c>IChangeCounterSource</c> to call, which is the strongest available statement of that: the
+/// property is not a rule anyone has to keep, it is a dependency that is not there. Both ends of
+/// every subtraction were cached at a moment when they were free, and this reads them back:
 /// </para>
 /// <para>
-/// **Turning a position into a time is the part that still asks the engine**, in both mechanisms,
-/// because the position being asked about is one mapping's and the history row is a whole group's —
-/// there is nowhere shared to cache it. CDC maps its own watermark through
-/// <c>fn_cdc_map_lsn_to_time</c>; Change Tracking maps both ends through
-/// <c>sys.dm_tran_commit_table</c> and, only when that DMV has aged the version out, reconstructs an
-/// estimate from polling history and reports it under a different name.
+/// **The source's current position and its time** come from a <c>ChangeCheckHistory</c> row. The
+/// polling gate (phase 75) asks each source group once a tick and writes down both, on the connection
+/// it opened for its own reason.
+/// </para>
+/// <para>
+/// **The mapping's own applied position and its time** come from its <c>ChangeWatermarks</c> row.
+/// The reader that produced the position mapped it to a time on the connection the pass already had
+/// open, and both were written in the same statement — a position and a time that could disagree
+/// about which pass they came from would be a wrong lag rather than a missing one.
+/// </para>
+/// <para>
+/// Phase 85 asked the engine for the applied-position time on every call, on the reasoning that a
+/// mapping's position has nowhere shared to be cached. It has somewhere of its own, which is better:
+/// "when did this position commit" is a fixed historical fact from the moment it is known, so
+/// recording it right after the pass that produced it is *more* reliable than re-asking later — for
+/// Change Tracking decisively so, since a promptly captured version is captured before
+/// <c>dm_tran_commit_table</c>'s rolling window could ever have aged it out.
+/// </para>
+/// <para>
+/// **A missing cached value is "no data yet", never a live escape hatch.** A mapping that has not run
+/// since phase 87 shipped, or whose reader could not place its position, reports <c>Supported</c>
+/// true with null figures — the state this service already used for a mapping that has never read. A
+/// cold start resolves itself within one scheduling interval; a live fallback would be a permanent
+/// licence for a status screen to poll a production source.
 /// </para>
 /// </summary>
 public sealed class ReaderLagService(
     ChangeSourceResolver sources,
-    IChangeCounterSource counters,
     ChangeWatermarkStore watermarks,
     ChangeCheckStore checks,
     ILogger<ReaderLagService> logger)
 {
-    public async Task<ReaderLag> DescribeAsync(
-        ReplicationTaskConfig task, string mappingName, CancellationToken cancellationToken)
+    /// <summary>
+    /// **Synchronous, and that is the phase 87 property stated in the signature.** Every value this
+    /// reads is a row in the state database, which every store here reads synchronously; there is no
+    /// round-trip left to await. A caller cannot accidentally reintroduce one without changing this
+    /// shape.
+    /// </summary>
+    public ReaderLag Describe(ReplicationTaskConfig task, string mappingName)
     {
         string readerKind;
         ChangeSource? source;
@@ -101,12 +122,12 @@ public sealed class ReaderLagService(
         if (source is null)
             return new ReaderLag(readerKind, Supported: false);
 
-        var applied = watermarks.GetWatermark(task.Name, mappingName, source.WatermarkKey);
+        var applied = watermarks.GetAppliedPosition(task.Name, mappingName, source.WatermarkKey);
 
         // No stored position at all: the mapping has never completed a pass, so there is nothing to
         // measure from. Null rather than a large number — "unknown" and "far behind" are different
         // states and only one of them is worth waking somebody for.
-        if (string.IsNullOrEmpty(applied))
+        if (applied is null || string.IsNullOrEmpty(applied.Watermark))
             return new ReaderLag(readerKind, Supported: true);
 
         return readerKind switch
@@ -114,55 +135,50 @@ public sealed class ReaderLagService(
             MsSqlDriverKinds.Cdc => new ReaderLag(
                 readerKind,
                 Supported: true,
-                ExactLag: await CdcLagAsync(source, applied, cancellationToken)),
+                ExactLag: CdcLag(source, applied)),
 
-            MsSqlDriverKinds.ChangeTracking =>
-                await ChangeTrackingLagAsync(readerKind, source, applied, cancellationToken),
+            MsSqlDriverKinds.ChangeTracking => ChangeTrackingLag(readerKind, source, applied),
 
             _ => new ReaderLag(readerKind, Supported: false),
         };
     }
 
     /// <summary>
-    /// CDC's real duration: the time the source puts on its own current position, minus the time it
-    /// puts on this mapping's position. Both ends come from <c>fn_cdc_map_lsn_to_time</c> on the same
-    /// server, so whatever clock that server keeps cancels out of the difference.
+    /// CDC's real duration: the time the source put on its own current position, minus the time it
+    /// put on this mapping's position. Both come from <c>fn_cdc_map_lsn_to_time</c> on the same
+    /// server, so whatever clock that server keeps cancels out of the difference — and both were
+    /// asked for at a moment that cost nothing, which is why neither is asked for here.
+    /// <para>
+    /// **No live fallback, in either direction.** Phase 85 fetched the group's position live when no
+    /// history row carried a time, calling it a first-install condition; it is, and a first install
+    /// resolves itself on the next gate tick. Keeping the branch meant every status screen retained a
+    /// path to the source, and the caller most likely to take it — a mapping on a source that has
+    /// just come back after an outage — is exactly the one that should not be adding load.
+    /// </para>
     /// </summary>
-    private async Task<TimeSpan?> CdcLagAsync(
-        ChangeSource source, string applied, CancellationToken cancellationToken)
+    private TimeSpan? CdcLag(ChangeSource source, AppliedPosition applied)
     {
-        try
+        // Deliberately the latest row that *has* a time rather than the latest row: a group whose
+        // most recent poll found no position at all (the capture job stopped) still has an earlier
+        // reading that a lag can be measured against, and reporting nothing there would hide a lag
+        // that is growing for exactly that reason.
+        var current = checks.GetLatestCheck(
+            source.ConnectionName, source.SourceDatabase, source.ReaderKind,
+            requireSourceTime: true)?.SourceTimeUtc;
+
+        if (current is null || applied.WatermarkTimeUtc is null)
         {
-            // The far end first, because it is the one that can be answered without a round-trip.
-            // Deliberately the latest row that *has* a time rather than the latest row: a group whose
-            // most recent poll found no position at all (the capture job stopped) still has an
-            // earlier reading that a lag can be measured against, and reporting nothing there would
-            // hide a lag that is growing for exactly that reason.
-            var current =
-                checks.GetLatestCheck(
-                    source.ConnectionName, source.SourceDatabase, source.ReaderKind,
-                    requireSourceTime: true)?.SourceTimeUtc
-                ?? (await counters.FetchAsync(
-                    source.ConnectionName, source.SourceDatabase, source.ReaderKind, cancellationToken))
-                    .SourceTimeUtc;
-
-            if (current is null)
-                return null;
-
-            var appliedTime = await counters.MapSourceTimeAsync(
-                source.ConnectionName, source.SourceDatabase, source.ReaderKind, applied, cancellationToken);
-
-            return appliedTime is null ? null : Clamp(current.Value - appliedTime.Value);
-        }
-        catch (Exception ex)
-        {
-            // Reading lag is a question, not a pass. An unreachable source means the answer is not
-            // available right now, which is what null says; nothing about the replication changes.
-            logger.LogWarning(
-                ex, "Could not compute CDC lag for '{Connection}'/'{Database}'.",
-                source.ConnectionName, source.SourceDatabase);
+            // Two different absences, one answer. The group has never been polled with a placeable
+            // position, or the mapping has not run since its cached time became a thing to record —
+            // and in both cases the honest report is that there is no figure yet, not a number
+            // reconstructed from whatever else is lying around.
+            logger.LogDebug(
+                "No cached lag inputs yet for '{Connection}'/'{Database}': current={Current}, applied={Applied}.",
+                source.ConnectionName, source.SourceDatabase, current, applied.WatermarkTimeUtc);
             return null;
         }
+
+        return Clamp(current.Value - applied.WatermarkTimeUtc.Value);
     }
 
     /// <summary>
@@ -173,34 +189,35 @@ public sealed class ReaderLagService(
     /// estimation.
     /// </para>
     /// <para>
-    /// **The time tries the engine first.** <c>sys.dm_tran_commit_table</c> maps a commit sequence
-    /// number to its commit time, and a <c>SYS_CHANGE_VERSION</c> is a commit sequence number, so
-    /// Change Tracking does have the equivalent of <c>fn_cdc_map_lsn_to_time</c> after all. When it
-    /// answers for both ends the figure is exact in the same sense CDC's is, and is reported in the
-    /// same field.
+    /// **The time comes from two cached <c>dm_tran_commit_table</c> answers.** That DMV maps a commit
+    /// sequence number to its commit time and a <c>SYS_CHANGE_VERSION</c> is one, so Change Tracking
+    /// has the equivalent of <c>fn_cdc_map_lsn_to_time</c> after all — asked once for the mapping's
+    /// version by the pass that stored it, and once per tick for the group's by the gate. Both
+    /// present, and the figure is exact in the same sense CDC's is, in the same field.
     /// </para>
     /// <para>
-    /// **The estimate is the fallback, not the mechanism.** The DMV holds a rolling window, so a
-    /// mapping far enough behind — precisely the one worth reporting on — can have a version that has
-    /// aged out of it. Only then does this reconstruct a figure from this system's own polling: the
-    /// first check that observed a version at or above the mapping's is the earliest moment we can
-    /// say the source had reached where the mapping now is, and the distance from there to the latest
-    /// check is how long it has been behind. Bounded above by the poll interval, reported under a
-    /// name that says so.
+    /// **The estimate is the fallback, and it is now a fallback rather than the routine path.** It
+    /// covers exactly what a cache always has to cover: a <c>ChangeCheckHistory</c> row written
+    /// before the gate started capturing this mechanism's time, a mapping that has not run since its
+    /// column existed, and a capture that failed at either end. When it applies, the figure is
+    /// reconstructed from this system's own polling — the first check that observed a version at or
+    /// above the mapping's is the earliest moment we can say the source had reached where the mapping
+    /// now is, and the distance from there to the latest check is how long it has been behind.
+    /// Bounded above by the poll interval, reported under a name that says so.
     /// </para>
     /// </summary>
-    private async Task<ReaderLag> ChangeTrackingLagAsync(
-        string readerKind, ChangeSource source, string applied, CancellationToken cancellationToken)
+    private ReaderLag ChangeTrackingLag(
+        string readerKind, ChangeSource source, AppliedPosition applied)
     {
-        if (!long.TryParse(applied, out var appliedVersion))
+        if (!long.TryParse(applied.Watermark, out var appliedVersion))
             return new ReaderLag(readerKind, Supported: true);
 
         var latest = checks.GetLatestCheck(
             source.ConnectionName, source.SourceDatabase, source.ReaderKind);
 
         // Never polled this group: both figures are measured against its latest check, and there
-        // isn't one. The exact figure could be recovered with a live fetch, but a lag call is a
-        // read of a status screen and the gate will have written a row within a tick.
+        // isn't one. A lag call is a read of a status screen, and the gate will have written a row
+        // within a tick.
         if (latest is null)
             return new ReaderLag(readerKind, Supported: true);
 
@@ -208,7 +225,7 @@ public sealed class ReaderLagService(
             ? Clamp(current - appliedVersion)
             : null;
 
-        if (await ExactChangeTrackingLagAsync(source, appliedVersion, latest, cancellationToken) is { } exact)
+        if (ExactChangeTrackingLag(applied, latest) is { } exact)
             return new ReaderLag(
                 readerKind, Supported: true, ExactLag: exact, ExactVersionsBehind: behind);
 
@@ -227,47 +244,27 @@ public sealed class ReaderLagService(
     }
 
     /// <summary>
-    /// The exact Change Tracking duration, or null to say the engine could not give one.
+    /// The exact Change Tracking duration, or null to say one of the two commit times was never
+    /// captured — which hands the figure to the estimate.
     /// <para>
-    /// **Both ends come from the DMV, or neither is used.** Subtracting an exact commit time from the
-    /// wall-clock instant a poll happened to run would be a hybrid whose error is the polling
-    /// interval — exactly the error the estimate already owns and names — while landing in the field
-    /// that promises there is no such error. The mapping's own version is looked up first because it
-    /// is the older of the two and therefore the one that ages out; when it has, the second query is
-    /// not worth making.
+    /// **Both ends come from the DMV, or neither is used.** Subtracting an engine-stated commit time
+    /// from <c>CheckedAtUtc</c>, the wall-clock instant a poll happened to run, would be a hybrid
+    /// whose error is the polling interval — exactly the error the estimate already owns and names —
+    /// while landing in the field that promises there is no such error. Phase 85 established this
+    /// when both lookups were live; it holds unchanged now that both are reads of a row.
+    /// </para>
+    /// <para>
+    /// Nothing here can throw or block, so unlike phase 85 there is no unreachable-source case to
+    /// catch: a source that was down when either value should have been captured simply left a null,
+    /// and a null is already the condition this returns for.
     /// </para>
     /// </summary>
-    private async Task<TimeSpan?> ExactChangeTrackingLagAsync(
-        ChangeSource source, long appliedVersion, ChangeCheck latest, CancellationToken cancellationToken)
+    private static TimeSpan? ExactChangeTrackingLag(AppliedPosition applied, ChangeCheck latest)
     {
-        if (latest.Value is null)
+        if (latest.Value is null || latest.SourceTimeUtc is null || applied.WatermarkTimeUtc is null)
             return null;
 
-        try
-        {
-            var appliedTime = await counters.MapSourceTimeAsync(
-                source.ConnectionName, source.SourceDatabase, source.ReaderKind,
-                appliedVersion.ToString(), cancellationToken);
-
-            if (appliedTime is null)
-                return null;
-
-            var currentTime = await counters.MapSourceTimeAsync(
-                source.ConnectionName, source.SourceDatabase, source.ReaderKind,
-                latest.Value, cancellationToken);
-
-            return currentTime is null ? null : Clamp(currentTime.Value - appliedTime.Value);
-        }
-        catch (Exception ex)
-        {
-            // Unlike CDC, there is somewhere to go from here: the estimate needs no source at all.
-            // An unreachable source costs precision, not the figure.
-            logger.LogWarning(
-                ex, "Could not map Change Tracking versions to commit times for '{Connection}'/'{Database}'; "
-                    + "falling back to the polling-history estimate.",
-                source.ConnectionName, source.SourceDatabase);
-            return null;
-        }
+        return Clamp(latest.SourceTimeUtc.Value - applied.WatermarkTimeUtc.Value);
     }
 
     /// <summary>

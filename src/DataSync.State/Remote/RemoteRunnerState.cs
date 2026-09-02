@@ -96,9 +96,15 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
                 previousWatermark, newWatermark),
             JournalOperation.CompleteRun);
 
-    public void SetWatermark(string taskName, string mappingName, string sourceTable, string watermark) =>
+    public void SetWatermark(
+        string taskName,
+        string mappingName,
+        string sourceTable,
+        string watermark,
+        DateTimeOffset? watermarkTimeUtc = null) =>
         Outcome(
-            "set-watermark", new SetWatermarkRequest(taskName, sourceTable, watermark, mappingName),
+            "set-watermark",
+            new SetWatermarkRequest(taskName, sourceTable, watermark, mappingName, watermarkTimeUtc),
             JournalOperation.SetWatermark);
 
     public void RecordVerificationResult(VerificationResultRecord result) =>

@@ -103,7 +103,41 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
                 sourceConnection, source, long.Parse(previousWatermark), targetVersion,
                 UseSnapshotIsolation(options), columnMappings, diagnostics, maxRows, bounded, cancellationToken);
 
-        return new ReadResult(rows, targetVersion.ToString(), diagnostics, bounded);
+        return new ReadResult(
+            rows, targetVersion.ToString(), diagnostics, bounded,
+            // For the unbounded case, and for a bounded pass that drains its whole window — both of
+            // which store targetVersion. A pass the cap cuts short overrides this with the time of
+            // the version it actually reached, in the same place it overrides the version itself.
+            await MapTimeAsync(sourceConnection, targetVersion, cancellationToken));
+    }
+
+    /// <summary>
+    /// The time the engine puts on a version this pass is about to store, or null if it will not say.
+    /// <para>
+    /// **Free here and only here.** The connection is open, already in the mapping's own database, and
+    /// the version is the one being persisted — which is what lets a status screen later report lag
+    /// out of the state database instead of asking this server again every thirty seconds (phase 87).
+    /// It also settles this mechanism's retention problem outright: captured while the version is
+    /// still the current one, it is captured long before <c>dm_tran_commit_table</c>'s rolling window
+    /// could age it out, which a later live lookup could never promise.
+    /// </para>
+    /// <para>
+    /// **Never allowed to fail the pass**, on the same judgement <c>ReaderLagService</c> already makes
+    /// about this call: a lag figure is a question about a replication, and the replication is the
+    /// thing itself. The caller records a null and the next pass tries again.
+    /// </para>
+    /// </summary>
+    private static async Task<DateTimeOffset?> MapTimeAsync(
+        DbConnection connection, long version, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await MapVersionToTimeAsync(connection, version, cancellationToken);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -439,7 +473,15 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
             // row sharing lastVersion is guaranteed to be in this batch — which is what makes stopping
             // here resumable rather than lossy.
             if (bounded is not null && maxRows is { } cap && rowsRead >= cap)
+            {
                 bounded.Reached = lastVersion.ToString();
+
+                // Beside the position, from the same row, on the connection that just streamed it —
+                // the cap's own answer to the mapping done up front for targetVersion, which this
+                // pass is not storing. See ReadResult.WatermarkTimeAfterRead for why the pair travels
+                // together.
+                bounded.ReachedTimeUtc = await MapTimeAsync(connection, lastVersion, cancellationToken);
+            }
 
             if (transaction is not null)
                 await transaction.CommitAsync(cancellationToken);

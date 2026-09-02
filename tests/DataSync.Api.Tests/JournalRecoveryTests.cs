@@ -184,6 +184,56 @@ public sealed class JournalRecoveryTests : IDisposable
         Assert.Contains(_logger.Entries, e => e.Message.Contains("unreadable line"));
     }
 
+    /// <summary>
+    /// A runner that journalled its watermark offline journalled the source's own time for that
+    /// position with it, and replay must land both — a position recovered without its time would
+    /// report "no lag data" for a mapping that had in fact measured itself perfectly well, until its
+    /// next pass happened to overwrite the row. See phase 87.
+    /// </summary>
+    [Fact]
+    public void A_journalled_watermark_carries_its_cached_commit_time_through_replay()
+    {
+        _state.UpsertTask(TaskName, enabled: true);
+        var runId = _workQueue.Enqueue(TaskName, RunKind.Primary, "Orders");
+        var committed = new DateTimeOffset(2026, 3, 1, 11, 55, 0, TimeSpan.Zero);
+
+        WriteJournal(runId, (JournalOperation.SetWatermark,
+            new SetWatermarkRequest(TaskName, "dbo.Orders", "1234", MappingName, committed)));
+
+        _recovery.Recover(TaskName);
+
+        var applied = new ChangeWatermarkStore(_database)
+            .GetAppliedPosition(TaskName, MappingName, "dbo.Orders");
+
+        Assert.Equal("1234", applied!.Watermark);
+        Assert.Equal(committed, applied.WatermarkTimeUtc);
+    }
+
+    /// <summary>
+    /// **An entry from a runner older than phase 87 replays, and replays as a watermark.** The
+    /// position is the outcome the journal exists to preserve; the commit time is a convenience for a
+    /// status screen, and its absence is a state lag reporting already answers for. Refusing the
+    /// entry — the treatment the missing *mapping name* gets, one field along — would trade a real
+    /// replication result for a missing number.
+    /// </summary>
+    [Fact]
+    public void A_journalled_watermark_from_before_the_cache_existed_still_replays()
+    {
+        _state.UpsertTask(TaskName, enabled: true);
+        var runId = _workQueue.Enqueue(TaskName, RunKind.Primary, "Orders");
+
+        WriteJournal(runId, (JournalOperation.SetWatermark,
+            new SetWatermarkRequest(TaskName, "dbo.Orders", "1234", MappingName)));
+
+        _recovery.Recover(TaskName);
+
+        var applied = new ChangeWatermarkStore(_database)
+            .GetAppliedPosition(TaskName, MappingName, "dbo.Orders");
+
+        Assert.Equal("1234", applied!.Watermark);
+        Assert.Null(applied.WatermarkTimeUtc);
+    }
+
     private sealed class CapturingLogger : ILogger<JournalRecovery>
     {
         public List<(LogLevel Level, string Message)> Entries { get; } = [];
