@@ -58,3 +58,20 @@ is a lead, not a conclusion.
 
 **Next step**: do the audit described above; come back with a classified list of every run-time
 introspection call site before deciding what (if anything) needs a phase doc.
+
+---
+
+# Outcome
+
+The audit is done. Every run-time introspection call site was traced and classified:
+`BatchReloadReader.ExpandAutoSegmentsAsync` (auto-segment discovery) stays live — sampling has no stored
+substitute. Everything else — `WatermarkReader`/`BatchReloadReader`/`TriggerAuditReader`/
+`ScriptedQueryReader` reading source columns, every writer's `TargetShape.LoadAsync`, and
+`BatchInsertStagingProvider.StageAsync` reading target columns — exists because `ColumnMapping`
+deliberately stores no type/key/nullability info, a real anti-staleness decision already on record in
+that type's own doc comment, not an oversight.
+
+Resolved as `architecture/planning/done/mapping-metadata-cache.md`: cache it anyway, captured on mapping
+creation, updated only by an explicit "Refresh metadata" action — never silently by ordinary operation.
+That doc's first phase builds the cache and the UI only; switching each run-time consumer to actually
+read the cache instead of live-querying is deliberately deferred to a later, separately-reviewed phase.
