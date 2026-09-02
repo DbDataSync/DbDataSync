@@ -29,19 +29,15 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **083** — the Certificates section of the Admin screen | 081 and 082, its two dependencies, are both done |
-| 2 | **034** — PostgreSQL logical replication | |
-| 3 | **035** — config history diff and revert | now also covers `datasync.config.yaml`'s missing history view, carried forward from 081 |
-| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **034** — PostgreSQL logical replication | |
+| 2 | **035** — config history diff and revert | now also covers `datasync.config.yaml`'s missing history view, carried forward from 081 |
+| 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Set 2026-09-01; 082 done and removed, 083 moves up to take its place. Ahead of the three engine phases by
-choice, not necessity: nothing in 034/035/038 blocks on them, and moving either group is an ordinary
-decision that changes only this table.
-What is left below it is the three engine phases that have been waiting since distribution and auth
-moved above them — with 032 and 033 done there were three change-tracking mechanisms and no way for
-anyone outside this repo to install
-any of them, and nothing guarding the port. A phase moving
-up or down is an ordinary decision and only this table changes.
+Set 2026-09-01; 083 done and removed — the admin-screen/config/certificate arc (079, 081, 082, 083) is
+now fully shipped, end to end. What's left is the three engine phases that have been waiting since
+distribution and auth moved above them — with 032 and 033 done there were three change-tracking
+mechanisms and no way for anyone outside this repo to install any of them, and nothing guarding the
+port. A phase moving up or down is an ordinary decision and only this table changes.
 
 ## What counts as a phase
 
