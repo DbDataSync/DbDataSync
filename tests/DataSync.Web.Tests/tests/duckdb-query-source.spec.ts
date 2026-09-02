@@ -166,12 +166,20 @@ async function setQuery(page: Page, query: string) {
 
 async function openSourceTab(page: Page) {
   await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+  await expect(page.getByTestId('source-query-open-button')).toBeVisible({ timeout: 20_000 })
+}
+
+/** Opens the popup and waits for Monaco inside it — the editor doesn't exist in the DOM until this
+ * runs, since it's the popup's content, not the source card's. */
+async function openQueryDialog(page: Page) {
+  await page.getByTestId('source-query-open-button').click()
+  await expect(page.getByTestId('source-query-dialog')).toBeVisible()
   await expect(page.getByTestId('source-query-editor').locator('.monaco-editor'))
     .toBeVisible({ timeout: 20_000 })
 }
 
 test.describe('duckdb query source', () => {
-  test('01 - the source card offers a query editor instead of schema and table pickers', async ({ page }) => {
+  test('01 - the source card offers a button instead of schema and table pickers', async ({ page }) => {
     await stub(page)
     await openSourceTab(page)
 
@@ -184,12 +192,17 @@ test.describe('duckdb query source', () => {
     await expect(page.getByTestId('source-side')).toContainText('lake')
     await expect(page.getByTestId('source-side')).toContainText('memory')
 
-    // And the editor opens on the query the mapping already runs. Asserted on the rendered text
-    // rather than on a value, because Monaco has none — the visible lines are the content.
-    await expect(page.getByTestId('source-query-editor')).toContainText('read_parquet')
+    // Nothing about the query is on the card itself — the instructions, the editor and the preview
+    // all live behind the button, not open on the page.
+    await expect(page.getByTestId('source-query-editor')).toHaveCount(0)
 
     // The target side is untouched — it is an ordinary table, and this phase changed nothing there.
     await expect(page.getByTestId('target-table-input')).toBeVisible()
+
+    // Opening the popup shows the query the mapping already runs. Asserted on the rendered text
+    // rather than on a value, because Monaco has none — the visible lines are the content.
+    await openQueryDialog(page)
+    await expect(page.getByTestId('source-query-editor')).toContainText('read_parquet')
 
     await page.screenshot({ path: path.join(screenshotsDir, '64-duckdb-query-source.png'), fullPage: true })
   })
@@ -201,6 +214,7 @@ test.describe('duckdb query source', () => {
   test('02 - Preview runs the unsaved text in the editor, not the saved config', async ({ page }) => {
     const sent = await stub(page)
     await openSourceTab(page)
+    await openQueryDialog(page)
 
     const edited = "SELECT Id, Name FROM read_csv('/tmp/late-arrivals.csv')"
     await setQuery(page, edited)
@@ -242,9 +256,15 @@ test.describe('duckdb query source', () => {
     await expect(page.getByTestId('column-mappings-awaiting-preview')).toBeVisible()
 
     // Back to the source card — the draft survives the tab switch, which is why the form holds it —
-    // and preview.
+    // open the popup and preview.
+    await openQueryDialog(page)
     await page.getByTestId('source-query-preview-button').click()
     await expect(page.getByTestId('source-query-preview')).toBeVisible()
+
+    // The popup closes rather than sitting over the tab it was opened from — the columns tab is
+    // behind it either way, but a lingering modal is a state nothing else in this editor leaves you in.
+    await page.getByTestId('source-query-close-button').click()
+    await expect(page.getByTestId('source-query-dialog')).toHaveCount(0)
 
     await page.getByTestId('mapping-tab-columns').click()
     await expect(page.getByTestId('column-mappings-awaiting-preview')).toHaveCount(0)
@@ -271,6 +291,7 @@ test.describe('duckdb query source', () => {
     })))
 
     await openSourceTab(page)
+    await openQueryDialog(page)
     await setQuery(page, 'SELECT * FRM nowhere')
     await page.getByTestId('source-query-preview-button').click()
 
