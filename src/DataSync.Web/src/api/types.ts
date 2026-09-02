@@ -760,6 +760,35 @@ export interface TaskRunRecord {
    * measured", which is what lets an untraced row render exactly as it always has.
    */
   timing: RunTiming | null
+  /**
+   * Where this pass's watermark started and where it ended — the history behind `ChangeWatermarks`'
+   * single current value (phase 71), surfaced in the run list since phase 88.
+   *
+   * Raw source positions: a CDC LSN or a Change Tracking version, in the encoding the source stores
+   * them in. Not a time and not readable as one, which is why the run list dates them through
+   * `useRunWatermarkTimes` and keeps these as the tooltip.
+   *
+   * Both null for a run that made no new position durable — a backfill, a verification, or any
+   * failed pass.
+   */
+  previousWatermark: string | null
+  newWatermark: string | null
+}
+
+/**
+ * When a run's stored watermarks were the source's own position — see phase 88.
+ *
+ * Resolved on read out of `ChangeCheckHistory`, the polling history that spans time, rather than
+ * stored on the run: the answer depends on history written after the run ended, and stops existing
+ * once that history is purged.
+ *
+ * Either field can be null on its own, and a run absent from the map has neither — its watermarks
+ * have aged past the retention window, or it never stored one. That absence is rendered as no
+ * timestamp, never as a zero or a guess.
+ */
+export interface RunWatermarkTimes {
+  previousWatermarkTimeUtc: string | null
+  newWatermarkTimeUtc: string | null
 }
 
 /**
@@ -886,6 +915,15 @@ export interface MappingLag {
   exactLagMs: number | null
   versionsBehind: number | null
   estimatedLagMs: number | null
+  /**
+   * Where the source had got to, at the moment the figures above are measured against — the exact
+   * polling-history row this mapping's own comparison used, never the clock (phase 88).
+   *
+   * The engine's own commit time for that position where it has one, the moment we polled where it
+   * does not. Null when no history row was consulted: an unsupported reader, or a mapping that has
+   * never stored a position.
+   */
+  asOfUtc: string | null
 }
 
 /**

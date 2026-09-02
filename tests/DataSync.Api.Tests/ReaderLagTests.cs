@@ -597,4 +597,106 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    // ---- The "as of" time (phase 88) ------------------------------------------------------------
+    //
+    // The one thing every one of these asserts is that the timestamp names the *same row* the figure
+    // beside it came from. That is the whole requirement: an "as of" taken from the group's newest
+    // row would look right in every ordinary case and be wrong in exactly the cases somebody is
+    // reading this screen for — a capture job that has stopped, a mechanism whose commit-time
+    // mapping has aged out — where the figure and the row it rests on deliberately part company
+    // with the newest reading.
+
+    [Fact]
+    public async Task AsOf_ForCdc_IsTheRowTheFigureUsed_NotTheGroupsNewestRow()
+    {
+        var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
+        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1), Origin - TimeSpan.FromMinutes(7));
+
+        RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1),
+            Origin, sourceTime: Origin);
+
+        // A newer poll that found no position at all — the capture job stopped five minutes ago.
+        // CDC's figure deliberately measures against the last row that *has* a time rather than the
+        // last row, so the lag keeps growing for exactly the reason it should; the "as of" has to
+        // skip the same row, or it would claim a reading that produced no figure.
+        RecordCheck(database, MsSqlDriverKinds.Cdc, null, Origin.AddMinutes(5));
+
+        var result = BuildLag().Describe(task, "orders");
+
+        Assert.Equal(TimeSpan.FromMinutes(7), result.ExactLag);
+        Assert.Equal(Origin, result.AsOfUtc);
+    }
+
+    [Fact]
+    public async Task AsOf_ForAnExactChangeTrackingFigure_IsTheEnginesCommitTimeNotThePollTime()
+    {
+        var (task, database) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
+        SetWatermark(task, "40", Origin.AddMinutes(1));
+
+        // Polled at 12:00; the engine says the version it found committed at 12:21. The exact figure
+        // is the difference between two engine-stated times, so the instant it is measured against
+        // is the engine's — reporting 12:00 beside a figure computed from 12:21 would describe a
+        // subtraction nobody performed.
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin,
+            sourceTime: Origin.AddMinutes(21));
+
+        var result = BuildLag().Describe(task, "orders");
+
+        Assert.Equal(TimeSpan.FromMinutes(20), result.ExactLag);
+        Assert.Equal(Origin.AddMinutes(21), result.AsOfUtc);
+    }
+
+    [Fact]
+    public async Task AsOf_ForAChangeTrackingEstimate_IsThePollTimeTheEstimateRanTo()
+    {
+        var (task, database) = await SetUpAsync(MsSqlDriverKinds.ChangeTracking);
+        SetWatermark(task, "40");
+
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "10", Origin);
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "55", Origin.AddMinutes(20));
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin.AddMinutes(60));
+
+        var result = BuildLag().Describe(task, "orders");
+
+        // The estimate runs from the crossing poll to the latest poll, both wall-clock instants this
+        // system chose — so the "as of" is that same latest poll. It follows the figure between the
+        // two fields rather than being fixed to either column.
+        Assert.Equal(TimeSpan.FromMinutes(40), result.EstimatedLag);
+        Assert.Equal(Origin.AddMinutes(60), result.AsOfUtc);
+    }
+
+    [Fact]
+    public async Task AsOf_IsReportedEvenWhereTheFigureIsNot()
+    {
+        var (task, database) = await SetUpAsync(MsSqlDriverKinds.Cdc);
+
+        // A mapping that has run — so it has a position — but whose pass never captured a time for
+        // it, which is every CDC mapping that last ran before phase 87 shipped.
+        SetWatermark(task, Lsn(0, 0, 0, 42, 0, 0, 0, 100, 0, 1));
+        RecordCheck(database, MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 200, 0, 1),
+            Origin, sourceTime: Origin);
+
+        var result = BuildLag().Describe(task, "orders");
+
+        // No figure, and still an answer to "when did we last see the source". The two absences a
+        // blank cell used to conflate — a poller that has stopped, and a mapping that cannot be
+        // placed — are different problems, and only the first is about this system.
+        Assert.Null(result.ExactLag);
+        Assert.Equal(Origin, result.AsOfUtc);
+    }
+
+    [Fact]
+    public async Task AsOf_IsNullWhereNoReadingWasConsultedAtAll()
+    {
+        var (task, database) = await SetUpAsync(
+            GenericDriverKinds.Watermark,
+            new Dictionary<string, string> { ["watermarkColumn"] = "ModifiedAt" });
+        RecordCheck(database, MsSqlDriverKinds.ChangeTracking, "100", Origin, sourceTime: Origin);
+
+        // A reader with no database-wide position is in no polling group, so there is no reading
+        // behind it — not even a stale one. Null rather than the newest row of some group it does
+        // not belong to.
+        Assert.Null(BuildLag().Describe(task, "orders").AsOfUtc);
+    }
 }

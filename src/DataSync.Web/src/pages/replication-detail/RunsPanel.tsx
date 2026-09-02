@@ -2,9 +2,14 @@ import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { RunKindBadge, StatusBadge } from '../../components/StatusBadge'
 import { BackfillForm } from './BackfillForm'
-import { useCancelRun, useInvalidateRunHistory, useRunHistory, useTriggerRun, useResyncRun } from '../../api/hooks'
+import {
+  MONITORING_REFRESH_MS, useCancelRun, useInvalidateRunHistory, useRunHistory,
+  useRunWatermarkTimes, useTriggerRun, useResyncRun,
+} from '../../api/hooks'
+import { RefreshCountdown } from '../../components/RefreshCountdown'
+import { ShellActions } from '../../components/ShellActions'
 import { useRunHub } from '../../api/useRunHub'
-import type { RunTiming, TaskRunRecord } from '../../api/types'
+import type { RunTiming, RunWatermarkTimes, TaskRunRecord } from '../../api/types'
 
 /** A command sent down from the chrome's Backfill…/Run Now buttons. */
 export interface RunsCommand {
@@ -12,8 +17,18 @@ export interface RunsCommand {
   nonce: number
 }
 
-const COLUMNS = '1.2fr .7fr .9fr .8fr .6fr .7fr .7fr 1fr 78px'
+const COLUMNS = '1.05fr .65fr .85fr .7fr .5fr .55fr .6fr .7fr 1.15fr .85fr 78px'
 type Filter = 'all' | 'failed' | 'backfills'
+
+/**
+ * The tight poll while a run is being watched live, unchanged since it was added.
+ *
+ * **A backstop, not the mechanism.** The hub pushes a run's log lines and its completion; this exists
+ * because the final `TaskRuns` row is written by a different process from the one that pushed, and
+ * the row's counts have to catch up. It stays faster than the panel's ordinary cadence for exactly
+ * as long as somebody is watching one run.
+ */
+const LIVE_WATCH_MS = 1500
 
 /**
  * Processing time: how long the run itself took, from when it started to when it ended.
@@ -60,7 +75,26 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
   const [filter, setFilter] = useState<Filter>('all')
 
   const isWatching = !!activeRunId
-  const { data: runs, error: historyError } = useRunHistory(replicationName, isWatching ? 1500 : undefined)
+
+  // Ten seconds ordinarily; the live-watch backstop while somebody is watching a run, because it is
+  // the faster of the two and a query has one interval.
+  //
+  // **Layered onto the hub, not in place of it** (phase 88). The panel used to poll only while
+  // watching and otherwise wait for a push — which is right for a run that this browser started, and
+  // silent about a run started by the scheduler, by the CLI, or by somebody else's browser. The hub
+  // still delivers everything it delivered before, and the poll is what makes the list correct for
+  // a tab nobody has touched. The two cannot storm each other: react-query restarts the interval
+  // from the moment data lands, so a push-driven invalidation pushes the next poll ten seconds out
+  // rather than racing it.
+  const interval = isWatching ? LIVE_WATCH_MS : MONITORING_REFRESH_MS
+  const { data: runs, error: historyError, dataUpdatedAt } = useRunHistory(replicationName, interval)
+
+  // Deliberately the steady cadence even while watching: these timestamps come out of the polling
+  // gate's own history, which is written once per scheduling tick, so asking every 1.5 seconds
+  // would be re-deriving an answer nothing has changed. The key is nested under the run history's,
+  // so the invalidation that fires when a run completes refreshes this too — which is the moment a
+  // new watermark actually appears.
+  const { data: watermarkTimes } = useRunWatermarkTimes(replicationName, MONITORING_REFRESH_MS)
   const trigger = useTriggerRun(replicationName)
   const cancel = useCancelRun(replicationName)
   const resync = useResyncRun(replicationName)
@@ -101,6 +135,18 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
 
   return (
     <div className="pane">
+      <ShellActions>
+        <RefreshCountdown
+          label="Runs"
+          dataUpdatedAt={dataUpdatedAt}
+          // The interval actually in force, not the constant: while a run is being watched the list
+          // refreshes every 1.5 seconds, and a countdown ticking down from ten beside it would be
+          // describing a schedule the panel is not on.
+          intervalMs={interval}
+          testId="runs-countdown"
+        />
+      </ShellActions>
+
       <ErrorBanner error={historyError ?? trigger.error ?? cancel.error ?? resync.error} />
 
       {(isWatching || showBackfill) && (
@@ -169,7 +215,16 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
           {/* "Queued", not "Started": this column has always shown the enqueue time, and now there is
               a real start timestamp beside it for the header to have been lying about. */}
           <span>Queued</span><span>Kind</span><span>Mapping</span><span>Segment</span>
-          <span>Read</span><span>Written</span><span>Processing</span><span>Status</span><span />
+          {/* The worker process that ran it. Recorded since the work queue existed and never shown
+              until phase 88 — it is what an operator correlates a run against the machine's own
+              logs by, and there was no way to get it out of this screen. */}
+          <span>PID</span>
+          <span>Read</span><span>Written</span><span>Processing</span>
+          {/* Where the mapping's position started and where it got to, as times. The positions
+              themselves are an LSN or a version — unreadable as an interval, which is the thing
+              somebody looking at a run wants to know. */}
+          <span>Watermark</span>
+          <span>Status</span><span />
         </div>
 
         <div style={{ overflow: 'auto' }}>
@@ -205,9 +260,13 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
               <span><RunKindBadge kind={r.runKind} /></span>
               <span>{r.mappingName}</span>
               <span className="faint">{r.segmentLabel ?? '—'}</span>
+              {/* Null for a run no worker ever claimed — still queued, or cancelled first — which
+                  is a fact about the run rather than a missing reading. */}
+              <span className="mono sm dim" data-testid={`run-pid-${r.runId}`}>{r.pid ?? '—'}</span>
               <span>{r.rowsRead.toLocaleString()}</span>
               <span>{r.rowsWritten.toLocaleString()}</span>
               <span className="dim" title={queueTime(r) ?? undefined}>{processingTime(r)}</span>
+              <WatermarkCell run={r} times={watermarkTimes?.[r.runId]} />
               <span title={r.errorSummary ?? undefined}><StatusBadge status={r.status} /></span>
               {/* Offered, not performed. A full reload of a table that fell behind can be hours of
                   work, so a pass failing because its source dropped the history it needed reports
@@ -240,6 +299,59 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Where this pass's watermark started and where it got to, as times — see phase 88.
+ *
+ * **The stored value is a position, and the position is not the point.** `PreviousWatermark` and
+ * `NewWatermark` are a CDC LSN or a Change Tracking version; what an operator reads a run list for
+ * is how much time a pass covered, and no amount of staring at `0x0000002A000001B80003` answers
+ * that. The times come from `ChangeCheckHistory` — the earliest poll that observed the source at or
+ * past each position — and the raw value stays in the tooltip, where it is exactly what somebody
+ * comparing this against a query on the source needs.
+ *
+ * **Three different dashes, and they mean three different things.** A run with no watermarks at all
+ * is a backfill, a verification or a failed pass — it made no position durable, and the whole cell
+ * is one dash. A watermark whose time did not resolve has aged out of the polling history's
+ * retention window, or names a position the source has not been observed at yet; it gets a dash of
+ * its own with the raw value still on it. Neither is an error, and neither invents a time.
+ */
+function WatermarkCell({ run, times }: { run: TaskRunRecord; times: RunWatermarkTimes | undefined }) {
+  if (!run.previousWatermark && !run.newWatermark)
+    return <span className="faint" data-testid={`run-watermark-${run.runId}`}>—</span>
+
+  return (
+    <span className="row" style={{ gap: 4, minWidth: 0 }} data-testid={`run-watermark-${run.runId}`}>
+      <WatermarkPoint raw={run.previousWatermark} time={times?.previousWatermarkTimeUtc ?? null} which="from" />
+      <span className="faint">→</span>
+      <WatermarkPoint raw={run.newWatermark} time={times?.newWatermarkTimeUtc ?? null} which="to" />
+    </span>
+  )
+}
+
+function WatermarkPoint({ raw, time, which }: {
+  raw: string | null
+  time: string | null
+  which: 'from' | 'to'
+}) {
+  if (!raw) return <span className="faint">—</span>
+
+  const label = which === 'from' ? 'Started from' : 'Advanced to'
+  return (
+    <span
+      className={time ? 'dim' : 'faint'}
+      title={
+        `${label} source position ${raw}.` +
+        (time
+          ? ` The source was first observed there at ${new Date(time).toLocaleString()}.`
+          : ' No polling history covers that position — it has aged out of the retention window, ' +
+            'or the source has not been observed there.')
+      }
+    >
+      {time ? new Date(time).toLocaleTimeString() : '—'}
+    </span>
   )
 }
 

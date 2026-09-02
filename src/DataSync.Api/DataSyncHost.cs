@@ -168,6 +168,10 @@ public static class DataSyncHost
         // never grouped one way for the skip decision and another for the figure reported about it —
         // see phase 85.
         builder.Services.AddSingleton<ReaderLagService>();
+
+        // Dating a run's stored watermarks reads the same polling history through the same
+        // resolution, for the same reason — see phase 88.
+        builder.Services.AddSingleton<RunWatermarkTimeService>();
         builder.Services.AddHostedService<SchedulerService>();
         builder.Services.AddHostedService<RunMonitorService>();
         builder.Services.AddHostedService<RunPruningService>();

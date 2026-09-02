@@ -1,4 +1,6 @@
 import { ErrorBanner } from '../../components/ErrorBanner'
+import { RefreshCountdown } from '../../components/RefreshCountdown'
+import { ShellActions } from '../../components/ShellActions'
 import { resolveSide } from '../../api/resolveEndpoint'
 import { useReplication, useReplicationLag, useTableMappingDetails, useTableMappings } from '../../api/hooks'
 import type { MappingLag, ReplicationTaskConfig, TableSpec } from '../../api/types'
@@ -20,7 +22,7 @@ const COLUMNS = '1fr 1fr 190px'
 export function MonitoringPanel({ replicationName }: { replicationName: string }) {
   const { data: task } = useReplication(replicationName)
   const { data: names } = useTableMappings(replicationName)
-  const { data: lag, isLoading, error } = useReplicationLag(replicationName)
+  const { data: lag, isLoading, error, dataUpdatedAt } = useReplicationLag(replicationName)
 
   // The mapping configs the sidebar has already loaded, for the source/target each row names. The
   // lag endpoint answers "how far behind", not "behind what" — which is config, and is already here.
@@ -28,6 +30,10 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
 
   return (
     <div className="pane">
+      <ShellActions>
+        <RefreshCountdown label="Lag" dataUpdatedAt={dataUpdatedAt} testId="lag-countdown" />
+      </ShellActions>
+
       <ErrorBanner error={error} />
 
       <div className="card" data-testid="monitoring-range">
@@ -166,6 +172,25 @@ function LagCell({ name, lag }: { name: string; lag: MappingLag | undefined }) {
       {state === 'no-data' && <span className="faint">no data yet</span>}
 
       {behind}
+
+      {/* What the figure above is measured *against*, which is the question every lag number
+          invites and none of them answered until phase 88. Rendered for every state that consulted
+          a reading, including the ones with no figure: "we last saw the source ten seconds ago and
+          still cannot place this mapping" and "we have not looked in an hour" are different
+          problems, and only the second is about the poller. */}
+      {lag.asOfUtc && (
+        <span
+          className="faint sm"
+          data-testid={`monitoring-asof-${name}`}
+          title={
+            `The source's own position as of ${new Date(lag.asOfUtc).toLocaleString()} — the ` +
+            'reading this lag is the distance from. Not the current time, and not when this page ' +
+            'last refreshed.'
+          }
+        >
+          as of {new Date(lag.asOfUtc).toLocaleTimeString()}
+        </span>
+      )}
     </span>
   )
 }

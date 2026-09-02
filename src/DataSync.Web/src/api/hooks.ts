@@ -26,6 +26,8 @@ const keys = {
   tableMapping: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName] as const,
   runHistory: (replicationName: string) => ['replications', replicationName, 'runs'] as const,
+  runWatermarkTimes: (replicationName: string) =>
+    ['replications', replicationName, 'runs', 'watermark-times'] as const,
   run: (runId: string) => ['runs', runId] as const,
   provisioning: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'provisioning'] as const,
@@ -414,10 +416,50 @@ export function useDeleteTableMapping(replicationName: string) {
   })
 }
 
+/**
+ * The one cadence the three monitoring panels share — the run list, the metrics card and the lag
+ * tab (phase 88).
+ *
+ * Ten seconds, down from thirty on the two that polled and up from never on the one that only
+ * listened. It is a single constant rather than three literals because the number is now a promise
+ * the UI makes out loud: each of those panels renders a countdown to its own next refresh, and a
+ * panel whose interval drifted from the number beside it would be worse than one with no countdown
+ * at all.
+ *
+ * Deliberately not applied to `useReplicationStatus` (5s), `useNotifications` (15s) or
+ * `useVerificationResults` (5s). Those cadences answer different questions — two of them are
+ * screens somebody is watching immediately after pressing a button — and none of them was asked
+ * about.
+ */
+export const MONITORING_REFRESH_MS = 10_000
+
 export function useRunHistory(replicationName: string | undefined, refetchInterval?: number) {
   return useQuery({
     queryKey: keys.runHistory(replicationName ?? ''),
     queryFn: () => api.runs.history(replicationName!),
+    enabled: !!replicationName,
+    refetchInterval,
+  })
+}
+
+/**
+ * When each run in that history moved its mapping's watermark, dated out of polling history — see
+ * phase 88.
+ *
+ * A second query rather than fields on the run record, because the answer is derived on read and
+ * changes as `ChangeCheckHistory`'s retention window moves; the run itself is durable and does not.
+ * It shares the run history's cadence so the two halves of a row never disagree by a poll.
+ *
+ * Its key is nested under `runHistory`'s, which means every existing invalidation of the run list —
+ * a trigger, a cancel, a run completing on the hub — refreshes these timestamps too. That is what
+ * should happen: a pass that just ended is exactly the one whose new watermark is worth dating.
+ */
+export function useRunWatermarkTimes(
+  replicationName: string | undefined, refetchInterval?: number,
+) {
+  return useQuery({
+    queryKey: keys.runWatermarkTimes(replicationName ?? ''),
+    queryFn: () => api.runs.watermarkTimes(replicationName!),
     enabled: !!replicationName,
     refetchInterval,
   })
@@ -600,16 +642,17 @@ export function useRunMetrics(replicationName: string | undefined, window: Metri
     queryKey: keys.metrics(replicationName ?? '', window),
     queryFn: () => api.metrics.get(replicationName!, window),
     enabled: !!replicationName,
-    refetchInterval: 30_000,
+    refetchInterval: MONITORING_REFRESH_MS,
   })
 }
 
 /**
  * Every mapping's lag, and the range across them — see phase 86.
  *
- * Thirty seconds, the same cadence `useRunMetrics` polls on: lag is a figure somebody reads when
- * they go looking, and the case where somebody is watching a replication move second by second is a
- * live run, which the run hub already covers.
+ * `MONITORING_REFRESH_MS`, the same cadence `useRunMetrics` polls on — ten seconds since phase 88,
+ * thirty before it. Lag is still a figure somebody reads when they go looking rather than one they
+ * watch move; what changed is that the tab now shows when the next reading lands, and a wait of
+ * half a minute for a number somebody is standing in front of is longer than it needs to be.
  *
  * One query per replication, not one per mapping. The Monitoring tab and each row of the
  * replications list share this key, so a list of ten replications is ten requests rather than ten
@@ -620,7 +663,7 @@ export function useReplicationLag(replicationName: string | undefined) {
     queryKey: keys.replicationLag(replicationName ?? ''),
     queryFn: () => api.replications.lag(replicationName!),
     enabled: !!replicationName,
-    refetchInterval: 30_000,
+    refetchInterval: MONITORING_REFRESH_MS,
   })
 }
 

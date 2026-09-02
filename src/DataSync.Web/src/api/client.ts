@@ -43,6 +43,7 @@ import type {
   TableMappingConfig,
   TableMetadata,
   TaskRunRecord,
+  RunWatermarkTimes,
   TriggerResponse,
 } from './types'
 
@@ -340,6 +341,16 @@ export const api = {
     history: (replicationName: string, limit = 50) =>
       request<TaskRunRecord[]>(
         `/api/replications/${encodeURIComponent(replicationName)}/runs?limit=${limit}`,
+      ),
+    /**
+     * When those same runs' watermarks were the source's position, keyed by run id — see phase 88.
+     *
+     * The same limit as `history`, so the two answers cover the same page. A run with no timestamp
+     * at all is absent rather than present with two nulls.
+     */
+    watermarkTimes: (replicationName: string, limit = 50) =>
+      request<Record<string, RunWatermarkTimes>>(
+        `/api/replications/${encodeURIComponent(replicationName)}/runs/watermark-times?limit=${limit}`,
       ),
     get: (runId: string) => request<TaskRunRecord>(`/api/runs/${runId}`),
     /** Reloads the table and clears the stored watermark, for a run whose source position expired. */

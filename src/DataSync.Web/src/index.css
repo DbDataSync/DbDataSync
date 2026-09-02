@@ -136,6 +136,24 @@ button { font-family: inherit; }
 .topbar .crumb.here { color: var(--ink); }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
 
+/* Where a panel beneath the shell renders its own chrome — see ShellActions. Contributes no gap of
+   its own when nothing is mounted into it, so a screen with no countdown is unchanged. */
+.shell-actions { display: contents; }
+
+/* A panel's countdown to its own next refresh (phase 88). Quiet by construction: this sits in the
+   chrome of every monitoring screen and is read at a glance or not at all, so it carries the
+   secondary ink weight rather than competing with the buttons beside it. */
+.refresh-countdown {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 0 7px; height: 22px;
+  border: 1px solid var(--chrome-edge); border-radius: 11px;
+  font: 500 11px var(--ui); color: var(--ink-4);
+  white-space: nowrap;
+}
+.refresh-countdown-label { color: var(--ink-4); }
+/* Tabular figures so the number does not shuffle the label sideways as it counts down. */
+.refresh-countdown-value { color: var(--ink); font-variant-numeric: tabular-nums; }
+
 .tabbar {
   height: 46px; flex: none;
   border-bottom: 1px solid var(--chrome-edge);

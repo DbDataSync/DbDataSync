@@ -16,6 +16,8 @@ public sealed class RunsController(
     TaskRunStore taskRunStore,
     ResyncService resyncService,
     SegmentingPreviewService segmentingPreview,
+    ConfigRepository configRepository,
+    RunWatermarkTimeService watermarkTimes,
     LogWriter logWriter) : ControllerBase
 {
     [HttpPost("replications/{name}/runs")]
@@ -106,6 +108,44 @@ public sealed class RunsController(
     public ActionResult<IReadOnlyList<TaskRunRecord>> History(
         string name, [FromQuery] RunKind? kind = null, [FromQuery] int limit = 50) =>
         Ok(taskRunStore.GetRunHistory(name, kind, limit));
+
+    /// <summary>
+    /// When each of those runs' stored watermarks was the source's own position — see phase 88.
+    /// <para>
+    /// **A companion lookup rather than fields on the history above.** <c>TaskRunRecord</c> is the
+    /// state store's own record of a run, written by the runner; these two timestamps are neither
+    /// stored nor knowable at the moment a run ends — they are derived on read, out of polling
+    /// history that has since been written and may since have been purged. Putting them on that
+    /// record would make a durable row carry a value that changes as the retention window moves.
+    /// </para>
+    /// <para>
+    /// Takes the same <paramref name="kind"/> and <paramref name="limit"/> as the history endpoint
+    /// and resolves the same page, so a client asking both questions about one screenful cannot be
+    /// answered about two different sets of runs.
+    /// </para>
+    /// <para>
+    /// Keyed by run id, and a run with no timestamp at all is simply absent: it aged out of
+    /// <c>ChangeCheckHistory</c>'s window, or it never made a position durable in the first place —
+    /// a backfill, a verification, or a failed pass.
+    /// </para>
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("replications/{name}/runs/watermark-times")]
+    public ActionResult<IReadOnlyDictionary<Guid, RunWatermarkTimes>> WatermarkTimes(
+        string name, [FromQuery] RunKind? kind = null, [FromQuery] int limit = 50)
+    {
+        ReplicationTaskConfig task;
+        try
+        {
+            task = configRepository.LoadReplicationTask(name);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+
+        return Ok(watermarkTimes.Describe(task, taskRunStore.GetRunHistory(name, kind, limit)));
+    }
 
     [Authorize(Policies.Viewer)]
     [HttpGet("runs/{runId:guid}")]

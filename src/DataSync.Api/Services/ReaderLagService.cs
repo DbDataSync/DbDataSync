@@ -38,12 +38,33 @@ namespace DataSync.Api.Services;
 /// data. Null — never a synthesised zero — when the group has not accumulated enough history to
 /// place the mapping's version at all.
 /// </param>
+/// <param name="AsOfUtc">
+/// The far end of the subtraction: where the source had got to, at the moment the figures above are
+/// measured against. Phase 88 surfaces what phase 85 already computed and discarded.
+/// <para>
+/// **The exact <c>ChangeCheckHistory</c> row this mapping's own comparison used**, not the group's
+/// newest row and not the clock. CDC and Change Tracking pick that row differently — CDC takes the
+/// latest one that carries a source time, Change Tracking the latest one outright — so a figure and
+/// the "as of" beside it always come from the same reading.
+/// </para>
+/// <para>
+/// <c>SourceTimeUtc</c> where the row has one and <c>CheckedAtUtc</c> where it does not, matching
+/// whichever the figure itself used. The two are different claims — when the engine says that
+/// position committed, versus when this system happened to ask — and the first is the better answer
+/// exactly where it exists.
+/// </para>
+/// <para>
+/// Null when no history row was consulted at all: an unsupported reader, or a mapping that has never
+/// stored a position, both of which return before any check is read.
+/// </para>
+/// </param>
 public sealed record ReaderLag(
     string ReaderKind,
     bool Supported,
     TimeSpan? ExactLag = null,
     long? ExactVersionsBehind = null,
-    TimeSpan? EstimatedLag = null);
+    TimeSpan? EstimatedLag = null,
+    DateTimeOffset? AsOfUtc = null);
 
 /// <summary>
 /// Computes a mapping's staleness against its source's own last-known position.
@@ -132,10 +153,7 @@ public sealed class ReaderLagService(
 
         return readerKind switch
         {
-            MsSqlDriverKinds.Cdc => new ReaderLag(
-                readerKind,
-                Supported: true,
-                ExactLag: CdcLag(source, applied)),
+            MsSqlDriverKinds.Cdc => CdcLag(readerKind, source, applied),
 
             MsSqlDriverKinds.ChangeTracking => ChangeTrackingLag(readerKind, source, applied),
 
@@ -156,7 +174,7 @@ public sealed class ReaderLagService(
     /// just come back after an outage — is exactly the one that should not be adding load.
     /// </para>
     /// </summary>
-    private TimeSpan? CdcLag(ChangeSource source, AppliedPosition applied)
+    private ReaderLag CdcLag(string readerKind, ChangeSource source, AppliedPosition applied)
     {
         // Deliberately the latest row that *has* a time rather than the latest row: a group whose
         // most recent poll found no position at all (the capture job stopped) still has an earlier
@@ -165,6 +183,11 @@ public sealed class ReaderLagService(
         var current = checks.GetLatestCheck(
             source.ConnectionName, source.SourceDatabase, source.ReaderKind,
             requireSourceTime: true)?.SourceTimeUtc;
+
+        // Reported even where the figure is not. "We last saw the source here, and cannot yet say
+        // how far behind you are" is a more useful screen than a blank one, and it is the difference
+        // between a stalled poller and a mapping that has simply not run.
+        var lag = new ReaderLag(readerKind, Supported: true, AsOfUtc: current);
 
         if (current is null || applied.WatermarkTimeUtc is null)
         {
@@ -175,10 +198,10 @@ public sealed class ReaderLagService(
             logger.LogDebug(
                 "No cached lag inputs yet for '{Connection}'/'{Database}': current={Current}, applied={Applied}.",
                 source.ConnectionName, source.SourceDatabase, current, applied.WatermarkTimeUtc);
-            return null;
+            return lag;
         }
 
-        return Clamp(current.Value - applied.WatermarkTimeUtc.Value);
+        return lag with { ExactLag = Clamp(current.Value - applied.WatermarkTimeUtc.Value) };
     }
 
     /// <summary>
@@ -225,9 +248,15 @@ public sealed class ReaderLagService(
             ? Clamp(current - appliedVersion)
             : null;
 
+        // Whichever end of this row the figure below turns out to rest on. The exact branch
+        // subtracts from its SourceTimeUtc and the estimate from its CheckedAtUtc, so the same
+        // coalesce that picks between them names the instant either figure is measured against.
+        var asOf = latest.SourceTimeUtc ?? latest.CheckedAtUtc;
+
         if (ExactChangeTrackingLag(applied, latest) is { } exact)
             return new ReaderLag(
-                readerKind, Supported: true, ExactLag: exact, ExactVersionsBehind: behind);
+                readerKind, Supported: true, ExactLag: exact, ExactVersionsBehind: behind,
+                AsOfUtc: asOf);
 
         // Parsed as numbers, in this language, one row at a time — not a >= in the SQL. Value is
         // text in a store that runs on three engines, and every one of them would order "9" above
@@ -240,7 +269,8 @@ public sealed class ReaderLagService(
             readerKind,
             Supported: true,
             ExactVersionsBehind: behind,
-            EstimatedLag: crossing is null ? null : Clamp(latest.CheckedAtUtc - crossing.CheckedAtUtc));
+            EstimatedLag: crossing is null ? null : Clamp(latest.CheckedAtUtc - crossing.CheckedAtUtc),
+            AsOfUtc: asOf);
     }
 
     /// <summary>

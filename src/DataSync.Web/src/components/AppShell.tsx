@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
+import { ShellActionsSlot } from './shellActionsSlot'
 import { NotificationBell } from './NotificationBell'
 import { SignedInAs } from './SignIn'
 import { useIsAdmin } from './useIsAdmin'
@@ -22,6 +23,12 @@ export function AppShell({ crumbs, tabs, actions, children }: {
   // item is only about not offering a Viewer a destination that would 403 on arrival, the same
   // instinct useIsAdmin's own doc comment states for the Save buttons it gates.
   const isAdmin = useIsAdmin()
+
+  // State rather than a ref, deliberately: a portal needs its host element to exist before it can
+  // render into it, and a ref assignment does not re-render the subscribers. Holding the node in
+  // state means the first render publishes null — `ShellActions` renders nothing — and the second
+  // publishes the element, which is when the countdowns appear.
+  const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null)
 
   return (
     <>
@@ -93,6 +100,9 @@ export function AppShell({ crumbs, tabs, actions, children }: {
               authenticate. */}
           <div className="right">
             {actions}
+            {/* What the content below wants to say up here — see `ShellActions`. Left of the bell
+                and the identity, which stay the rightmost things on every screen. */}
+            <span className="shell-actions" ref={setActionSlot} />
             {/* Beside the signed-in identity, on every screen and for the same reason: a
                 notification is about the deployment, not about whichever page happens to be open. */}
             <NotificationBell />
@@ -102,7 +112,9 @@ export function AppShell({ crumbs, tabs, actions, children }: {
 
         {tabs && <div className="tabbar">{tabs}</div>}
 
-        <div className="content">{children}</div>
+        <div className="content">
+          <ShellActionsSlot.Provider value={actionSlot}>{children}</ShellActionsSlot.Provider>
+        </div>
       </div>
     </>
   )

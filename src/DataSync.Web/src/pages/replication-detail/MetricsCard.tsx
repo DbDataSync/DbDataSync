@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useRunMetrics } from '../../api/hooks'
+import { RefreshCountdown } from '../../components/RefreshCountdown'
+import { ShellActions } from '../../components/ShellActions'
 import type { MetricsWindow, RunMetricsBucket } from '../../api/types'
 
 const WINDOWS: { id: MetricsWindow; label: string }[] = [
@@ -22,10 +24,16 @@ const WINDOWS: { id: MetricsWindow; label: string }[] = [
  */
 export function MetricsCard({ replicationName, enabled }: { replicationName: string; enabled: boolean }) {
   const [window, setWindow] = useState<MetricsWindow>('24h')
-  const { data, isLoading } = useRunMetrics(replicationName, window)
+  const { data, isLoading, dataUpdatedAt } = useRunMetrics(replicationName, window)
 
   return (
     <div className={`card ${enabled ? 'enabled' : 'disabled'}`} data-testid="metrics-card">
+      {/* This card sits in the detail rail on every tab, so its countdown is the one constant of
+          the three — the other two come and go with whichever tab is open. */}
+      <ShellActions>
+        <RefreshCountdown label="Metrics" dataUpdatedAt={dataUpdatedAt} testId="metrics-countdown" />
+      </ShellActions>
+
       <div className="card-head">
         <span className="card-title">Last {window}</span>
         <span className="spacer row" style={{ gap: 4 }}>

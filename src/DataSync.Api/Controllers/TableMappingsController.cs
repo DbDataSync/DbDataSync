@@ -238,12 +238,25 @@ public sealed record MappingLag(
     bool Supported,
     long? ExactLagMs,
     long? VersionsBehind,
-    long? EstimatedLagMs)
+    long? EstimatedLagMs,
+    /// <summary>
+    /// Where the source had got to, at the moment the figures above are measured against — the exact
+    /// <c>ChangeCheckHistory</c> row this mapping's own comparison used, never the clock. See
+    /// <see cref="ReaderLag.AsOfUtc"/>, whose choice between the row's two timestamps this carries
+    /// unchanged.
+    /// <para>
+    /// A timestamp rather than milliseconds, unlike the two figures beside it. Those are durations a
+    /// client does arithmetic on; this is an instant a client renders, and an offset from an
+    /// unstated origin would be the harder of the two to get right.
+    /// </para>
+    /// </summary>
+    DateTimeOffset? AsOfUtc = null)
 {
     public static MappingLag From(ReaderLag lag) => new(
         lag.ReaderKind,
         lag.Supported,
         (long?)lag.ExactLag?.TotalMilliseconds,
         lag.ExactVersionsBehind,
-        (long?)lag.EstimatedLag?.TotalMilliseconds);
+        (long?)lag.EstimatedLag?.TotalMilliseconds,
+        lag.AsOfUtc);
 }
