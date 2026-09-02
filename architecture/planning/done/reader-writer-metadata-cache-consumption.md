@@ -1,7 +1,8 @@
-# Wiring readers and writers to the cached metadata, without a mass behavior change on deploy
+# Wiring readers and writers to the cached metadata — cache-only, fail loud when empty
 
 **Status: resolved — ready for an implementation phase doc. The deliberately deferred second half of
-`architecture/planning/done/mapping-metadata-cache.md`.**
+`architecture/planning/done/mapping-metadata-cache.md`. Revised from an initial live-fallback draft
+before implementation started — see "The design that was rejected" below.**
 
 ## What phase 90 built, and what it deliberately didn't
 
@@ -21,33 +22,33 @@ still live-queries exactly as before:
   auto-segment discovery samples a column's actual current value distribution, which no cache could
   ever substitute for.
 
-## The problem a naive wiring would create
+## The resolution: always the cache, never a live fallback, fail loud when it's empty
 
-Phase 90 explicitly did not backfill existing mappings — every mapping that existed before it shipped,
-and hasn't been edited or explicitly refreshed since, has an **empty** cache. If this phase simply made
-every consumer above require the cache and fail without it, the moment it ships, every one of those
-mappings' next run would fail outright, across an entire production install, with no single deliberate
-action having caused it. That directly violates the same principle that motivated phase 90 in the first
-place — "the standard operation of the tool shouldn't change behaviour without someone being involved in
-that decision" — just inverted: a *mass* failure on deploy is exactly the kind of behavior change nobody
-decided on, even if the eventual state (cache required) is the right one.
+Every one of the six consumers above reads only `SourceColumns`/`TargetColumns` from now on. There is no
+live `ITableCatalog` call left in any of their run paths. When the relevant cache is empty (or missing
+the specific column needed), the run **fails** — a distinct, named failure kind, with a message that
+says plainly what happened and what to do: this mapping's cached metadata isn't there, use Refresh
+metadata to populate it.
 
-## The resolution
+## The design that was rejected
 
-**Per mapping, per side, the switch is binary and keyed on whether the cache is populated — no partial
-trust, no live fallback once cached:**
+An earlier draft of this doc proposed a live fallback whenever the cache was empty, specifically to
+avoid every pre-existing, never-refreshed mapping failing its next run the moment this phase shipped.
+**Overridden, deliberately**: the operator's instruction was cache-only, fail loud, full stop. The
+accepted consequence, stated plainly rather than hidden: **on deploy, every mapping using one of these
+six consumers that has never been saved or refreshed since phase 90 shipped will fail its next run**,
+until an operator explicitly refreshes it. That is the intended behavior, not a rollout risk to be
+engineered around — a hard stop with a clear, actionable message is exactly "someone being involved in
+that decision," made unavoidable rather than merely available.
 
-- `SourceColumns`/`TargetColumns` non-empty → use it exclusively. No live `ITableCatalog` call at all,
-  not even as a fallback for a single missing column — a column the cache doesn't have is a fact about
-  the cache (stale, or the operator hasn't refreshed since a real schema change), which is exactly the
-  situation "refresh it yourself" exists to name, not something to paper over with a live peek.
-- Empty → live-query exactly as today. Nothing changes for a mapping nobody has touched since phase 90
-  shipped.
+## The failure itself
 
-This means the transition to cache-based behavior happens **exactly when a human causes the cache to
-exist** — by editing and saving the mapping (phase 90 already captures on save) or by explicitly hitting
-Refresh — never on its own, never for a mapping sitting untouched. A fleet upgrade changes nothing for
-anyone until they interact with a mapping; from then on, that mapping is cache-only.
+Mirror `PositionExpiredException`'s existing shape (phase 32) — a specific, named exception type
+(naming convention is implementation's call, e.g. `MetadataNotCachedException`), carrying the mapping
+name and which side/column was needed, caught wherever the run pipeline already catches
+`PositionExpiredException` and reports a `TaskRuns.FailureKind`. This gets the notification system's
+existing run-failure trigger (phase 77 — any `Failed` run notifies) for free, with no new wiring, the
+same way phase 80's watermark-expiry producer rode the same `CompleteRun` path rather than a new one.
 
 ## One thing to verify before trusting the cache is equivalent
 
@@ -56,37 +57,39 @@ surface, which the codebase's own doc comments note is a **different path** from
 consults at run time (`ITableCatalog`, the driver-level catalog): "This is the surface an operator
 *browses and maps against*... the pipeline reads the driver's own catalog." Both return the same
 `ColumnMetadata` shape, but a connection with a bound `metadataProvider` script could make
-`MetadataService`'s answer diverge from `ITableCatalog`'s raw one for the same table. Confirm this can't
-happen for a mapping in the cache-in-use state before assuming the two are interchangeable — if it can,
-the phase needs to say plainly what a divergence looks like to an operator (most likely: the cached
-column a reader/writer needed just isn't in the list, which the "cache doesn't have it, go refresh"
-handling above already covers without special-casing this).
+`MetadataService`'s answer diverge from `ITableCatalog`'s raw one for the same table. If that's possible,
+it now matters more than it would have under a live-fallback design: a cache built from a diverging
+source could report a column present-but-wrong rather than merely absent. Confirm this before
+implementation trusts the two are interchangeable.
 
 ## What this phase should build
 
-For each of the six run-time consumers above: read the mapping's relevant cached column list first;
-look up the specific column needed (by name) from it; only fall through to a live `ITableCatalog` call
-when the cache is empty for that side. `TargetShape.LoadAsync`/`MsSqlTargetShape.LoadAsync` is shared by
-all six writers — fixing it once likely covers five of the eight consumer call sites in one change.
+For each of the six run-time consumers: read the mapping's relevant cached column list; look up the
+needed column by name; throw the new failure, with the mapping/side/column named in the message, if the
+cache is empty or the column isn't in it. `TargetShape.LoadAsync`/`MsSqlTargetShape.LoadAsync` is shared
+by all six writers — fixing it once likely covers five of the eight consumer call sites in one change.
 
 ## What this phase should not do
 
 - Touch `ExpandAutoSegmentsAsync` — confirmed, permanently live.
-- Backfill any mapping's cache — unchanged from phase 90's own decision.
-- Add a live fallback for a single missing column within an otherwise-populated cache — the binary,
-  per-side rule above is deliberate; a partial trust rule is a second, subtler kind of silent staleness.
+- Backfill any mapping's cache, or add a migration that pre-populates one — the failure on an
+  unrefreshed mapping is the intended signal, not a gap to paper over.
+- Add any live fallback, partial or otherwise, for a missing column in an empty or incomplete cache.
 
 ## How to verify
 
-- A test per consumer: cache populated → zero calls to `ITableCatalog`/`IDriver` introspection methods
-  (a fake that throws if called proves this directly, the same technique phase 87 used to prove
-  `ReaderLagService` stopped calling `IChangeCounterSource`).
-- A test per consumer: cache empty → behaves exactly as before phase 90, live-querying as always.
-- A test asserting a mapping edited after this phase ships (triggering phase 90's existing capture)
-  transitions from live-querying to cache-only on its very next run, with no separate action required
-  beyond the save that populated the cache.
+- A test per consumer: cache populated with the needed column → runs correctly, zero calls to
+  `ITableCatalog`/`IDriver` introspection methods (a fake that throws if called proves this directly,
+  the same technique phase 87 used to prove `ReaderLagService` stopped calling `IChangeCounterSource`).
+- A test per consumer: cache empty → the new failure is thrown, naming the mapping and the missing side,
+  not a generic error and not a silent live query.
+- A test asserting the failure produces a `Failed` run with the new `FailureKind` and a notification,
+  through the existing `CompleteRun`/phase-77 path, with no new producer wired.
+- A test asserting a mapping edited or refreshed after this phase ships (populating its cache) runs
+  successfully on its very next pass.
 - Full suite green (`Category!=Integration`, `Category=Integration`), `tsc -b`/SPA build clean (no SPA
-  change expected — this is entirely a run-time backend change).
+  change expected beyond however the new failure surfaces in run history, which should already display
+  any other `FailureKind` the same way).
 
 **Next step**: ready for an implementation phase doc.
 
