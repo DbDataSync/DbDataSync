@@ -204,6 +204,40 @@ public sealed class TableMappingConfig
     public bool TraceTiming { get; set; }
 
     /// <summary>
+    /// The source table's shape as it was when this mapping was last captured or refreshed — see
+    /// <see cref="CachedColumn"/> for why a cache exists at all beside <see cref="ColumnMapping"/>'s
+    /// deliberate refusal to store types.
+    /// <para>
+    /// Empty for a mapping created before this existed, and for a query source, which has no catalog
+    /// to read. **Nothing reads this yet** — phase 90 builds and refreshes the cache; switching
+    /// readers off their live catalog queries onto it is a behaviour change with its own phase.
+    /// </para>
+    /// </summary>
+    public List<CachedColumn> SourceColumns { get; set; } = new();
+
+    /// <summary>The target table's shape, on the same terms as <see cref="SourceColumns"/>. Empty for
+    /// a target that provisioning has yet to create — there is no catalog entry to capture.</summary>
+    public List<CachedColumn> TargetColumns { get; set; } = new();
+
+    /// <summary>
+    /// When <see cref="SourceColumns"/>/<see cref="TargetColumns"/> were last written. Null while
+    /// nothing has ever been captured.
+    /// <para>
+    /// The field that makes the cache's own premise checkable. The whole design is that staleness is
+    /// something an operator decides about rather than something that happens quietly, and an
+    /// operator cannot decide whether to refresh a picture whose age is not on screen.
+    /// </para>
+    /// <para>
+    /// A <see cref="DateTime"/> in UTC, not a <c>DateTimeOffset</c>: YamlDotNet writes a
+    /// <c>DateTimeOffset</c> out as a mapping of its own properties and then cannot read it back —
+    /// "Property 'dateTime' not found on type 'System.DateTimeOffset'" — so the field would appear to
+    /// work until the next time this config was loaded. The offset would be noise anyway; there is
+    /// exactly one moment being recorded and it is always UTC.
+    /// </para>
+    /// </summary>
+    public DateTime? ColumnsCapturedUtc { get; set; }
+
+    /// <summary>
     /// Markdown notes about this table mapping specifically — the quirks of this table, why a column is
     /// mapped the way it is, what broke last time. Git-tracked and diffed like the replication's own
     /// (see <c>ReplicationTaskConfig.Notes</c>).
@@ -213,6 +247,52 @@ public sealed class TableMappingConfig
     /// </para>
     /// </summary>
     public string? Notes { get; set; }
+}
+
+/// <summary>
+/// One column of a source or target table, as the catalog described it when somebody last looked.
+/// <para>
+/// The same five facts <c>DataSync.Drivers.Abstractions.ColumnMetadata</c> carries, restated here
+/// because config cannot reference the driver abstractions — that project references this one, not
+/// the other way round — and because a persisted type has to round-trip: YamlDotNet constructs
+/// through a parameterless constructor and property setters, so a positional record serialises out
+/// and then throws on the way back in. The same reason <see cref="RenameStep"/> is a class.
+/// </para>
+/// <para>
+/// **This is a cache, and it is only ever written by somebody asking for it.** Capture happens when
+/// a mapping is saved with a side whose table changed (or that has nothing cached yet), reusing the
+/// column list the editor already fetched to draw its picker rather than issuing a query of its own,
+/// and the Refresh Metadata action overwrites it on demand. No pass, no run, and no ordinary re-save
+/// updates it — a cache that silently caught up with a schema change would be exactly the staleness
+/// hazard <see cref="ColumnMapping.TargetType"/>'s doc comment refuses.
+/// </para>
+/// </summary>
+public sealed class CachedColumn
+{
+    public CachedColumn() { }
+
+    public CachedColumn(string name, string nativeType, bool isNullable, bool isPrimaryKey, bool isIdentity)
+    {
+        Name = name;
+        NativeType = nativeType;
+        IsNullable = isNullable;
+        IsPrimaryKey = isPrimaryKey;
+        IsIdentity = isIdentity;
+    }
+
+    public string Name { get; set; } = "";
+    public string NativeType { get; set; } = "";
+    public bool IsNullable { get; set; }
+    public bool IsPrimaryKey { get; set; }
+    public bool IsIdentity { get; set; }
+
+    /// <summary>Everything about this column except its name, for reporting what a refresh changed.
+    /// Name is excluded because it is the identity a diff pairs two columns *by*.</summary>
+    public bool SameShapeAs(CachedColumn other) =>
+        string.Equals(NativeType, other.NativeType, StringComparison.Ordinal)
+        && IsNullable == other.IsNullable
+        && IsPrimaryKey == other.IsPrimaryKey
+        && IsIdentity == other.IsIdentity;
 }
 
 /// <summary>

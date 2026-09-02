@@ -7,6 +7,22 @@ using DataSync.Core.Sql;
 namespace DataSync.Api.Services;
 
 /// <summary>
+/// The one question <see cref="MappingMetadataService"/> asks of a live database, behind an interface
+/// so the cache's own rules can be tested without one.
+/// <para>
+/// The same seam <c>IChangeCounterSource</c> is: one narrow interface over the piece that does I/O,
+/// implemented by the real service and faked in tests, rather than an interface over everything the
+/// service can do. Introspection stays <see cref="MetadataService"/>'s job — this only names the part
+/// of it that the cache depends on.
+/// </para>
+/// </summary>
+public interface IColumnCatalog
+{
+    Task<IReadOnlyList<ColumnMetadata>> ListColumnsAsync(
+        string connectionName, string database, string schema, string table, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// On-demand schema introspection for a configured connection (architecture/detailed-design.md §3.1)
 /// — opens a connection, runs one metadata query, closes it. No data movement.
 /// <para>
@@ -17,6 +33,7 @@ namespace DataSync.Api.Services;
 /// </para>
 /// </summary>
 public sealed class MetadataService(DriverConnectionFactory connections, ScriptedMetadata scriptedMetadata)
+    : IColumnCatalog
 {
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(string connectionName, CancellationToken cancellationToken)
     {

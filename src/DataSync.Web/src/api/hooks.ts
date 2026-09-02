@@ -408,6 +408,28 @@ export function useUpsertTableMapping(replicationName: string) {
   })
 }
 
+/**
+ * Re-reads both sides' catalogs and overwrites this mapping's cached column metadata — phase 90.
+ *
+ * A mutation rather than a query, and not on any refetch cadence: it opens connections to the source
+ * and target, writes config and makes a git commit. The entire premise of the cache is that it moves
+ * only when somebody moved it, so a hook that could fire on a window focus would defeat it.
+ *
+ * The mapping comes back in the result, so the caller does not re-fetch to see what it asked for —
+ * but the mapping's own query is invalidated anyway, because a git commit just happened and the
+ * Version Control tab is looking at the same repository.
+ */
+export function useRefreshMappingMetadata(replicationName: string, mappingName: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.tableMappings.refreshMetadata(replicationName, mappingName!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.tableMapping(replicationName, mappingName ?? '') })
+      queryClient.invalidateQueries({ queryKey: keys.replicationHistory(replicationName) })
+    },
+  })
+}
+
 export function useDeleteTableMapping(replicationName: string) {
   const queryClient = useQueryClient()
   return useMutation({

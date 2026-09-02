@@ -13,7 +13,8 @@ namespace DataSync.Api.Controllers;
 [Route("api/replications/{replicationName}/table-mappings")]
 public sealed class TableMappingsController(
     ConfigRepository configRepository, CurrentUser currentUser, IHubContext<RunHub> hub,
-    ParameterCheck parameterCheck, ReaderLagService lag) : ControllerBase
+    ParameterCheck parameterCheck, ReaderLagService lag,
+    MappingMetadataService mappingMetadata) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
@@ -73,6 +74,17 @@ public sealed class TableMappingsController(
             // reason: a per-stage override naming a Kind or a setting that cannot work is caught while
             // somebody is still looking at the edit, not on the first pass (phase 68).
             parameterCheck.ThrowIfInvalid(configRepository.LoadReplicationTask(replicationName), mapping);
+
+            // What a save may do to the cached column metadata, which is very little — see
+            // MappingMetadataCapture. A mapping being created has nothing stored to reconcile against.
+            TableMappingConfig? stored = null;
+            try
+            {
+                stored = configRepository.LoadTableMapping(replicationName, mappingName);
+            }
+            catch (FileNotFoundException) { }
+            MappingMetadataCapture.Apply(mapping, stored, DateTime.UtcNow);
+
             return Ok(configRepository.SaveTableMapping(replicationName, mapping, currentUser.Author));
         }
         catch (FileNotFoundException)
@@ -80,6 +92,34 @@ public sealed class TableMappingsController(
             // Saving a mapping resolves its endpoints against the replication, so the replication has
             // to exist. It always had to for the mapping to mean anything; now it is enforced.
             return NotFound(new { error = $"Replication '{replicationName}' was not found." });
+        }
+        catch (ConfigValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Re-reads both sides' catalogs and overwrites this mapping's cached column metadata — see
+    /// <see cref="CachedColumn"/> for why the cache is only ever written on request.
+    /// <para>
+    /// A POST rather than a GET, and not folded into <see cref="Upsert"/>: it opens connections to
+    /// the source and target, writes config and makes a git commit. None of that should happen
+    /// because something refetched.
+    /// </para>
+    /// </summary>
+    [HttpPost("{mappingName}/refresh-metadata")]
+    public async Task<ActionResult<MetadataRefreshResult>> RefreshMetadata(
+        string replicationName, string mappingName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await mappingMetadata.RefreshAsync(
+                replicationName, mappingName, currentUser.Author, cancellationToken));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
         }
         catch (ConfigValidationException ex)
         {

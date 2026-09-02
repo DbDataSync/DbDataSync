@@ -223,6 +223,22 @@ export interface TableMappingConfig {
   readerOverride?: ReaderConfig | null
   cacheOverride?: CacheConfig | null
   writerOverride?: WriterConfig | null
+
+  /**
+   * The source and target tables' shape as of the last capture — phase 90.
+   *
+   * **Nothing reads these yet.** Every reader, writer and staging provider still queries the live
+   * catalog on every pass, exactly as before; this phase builds the cache and the action that
+   * refreshes it, and switching consumers onto it is a behaviour change with its own later phase.
+   *
+   * Written by the editor from the column lists it already fetched to draw its pickers, and only
+   * when a side's table changed or nothing was cached yet — never on an ordinary re-save. The
+   * server enforces both halves of that; see `MappingMetadataCapture`.
+   */
+  sourceColumns?: ColumnMetadata[]
+  targetColumns?: ColumnMetadata[]
+  /** When the two lists above were last written. Null for a mapping nobody has captured. */
+  columnsCapturedUtc?: string | null
 }
 
 export interface TableMetadata {
@@ -236,6 +252,31 @@ export interface ColumnMetadata {
   isNullable: boolean
   isPrimaryKey: boolean
   isIdentity: boolean
+}
+
+/**
+ * What a metadata refresh did to one side's cache.
+ *
+ * Columns are named rather than counted, because "show the operator what changed" is the whole
+ * difference between this and a silent update — a card reporting "1 changed" leaves them to go and
+ * find which one.
+ */
+export interface MetadataRefreshSide {
+  side: 'source' | 'target'
+  /** False when the side could not be read — `unavailable` says why, and its cache is untouched. */
+  refreshed: boolean
+  unavailable: string | null
+  columnCount: number
+  added: string[]
+  removed: string[]
+  changed: string[]
+}
+
+export interface MetadataRefreshResult {
+  /** The mapping as saved, so a client that just refreshed need not re-fetch to see the cache. */
+  mapping: TableMappingConfig
+  source: MetadataRefreshSide
+  target: MetadataRefreshSide
 }
 
 /** A script bound to a slot. Name and parameters are replaced together by the most specific level

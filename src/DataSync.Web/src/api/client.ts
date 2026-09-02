@@ -15,6 +15,7 @@ import type {
   BulkCreateRequest,
   BulkCreateResult,
   MappingLag,
+  MetadataRefreshResult,
   ReplicationLag,
   CertificateActionResult,
   CertificateCandidate,
@@ -173,6 +174,11 @@ export const api = {
       put<TableMappingConfig>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}`,
         mapping,
+      ),
+    refreshMetadata: (replicationName: string, mappingName: string) =>
+      request<MetadataRefreshResult>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/refresh-metadata`,
+        { method: 'POST' },
       ),
     delete: (replicationName: string, mappingName: string) =>
       request<void>(

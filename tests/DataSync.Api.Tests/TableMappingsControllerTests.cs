@@ -297,4 +297,71 @@ public sealed class TableMappingsControllerTests(TestApiFactory factory) : IClas
     private sealed record BulkResultDto(List<string> Created, List<string> Skipped);
 
     #endregion
+
+    #region Cached column metadata (phase 90)
+
+    /// <summary>
+    /// That the capture rule <c>MappingMetadataTests</c> pins is the one actually on the route — the
+    /// same reason phase 86's lag tests went through the endpoint as well as the function. A rule
+    /// nothing calls is a rule that holds perfectly and protects nothing.
+    /// </summary>
+    [Fact]
+    public async Task Upsert_CapturesTheColumnsTheEditorSends_ThenLeavesThemAloneOnAnUnrelatedSave()
+    {
+        var replicationName = await EnsureReplicationAsync();
+        var url = $"/api/replications/{replicationName}/table-mappings/orders";
+
+        var created = MakeMapping("orders");
+        created.SourceColumns = [new CachedColumn("Id", "int", false, true, true)];
+        created.TargetColumns = [new CachedColumn("Id", "bigint", false, true, false)];
+        (await _client.PutAsJsonAsync(url, created, JsonOptions)).EnsureSuccessStatusCode();
+
+        var afterCreate = await _client.GetFromJsonAsync<TableMappingConfig>(url, JsonOptions);
+        Assert.Equal("int", Assert.Single(afterCreate!.SourceColumns).NativeType);
+        var capturedAt = afterCreate.ColumnsCapturedUtc;
+        Assert.NotNull(capturedAt);
+
+        // An edit to something the cache has nothing to do with, sending the cache back unchanged —
+        // which is exactly what the editor does when neither side's table was touched.
+        var edited = MakeMapping("orders");
+        edited.Notes = "the warehouse team owns this one";
+        edited.SourceColumns = afterCreate.SourceColumns;
+        edited.TargetColumns = afterCreate.TargetColumns;
+        (await _client.PutAsJsonAsync(url, edited, JsonOptions)).EnsureSuccessStatusCode();
+
+        var afterEdit = await _client.GetFromJsonAsync<TableMappingConfig>(url, JsonOptions);
+        Assert.Equal(capturedAt, afterEdit!.ColumnsCapturedUtc);
+        Assert.Equal("bigint", Assert.Single(afterEdit.TargetColumns).NativeType);
+    }
+
+    [Fact]
+    public async Task Upsert_FromAClientThatKnowsNothingOfTheCache_DoesNotClearIt()
+    {
+        var replicationName = await EnsureReplicationAsync();
+        var url = $"/api/replications/{replicationName}/table-mappings/orders";
+
+        var created = MakeMapping("orders");
+        created.SourceColumns = [new CachedColumn("Id", "int", false, true, true)];
+        (await _client.PutAsJsonAsync(url, created, JsonOptions)).EnsureSuccessStatusCode();
+
+        // MakeMapping states no columns at all — the shape every write path that predates this phase
+        // sends, the CLI and a hand-rolled curl among them.
+        (await _client.PutAsJsonAsync(url, MakeMapping("orders"), JsonOptions)).EnsureSuccessStatusCode();
+
+        var saved = await _client.GetFromJsonAsync<TableMappingConfig>(url, JsonOptions);
+        Assert.Equal("Id", Assert.Single(saved!.SourceColumns).Name);
+    }
+
+    [Fact]
+    public async Task RefreshMetadata_OnAMappingThatIsNotThere_IsNotFound()
+    {
+        var replicationName = await EnsureReplicationAsync();
+
+        var response = await _client.PostAsync(
+            $"/api/replications/{replicationName}/table-mappings/no-such-mapping/refresh-metadata", null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    #endregion
 }

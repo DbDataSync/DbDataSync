@@ -15,6 +15,7 @@ import { MappingSide } from './MappingSide'
 import { EndpointSidePair } from '../../components/EndpointSidePair'
 import { resolveSide } from '../../api/resolveEndpoint'
 import { ColumnMappingEditor } from './ColumnMappingEditor'
+import { CachedMetadataCard } from './CachedMetadataCard'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { NotesPanel } from '../../components/NotesPanel'
 import { SubTabs } from '../../components/SubTabs'
@@ -27,6 +28,20 @@ import { isQuerySource, queryOf, withQuery } from './querySource'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
 const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
+
+/**
+ * Whether two specs point at the same table, for deciding whether a save re-captures that side's
+ * cached columns.
+ *
+ * All four fields, because any of them moving is a different table: the same `dbo.Orders` on another
+ * database is not this one. Compared as *configured* rather than as resolved — a mapping that
+ * inherits both endpoints has not itself changed when the replication's endpoint moves underneath
+ * it, and quietly re-capturing every mapping on such an edit is exactly the silent catch-up the
+ * cache exists to prevent. Refresh is how an operator says otherwise.
+ */
+const samePlace = (a: TableSpec | undefined, b: TableSpec) =>
+  !!a && a.connectionName === b.connectionName && a.database === b.database
+  && a.schema === b.schema && a.table === b.table
 
 interface Props {
   replicationName: string
@@ -174,6 +189,30 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     && resolvedTarget.connectionName && resolvedTarget.database && target.table
     && columnMappings.length > 0
 
+  /**
+   * The cached column metadata this save should carry — phase 90.
+   *
+   * **Captured from the lists this form already fetched, never from a query of its own.** The
+   * pickers above and the column-mapping tab both run `useColumns` on the resolved endpoints, keyed
+   * identically, so React Query has already served the answer; writing it into the mapping costs
+   * nothing beyond the bytes.
+   *
+   * **And only when it is a capture.** A side whose table has not moved since the mapping was
+   * loaded sends back what is stored, so re-saving to fix a typo in a note does not restamp the
+   * cache with today's date — the whole design is that the cache goes stale visibly rather than
+   * quietly catching up. A side with nothing cached yet always captures: there is no picture to
+   * preserve, and one is what the operator came for. The server holds both halves of this rule too
+   * (`MappingMetadataCapture`), because the SPA is not the only thing that can `PUT`.
+   */
+  const captureFor = (
+    fetched: ColumnMetadata[] | undefined,
+    cached: ColumnMetadata[] | undefined,
+    tableChanged: boolean,
+  ) => (fetched && (tableChanged || !cached || cached.length === 0) ? fetched : cached ?? [])
+
+  const sourceTableChanged = !!existing && !samePlace(existing.sources[0], source)
+  const targetTableChanged = !!existing && !samePlace(existing.targets[0], target)
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     await upsert.mutateAsync({
@@ -185,6 +224,11 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
         ...existing,
         name, sources: [source], targets: [target], columnMappings, scripts, provisioning,
         defaultSegmenting, notes, traceTiming, ...pipeline,
+        sourceColumns: captureFor(sourceColumns, existing?.sourceColumns, sourceTableChanged),
+        // `catalogTargetColumns`, not `targetColumns` — the latter falls back to the *source's*
+        // columns for a target that does not exist yet, which is right for an editor about to
+        // create that table and wrong for a cache claiming to describe the target as it is.
+        targetColumns: captureFor(catalogTargetColumns, existing?.targetColumns, targetTableChanged),
       },
     })
     onSaved(name)
@@ -341,18 +385,24 @@ export function ColumnMappingTab() {
   } = useOutletContext<MappingEditorContext>()
 
   return (
-    <ColumnMappingEditor
-      replicationName={replicationName}
-      sourceColumns={sourceColumns}
-      querySource={querySource}
-      // The saved name, not the draft one: the inferred-type endpoint reads config off disk, and a
-      // mapping being renamed in this form does not exist under its new name until it is saved.
-      mappingName={existing?.name}
-      target={resolvedTarget}
-      mappings={columnMappings}
-      onChange={setColumnMappings}
-      targetExists={targetExists}
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <ColumnMappingEditor
+        replicationName={replicationName}
+        sourceColumns={sourceColumns}
+        querySource={querySource}
+        // The saved name, not the draft one: the inferred-type endpoint reads config off disk, and a
+        // mapping being renamed in this form does not exist under its new name until it is saved.
+        mappingName={existing?.name}
+        target={resolvedTarget}
+        mappings={columnMappings}
+        onChange={setColumnMappings}
+        targetExists={targetExists}
+      />
+      {/* Below the editor rather than on a tab of its own: the cache is the same five facts about
+          the same two tables that this grid is showing, and a screen an operator has to go looking
+          for is one they will not think to refresh. */}
+      <CachedMetadataCard replicationName={replicationName} existing={existing} />
+    </div>
   )
 }
 
