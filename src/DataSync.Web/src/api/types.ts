@@ -888,6 +888,28 @@ export interface MappingLag {
   estimatedLagMs: number | null
 }
 
+/**
+ * Every mapping's lag in one payload, and the range across them — see phase 86.
+ *
+ * The range is computed on the server so the Monitoring tab and the replications list cannot arrive
+ * at two different answers from the same data.
+ */
+export interface ReplicationLag {
+  /** Keyed by mapping name. Every mapping is present, whether or not it has a figure — an absent
+   * key and a mapping reporting nothing would look identical, and they are different states. */
+  mappings: Record<string, MappingLag>
+  /** Smallest and largest `exactLagMs ?? estimatedLagMs` among mappings that have one. Null — both
+   * of them — when no mapping does. Mappings with nothing to report are excluded rather than
+   * counted as zero, so a replication is never shown as caught up on the strength of the mappings
+   * that cannot say. */
+  lowestLagMs: number | null
+  highestLagMs: number | null
+  /** True when any mapping reached the range through `estimatedLagMs`, whose error is this system's
+   * poll interval. The range is a coalesce of two figures phase 85 deliberately keeps apart; this
+   * is what lets a screen label the result as approximate instead of quietly promising it is not. */
+  rangeIncludesEstimates: boolean
+}
+
 /** Who the caller is, and how they could sign in. The one endpoint the app can always call — the
  * answer to "am I signed in" cannot itself require being signed in. */
 export interface AuthStatus {

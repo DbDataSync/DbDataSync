@@ -39,6 +39,7 @@ const keys = {
     ['replications', replicationName, 'status'] as const,
   metrics: (replicationName: string, window: string) =>
     ['replications', replicationName, 'metrics', window] as const,
+  replicationLag: (replicationName: string) => ['replications', replicationName, 'lag'] as const,
   verificationResults: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'verification-results', mappingName] as const,
   verificationResult: (replicationName: string, id: number) =>
@@ -598,6 +599,26 @@ export function useRunMetrics(replicationName: string | undefined, window: Metri
   return useQuery({
     queryKey: keys.metrics(replicationName ?? '', window),
     queryFn: () => api.metrics.get(replicationName!, window),
+    enabled: !!replicationName,
+    refetchInterval: 30_000,
+  })
+}
+
+/**
+ * Every mapping's lag, and the range across them — see phase 86.
+ *
+ * Thirty seconds, the same cadence `useRunMetrics` polls on: lag is a figure somebody reads when
+ * they go looking, and the case where somebody is watching a replication move second by second is a
+ * live run, which the run hub already covers.
+ *
+ * One query per replication, not one per mapping. The Monitoring tab and each row of the
+ * replications list share this key, so a list of ten replications is ten requests rather than ten
+ * times however many mappings each has.
+ */
+export function useReplicationLag(replicationName: string | undefined) {
+  return useQuery({
+    queryKey: keys.replicationLag(replicationName ?? ''),
+    queryFn: () => api.replications.lag(replicationName!),
     enabled: !!replicationName,
     refetchInterval: 30_000,
   })

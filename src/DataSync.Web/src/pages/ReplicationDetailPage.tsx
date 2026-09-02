@@ -21,11 +21,12 @@ const TABS: { path: string; label: string; testId: string }[] = [
   { path: 'overview', label: 'Overview', testId: 'tab-overview' },
   { path: 'mappings', label: 'Table Mappings', testId: 'tab-mappings' },
   { path: 'runs', label: 'Runs', testId: 'tab-runs' },
+  { path: 'monitoring', label: 'Monitoring', testId: 'tab-monitoring' },
   { path: 'history', label: 'Version Control', testId: 'tab-history' },
 ]
 
 /**
- * A layout route: the four tabs are four routes sharing this chrome, rendered through the `Outlet`.
+ * A layout route: the five tabs are five routes sharing this chrome, rendered through the `Outlet`.
  *
  * The chrome does not unmount when the tab changes, which is what lets the Backfill…/Run Now buttons
  * live up here and still reach the Runs panel — see `RunsCommand`.
@@ -36,8 +37,8 @@ const TABS: { path: string; label: string; testId: string }[] = [
  * unmount until the replication does.
  *
  * Status and Schedule live here for the same reason — a rail beside the `Outlet` rather than inside
- * it, so they are the same cards showing the same thing on all four tabs rather than four mounts of
- * them on one.
+ * it, so they are the same cards showing the same thing on every tab rather than one mount of
+ * them per tab.
  */
 export function ReplicationDetailPage() {
   const { name } = useParams<{ name: string }>()

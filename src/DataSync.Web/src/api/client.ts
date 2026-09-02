@@ -15,6 +15,7 @@ import type {
   BulkCreateRequest,
   BulkCreateResult,
   MappingLag,
+  ReplicationLag,
   CertificateActionResult,
   CertificateCandidate,
   InferredColumnType,
@@ -139,6 +140,9 @@ export const api = {
       put<ReplicationTaskConfig>(`/api/replications/${encodeURIComponent(name)}`, task),
     delete: (name: string) => request<void>(`/api/replications/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     history: (name: string) => request<CommitInfo[]>(`/api/replications/${encodeURIComponent(name)}/history`),
+    // Every mapping's lag and the range across them, in one call — see phase 86. The per-mapping
+    // endpoint below still exists for a caller that wants exactly one.
+    lag: (name: string) => request<ReplicationLag>(`/api/replications/${encodeURIComponent(name)}/lag`),
   },
   tableMappings: {
     list: (replicationName: string) =>

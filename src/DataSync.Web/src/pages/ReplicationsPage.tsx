@@ -6,17 +6,44 @@ import { Field } from '../components/Field'
 import {
   useDefaultCapabilities,
   useReplication,
+  useReplicationLag,
   useReplications,
   useTableMappings,
   useUpsertReplication,
 } from '../api/hooks'
+import { formatLag } from './replication-detail/lag'
 import type { ReplicationTaskConfig, ScheduleMode } from '../api/types'
 
-const COLUMNS = '1.3fr 1fr 1fr .9fr'
+const COLUMNS = '1.3fr 1fr 1fr .8fr .9fr'
 
 function ScheduleText({ task }: { task: ReplicationTaskConfig | undefined }) {
   if (!task) return <span className="faint">…</span>
   return <>{task.scheduling.mode === 'Continuous' ? `every ${task.scheduling.frequencySeconds}s` : task.scheduling.cronExpression}</>
+}
+
+/**
+ * The furthest-behind mapping, and nothing else.
+ *
+ * The Monitoring tab shows the full lowest–highest range; a list row shows only the highest, which
+ * is the judgement the plan doc left to whoever laid this out. At list density a range is two
+ * numbers in a column narrow enough that neither is legible, and the question a list answers is
+ * "which of these needs looking at" — that is the highest, and the low end never changes the answer.
+ * The range is one click away on the row it belongs to.
+ *
+ * `~` when any estimate went into it, for the same reason the tab badges one: the figure carries
+ * this system's poll interval as its error and a bare number would not say so.
+ */
+function LagSummary({ name }: { name: string }) {
+  const { data } = useReplicationLag(name)
+  if (!data) return <span className="faint">…</span>
+  // Null is not zero. No mapping here can report lag — an unsupported reader, or one that has not
+  // run — and "0s" would be a claim about the replication that nothing has established.
+  if (data.highestLagMs === null) return <span className="faint">no lag data</span>
+  return (
+    <span title="The furthest behind any of this replication's mappings is. Its full range is on the Monitoring tab.">
+      {data.rangeIncludesEstimates ? '~' : ''}{formatLag(data.highestLagMs)}
+    </span>
+  )
 }
 
 function ReplicationRow({ name, onOpen }: { name: string; onOpen: () => void }) {
@@ -28,6 +55,7 @@ function ReplicationRow({ name, onOpen }: { name: string; onOpen: () => void }) 
       <span className="name" style={{ color: 'var(--accent)' }}>{name}</span>
       <span className="dim">{data ? `${data.changeProcessing.reader.kind}` : '…'}</span>
       <span className="dim"><ScheduleText task={data} /></span>
+      <span className="dim" data-testid={`replication-lag-${name}`}><LagSummary name={name} /></span>
       <span className="status">
         <span className={`dot ${data?.enabled ? 'dot-ok' : 'dot-idle'}`} />
         {data ? (data.enabled ? 'enabled' : 'disabled') : '…'}
@@ -116,7 +144,7 @@ export function ReplicationsPage() {
 
         <div className="card flush">
           <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
-            <span>Name</span><span>Reader</span><span>Schedule</span><span>Status</span>
+            <span>Name</span><span>Reader</span><span>Schedule</span><span>Max lag</span><span>Status</span>
           </div>
           {isLoading && <div className="empty">Loading…</div>}
           {names?.length === 0 && <div className="empty">No replications yet.</div>}

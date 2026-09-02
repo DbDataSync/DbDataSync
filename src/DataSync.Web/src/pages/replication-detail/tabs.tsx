@@ -4,9 +4,10 @@ import { OverviewPanel } from './OverviewPanel'
 import { TableMappingsPanel } from './TableMappingsPanel'
 import { RunsPanel } from './RunsPanel'
 import { HistoryPanel } from './HistoryPanel'
+import { MonitoringPanel } from './MonitoringPanel'
 
 /**
- * The four routed tabs, each a thin adapter that takes the replication name from the layout route's
+ * The five routed tabs, each a thin adapter that takes the replication name from the layout route's
  * outlet context. Keeping the panels themselves unaware of routing means they stay ordinary
  * components — testable, and reusable if a screen ever composes more than one.
  */
@@ -25,6 +26,10 @@ export function MappingsTab() {
 export function RunsTab() {
   const { replicationName, command } = useOutletContext<ReplicationOutletContext>()
   return <RunsPanel replicationName={replicationName} command={command} />
+}
+
+export function MonitoringTab() {
+  return <MonitoringPanel replicationName={useReplicationName()} />
 }
 
 export function HistoryTab() {

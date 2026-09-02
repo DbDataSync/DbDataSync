@@ -10,7 +10,7 @@ import { ScriptsPage } from './pages/ScriptsPage'
 import { AdminCertificatePage } from './pages/AdminCertificatePage'
 import { AdminConfigPage } from './pages/AdminConfigPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
-import { HistoryTab, MappingsTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
+import { HistoryTab, MappingsTab, MonitoringTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
 import {
   CustomTransformsTab, OverviewNotesTab, PipelineTab, SegmentingStrategiesTab, TargetProvisioningTab,
 } from './pages/replication-detail/OverviewPanel'
@@ -116,6 +116,9 @@ export default function App() {
           <Route path=":mappingName/verification/:resultId" element={<VerificationResultPage />} />
         </Route>
         <Route path="runs" element={<RunsTab />} />
+        {/* How far behind each mapping is — see phase 86. Its own tab rather than a rail card:
+            it is a row per mapping, and the rail is where the replication-wide cards live. */}
+        <Route path="monitoring" element={<MonitoringTab />} />
         <Route path="history" element={<HistoryTab />} />
       </Route>
 
