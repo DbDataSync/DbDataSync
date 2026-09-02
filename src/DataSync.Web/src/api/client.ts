@@ -25,6 +25,7 @@ import type {
   DriverType,
   ParameterDescriptor,
   ProvisioningPlanReport,
+  QueryPreviewResult,
   ScriptCompileResult,
   ScriptDefinition,
   MetricsWindow,
@@ -98,6 +99,13 @@ export const api = {
       request<ConnectionTestReport>(`/api/connections/${encodeURIComponent(name)}/test`, { method: 'POST' }),
     credentialSource: (name: string) =>
       request<CredentialSource>(`/api/connections/${encodeURIComponent(name)}/credential-source`),
+    /** Runs a query and returns its columns and first few rows. Takes the text in the body, so what
+     * runs is what is in the editor rather than what was last saved to the mapping. */
+    queryPreview: (name: string, query: string, sampleRows = 20) =>
+      request<QueryPreviewResult>(`/api/connections/${encodeURIComponent(name)}/query-preview`, {
+        method: 'POST',
+        body: JSON.stringify({ query, sampleRows }),
+      }),
   },
   scripts: {
     list: () => request<ScriptListItem[]>('/api/scripts'),

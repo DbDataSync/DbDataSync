@@ -28,6 +28,34 @@ public sealed record ScriptTestResult(
     string? Statement = null,
     string? Error = null);
 
+/// <summary>
+/// A query to run and show the result of, taken from whatever is in an editor right now.
+/// </summary>
+/// <param name="ConnectionName">
+/// Which system to run it against. Required, unlike <see cref="ScriptTestRequest.ConnectionName"/> —
+/// there is no generated mode here, because there is nothing to generate: the whole point is what
+/// this SQL returns from that database.
+/// </param>
+/// <param name="Query">
+/// **The text in the editor, not the mapping's saved config.** A preview that could only run saved
+/// SQL would mean committing a query to config history to find out whether it was the query you
+/// meant — the same reason <c>ScriptsController.Test</c> takes the definition in its body.
+/// </param>
+public sealed record QueryPreviewRequest(string ConnectionName, string Query, int SampleRows = 20);
+
+/// <param name="Source">Where the rows came from, in the operator's words. The same safety property
+/// <see cref="ScriptTestResult.Source"/> carries: this touched a real system, and says which.</param>
+/// <param name="Truncated">Whether the query had more rows than were read. Shown, because a limit an
+/// operator can see beats one they cannot.</param>
+/// <param name="Error">What the engine said, for a query that did not run. Not a 500: a query that
+/// does not parse is the answer this endpoint exists to give.</param>
+public sealed record QueryPreviewResult(
+    string Source,
+    IReadOnlyList<string> Columns,
+    IReadOnlyList<IReadOnlyList<string?>> Rows,
+    bool Truncated = false,
+    string? Error = null);
+
 /// <summary>What to run the script against.</summary>
 /// <param name="ConnectionName">Set only for a live test. Empty by default, and choosing one is a
 /// deliberate act — there is no fallback from generated to live, because a silent one would mean an
@@ -112,6 +140,92 @@ public sealed class ScriptTestService(
                 Error: ex is ScriptCompilationFailure ? ex.Message : $"{ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Runs an operator's own query and reports the columns and first few rows it produced.
+    /// <para>
+    /// Here rather than in a service of its own because it is the same act this class already
+    /// performs — <see cref="LiveRowsAsync"/> has opened a picked connection, issued a capped read and
+    /// turned the result set into rows since phase 41. What is new is only *whose* statement runs: a
+    /// script test runs SQL a script generated, and this runs SQL a person typed. Everything around it
+    /// — resolving the connection through <see cref="DriverConnectionFactory"/>, the visible cap, the
+    /// unambiguous <c>Source</c> wording, an engine error returned as a result rather than raised as a
+    /// fault — is the same contract, and a parallel implementation would be a second place that has to
+    /// keep agreeing with it.
+    /// </para>
+    /// <para>
+    /// This is what makes a query-first reader configurable at all: <c>DuckDbQueryReader</c>'s entire
+    /// configuration is one statement, and a mapping editor that could not run it would be asking an
+    /// operator to write SQL blind and find out on the first pass.
+    /// </para>
+    /// </summary>
+    public async Task<QueryPreviewResult> PreviewQueryAsync(
+        QueryPreviewRequest request, CancellationToken cancellationToken)
+    {
+        var source = $"live query against '{request.ConnectionName}'";
+
+        if (string.IsNullOrWhiteSpace(request.Query))
+            return new QueryPreviewResult(source, [], [], Error: "There is no query to run.");
+
+        var limit = Math.Clamp(request.SampleRows, 1, MaxLiveRows);
+
+        try
+        {
+            var (connection, _) = await connections.OpenAsync(request.ConnectionName, cancellationToken);
+            await using (connection)
+            {
+                using var cmd = connection.CreateTimedCommand();
+                cmd.CommandText = request.Query;
+
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                var schema = ResultSetSchema.From(reader);
+
+                // The cap is applied by stopping the read, not by wrapping the statement in a LIMIT.
+                // Rewriting SQL somebody else wrote means parsing it — their query may already carry a
+                // LIMIT, an ORDER BY it depends on, a CTE, or several statements — and a preview that
+                // silently ran something other than what is in the editor would defeat its own purpose.
+                // Stopping early costs nothing: the reader streams, so the engine is never asked for
+                // the rest.
+                var rows = new List<IReadOnlyList<string?>>();
+                var truncated = false;
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    if (rows.Count == limit)
+                    {
+                        truncated = true;
+                        break;
+                    }
+
+                    rows.Add([.. ResultSetSchema.ReadValues(reader, schema.Count).Select(Display)]);
+                }
+
+                return new QueryPreviewResult(source, schema.ColumnNames, rows, truncated);
+            }
+        }
+        // The same reasoning the script test uses, for the same reason: a query that does not parse,
+        // names a column that is not there, or reaches a file that does not exist is exactly what an
+        // operator pressed this button to find out. Whatever the engine said is the result. The two
+        // rethrown are the caller's mistake rather than the query's — a connection that does not exist.
+        catch (Exception ex) when (ex is not (ConfigValidationException or FileNotFoundException))
+        {
+            return new QueryPreviewResult(source, [], [], Error: $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// A cell, for a grid. Null stays null on the wire rather than becoming the string "NULL" —
+    /// <see cref="Format"/>'s quoting is right for a test case's one-line summary and wrong for a
+    /// table, where an empty string and a null need to look different without either being quoted.
+    /// </summary>
+    private static string? Display(object? value) => value switch
+    {
+        null => null,
+        string s => s,
+        byte[] bytes => $"0x{Convert.ToHexString(bytes)}",
+        DateTime dt => dt.ToString("O", CultureInfo.InvariantCulture),
+        IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString(),
+    };
 
     private ScriptCompilation Compile(ScriptDefinition script)
     {

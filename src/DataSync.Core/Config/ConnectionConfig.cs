@@ -7,6 +7,14 @@ public enum ConnectionDriverType
 {
     MsSql,
     Postgres,
+
+    /// <summary>
+    /// DuckDB, embedded. Unlike the other two it is not a server: the "address" is a file path or
+    /// <c>:memory:</c>, there is nothing to authenticate to, and there is no catalog worth browsing
+    /// because what a DuckDB source reads is a query an operator wrote — see
+    /// <c>DataSync.Drivers.DuckDb.DuckDbQueryReader</c>.
+    /// </summary>
+    DuckDb,
 }
 
 /// <summary>

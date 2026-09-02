@@ -1,3 +1,4 @@
+import { CodeEditor } from './CodeEditor'
 import { Field } from './Field'
 import { KeyValueTable } from './KeyValueTable'
 import { isVararg, occurrences, varargEntries, withVararg } from './parameterValues'
@@ -182,6 +183,21 @@ function Control({ parameter, value, set, options, testId }: {
           value={value}
           onChange={(e) => set(e.target.value)}
           data-testid={testId}
+        />
+      )
+
+    case 'Sql':
+      // The same Monaco every other SQL in this app is written in, reached declaratively. Before
+      // this, a setting that happened to be SQL got a one-line text input, and the only way to give
+      // it an editor was for a screen to special-case the parameter by name — which is exactly the
+      // knowledge `ParameterType` exists to keep out of here.
+      return (
+        <CodeEditor
+          value={value}
+          language="sql"
+          onChange={set}
+          minLines={6}
+          testId={testId}
         />
       )
 

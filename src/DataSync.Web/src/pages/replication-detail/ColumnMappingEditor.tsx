@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { useColumns, useInferredColumnTypes } from '../../api/hooks'
 import { EditableValue } from '../../components/EditableValue'
-import type { ColumnMapping, ResolvedRef } from '../../api/types'
+import type { ColumnMapping, ColumnMetadata, ResolvedRef } from '../../api/types'
 
 interface Props {
   replicationName: string
   /** Undefined for a mapping that has not been saved yet — there is nothing on disk to infer from. */
   mappingName: string | undefined
-  source: ResolvedRef
   target: ResolvedRef
   mappings: ColumnMapping[]
   onChange: (mappings: ColumnMapping[]) => void
@@ -18,6 +17,18 @@ interface Props {
    * someone who picked an existing table.
    */
   targetExists: boolean | undefined
+  /**
+   * The source's columns, resolved by the form above rather than fetched here.
+   *
+   * Passed in because there is now more than one way to know them: a table source reads the catalog,
+   * and a query source has no catalog to read — its columns are whatever its last preview returned.
+   * The form owns that decision because it owns the preview's result; this editor only needs the
+   * answer. React Query serves the catalog case from the same cached fetch either way.
+   */
+  sourceColumns: ColumnMetadata[] | undefined
+  /** A query source has no catalog, so an empty list here means "not previewed yet" rather than
+   * "this table has no columns" — which are different things to tell an operator. */
+  querySource: boolean
 }
 
 const COLUMNS = '1fr 22px 1fr 0.95fr 1.15fr 74px'
@@ -40,9 +51,9 @@ const COLUMNS = '1fr 22px 1fr 0.95fr 1.15fr 74px'
  * columns is the only answer that makes the table that appears match the table that was described.
  */
 export function ColumnMappingEditor({
-  replicationName, mappingName, source, target, mappings, onChange, targetExists,
+  replicationName, mappingName, target, mappings, onChange, targetExists,
+  sourceColumns, querySource,
 }: Props) {
-  const { data: sourceColumns } = useColumns(source.connectionName, source.database, source.schema, source.table)
   // Not asked for at all when the table is not there: the request would 404 and be retried, and the
   // answer is already known.
   const { data: catalogTargetColumns } = useColumns(
@@ -63,6 +74,20 @@ export function ColumnMappingEditor({
       <div className="card">
         <div className="card-head tight"><span className="card-title sm">Column mappings</span></div>
         <div className="empty">Select a source and target table to map columns.</div>
+      </div>
+    )
+  }
+
+  // Empty means two different things, and saying so is the difference between an operator knowing
+  // what to do next and staring at a blank grid. A query source has no catalog to have been empty.
+  if (querySource && sourceColumns.length === 0) {
+    return (
+      <div className="card">
+        <div className="card-head tight"><span className="card-title sm">Column mappings</span></div>
+        <div className="empty" data-testid="column-mappings-awaiting-preview">
+          Preview the source query — on the Source card above — and its result columns become the ones
+          to map here.
+        </div>
       </div>
     )
   }

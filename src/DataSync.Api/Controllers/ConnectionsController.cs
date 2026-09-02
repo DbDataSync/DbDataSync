@@ -19,6 +19,7 @@ public sealed class ConnectionsController(
     DriverRegistry driverRegistry,
     DriverConnectionFactory connectionFactory,
     ParameterCheck parameterCheck,
+    ScriptTestService testService,
     CurrentUser currentUser) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
@@ -207,6 +208,46 @@ public sealed class ConnectionsController(
         }
     }
 
+    /// <summary>
+    /// Runs a query against this connection and returns its columns and first few rows.
+    /// <para>
+    /// **On the connection, not on the mapping**, because that is what the request actually needs: the
+    /// query being previewed is the unsaved text in an editor, and the mapping it is destined for may
+    /// not exist yet. Routing it through the mapping would make the mapping's saved config the subject
+    /// and defeat the point — see <see cref="QueryPreviewRequest.Query"/>.
+    /// </para>
+    /// <para>
+    /// Not authorized as a Viewer, deliberately, and the only endpoint on this controller that reads
+    /// data rather than metadata: it runs SQL somebody typed, against a production system, with
+    /// whatever the connection's own credential can reach. That is the same authority
+    /// <c>POST /api/scripts/{name}/test</c> already needs, and it is held to the same bar rather than
+    /// to the one that governs browsing a catalog.
+    /// </para>
+    /// <para>
+    /// A query the engine rejects comes back as a result carrying its message, not as a 500 — an
+    /// operator writing SQL is going to get it wrong several times on the way to right, and each of
+    /// those is an answer rather than a fault.
+    /// </para>
+    /// </summary>
+    [HttpPost("{name}/query-preview")]
+    public async Task<ActionResult<QueryPreviewResult>> QueryPreview(
+        string name, [FromBody] QueryPreviewBody body, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await testService.PreviewQueryAsync(
+                new QueryPreviewRequest(name, body.Query, body.SampleRows), cancellationToken));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { error = $"Connection '{name}' does not exist." });
+        }
+        catch (ConfigValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
     [HttpDelete("{name}")]
     public IActionResult Delete(string name)
     {
@@ -222,3 +263,6 @@ public sealed record ConnectionTestReport(
     bool Succeeded, double ConnectMs, double ProbeMs, string? ServerVersion, string? Error);
 
 public sealed record CredentialSource(string Store, string SecretRef, string EnvironmentVariable, bool RequiresCredential);
+
+/// <summary>The body of a query preview. The connection is the route's, so it is not repeated here.</summary>
+public sealed record QueryPreviewBody(string Query, int SampleRows = 20);

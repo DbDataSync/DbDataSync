@@ -2,6 +2,7 @@ using ClrKernel.Core.Secrets;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.DuckDb;
 using DataSync.Drivers.MsSql;
 using DataSync.Drivers.Postgres;
 using DataSync.Scripting;
@@ -30,6 +31,7 @@ var driverRegistry = new DriverRegistry();
 // and a driver must not depend on Roslyn.
 driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
+driverRegistry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
 
 // Phase 39: a runner spawned by the API never opens the state file. It applies its changes over
 // loopback to the process that owns it, and journals to disk if that process goes away mid-run.

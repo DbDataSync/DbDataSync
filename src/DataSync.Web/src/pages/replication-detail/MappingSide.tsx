@@ -2,7 +2,8 @@ import { Field } from '../../components/Field'
 import { EndpointSideCard } from '../../components/EndpointSidePair'
 import { useConnections, useDatabases, useTables } from '../../api/hooks'
 import { tableExists } from '../../api/tableExists'
-import type { EndpointRef, TableSpec } from '../../api/types'
+import { QuerySourcePanel } from './QuerySourcePanel'
+import type { ColumnMetadata, EndpointRef, TableSpec } from '../../api/types'
 
 interface Props {
   /** Which side this is: the card's accent colour and its title come from it. */
@@ -21,6 +22,18 @@ interface Props {
    * intention: there is no such thing as creating a source table to read from.
    */
   allowNewTable?: boolean
+  /**
+   * Source side only, and only for a reader whose configuration *is* a query. Rendered in place of
+   * the schema and table pickers, which such a source has no answer for — see `QuerySourcePanel`.
+   *
+   * Passed in rather than decided here: which reader a mapping runs is the pipeline's question, and
+   * the draft that answers it lives in `TableMappingForm` alongside the query this edits.
+   */
+  query?: {
+    value: string
+    onChange: (next: string) => void
+    onColumns: (columns: ColumnMetadata[]) => void
+  }
 }
 
 /**
@@ -31,7 +44,7 @@ interface Props {
  * table picker cascades from the *resolved* endpoint either way, so choosing a table works the same
  * whichever side of that toggle you are on.
  */
-export function MappingSide({ side, label, inherited, spec, onChange, testIdPrefix, allowNewTable = false }: Props) {
+export function MappingSide({ side, label, inherited, spec, onChange, testIdPrefix, allowNewTable = false, query }: Props) {
   const overriding = spec.connectionName !== null || spec.database !== null
 
   const connectionName = spec.connectionName ?? inherited?.connectionName ?? ''
@@ -130,7 +143,18 @@ export function MappingSide({ side, label, inherited, spec, onChange, testIdPref
           </Field>
         </div>
 
-        {allowNewTable ? (
+        {query ? (
+          /* A query-first source: the statement replaces schema and table, which it has no answer
+             for. Connection and database stay above — a query still runs somewhere, and config
+             requires both to resolve — but there is no catalog entry here to point at. */
+          <QuerySourcePanel
+            query={query.value}
+            onChange={query.onChange}
+            connectionName={connectionName}
+            onColumns={query.onColumns}
+            testIdPrefix={testIdPrefix}
+          />
+        ) : allowNewTable ? (
           <>
             {/* Schema and table stay two fields rather than one `dbo.Orders` box. Parsing that back
                 out is a guess about quoting, and it is wrong the moment a name contains a dot. */}

@@ -8,8 +8,8 @@ import {
 } from '../../api/hooks'
 import { tableExists } from '../../api/tableExists'
 import type {
-  BatchReloadSegment, ColumnMapping, ProvisioningConfig, ReplicationTaskConfig, ResolvedRef,
-  ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
+  BatchReloadSegment, ColumnMapping, ColumnMetadata, ProvisioningConfig, ReplicationTaskConfig,
+  ResolvedRef, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
 } from '../../api/types'
 import { MappingSide } from './MappingSide'
 import { EndpointSidePair } from '../../components/EndpointSidePair'
@@ -23,6 +23,7 @@ import { ProvisioningCard } from './ProvisioningCard'
 import { DefaultSegmentingCard } from './DefaultSegmentingCard'
 import { SourceFilterCard } from './SourceFilterCard'
 import { MappingPipelineCard, type PipelineOverrides } from './MappingPipelineCard'
+import { isQuerySource, queryOf, withQuery } from './querySource'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
 const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
@@ -101,6 +102,17 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
       setTarget((current) => (current.table ? current : { ...current, table: next.table }))
   }
 
+  /**
+   * The columns the source query last returned, for a reader whose source has no catalog to ask.
+   *
+   * Draft state, not persisted and not fetched: a query's result shape is only knowable by running
+   * it, so this is filled in when the operator presses Preview and is empty until they do. Held here
+   * rather than inside the source tab so the column-mapping tab — a sibling, remounted whenever the
+   * operator switches tabs — can map what the query actually returns.
+   */
+  const [queryColumns, setQueryColumns] = useState<ColumnMetadata[]>([])
+  const querySource = isQuerySource(task, pipeline)
+
   // What each side actually points at once the replication's endpoints are applied.
   const resolvedSource = resolveSide(task?.endpoints?.source ?? null, source)
   const resolvedTarget = resolveSide(task?.endpoints?.target ?? null, target)
@@ -124,8 +136,13 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   // mapping without opening the Column Mapping tab would leave Save permanently disabled with nothing
   // on screen saying why. These are the same queries the editor runs, keyed identically, so React
   // Query serves both from one fetch.
-  const { data: sourceColumns } = useColumns(
-    resolvedSource.connectionName, resolvedSource.database, resolvedSource.schema, resolvedSource.table)
+  // A query source's driver reports no columns at all — deliberately, since a query's rows come from
+  // whatever its scanners reach rather than from a catalog. So the preview's result stands in, and
+  // the metadata call is not made: it would return an empty list at best and 404 at worst.
+  const { data: catalogSourceColumns } = useColumns(
+    resolvedSource.connectionName, resolvedSource.database, resolvedSource.schema,
+    querySource ? undefined : resolvedSource.table)
+  const sourceColumns = querySource ? queryColumns : catalogSourceColumns
   const { data: catalogTargetColumns } = useColumns(
     resolvedTarget.connectionName, resolvedTarget.database, resolvedTarget.schema,
     targetExists === true ? resolvedTarget.table : undefined)
@@ -147,8 +164,13 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   // says.
   const tabs = useMappingTabs(replicationName, base, existing?.name)
 
+  // A query source is saveable without a source table, because it has none — its statement is what
+  // it reads. Everything else is unchanged: both endpoints still have to resolve (config rejects a
+  // mapping whose source database is blank), and there still has to be something mapped.
+  const sourceStated = querySource ? queryOf(task, pipeline).trim().length > 0 : Boolean(source.table)
+
   const canSave = name
-    && resolvedSource.connectionName && resolvedSource.database && source.table
+    && resolvedSource.connectionName && resolvedSource.database && sourceStated
     && resolvedTarget.connectionName && resolvedTarget.database && target.table
     && columnMappings.length > 0
 
@@ -221,6 +243,11 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
             spec={source}
             onChange={(v) => setSourceSpec({ ...v, filter: source.filter })}
             testIdPrefix="source"
+            query={querySource ? {
+              value: queryOf(task, pipeline),
+              onChange: (next) => setPipeline(withQuery(task, pipeline, next)),
+              onColumns: setQueryColumns,
+            } : undefined}
           />
         }
         target={
@@ -253,6 +280,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
             replicationName, existing, resolvedSource, resolvedTarget, targetExists,
             targetChangedSinceSave, connections: connections ?? [], task,
             columnMappings, setColumnMappings,
+            sourceColumns, querySource,
             scripts, setScripts,
             defaultSegmenting, setDefaultSegmenting,
             provisioning, setProvisioning,
@@ -279,6 +307,11 @@ export interface MappingEditorContext {
   task: ReplicationTaskConfig | undefined
   columnMappings: ColumnMapping[]
   setColumnMappings: (next: ColumnMapping[]) => void
+  /** The source's columns as this form resolved them — the catalog's, or the query preview's for a
+   * source that has no catalog. Undefined while the catalog call is still in flight. */
+  sourceColumns: ColumnMetadata[] | undefined
+  /** Whether this mapping's reader is configured by a query rather than by a table. */
+  querySource: boolean
   scripts: ScriptBindings
   setScripts: (next: ScriptBindings) => void
   defaultSegmenting: BatchReloadSegment[]
@@ -303,17 +336,18 @@ export function MappingNotesTab() {
 
 export function ColumnMappingTab() {
   const {
-    replicationName, existing, resolvedSource, resolvedTarget, columnMappings, setColumnMappings,
-    targetExists,
+    replicationName, existing, resolvedTarget, columnMappings, setColumnMappings,
+    targetExists, sourceColumns, querySource,
   } = useOutletContext<MappingEditorContext>()
 
   return (
     <ColumnMappingEditor
       replicationName={replicationName}
+      sourceColumns={sourceColumns}
+      querySource={querySource}
       // The saved name, not the draft one: the inferred-type endpoint reads config off disk, and a
       // mapping being renamed in this form does not exist under its new name until it is saved.
       mappingName={existing?.name}
-      source={resolvedSource}
       target={resolvedTarget}
       mappings={columnMappings}
       onChange={setColumnMappings}

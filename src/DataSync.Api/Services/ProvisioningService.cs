@@ -343,6 +343,7 @@ public sealed class ProvisioningService(
     {
         ConnectionDriverType.MsSql => MsSqlDialect.Instance,
         ConnectionDriverType.Postgres => PostgresDialect.Instance,
+        ConnectionDriverType.DuckDb => DuckDbDialect.Instance,
         _ => throw new InvalidOperationException($"No SqlDialect is registered for driver type '{driverType}'."),
     };
 }

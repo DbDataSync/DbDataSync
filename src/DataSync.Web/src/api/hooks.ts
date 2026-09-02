@@ -517,6 +517,20 @@ export function useBackfill(replicationName: string) {
  * query keyed on a half-typed SQL string would run against a real connection on every keystroke for
  * the two connection-bound kinds.
  */
+/**
+ * Runs the query currently in the source tab's editor and hands back what it returned.
+ *
+ * A mutation rather than a query, for the reason `useTestSegmentingStrategy` is one: it runs when
+ * somebody presses Preview. Keyed as a query on a half-typed SQL string, it would execute against a
+ * real system on every keystroke — which is the one thing a preview of arbitrary SQL must not do.
+ */
+export function usePreviewQuery() {
+  return useMutation({
+    mutationFn: ({ connectionName, query }: { connectionName: string; query: string }) =>
+      api.connections.queryPreview(connectionName, query),
+  })
+}
+
 export function useTestSegmentingStrategy(replicationName: string) {
   return useMutation({
     mutationFn: ({ mappingName, strategy }: { mappingName: string; strategy: SegmentingStrategyConfig }) =>

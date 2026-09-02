@@ -3,7 +3,7 @@
 // already knows the exact contract, and a codegen step would add a moving part (fetching a live
 // OpenAPI doc) without reducing risk here.
 
-export type DriverType = 'MsSql' | 'Postgres'
+export type DriverType = 'MsSql' | 'Postgres' | 'DuckDb'
 /** What DataSync supplies when connecting. `None` is what a wallet, a DSN with stored credentials, a
  * .pgpass file or a credential-bearing URL all look like from here — the address or the environment
  * provides it and DataSync passes nothing. */
@@ -273,6 +273,8 @@ export type Hooks = Record<string, HookConfig[] | null>
  * of declaring a parameter is that this app can render it without knowing what it is for. */
 export type ParameterType =
   | 'Text' | 'Number' | 'Bool' | 'Date' | 'DateTime' | 'Dropdown' | 'ColumnPicker' | 'Property' | 'Secret'
+  /** A SQL statement, which `ParameterForm` renders as a real editor rather than a one-line input. */
+  | 'Sql'
 
 export interface ParameterCardinality {
   min: number
@@ -1094,4 +1096,22 @@ export interface CertificateActionResult {
   message: string
   requestId: string | null
   status: AdminCertificateStatus | null
+}
+
+/**
+ * What a query returned when an operator pressed Preview — see `POST /api/connections/{name}/query-preview`.
+ *
+ * `rows` is stringified server-side, one cell per column in `columns` order, so a grid renders it
+ * without needing to know a single source type. A null cell stays null: an empty string and a NULL
+ * have to look different, and the server deliberately does not spell either of them as a word.
+ */
+export interface QueryPreviewResult {
+  /** Where the rows came from, in the operator's words — this touched a real system and says which. */
+  source: string
+  columns: string[]
+  rows: (string | null)[][]
+  /** Whether the query had more rows than were read. A limit an operator can see beats one they cannot. */
+  truncated: boolean
+  /** What the engine said about a query that would not run. Not a failed request — an answer. */
+  error: string | null
 }

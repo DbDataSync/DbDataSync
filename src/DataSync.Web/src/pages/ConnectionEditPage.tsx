@@ -283,6 +283,7 @@ export function ConnectionEditPage() {
                   >
                     <option value="MsSql">MsSql</option>
                     <option value="Postgres">Postgres</option>
+                    <option value="DuckDb">DuckDb</option>
                   </select>
                 </Field>
 

@@ -43,6 +43,23 @@ public enum ParameterType
     /// parameter reinventing the contract, or forgetting it.
     /// </summary>
     Secret,
+
+    /// <summary>
+    /// A SQL statement, rendered as a real editor rather than a one-line text box.
+    /// <para>
+    /// Named for the *value*, like every other member here, rather than for the control — a
+    /// hypothetical <c>CodeEditor</c> would be the SPA's word for it, and this enum exists precisely
+    /// so a declaration says what a setting is and the SPA decides what to show for it.
+    /// </para>
+    /// <para>
+    /// Added when a reader's whole configuration became a query somebody writes
+    /// (<c>DataSync.Drivers.DuckDb.DuckDbQueryReader</c>). Every SQL an operator had written until then
+    /// — a column transform, a source filter, a hook body — had a hand-built editor of its own on the
+    /// screen that owned it; this is the same thing said declaratively, so the next reader with a
+    /// statement-shaped setting needs no SPA release.
+    /// </para>
+    /// </summary>
+    Sql,
 }
 
 /// <summary>

@@ -11,6 +11,7 @@ using DataSync.State.Remote;
 using DataSync.Core.Config;
 using DataSync.Core.Git;
 using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.DuckDb;
 using DataSync.Drivers.MsSql;
 using DataSync.Scripting;
 using DataSync.Drivers.Postgres;
@@ -141,6 +142,11 @@ public static class DataSyncHost
             var scriptHost = sp.GetRequiredService<ScriptHost>();
             registry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
             registry.RegisterWithScripting(new PostgresDriver(), scriptHost);
+            // DuckDb takes the same call and gets no ScriptedQuery reader out of it: it names a dialect
+            // but supplies no ITableCatalog, and a scripted query builder is handed the source table's
+            // columns by contract. Registered through the same helper anyway, so there is one
+            // registration shape rather than a special case to keep in step.
+            registry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
             return registry;
         });
         builder.Services.AddSingleton<ScriptedMetadata>();

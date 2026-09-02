@@ -5,6 +5,7 @@
     <Project Path="src/DataSync.Cli/DataSync.Cli.csproj" />
     <Project Path="src/DataSync.Core/DataSync.Core.csproj" />
     <Project Path="src/DataSync.Drivers.Abstractions/DataSync.Drivers.Abstractions.csproj" />
+    <Project Path="src/DataSync.Drivers.DuckDb/DataSync.Drivers.DuckDb.csproj" />
     <Project Path="src/DataSync.Drivers.Generic/DataSync.Drivers.Generic.csproj" />
     <Project Path="src/DataSync.Drivers.MsSql/DataSync.Drivers.MsSql.csproj" />
     <Project Path="src/DataSync.Drivers.Postgres/DataSync.Drivers.Postgres.csproj" />
@@ -24,6 +25,7 @@
     <Project Path="tests/DataSync.Cli.Tests/DataSync.Cli.Tests.csproj" />
     <Project Path="tests/DataSync.Core.Tests/DataSync.Core.Tests.csproj" />
     <Project Path="tests/DataSync.Drivers.Abstractions.Tests/DataSync.Drivers.Abstractions.Tests.csproj" />
+    <Project Path="tests/DataSync.Drivers.DuckDb.Tests/DataSync.Drivers.DuckDb.Tests.csproj" />
     <Project Path="tests/DataSync.Drivers.Generic.Tests/DataSync.Drivers.Generic.Tests.csproj" />
     <Project Path="tests/DataSync.Drivers.MsSql.Tests/DataSync.Drivers.MsSql.Tests.csproj" />
     <Project Path="tests/DataSync.Drivers.Postgres.Tests/DataSync.Drivers.Postgres.Tests.csproj" />
