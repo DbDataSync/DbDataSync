@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Generic;
@@ -60,8 +61,13 @@ internal sealed class FakeDbParameter : DbParameter
     public override System.Data.DbType DbType { get; set; }
     public override System.Data.ParameterDirection Direction { get; set; }
     public override bool IsNullable { get; set; }
+    // [AllowNull] on the setter matches DbParameter's own base declaration: the getter never returns
+    // null, but the setter is annotated to accept it, an asymmetry these two properties inherit rather
+    // than introduce.
+    [AllowNull]
     public override string ParameterName { get; set; } = "";
     public override int Size { get; set; }
+    [AllowNull]
     public override string SourceColumn { get; set; } = "";
     public override bool SourceColumnNullMapping { get; set; }
     public override object? Value { get; set; }

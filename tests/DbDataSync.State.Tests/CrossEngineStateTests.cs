@@ -283,7 +283,7 @@ public sealed class CrossEngineStateTests : IDisposable
 
         var written = logs.GetLogs(runId);
         Assert.Equal(3, written.Count);
-        Assert.Single(written.Where(l => l.Message == "replayed"));
+        Assert.Single(written, l => l.Message == "replayed");
         Assert.Equal(2, written.Count(l => l.Message == "live"));
     }
 

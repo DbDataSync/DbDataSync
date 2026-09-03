@@ -1,4 +1,3 @@
-using DbDataSync.Api.Auth;
 using DbDataSync.State;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,7 +17,7 @@ public sealed record UpdateUserRequest(string? Role, bool? Enabled);
 /// </summary>
 [ApiController]
 [Route("api/users")]
-public sealed class UsersController(UserStore users, SessionStore sessions, CurrentUser currentUser)
+public sealed class UsersController(UserStore users, SessionStore sessions)
     : ControllerBase
 {
     [HttpGet]

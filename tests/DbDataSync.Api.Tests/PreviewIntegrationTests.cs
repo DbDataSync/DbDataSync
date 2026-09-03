@@ -128,7 +128,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
     {
         var preview = await GetPreviewAsync();
 
-        var read = Assert.Single(preview.Statements.Where(s => s.Stage == "Source read" && s.Sql is not null));
+        var read = Assert.Single(preview.Statements, s => s.Stage == "Source read" && s.Sql is not null);
         Assert.Contains("UPPER(", read.Sql!);
 
         // Executed, not compared. Whatever the preview says it will read, that is what must arrive at
@@ -152,7 +152,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Equal(["Source read", "Staging", "Before load", "Write"], stages);
         Assert.Empty(preview.Problems);
 
-        var hook = Assert.Single(preview.Statements.Where(s => s.Stage == "Before load"));
+        var hook = Assert.Single(preview.Statements, s => s.Stage == "Before load");
         Assert.Equal("Hook: note-the-load", hook.Title);
         Assert.Equal("OperatorSql", hook.Origin);
         Assert.Contains("PreviewHookLog", hook.Sql!);
@@ -162,7 +162,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Contains(staging, s => s.Sql?.StartsWith("CREATE TABLE #Staging_") == true);
         Assert.Contains(staging, s => s.Sql is null && s.Detail!.Contains("SqlBulkCopy"));
 
-        var write = Assert.Single(preview.Statements.Where(s => s.Stage == "Write"));
+        var write = Assert.Single(preview.Statements, s => s.Stage == "Write");
         Assert.Contains("MERGE INTO", write.Sql!);
     }
 

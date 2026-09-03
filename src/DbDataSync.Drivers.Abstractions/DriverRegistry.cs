@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using DbDataSync.Core.Config;
 
 namespace DbDataSync.Drivers.Abstractions;
@@ -40,7 +41,7 @@ public sealed class DriverRegistry
             ? driver
             : throw new InvalidOperationException($"No driver registered for '{driverType}'.");
 
-    public bool TryGet(ConnectionDriverType driverType, out IDriver? driver) =>
+    public bool TryGet(ConnectionDriverType driverType, [NotNullWhen(true)] out IDriver? driver) =>
         _drivers.TryGetValue(driverType, out driver);
 
     public bool SupportsReader(ConnectionDriverType driverType, string kind) =>

@@ -29,8 +29,10 @@ namespace DbDataSync.Scripting;
 /// supplying one, and changing that gate is a separate decision from this phase's.
 /// </para>
 /// </summary>
+#pragma warning disable CS9113 // catalog is unused by design — see the class doc comment above.
 public sealed class ScriptedQueryReader(ScriptHost scriptHost, SqlDialect dialect, string engineName, ITableCatalog catalog)
     : IChangeReader
+#pragma warning restore CS9113
 {
     /// <summary>The reader option naming the script. A pipeline-stage choice, so it is bound the way
     /// every other stage option is rather than through the script hierarchy — the Kind and its script

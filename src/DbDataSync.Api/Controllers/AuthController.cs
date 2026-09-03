@@ -15,13 +15,14 @@ public sealed record AuthStatus(
 /// <summary>
 /// Signing in, signing out, and asking who you are.
 /// <para>
-/// Anonymous by necessity: a sign-in endpoint that required a session would be a door locked from the
-/// inside. Everything else in the app is closed by default.
+/// Anonymous case by case, not by default — a blanket <c>[AllowAnonymous]</c> on the class would
+/// override every action's own <c>[Authorize]</c>, including <see cref="SignInWithWindows"/>'s, which
+/// depends on one actually running to negotiate a Windows identity in the first place. Each action that
+/// genuinely needs to bypass auth says so itself; everything else in the app is closed by default.
 /// </para>
 /// </summary>
 [ApiController]
 [Route("api/auth")]
-[AllowAnonymous]
 public sealed class AuthController(
     AuthOptions options, UserStore users, SessionStore sessions, CurrentUser currentUser) : ControllerBase
 {
@@ -30,6 +31,7 @@ public sealed class AuthController(
     /// answer to "am I signed in" cannot itself require being signed in.
     /// </summary>
     [HttpGet("status")]
+    [AllowAnonymous]
     public ActionResult<AuthStatus> Status()
     {
         var methods = new List<string>();
@@ -89,6 +91,7 @@ public sealed class AuthController(
     }
 
     [HttpPost("sign-out")]
+    [AllowAnonymous]
     public IActionResult SignOutOfDbDataSync()
     {
         if (Request.Cookies[AuthOptions.SessionCookie] is { } sessionId)

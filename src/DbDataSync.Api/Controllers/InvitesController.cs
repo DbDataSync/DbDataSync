@@ -33,8 +33,7 @@ public sealed class InvitesController(
     UserStore users,
     SessionStore sessions,
     PasskeyService passkeys,
-    CurrentUser currentUser,
-    AuthOptions authOptions) : ControllerBase
+    CurrentUser currentUser) : ControllerBase
 {
     private const string RegistrationStateCookie = "dbdatasync.passkey-registration";
     private const string AssertionStateCookie = "dbdatasync.passkey-assertion";
