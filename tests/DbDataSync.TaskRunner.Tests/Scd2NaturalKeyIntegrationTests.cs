@@ -1,6 +1,7 @@
 using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
+using DbDataSync.Core.Sql;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Generic;
 using DbDataSync.Drivers.MsSql;
@@ -43,6 +44,8 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
     // the one above.
     private readonly string _lines = $"Lines_{Guid.NewGuid():N}";
     private readonly string _linesTarget = $"LinesHist_{Guid.NewGuid():N}";
+
+    private readonly MsSqlDriver _driver = new();
 
     private ConfigRepository _configRepository = null!;
     private RunExecutor _executor = null!;
@@ -96,7 +99,10 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
             Scripting.ForTests(_configRepository, _repoRoot),
             Path.Combine(_repoRoot, "state.db"));
 
-        SetUpConfig();
+        await ProvisionTargetAsync(_orders, _ordersTarget, [("Id", "Id"), ("Customer", "Customer"), ("Total", "Total")]);
+        await ProvisionTargetAsync(_lines, _linesTarget, [("OrderId", "OrderId"), ("LineNumber", "LineNumber"), ("Sku", "Sku")]);
+
+        await SetUpConfigAsync();
     }
 
     public async Task DisposeAsync()
@@ -119,11 +125,69 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Creates one SCD2 history target ahead of the first pass, through the production provisioner
+    /// rather than hand-written DDL — the <c>DS_</c> version columns are
+    /// <see cref="HistorizedProvisioning"/>'s to decide, and a copy of them here would be a second
+    /// answer to drift from.
+    /// <para>
+    /// This fixture used to leave the table for the run's own <c>CreateTargetTableIfMissing</c> to
+    /// create. That still happens and still finds the table already there, harmlessly — but it cannot
+    /// be what creates it any more, because of the order phase 90 and 91 put things in. Phase 90
+    /// captures a table's shape when the mapping is *saved*; phase 91's writers refuse to run without
+    /// it. A target that does not exist until halfway through the first pass has nothing to capture at
+    /// save time, so every pass would fail with <c>MetadataNotCachedException</c>. Provisioning it
+    /// first is what gives <see cref="SaveMappingAsync"/> a real table to read.
+    /// </para>
+    /// </summary>
+    private async Task ProvisionTargetAsync(
+        string sourceTable, string targetTable, (string Source, string Target)[] columns)
+    {
+        var sourceColumns = await _driver.ListColumnsAsync(
+            _adminConnection, _databaseName, "dbo", sourceTable, CancellationToken.None);
+        var (mapped, _) = ProvisioningColumnBuilder.Build(
+            MsSqlDialect.Instance, sourceColumns,
+            [.. columns.Select(c => new ColumnMapping { SourceColumn = c.Source, TargetColumn = c.Target })]);
+
+        var plan = await ((IProvisioner)_driver).PlanAsync(
+            _adminConnection,
+            new ProvisioningRequest(
+                ProvisioningActions.CreateTargetTable,
+                new TableRef { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = targetTable },
+                ReaderKind: null,
+                ReaderOptions: new Dictionary<string, string>(),
+                HistorizedProvisioning.Extend(mapped, GenericDriverKinds.Scd2),
+                GenericDriverKinds.Scd2),
+            CancellationToken.None);
+
+        foreach (var step in plan.Steps)
+            await ExecuteAsync(_adminConnection, step.CommandText);
+    }
+
+    /// <summary>
+    /// Saves a mapping with its phase-90 column cache populated from the real catalog first, which is
+    /// what phase 91's readers and writers require. See the same helper on
+    /// <see cref="RunExecutorIntegrationTests"/> for why a fixture saving through
+    /// <see cref="ConfigRepository"/> has to do this by hand.
+    /// </summary>
+    private async Task SaveMappingAsync(string replicationName, TableMappingConfig mapping)
+    {
+        mapping.SourceColumns = await CachedColumnsAsync(mapping.Sources[0].Schema, mapping.Sources[0].Table);
+        mapping.TargetColumns = await CachedColumnsAsync(mapping.Targets[0].Schema, mapping.Targets[0].Table);
+        _configRepository.SaveTableMapping(replicationName, mapping, Author);
+    }
+
+    private async Task<List<CachedColumn>> CachedColumnsAsync(string schema, string table) =>
+    [
+        .. (await _driver.ListColumnsAsync(_adminConnection, _databaseName, schema, table, CancellationToken.None))
+            .Select(c => new CachedColumn(c.Name, c.NativeType, c.IsNullable, c.IsPrimaryKey, c.IsIdentity)),
+    ];
+
+    /// <summary>
     /// The replication states no natural key at all — since phase 68 there is nowhere at this level to
     /// state one. Both mappings let the target table be created for them, which is also what proves
     /// provisioning extends the right mapping's writer Kind.
     /// </summary>
-    private void SetUpConfig(WriterConfig? ordersWriterOverride = null)
+    private async Task SetUpConfigAsync(WriterConfig? ordersWriterOverride = null)
     {
         ConnectionInput MakeConnectionInput(string name) => new()
         {
@@ -155,25 +219,25 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
             Provisioning = new ProvisioningConfig { CreateTargetTableIfMissing = true },
         }, Author);
 
-        SaveMapping("orders", _orders, _ordersTarget,
+        await SaveMappingAsync("orders", _orders, _ordersTarget,
             [("Id", "Id"), ("Customer", "Customer"), ("Total", "Total")], ordersWriterOverride);
 
-        SaveMapping("lines", _lines, _linesTarget,
+        await SaveMappingAsync("lines", _lines, _linesTarget,
             [("OrderId", "OrderId"), ("LineNumber", "LineNumber"), ("Sku", "Sku")], writerOverride: null);
     }
 
-    private void SaveMapping(
+    private async Task SaveMappingAsync(
         string name, string sourceTable, string targetTable, (string Source, string Target)[] columns,
         WriterConfig? writerOverride)
     {
-        _configRepository.SaveTableMapping(TaskName, new TableMappingConfig
+        await SaveMappingAsync(TaskName, new TableMappingConfig
         {
             Name = name,
             Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = sourceTable }],
             Targets = [new TableSpec { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = targetTable }],
             ColumnMappings = [.. columns.Select(c => new ColumnMapping { SourceColumn = c.Source, TargetColumn = c.Target })],
             WriterOverride = writerOverride,
-        }, Author);
+        });
     }
 
     private async Task<TaskRunRecord> EnqueueAndDrainAsync(string mappingName)
@@ -267,7 +331,7 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task AMappingsExplicitNaturalKey_IsUsedInsteadOfTheDerivableOne()
     {
-        SetUpConfig(ordersWriterOverride: new WriterConfig
+        await SetUpConfigAsync(ordersWriterOverride: new WriterConfig
         {
             Kind = GenericDriverKinds.Scd2,
             Options = { [Scd2Writer.NaturalKeyOption] = "NotAMappedColumn" },
@@ -289,7 +353,7 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task AMappingsExplicitNaturalKey_VersionsByTheColumnsItNames()
     {
-        SetUpConfig(ordersWriterOverride: new WriterConfig
+        await SetUpConfigAsync(ordersWriterOverride: new WriterConfig
         {
             Kind = GenericDriverKinds.Scd2,
             Options = { [Scd2Writer.NaturalKeyOption] = "Customer" },

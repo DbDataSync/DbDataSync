@@ -271,12 +271,15 @@ public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixt
         await CollectAsync(baseline.Rows);
 
         // No fallback to ThrowingTableCatalog here either — an empty cache fails loudly on its own,
-        // naming the mapping, the side and the column, rather than reaching for a live query.
+        // naming the mapping and the side, rather than reaching for a live query.
         var ex = await Assert.ThrowsAsync<MetadataNotCachedException>(() =>
             reader.ReadChangesAsync(_connection, Source(), baseline.NewWatermark, [], MappingName, [], options, CancellationToken.None));
 
         Assert.Equal(MappingName, ex.MappingName);
         Assert.Equal("source", ex.Side);
-        Assert.Equal("Version", ex.Column);
+        // Null, not "Version": an empty cache has no list to look a name up in, so the exception names
+        // the side that needs refreshing and stops there. A column name appears only when the cache is
+        // populated and that one column is missing from it.
+        Assert.Null(ex.Column);
     }
 }

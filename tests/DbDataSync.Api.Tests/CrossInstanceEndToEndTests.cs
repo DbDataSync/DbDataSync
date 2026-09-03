@@ -252,5 +252,13 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
         }, JsonOptions)).EnsureSuccessStatusCode();
+
+        // The PUT saves the mapping without introspecting — phase 90 captures the cache from the
+        // columns a client sends, and a hand-built TableMappingConfig sends none, leaving phase 91's
+        // readers and writers nothing to run from. This is the Refresh metadata endpoint, which reads
+        // both catalogs server-side.
+        (await _client.PostAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main/refresh-metadata", null))
+            .EnsureSuccessStatusCode();
     }
 }

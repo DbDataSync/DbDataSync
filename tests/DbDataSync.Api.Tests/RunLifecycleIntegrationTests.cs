@@ -145,6 +145,16 @@ public sealed class RunLifecycleIntegrationTests : IClassFixture<TestApiFactory>
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
         }, JsonOptions)).EnsureSuccessStatusCode();
+
+        // The PUT saves the mapping; it does not introspect. Phase 90 captures a mapping's column
+        // metadata from the columns the *client* sends — the editor sends the ones it already fetched
+        // for its pickers, and a test PUTting a hand-built TableMappingConfig sends none. Phase 91's
+        // readers and writers then refuse to run against the empty cache that leaves. This is the
+        // endpoint behind the editor's Refresh metadata button, and the server-side introspection that
+        // actually fills it.
+        (await _client.PostAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main/refresh-metadata", null))
+            .EnsureSuccessStatusCode();
     }
 
     [Fact]

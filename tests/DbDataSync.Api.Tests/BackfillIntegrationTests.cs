@@ -320,7 +320,8 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
             },
         }, JsonOptions)).EnsureSuccessStatusCode();
 
-    private async Task CreateMappingAsync(int index) =>
+    private async Task CreateMappingAsync(int index)
+    {
         (await _client.PutAsJsonAsync($"/api/replications/{_replicationName}/table-mappings/map-{index}", new TableMappingConfig
         {
             Name = $"map-{index}",
@@ -332,6 +333,15 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
         }, JsonOptions)).EnsureSuccessStatusCode();
+
+        // The PUT saves the mapping without introspecting — phase 90 captures the cache from the
+        // columns a client sends, and a hand-built TableMappingConfig sends none, leaving phase 91's
+        // readers and writers nothing to run from. This is the Refresh metadata endpoint, which reads
+        // both catalogs server-side.
+        (await _client.PostAsync(
+            $"/api/replications/{_replicationName}/table-mappings/map-{index}/refresh-metadata", null))
+            .EnsureSuccessStatusCode();
+    }
 
     private void SetSecretEnvVar(string connectionName, string? password) =>
         Environment.SetEnvironmentVariable(

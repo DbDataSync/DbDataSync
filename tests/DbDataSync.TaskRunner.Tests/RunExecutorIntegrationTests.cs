@@ -38,6 +38,8 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     private readonly string _targetTable = $"Tgt_{Guid.NewGuid():N}";
     private readonly string _reloadTargetTable = $"ReloadTgt_{Guid.NewGuid():N}";
 
+    private readonly MsSqlDriver _driver = new();
+
     private ConfigRepository _configRepository = null!;
     private RunExecutor _executor = null!;
     private WorkQueueStore _workQueueStore = null!;
@@ -88,7 +90,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             Scripting.ForTests(_configRepository, _repoRoot),
             Path.Combine(_repoRoot, "state.db"));
 
-        SetUpConfig();
+        await SetUpConfigAsync();
     }
 
     public async Task DisposeAsync()
@@ -110,7 +112,51 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private void SetUpConfig(int frequencySeconds = 1, int idleTimeoutSeconds = 2, bool traceTiming = false)
+    /// <summary>
+    /// Saves a mapping with its phase-90 column cache populated from the real catalog first — which is
+    /// what makes it a mapping phase 91's readers and writers will run.
+    /// <para>
+    /// A mapping created through the app gets this for free: the editor sends the columns it already
+    /// fetched, and Refresh metadata re-reads them. These fixtures build a
+    /// <see cref="TableMappingConfig"/> in C# and hand it straight to <see cref="ConfigRepository"/>,
+    /// below the API layer where that capture lives, so without this they save a mapping with an empty
+    /// cache and every consumer named in phase 91 throws <c>MetadataNotCachedException</c> on the first
+    /// pass. Introspection goes through <see cref="IDriver.ListColumnsAsync"/> — the same public seam
+    /// the API's own capture reads — rather than a hand-written column list, so the cache says what the
+    /// server actually says.
+    /// </para>
+    /// </summary>
+    private async Task SaveMappingAsync(string replicationName, TableMappingConfig mapping)
+    {
+        mapping.SourceColumns = await CachedColumnsAsync(mapping.Sources[0].Schema, mapping.Sources[0].Table);
+        mapping.TargetColumns = await CachedColumnsAsync(mapping.Targets[0].Schema, mapping.Targets[0].Table);
+        _configRepository.SaveTableMapping(replicationName, mapping, Author);
+    }
+
+    /// <summary>
+    /// One table's shape as the cache stores it. A table that does not exist is left uncaptured rather
+    /// than being an error here — a real mapping pointed at a missing table has nothing to capture
+    /// either, and <see cref="AFailedPass_DoesNotAcknowledgeAndLeavesTheHistoryAlone"/> aims a writer
+    /// at one on purpose. Its pass still fails, which is all that test asks of it; only the message
+    /// changes, from the target table not existing to its metadata never having been cached.
+    /// </summary>
+    private async Task<List<CachedColumn>> CachedColumnsAsync(string schema, string table)
+    {
+        IReadOnlyList<ColumnMetadata> columns;
+        try
+        {
+            columns = await _driver.ListColumnsAsync(
+                _adminConnection, _databaseName, schema, table, CancellationToken.None);
+        }
+        catch (InvalidOperationException)
+        {
+            return [];
+        }
+
+        return [.. columns.Select(c => new CachedColumn(c.Name, c.NativeType, c.IsNullable, c.IsPrimaryKey, c.IsIdentity))];
+    }
+
+    private async Task SetUpConfigAsync(int frequencySeconds = 1, int idleTimeoutSeconds = 2, bool traceTiming = false)
     {
         ConnectionInput MakeConnectionInput(string name) => new()
         {
@@ -146,7 +192,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             },
         }, Author);
 
-        _configRepository.SaveTableMapping("e2e-sync", new TableMappingConfig
+        await SaveMappingAsync("e2e-sync", new TableMappingConfig
         {
             Name = "main",
             Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
@@ -157,7 +203,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
             TraceTiming = traceTiming,
-        }, Author);
+        });
     }
 
     private async Task<Dictionary<int, string>> GetTargetRowsAsync()
@@ -198,7 +244,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
 
         // Long enough that the worker is still waiting when the second pass arrives, short enough that
         // the test ends in seconds.
-        SetUpConfig(frequencySeconds: 2, idleTimeoutSeconds: 6);
+        await SetUpConfigAsync(frequencySeconds: 2, idleTimeoutSeconds: 6);
 
         var first = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
         var worker = _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
@@ -309,7 +355,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await ExecuteAsync(_adminConnection,
             $"CREATE TABLE dbo.[{targetTable}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
 
-        _configRepository.SaveTableMapping("e2e-sync", new TableMappingConfig
+        await SaveMappingAsync("e2e-sync", new TableMappingConfig
         {
             Name = name,
             Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
@@ -320,7 +366,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
             ReaderOverride = readerOverride,
-        }, Author);
+        });
         return name;
     }
 
@@ -512,7 +558,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await ExecuteAsync(_adminConnection,
             $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (5, 'Five'), (9, 'Nine'), (40, 'Forty');");
 
-        SetUpReloadReplication([new RangeSegment("Id", "1", "6"), new RangeSegment("Id", "6", "11")]);
+        await SetUpReloadReplicationAsync([new RangeSegment("Id", "1", "6"), new RangeSegment("Id", "6", "11")]);
 
         var runId = _workQueueStore.Enqueue("reload-only", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("reload-only", degreeOfParallelism: 1, CancellationToken.None);
@@ -537,7 +583,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             SELECT n, CONCAT('Row', n) FROM (VALUES (1),(2),(3),(4),(5),(6),(7),(8)) v(n);
             """);
 
-        SetUpReloadReplication(([new AutoSegment("Id", 3)]));
+        await SetUpReloadReplicationAsync(([new AutoSegment("Id", 3)]));
 
         var runId = _workQueueStore.Enqueue("reload-only", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("reload-only", degreeOfParallelism: 1, CancellationToken.None);
@@ -555,7 +601,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task WithoutTheTraceOption_ARunRecordsNoTiming()
     {
-        SetUpConfig();
+        await SetUpConfigAsync();
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One');");
 
         var run = await EnqueueAndDrainAsync();
@@ -567,7 +613,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task WithTheTraceOption_ARunRecordsEveryStage()
     {
-        SetUpConfig(traceTiming: true);
+        await SetUpConfigAsync(traceTiming: true);
         await ExecuteAsync(_adminConnection,
             $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (3, 'Three');");
 
@@ -599,7 +645,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task WithTheTraceOption_AReadThatFoundNothing_StillRecordsALifetime()
     {
-        SetUpConfig(traceTiming: true);
+        await SetUpConfigAsync(traceTiming: true);
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One');");
         await EnqueueAndDrainAsync();
 
@@ -612,7 +658,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.Null(run.Timing.ReaderTimeToFirstRowMs);
     }
 
-    private void SetUpReloadReplication(IReadOnlyList<BatchReloadSegment> segments)
+    private async Task SetUpReloadReplicationAsync(IReadOnlyList<BatchReloadSegment> segments)
     {
         _configRepository.SaveReplicationTask(new ReplicationTaskConfig
         {
@@ -637,7 +683,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             },
         }, Author);
 
-        _configRepository.SaveTableMapping("reload-only", new TableMappingConfig
+        await SaveMappingAsync("reload-only", new TableMappingConfig
         {
             Name = "main",
             Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
@@ -650,7 +696,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             // On the mapping, not on the reader's options bag — phase 58 moved segmenting to where it
             // belongs and stopped reading the old `segments` reader option entirely.
             DefaultSegmenting = [.. segments],
-        }, Author);
+        });
     }
 
     #region Position acknowledgement
@@ -685,7 +731,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             },
         }, Author);
 
-        _configRepository.SaveTableMapping(replicationName, new TableMappingConfig
+        await SaveMappingAsync(replicationName, new TableMappingConfig
         {
             Name = "main",
             Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
@@ -695,7 +741,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
                 new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
-        }, Author);
+        });
     }
 
     private async Task<long> ShadowRowCountAsync()

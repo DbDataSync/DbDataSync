@@ -224,5 +224,12 @@ public sealed class ConcurrentRunsIntegrationTests : IClassFixture<TestApiFactor
                 new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
             ],
         }, JsonOptions));
+
+        // The PUT saves the mapping without introspecting — phase 90 captures the cache from the
+        // columns a client sends, and a hand-built TableMappingConfig sends none, leaving phase 91's
+        // readers and writers nothing to run from. This is the Refresh metadata endpoint, which reads
+        // both catalogs server-side.
+        await EnsureSuccessWithBodyAsync(await _client.PostAsync(
+            $"/api/replications/{name}/table-mappings/main/refresh-metadata", null));
     }
 }

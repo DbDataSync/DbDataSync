@@ -101,8 +101,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
 
         // A literal transform and a hook, so the preview has an operator-authored statement of each
         // kind to attribute — the whole point being that the origin of every line is visible.
-        (await _client.PutAsJsonAsync(
-            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+        await SaveMappingAsync(new TableMappingConfig
             {
                 Name = "main",
                 Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
@@ -116,7 +115,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
                 {
                     ["beforeLoad"] = [new HookConfig { Name = "note-the-load", Sql = "INSERT INTO dbo.PreviewHookLog (Note) VALUES ('before load');" }],
                 },
-            }, JsonOptions)).EnsureSuccessStatusCode();
+            });
     }
 
     public async Task DisposeAsync()
@@ -322,8 +321,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         await ExecuteAsync(await OpenDatabaseAsync(),
             $"ALTER TABLE dbo.[{_targetTable}] ADD Region NVARCHAR(20) NULL;");
 
-        (await _client.PutAsJsonAsync(
-            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+        await SaveMappingAsync(new TableMappingConfig
             {
                 Name = "main",
                 Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
@@ -339,7 +337,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
                     new VerificationCheckConfig { Name = "rows-by-region", GroupBy = ["Region"] },
                     new VerificationCheckConfig { Name = "total-rows" },
                 ],
-            }, JsonOptions)).EnsureSuccessStatusCode();
+            });
 
         // Replicate first, so the two sides genuinely agree and a difference would mean something.
         await TriggerAndWaitAsync();
@@ -379,8 +377,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
     [Fact]
     public async Task ACheckFindsADifference_WhenTheTargetIsChangedBehindTheReplicationsBack()
     {
-        (await _client.PutAsJsonAsync(
-            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+        await SaveMappingAsync(new TableMappingConfig
             {
                 Name = "main",
                 Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
@@ -391,7 +388,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
                     new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name", Transform = "UPPER({{column}})" },
                 ],
                 Verification = [new VerificationCheckConfig { Name = "total-rows" }],
-            }, JsonOptions)).EnsureSuccessStatusCode();
+            });
 
         await TriggerAndWaitAsync();
 
@@ -472,8 +469,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         await ExecuteAsync(await OpenDatabaseAsync(),
             $"ALTER TABLE dbo.[{_targetTable}] ADD Retired NVARCHAR(10) NULL;");
 
-        (await _client.PutAsJsonAsync(
-            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+        await SaveMappingAsync(new TableMappingConfig
             {
                 Name = "main",
                 Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
@@ -485,7 +481,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
                     // On the source, absent from the target: the case this action exists for.
                     new ColumnMapping { SourceColumn = "note", TargetColumn = "Note" },
                 ],
-            }, JsonOptions)).EnsureSuccessStatusCode();
+            });
 
         var plan = await GetTargetPlanAsync();
 
@@ -523,8 +519,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         await ExecuteAsync(await OpenDatabaseAsync(),
             $"INSERT INTO dbo.[{_targetTable}] (Id, Name) VALUES (7, 'dave');");
 
-        (await _client.PutAsJsonAsync(
-            $"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
+        await SaveMappingAsync(new TableMappingConfig
             {
                 Name = "main",
                 Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
@@ -539,7 +534,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
                         Renames = [new RenameStep("Name", "FullName")],
                     },
                 ],
-            }, JsonOptions)).EnsureSuccessStatusCode();
+            });
 
         var plan = await GetTargetPlanAsync();
         var step = Assert.Single(plan.Steps);
@@ -680,6 +675,30 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         var connection = new SqlConnection(builder.ConnectionString);
         connection.Open();
         return connection;
+    }
+
+    /// <summary>
+    /// Saves the "main" mapping and then captures its column metadata, which are two calls rather
+    /// than one.
+    /// <para>
+    /// The <c>PUT</c> does not introspect anything. Phase 90 captures a mapping's cached column
+    /// metadata from the columns the *client* sends — the editor sends the ones it already fetched to
+    /// draw its pickers, and <c>MappingMetadataCapture</c> deliberately treats an empty incoming list
+    /// as "no news" rather than as an answer. A test PUTting a hand-built
+    /// <see cref="TableMappingConfig"/> sends none, so without the second call the mapping is saved
+    /// with an empty cache and phase 91's readers and writers refuse to run against it. The refresh
+    /// endpoint is what reads both catalogs server-side, and it is the one an operator reaches through
+    /// the editor's Refresh metadata button.
+    /// </para>
+    /// </summary>
+    private async Task SaveMappingAsync(TableMappingConfig mapping)
+    {
+        (await _client.PutAsJsonAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main", mapping, JsonOptions))
+            .EnsureSuccessStatusCode();
+        (await _client.PostAsync(
+            $"/api/replications/{_replicationName}/table-mappings/main/refresh-metadata", null))
+            .EnsureSuccessStatusCode();
     }
 
     private static async Task ExecuteAsync(SqlConnection connection, string sql)
