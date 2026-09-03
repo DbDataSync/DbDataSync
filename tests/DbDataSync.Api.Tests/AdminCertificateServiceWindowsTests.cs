@@ -93,7 +93,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         DbDataSyncConfigFile.SetValue(_repoRoot, CertificateBinding.Section, "AllowInvalid", allowInvalid ? "true" : "false");
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void GetStatus_NothingBoundYet_ReportsNoCertificate_AndKeyAccessUnknown()
     {
         var status = Build().GetStatus();
@@ -110,7 +110,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Null(status.KeyAccess.Account);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void GetStatus_NoCaConfigured_TemplatesReportTheReason()
     {
         var status = Build().GetStatus();
@@ -121,7 +121,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.NotNull(status.Templates.Detail);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void GetStatus_WithABoundAndInstalledCertificate_ReportsExpiryAndBindingState()
     {
         var commonName = $"dbdatasync-test-{Guid.NewGuid():N}.example.com";
@@ -143,7 +143,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.True(status.Binding.AllowInvalid);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void GetStatus_BoundSubjectWithNoMatchingCertificate_ReportsCertificateNotFound()
     {
         BindManually("no-such-certificate.example.com");
@@ -155,11 +155,11 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.False(status.Binding.CertificateFound);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void GetStatus_WithNoPendingEnrollment_ListIsEmpty() =>
         Assert.Empty(Build().GetStatus().PendingEnrollments);
 
-    [Fact]
+    [WindowsOnlyFact]
     public void GetStatus_WithAPendingEnrollment_ListsIt_AndRemovingItEmptiesTheListAgain()
     {
         PendingEnrollmentStore.Save(_repoRoot, new PendingEnrollment(
@@ -176,11 +176,11 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Empty(Build().GetStatus().PendingEnrollments);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void CreateSelfSigned_NoDnsNames_FailsBeforeTouchingTheStore() =>
         Assert.False(Build().CreateSelfSigned([], validityDays: null).Succeeded);
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Enroll_NoCaConfigured_FailsWithAClearMessage()
     {
         var result = Build().Enroll(["dbdatasync.example.com"], "WebServer", caConfig: null);
@@ -189,15 +189,15 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Contains("CaConfig", result.Message);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Enroll_NoDnsNames_Fails() =>
         Assert.False(Build().Enroll([], "WebServer", caConfig: "CASERVER\\CA Name").Succeeded);
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Enroll_NoTemplate_Fails() =>
         Assert.False(Build().Enroll(["dbdatasync.example.com"], "", caConfig: "CASERVER\\CA Name").Succeeded);
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Retrieve_UnknownRequestId_Fails()
     {
         var result = Build().Retrieve("never-submitted");
@@ -206,7 +206,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Contains("never-submitted", result.Message);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Bind_UnknownThumbprint_Fails_WithoutTouchingGit()
     {
         // LocalMachine\My is read, not written, here — Bind fails at the FindByThumbprint lookup, which
@@ -217,7 +217,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Contains("0000000000000000000000000000000000dead", result.Message);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void GetCandidates_RunsAgainstLocalMachine_AndEveryEntryHasAThumbprint()
     {
         // Reading LocalMachine\My needs no elevation (only writing to it does) — this does not assert
@@ -228,7 +228,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.All(candidates, c => Assert.False(string.IsNullOrEmpty(c.Thumbprint)));
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void EvaluateKeyAccess_NoServiceInstalled_IsUnknown()
     {
         var result = AdminCertificateService.EvaluateKeyAccess(certificate: null, account: null);
@@ -237,7 +237,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Null(result.Account);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void EvaluateKeyAccess_LocalSystemAccount_IsOk_EvenWithNoCertificate()
     {
         var result = AdminCertificateService.EvaluateKeyAccess(certificate: null, account: "LocalSystem");
@@ -245,7 +245,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Equal(KeyAccessState.Ok, result.State);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void EvaluateKeyAccess_NonLocalSystemAccount_ButNoCertificateToCheck_IsUnknown()
     {
         var result = AdminCertificateService.EvaluateKeyAccess(certificate: null, account: "SomeAccount");
@@ -254,7 +254,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Equal("SomeAccount", result.Account);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void EvaluateKeyAccess_RealCertificate_IsWarningForAnUnrelatedAccount()
     {
         var installed = InstallSelfSigned($"dbdatasync-test-{Guid.NewGuid():N}.example.com");
@@ -269,7 +269,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
         Assert.Equal("Guest", result.Account);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void EvaluateKeyAccess_RealCertificate_IsOkAfterAnExplicitGrant()
     {
         var installed = InstallSelfSigned($"dbdatasync-test-{Guid.NewGuid():N}.example.com");
@@ -290,7 +290,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
     /// certificate's raw bytes would actually show up as if a future change accidentally added a field
     /// carrying either.
     /// </summary>
-    [Fact]
+    [WindowsOnlyFact]
     public void SerializedStatus_NeverContainsKeyMaterial()
     {
         var commonName = $"dbdatasync-test-{Guid.NewGuid():N}.example.com";

@@ -75,7 +75,7 @@ public sealed class CertificateExpiryServiceWindowsTests : IDisposable
         return (service, notifications);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task CheckAsync_FindsTheBoundCertificate_AndRaisesExpiring_WhenWithinTheWarningWindow()
     {
         var commonName = $"dbdatasync-test-{Guid.NewGuid():N}.example.com";
@@ -92,7 +92,7 @@ public sealed class CertificateExpiryServiceWindowsTests : IDisposable
         Assert.Contains(certificate.Thumbprint, notification.Message);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task CheckAsync_WellOutsideTheWarningWindow_RaisesNothing()
     {
         var commonName = $"dbdatasync-test-{Guid.NewGuid():N}.example.com";
@@ -105,7 +105,7 @@ public sealed class CertificateExpiryServiceWindowsTests : IDisposable
         Assert.Empty(notifications.List());
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task CheckAsync_NoSubjectConfigured_RaisesNothingAndDoesNotThrow()
     {
         var configuration = new ConfigurationBuilder().Build();
@@ -119,7 +119,7 @@ public sealed class CertificateExpiryServiceWindowsTests : IDisposable
         Assert.Empty(notifications.List());
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task CheckAsync_SubjectConfiguredButNoMatchingCertificate_LogsAndDoesNotThrow()
     {
         var (service, notifications) = BuildService("no-such-certificate.example.com", expiryWarningDays: 30);

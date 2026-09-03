@@ -18,7 +18,7 @@ namespace DbDataSync.Certificates.Tests;
 [SupportedOSPlatform("windows")]
 public sealed class PendingEnrollmentKeysWindowsTests
 {
-    [Fact]
+    [WindowsOnlyFact]
     public void Create_ThenOpen_ReturnsAUsableKeyOfTheRightSize()
     {
         var keyName = PendingEnrollmentKeys.NewKeyName();
@@ -37,7 +37,7 @@ public sealed class PendingEnrollmentKeysWindowsTests
         }
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Open_UnknownKeyName_ReturnsNull()
     {
         var result = PendingEnrollmentKeys.Open($"DbDataSync-Nonexistent-{Guid.NewGuid():N}", machineKey: false);
@@ -45,7 +45,7 @@ public sealed class PendingEnrollmentKeysWindowsTests
         Assert.Null(result);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Delete_ThenOpen_ReturnsNull()
     {
         var keyName = PendingEnrollmentKeys.NewKeyName();
@@ -56,7 +56,7 @@ public sealed class PendingEnrollmentKeysWindowsTests
         Assert.Null(PendingEnrollmentKeys.Open(keyName, machineKey: false));
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Delete_OnAKeyThatWasNeverCreated_DoesNotThrow()
     {
         PendingEnrollmentKeys.Delete($"DbDataSync-Nonexistent-{Guid.NewGuid():N}", machineKey: false);

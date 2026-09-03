@@ -45,7 +45,7 @@ public sealed class CertificateStoreWindowsTests : IDisposable
         return installed;
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Install_ThenFindByThumbprint_FindsIt()
     {
         var installed = InstallSelfSigned($"dbdatasync-test-{Guid.NewGuid():N}.example.com");
@@ -56,7 +56,7 @@ public sealed class CertificateStoreWindowsTests : IDisposable
         Assert.Equal(installed.Thumbprint, found!.Thumbprint);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Install_ThenListServerAuth_IncludesIt()
     {
         var installed = InstallSelfSigned($"dbdatasync-test-{Guid.NewGuid():N}.example.com");
@@ -66,7 +66,7 @@ public sealed class CertificateStoreWindowsTests : IDisposable
         Assert.Contains(listed, c => c.Thumbprint == installed.Thumbprint);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Install_ThenFindBySubject_FindsIt()
     {
         var commonName = $"dbdatasync-test-{Guid.NewGuid():N}.example.com";
@@ -78,7 +78,7 @@ public sealed class CertificateStoreWindowsTests : IDisposable
         Assert.Equal(installed.Thumbprint, found!.Thumbprint);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Install_PersistsAKeyThatPrivateKeyAccessCanGrantOn()
     {
         var installed = InstallSelfSigned($"dbdatasync-test-{Guid.NewGuid():N}.example.com");
@@ -89,7 +89,7 @@ public sealed class CertificateStoreWindowsTests : IDisposable
         Assert.True(PrivateKeyAccess.CanRead(installed, account));
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void CanRead_BeforeAnyGrant_IsFalseForAnUnrelatedAccount()
     {
         var installed = InstallSelfSigned($"dbdatasync-test-{Guid.NewGuid():N}.example.com");
