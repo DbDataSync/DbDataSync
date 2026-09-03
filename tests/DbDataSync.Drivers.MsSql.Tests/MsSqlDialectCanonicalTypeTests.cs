@@ -97,6 +97,36 @@ public sealed class MsSqlDialectCanonicalTypeTests
         Assert.True(canonical.IsMax);
     }
 
+    [Fact]
+    public void PlainBinary_IsFixedLength()
+    {
+        var canonical = Dialect.ToCanonicalType("binary(16)");
+        Assert.Equal(CanonicalTypeKind.Binary, canonical.Kind);
+        Assert.Equal(16, canonical.Length);
+        Assert.True(canonical.IsFixed);
+    }
+
+    [Fact]
+    public void PlainVarbinary_IsNotFixedLength()
+    {
+        var canonical = Dialect.ToCanonicalType("varbinary(16)");
+        Assert.Equal(CanonicalTypeKind.Binary, canonical.Kind);
+        Assert.Equal(16, canonical.Length);
+        Assert.False(canonical.IsFixed);
+    }
+
+    [Theory]
+    [InlineData("timestamp")]
+    [InlineData("rowversion")]
+    public void TimestampAndRowversion_MapToFixedLengthBinary8(string nativeType)
+    {
+        var canonical = Dialect.ToCanonicalType(nativeType);
+        Assert.Equal(CanonicalTypeKind.Binary, canonical.Kind);
+        Assert.Equal(8, canonical.Length);
+        Assert.True(canonical.IsFixed);
+        Assert.False(canonical.IsMax);
+    }
+
     // --- Reverse direction: rendering a canonical type this dialect did not originate. ---
 
     private static CanonicalType Simple(CanonicalTypeKind kind) => new(kind, null, null, null, false, false);
@@ -141,6 +171,25 @@ public sealed class MsSqlDialectCanonicalTypeTests
         var rendered = Dialect.RenderColumnType(canonical);
         Assert.Equal("varbinary(max)", rendered.Sql);
         Assert.Null(rendered.Fidelity);
+    }
+
+    [Fact]
+    public void RenderingAFixedLengthBinary_ProducesBinaryNotVarbinary()
+    {
+        // What ToCanonicalType now gives a rowversion/timestamp source column (and a genuine binary(n)
+        // one) — the round trip this whole IsFixed flag exists for.
+        var canonical = new CanonicalType(CanonicalTypeKind.Binary, 8, null, null, false, false, IsFixed: true);
+        var rendered = Dialect.RenderColumnType(canonical);
+        Assert.Equal("binary(8)", rendered.Sql);
+        Assert.Null(rendered.Fidelity);
+    }
+
+    [Fact]
+    public void RenderingANonFixedBinary_StillProducesVarbinary()
+    {
+        var canonical = new CanonicalType(CanonicalTypeKind.Binary, 8, null, null, false, false);
+        var rendered = Dialect.RenderColumnType(canonical);
+        Assert.Equal("varbinary(8)", rendered.Sql);
     }
 
     [Fact]

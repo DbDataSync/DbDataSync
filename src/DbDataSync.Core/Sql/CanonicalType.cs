@@ -59,6 +59,12 @@ public enum CanonicalTypeKind
 /// any target has been chosen. <see cref="RenderedColumnType.Fidelity"/> folds this in with whatever
 /// the render side finds, so a caller only ever has one warning to read rather than two places to
 /// check.</param>
+/// <param name="IsFixed">Only meaningful for <see cref="CanonicalTypeKind.Binary"/>: the source column
+/// is a fixed-length <c>binary(n)</c> (SQL Server's <c>rowversion</c>/<c>timestamp</c> included — it is
+/// always exactly 8 bytes) rather than a variable-length <c>varbinary(n)</c>. Only SQL Server has a
+/// real fixed-length binary type distinct from its variable-length one, so this is set by
+/// <c>MsSqlDialect.ToCanonicalType</c> and read by <c>MsSqlDialect.RenderColumnType</c> alone — every
+/// other dialect ignores it and keeps rendering its one binary type, exactly as before this existed.</param>
 public sealed record CanonicalType(
     CanonicalTypeKind Kind,
     int? Length,
@@ -66,7 +72,8 @@ public sealed record CanonicalType(
     int? Scale,
     bool IsUnicode,
     bool IsMax,
-    string? SourceNote = null);
+    string? SourceNote = null,
+    bool IsFixed = false);
 
 /// <param name="Sql">The DDL-ready type spec for the target dialect, e.g. <c>"varchar(50)"</c>,
 /// <c>"numeric(18,2)"</c>. Never populated for <see cref="CanonicalTypeKind.Unmappable"/> — a caller

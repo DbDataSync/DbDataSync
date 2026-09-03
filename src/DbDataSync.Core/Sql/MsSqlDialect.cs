@@ -126,9 +126,17 @@ public sealed class MsSqlDialect : SqlDialect
             "text" => new CanonicalType(CanonicalTypeKind.String, null, null, null, false, true),
             "ntext" => new CanonicalType(CanonicalTypeKind.String, null, null, null, true, true),
 
-            "binary" => BinaryType(args),
-            "varbinary" => BinaryType(args),
+            "binary" => BinaryType(args, isFixed: true),
+            "varbinary" => BinaryType(args, isFixed: false),
             "image" => new CanonicalType(CanonicalTypeKind.Binary, null, null, null, false, true),
+
+            // rowversion is the current name; timestamp is the deprecated syntax for declaring the
+            // same column, but TYPE_NAME() — what this app's own catalog queries report — always says
+            // "timestamp" regardless of which one was written, so that's the name matched here. Always
+            // exactly 8 bytes, auto-assigned by the engine on every write — replicating it as a plain
+            // fixed-length binary(8) copies the value faithfully without a target column that tries
+            // (and fails) to behave like a second engine-managed rowversion of its own.
+            "timestamp" or "rowversion" => new CanonicalType(CanonicalTypeKind.Binary, 8, null, null, false, false, IsFixed: true),
 
             "date" => Simple(CanonicalTypeKind.Date),
             "time" => new CanonicalType(CanonicalTypeKind.Time, null, null, CanonicalTypeSpec.IntAt(args, 0, 7), false, false),
@@ -150,10 +158,13 @@ public sealed class MsSqlDialect : SqlDialect
                 ? new CanonicalType(CanonicalTypeKind.String, null, null, null, unicode, true)
                 : new CanonicalType(CanonicalTypeKind.String, CanonicalTypeSpec.IntAt(args, 0, 1), null, null, unicode, false);
 
-        static CanonicalType BinaryType(IReadOnlyList<string> args) =>
+        static CanonicalType BinaryType(IReadOnlyList<string> args, bool isFixed) =>
             args is ["max"]
+                // varbinary(max) only — binary has no max form.
                 ? new CanonicalType(CanonicalTypeKind.Binary, null, null, null, false, true)
-                : new CanonicalType(CanonicalTypeKind.Binary, CanonicalTypeSpec.IntAt(args, 0, 1), null, null, false, false);
+                : new CanonicalType(
+                    CanonicalTypeKind.Binary, CanonicalTypeSpec.IntAt(args, 0, 1), null, null, false, false,
+                    IsFixed: isFixed);
     }
 
     public override RenderedColumnType RenderColumnType(CanonicalType type) => type.Kind switch
@@ -173,6 +184,7 @@ public sealed class MsSqlDialect : SqlDialect
             Faithful($"{(type.IsUnicode ? "nvarchar" : "varchar")}({type.Length ?? 255})", type),
 
         CanonicalTypeKind.Binary when type.IsMax => Faithful("varbinary(max)", type),
+        CanonicalTypeKind.Binary when type.IsFixed => Faithful($"binary({type.Length ?? 255})", type),
         CanonicalTypeKind.Binary => Faithful($"varbinary({type.Length ?? 255})", type),
 
         CanonicalTypeKind.Date => Faithful("date", type),
