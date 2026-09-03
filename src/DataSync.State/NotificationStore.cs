@@ -18,6 +18,12 @@ public static class NotificationKinds
     /// <see cref="RunFailed"/> row whose message happens to say so.</summary>
     public const string PositionExpired = "PositionExpired";
 
+    /// <summary>A run failed because a reader, writer or staging provider needed a column's cached
+    /// shape and the mapping's metadata cache (phase 90) didn't have it — phase 91. Its own kind for
+    /// the same reason <see cref="PositionExpired"/> is: a known fix (Refresh metadata) that a feed
+    /// should be able to find without matching on prose.</summary>
+    public const string MetadataNotCached = "MetadataNotCached";
+
     /// <summary>The bound Windows certificate is within its configured warning window of
     /// <c>NotAfter</c> — phase 82, raised by <c>DataSync.Api.Services.CertificateExpiryService</c> at
     /// most once a day.</summary>

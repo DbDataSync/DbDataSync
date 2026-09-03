@@ -27,12 +27,14 @@ public sealed class MsSqlDeleteInsertWriter : IChangeWriter, IStatementPreview
         TableRef target,
         StagedChangeSet staged,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
         targetConnection.ChangeDatabase(target.Database);
 
-        var shape = await MsSqlTargetShape.LoadAsync(targetConnection, target, columnMappings, cancellationToken);
+        var shape = MsSqlTargetShape.FromCachedColumns(mappingName, targetColumns, target, columnMappings);
         var scope = MsSqlSegmentScope.Build(SegmentSerializer.ReadOptional(options), shape.Columns, columnMappings);
 
         await using var transaction = await targetConnection.BeginTransactionAsync(cancellationToken);

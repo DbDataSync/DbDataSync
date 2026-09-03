@@ -61,7 +61,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob');");
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, [], options: new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), previousWatermark: null, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(2, rows.Count);
@@ -76,7 +76,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol');");
 
         var baseline = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), previousWatermark: null, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         await CollectAsync(baseline.Rows);
         var watermark = baseline.NewWatermark;
 
@@ -84,7 +84,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"UPDATE dbo.[{_tableName}] SET Name = 'Robert' WHERE Id = 2;");
         await ExecuteAsync($"DELETE FROM dbo.[{_tableName}] WHERE Id = 3;");
 
-        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(3, rows.Count);
@@ -109,11 +109,11 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
     public async Task Incremental_WithNoChanges_ReturnsEmptyButAdvancesWatermark()
     {
         var baseline = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), previousWatermark: null, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         await CollectAsync(baseline.Rows);
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), baseline.NewWatermark, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), baseline.NewWatermark, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Empty(rows);
@@ -133,7 +133,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         // -1 sorts below every version the source could still hold, which is what a version discarded
         // by cleanup looks like from here.
         var problem = await Assert.ThrowsAsync<PositionExpiredException>(() => _reader.ReadChangesAsync(
-            _connection, Source(), "-1", [], new Dictionary<string, string>(), CancellationToken.None));
+            _connection, Source(), "-1", [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Equal("Change Tracking", problem.Mechanism);
         Assert.Equal("-1", problem.StoredPosition);
@@ -148,7 +148,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
     private async Task<string> BaselineAsync()
     {
         var baseline = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), previousWatermark: null, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         await CollectAsync(baseline.Rows);
         return baseline.WatermarkAfterRead;
     }
@@ -162,7 +162,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         for (var id = 1; id <= 6; id++)
             await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES ({id}, 'r{id}');");
 
-        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], Bounded(2), CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], "mapping", [], Bounded(2), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(2, rows.Count);
@@ -180,7 +180,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         var seen = new List<int>();
         for (var pass = 0; pass < 20; pass++)
         {
-            var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], Bounded(4), CancellationToken.None);
+            var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], "mapping", [], Bounded(4), CancellationToken.None);
             var rows = await CollectAsync(result.Rows);
             seen.AddRange(rows.Select(r => (int)r["Id"]!));
             watermark = result.WatermarkAfterRead;
@@ -203,13 +203,13 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         // above it.
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd');");
 
-        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], Bounded(2), CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], "mapping", [], Bounded(2), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(4, rows.Count);
 
         var next = await _reader.ReadChangesAsync(
-            _connection, Source(), result.WatermarkAfterRead, [], Bounded(2), CancellationToken.None);
+            _connection, Source(), result.WatermarkAfterRead, [], "mapping", [], Bounded(2), CancellationToken.None);
         Assert.Empty(await CollectAsync(next.Rows));
     }
 
@@ -222,7 +222,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         var watermark = await BaselineAsync();
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'a');");
 
-        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], Bounded(100), CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], "mapping", [], Bounded(100), CancellationToken.None);
         await CollectAsync(result.Rows);
 
         Assert.Equal(result.NewWatermark, result.WatermarkAfterRead);
@@ -235,7 +235,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         var watermark = await BaselineAsync();
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'a');");
 
-        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], Bounded(10), CancellationToken.None);
+        var result = await _reader.ReadChangesAsync(_connection, Source(), watermark, [], "mapping", [], Bounded(10), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Equal(["Id", "Name"], rows[0].Schema.ColumnNames);
@@ -257,7 +257,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         // same rows through it. The cap's arithmetic is asserted above against a cap small enough to
         // bite; the default's size is BoundedReadTests' business.
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), watermark, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         Assert.Single(await CollectAsync(result.Rows));
 
         // Not cut short, so it still advances to the window's end rather than to its last row.
@@ -272,7 +272,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'a'), (2, 'b');");
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], Bounded(0), CancellationToken.None);
+            _connection, Source(), watermark, [], "mapping", [], Bounded(0), CancellationToken.None);
 
         Assert.Equal(2, (await CollectAsync(result.Rows)).Count);
         Assert.Equal(result.NewWatermark, result.WatermarkAfterRead);
@@ -293,7 +293,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), watermark, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         await CollectAsync(result.Rows);
 
         // Not merely non-null: it has to be a time dm_tran_commit_table actually stated for this
@@ -320,7 +320,7 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'b');");
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], Bounded(1), CancellationToken.None);
+            _connection, Source(), watermark, [], "mapping", [], Bounded(1), CancellationToken.None);
         Assert.Single(await CollectAsync(result.Rows));
 
         // Cut short, so the stored position is the last row's version — and the time travels with it

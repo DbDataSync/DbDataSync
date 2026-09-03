@@ -33,6 +33,8 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         SourceTableRef source,
         string? previousWatermark,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

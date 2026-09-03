@@ -96,6 +96,28 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
 
     private sealed record Side(IChangeReader Reader, IStagingProvider Staging, IChangeWriter Writer, IChangeReader Watermark);
 
+    private const string MappingName = "cross-engine";
+
+    /// <summary>Matches InitializeAsync's own MSSQL CREATE TABLE — the generic staging provider and
+    /// writer resolve target column shape from here as of phase 91, in the native spelling
+    /// MsSqlSchemaQueries.GetColumnsAsync would have returned live.</summary>
+    private static List<CachedColumn> MsSqlColumns() =>
+    [
+        new("id", "int", false, true, false),
+        new("name", "nvarchar(100)", false, false, false),
+        new("amount", "decimal(18,2)", true, false, false),
+        new("modified_at", "datetime2(3)", true, false, false),
+    ];
+
+    /// <summary>The same table's Postgres side.</summary>
+    private static List<CachedColumn> PgColumns() =>
+    [
+        new("id", "integer", false, true, false),
+        new("name", "text", false, false, false),
+        new("amount", "numeric(18,2)", true, false, false),
+        new("modified_at", "timestamp(3)", true, false, false),
+    ];
+
     /// <summary>
     /// Resolved from the driver by Kind, exactly as <c>RunExecutor</c> resolves them through
     /// <c>DriverRegistry</c> — rather than constructed here from each driver's dialect and catalog.
@@ -167,9 +189,12 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         var target = PgSide();
         var options = new Dictionary<string, string>();
 
-        var read = await source.Reader.ReadChangesAsync(_mssql, MsSqlSource(), null, Mappings, options, CancellationToken.None);
-        var staged = await target.Staging.StageAsync(_pg, PgTarget(), read.Rows, Mappings, options, CancellationToken.None);
-        var written = await target.Writer.ApplyAsync(_pg, PgTarget(), staged, Mappings, options, CancellationToken.None);
+        var read = await source.Reader.ReadChangesAsync(
+            _mssql, MsSqlSource(), null, Mappings, MappingName, MsSqlColumns(), options, CancellationToken.None);
+        var staged = await target.Staging.StageAsync(
+            _pg, PgTarget(), read.Rows, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
+        var written = await target.Writer.ApplyAsync(
+            _pg, PgTarget(), staged, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
         await target.Staging.CleanupAsync(_pg, staged, CancellationToken.None);
 
         Assert.Equal(3, written.RowsWritten);
@@ -190,9 +215,12 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         var target = MsSqlSide();
         var options = new Dictionary<string, string>();
 
-        var read = await source.Reader.ReadChangesAsync(_pg, PgSource(), null, Mappings, options, CancellationToken.None);
-        var staged = await target.Staging.StageAsync(_mssql, MsSqlTarget(), read.Rows, Mappings, options, CancellationToken.None);
-        var written = await target.Writer.ApplyAsync(_mssql, MsSqlTarget(), staged, Mappings, options, CancellationToken.None);
+        var read = await source.Reader.ReadChangesAsync(
+            _pg, PgSource(), null, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
+        var staged = await target.Staging.StageAsync(
+            _mssql, MsSqlTarget(), read.Rows, Mappings, MappingName, MsSqlColumns(), options, CancellationToken.None);
+        var written = await target.Writer.ApplyAsync(
+            _mssql, MsSqlTarget(), staged, Mappings, MappingName, MsSqlColumns(), options, CancellationToken.None);
         await target.Staging.CleanupAsync(_mssql, staged, CancellationToken.None);
 
         Assert.Equal(3, written.RowsWritten);
@@ -211,9 +239,11 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         var target = PgSide();
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "modified_at" };
 
-        var first = await source.Watermark.ReadChangesAsync(_mssql, MsSqlSource(), null, Mappings, options, CancellationToken.None);
-        var staged = await target.Staging.StageAsync(_pg, PgTarget(), first.Rows, Mappings, options, CancellationToken.None);
-        await target.Writer.ApplyAsync(_pg, PgTarget(), staged, Mappings, options, CancellationToken.None);
+        var first = await source.Watermark.ReadChangesAsync(
+            _mssql, MsSqlSource(), null, Mappings, MappingName, MsSqlColumns(), options, CancellationToken.None);
+        var staged = await target.Staging.StageAsync(
+            _pg, PgTarget(), first.Rows, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
+        await target.Writer.ApplyAsync(_pg, PgTarget(), staged, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
         await target.Staging.CleanupAsync(_pg, staged, CancellationToken.None);
 
         Assert.Equal(3, (await ReadAllAsync(_pg, $"public.\"{_table}\"")).Count);
@@ -222,7 +252,8 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         // text column, or this row is re-read on every subsequent pass.
         await ExecAsync(_mssql, $"INSERT INTO dbo.[{_table}] VALUES (4, 'Dave', 7.77, '2026-04-01T08:00:00.250');");
 
-        var second = await source.Watermark.ReadChangesAsync(_mssql, MsSqlSource(), first.NewWatermark, Mappings, options, CancellationToken.None);
+        var second = await source.Watermark.ReadChangesAsync(
+            _mssql, MsSqlSource(), first.NewWatermark, Mappings, MappingName, MsSqlColumns(), options, CancellationToken.None);
         var rows = new List<ChangeRow>();
         await foreach (var row in second.Rows)
             rows.Add(row);
@@ -240,9 +271,11 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
 
         async Task ReloadAsync()
         {
-            var read = await source.Reader.ReadChangesAsync(_mssql, MsSqlSource(), null, Mappings, options, CancellationToken.None);
-            var staged = await target.Staging.StageAsync(_pg, PgTarget(), read.Rows, Mappings, options, CancellationToken.None);
-            await target.Writer.ApplyAsync(_pg, PgTarget(), staged, Mappings, options, CancellationToken.None);
+            var read = await source.Reader.ReadChangesAsync(
+                _mssql, MsSqlSource(), null, Mappings, MappingName, MsSqlColumns(), options, CancellationToken.None);
+            var staged = await target.Staging.StageAsync(
+                _pg, PgTarget(), read.Rows, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
+            await target.Writer.ApplyAsync(_pg, PgTarget(), staged, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
             await target.Staging.CleanupAsync(_pg, staged, CancellationToken.None);
         }
 

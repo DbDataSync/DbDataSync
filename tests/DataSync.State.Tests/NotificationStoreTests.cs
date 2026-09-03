@@ -174,6 +174,35 @@ public sealed class NotificationStoreTests : IDisposable
             _store.List().Select(n => n.Kind));
     }
 
+    /// <summary>
+    /// Phase 91's own failure, on the exact same footing as the expiry test above: this is the "no new
+    /// wiring" claim made checkable — a MetadataNotCached completion rides CompleteRun's existing
+    /// producer and needs nothing else touched to reach the feed.
+    /// </summary>
+    [Fact]
+    public void AMetadataNotCachedFailure_ProducesItsOwnNotificationKind_NamingTheMappingAndColumn()
+    {
+        var runId = QueueAndBegin("crm-sync", "orders");
+
+        // The wording RunExecutor passes through from MetadataNotCachedException, which already names
+        // the mapping, the side and the column.
+        _runs.CompleteRun(
+            runId, RunStatus.Failed, 0, 0,
+            "Table mapping 'orders' has no cached source column 'UpdatedAt'. The mapping's cached "
+                + "source shape doesn't include it — the table may have changed since it was last "
+                + "captured. Use Refresh metadata on the mapping to populate it before this run can proceed.",
+            RunFailureKinds.MetadataNotCached);
+
+        var notification = Assert.Single(_store.List());
+        Assert.Equal(NotificationKinds.MetadataNotCached, notification.Kind);
+        Assert.Equal("crm-sync", notification.TaskName);
+        Assert.Equal("orders", notification.MappingName);
+        Assert.Equal(runId, notification.RunId);
+        Assert.Contains("orders", notification.Message);
+        Assert.Contains("UpdatedAt", notification.Message);
+        Assert.Contains("Refresh metadata", notification.Message);
+    }
+
     [Fact]
     public void List_WithSinceId_ReturnsOnlyWhatIsNewer()
     {

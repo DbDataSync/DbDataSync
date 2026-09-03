@@ -63,13 +63,30 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
     private SourceTableRef Source() => new() { ConnectionName = "src", Database = db.DatabaseName, Schema = "dbo", Table = _sourceTable };
     private TableRef Target() => new() { ConnectionName = "tgt", Database = db.DatabaseName, Schema = "dbo", Table = _targetTable };
 
+    private const string MappingName = "mssql-pipeline";
+
+    /// <summary>MsSqlMergeWriter resolves its target shape from this cache as of phase 91 — matching
+    /// Target()'s own CREATE TABLE above, since MsSqlTargetShape.FromCachedColumns needs the target's
+    /// full column list, not just the mapped ones.</summary>
+    private static List<CachedColumn> TargetColumns() =>
+    [
+        new("Id", "int", false, true, false),
+        new("Name", "nvarchar(50)", false, false, false),
+        new("Amount", "decimal(18,2)", false, false, false),
+    ];
+
     private async Task<(long RowsWritten, string Watermark)> RunOnceAsync(
         string? previousWatermark, IReadOnlyDictionary<string, string>? writerOptions = null)
     {
-        var read = await _reader.ReadChangesAsync(_sourceConnection, Source(), previousWatermark, Mappings, new Dictionary<string, string>(), CancellationToken.None);
-        var staged = await _staging.StageAsync(_targetConnection, Target(), read.Rows, Mappings, new Dictionary<string, string>(), CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(
+            _sourceConnection, Source(), previousWatermark, Mappings, MappingName, [], new Dictionary<string, string>(),
+            CancellationToken.None);
+        var staged = await _staging.StageAsync(
+            _targetConnection, Target(), read.Rows, Mappings, MappingName, [], new Dictionary<string, string>(),
+            CancellationToken.None);
         var written = await _writer.ApplyAsync(
-            _targetConnection, Target(), staged, Mappings, writerOptions ?? new Dictionary<string, string>(), CancellationToken.None);
+            _targetConnection, Target(), staged, Mappings, MappingName, TargetColumns(),
+            writerOptions ?? new Dictionary<string, string>(), CancellationToken.None);
         return (written.RowsWritten, read.NewWatermark);
     }
 

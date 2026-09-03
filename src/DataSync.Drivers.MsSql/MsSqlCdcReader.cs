@@ -58,6 +58,8 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         SourceTableRef source,
         string? previousWatermark,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

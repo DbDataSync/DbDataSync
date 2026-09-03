@@ -80,6 +80,31 @@ internal sealed class MsSqlTargetShape
             mappedTargetColumns.Any(c => byName[c].IsIdentity));
     }
 
+    /// <summary>The cache-only path every MERGE/delete-insert writer's real <c>ApplyAsync</c> uses as of
+    /// phase 91 — see <see cref="DataSync.Drivers.Generic.TargetShape.FromCachedColumns"/>, which this
+    /// mirrors exactly for the reason the two types exist side by side in the first place.</summary>
+    public static MsSqlTargetShape FromCachedColumns(
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
+        TableRef target,
+        IReadOnlyList<ColumnMapping> columnMappings)
+    {
+        var columns = targetColumns.RequireAll(mappingName, "target");
+        var byName = columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+
+        var mappedTargetColumns = columnMappings.Select(m => m.TargetColumn).Distinct().ToList();
+        foreach (var column in mappedTargetColumns)
+            if (!byName.ContainsKey(column))
+                throw new MetadataNotCachedException(mappingName, "target", column);
+
+        return new MsSqlTargetShape(
+            target,
+            columns,
+            mappedTargetColumns,
+            columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList(),
+            mappedTargetColumns.Any(c => byName[c].IsIdentity));
+    }
+
     /// <summary>The MERGE join predicate on the target's primary key. Both MERGE-based writers match
     /// rows this way, so the requirement (a PK, and column mappings that carry it) is enforced here
     /// once with one message.</summary>

@@ -74,13 +74,14 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
         TableRef target,
         StagedChangeSet staged,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
         await dialect.UseDatabaseAsync(targetConnection, target.Database, cancellationToken);
 
-        var shape = await TargetShape.LoadAsync(
-            dialect, catalog, targetConnection, target, columnMappings, cancellationToken);
+        var shape = TargetShape.FromCachedColumns(dialect, mappingName, targetColumns, target, columnMappings);
         var (keys, values) = SplitColumns(options, columnMappings, target);
 
         var now = DateTimeOffset.UtcNow.UtcDateTime;

@@ -60,9 +60,20 @@ public sealed class TriggerAuditReaderTests(PostgresTestDatabase db) : IClassFix
         ConnectionName = "test", Database = db.DatabaseName, Schema = "public", Table = _tableName,
     };
 
+    private const string MappingName = "trigger-audit-probe";
+
+    /// <summary>Matches InitializeAsync's own CREATE TABLE — the key/non-key split this reader runs on
+    /// as of phase 91 comes from here, never a live catalog call.</summary>
+    private static List<CachedColumn> Columns() =>
+    [
+        new("Id", "int", false, true, false),
+        new("Name", "varchar(50)", false, false, false),
+    ];
+
     private Task<ReadResult> ReadAsync(string? watermark, IReadOnlyDictionary<string, string>? options = null) =>
         _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], options ?? new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), watermark, [], MappingName, Columns(), options ?? new Dictionary<string, string>(),
+            CancellationToken.None);
 
     private static async Task<List<ChangeRow>> CollectAsync(IAsyncEnumerable<ChangeRow> rows)
     {
@@ -176,8 +187,15 @@ public sealed class TriggerAuditReaderTests(PostgresTestDatabase db) : IClassFix
         {
             ConnectionName = "test", Database = db.DatabaseName, Schema = "public", Table = composite,
         };
+        List<CachedColumn> compositeColumns =
+        [
+            new("Region", "varchar(10)", false, true, false),
+            new("Id", "int", false, true, false),
+            new("Name", "varchar(50)", false, false, false),
+        ];
         Task<ReadResult> Read(string? watermark) => _reader.ReadChangesAsync(
-            _connection, source, watermark, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, source, watermark, [], MappingName, compositeColumns, new Dictionary<string, string>(),
+            CancellationToken.None);
 
         await ExecuteAsync(
             $"INSERT INTO public.\"{composite}\" VALUES ('north', 1, 'a'), ('south', 1, 'b');");

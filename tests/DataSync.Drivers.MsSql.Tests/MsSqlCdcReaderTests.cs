@@ -126,7 +126,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
 
     private Task<ReadResult> ReadAsync(string? watermark, SourceTableRef? source = null) =>
         _reader.ReadChangesAsync(
-            _connection, source ?? Source(), watermark, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, source ?? Source(), watermark, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
 
     private static async Task<List<ChangeRow>> CollectAsync(IAsyncEnumerable<ChangeRow> rows)
     {
@@ -304,7 +304,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         };
 
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => _reader.ReadChangesAsync(
-            _connection, source, null, [], new Dictionary<string, string>(), CancellationToken.None));
+            _connection, source, null, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains("Change Data Capture is not enabled", problem.Message);
     }
@@ -333,7 +333,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             var result = await _reader.ReadChangesAsync(
-                _connection, Source(), start, mappings, new Dictionary<string, string>(), CancellationToken.None);
+                _connection, Source(), start, mappings, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
             await CollectAsync(result.Rows);
         });
 
@@ -421,7 +421,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
     private Task<ReadResult> ReadAsync(
         string? watermark, IReadOnlyDictionary<string, string> options, SourceTableRef? source = null) =>
         _reader.ReadChangesAsync(
-            _connection, source ?? Source(), watermark, [], options, CancellationToken.None);
+            _connection, source ?? Source(), watermark, [], "mapping", [], options, CancellationToken.None);
 
     /// <summary>
     /// Waits until the capture job has caught up to a known number of pending changes, by reading the

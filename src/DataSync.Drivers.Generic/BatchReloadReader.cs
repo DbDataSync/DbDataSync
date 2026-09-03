@@ -33,13 +33,23 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
         SourceTableRef source,
         string? previousWatermark,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
 
         var segment = SegmentSerializer.ReadOptional(options);
-        var columns = await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
+        // Cache-only as of phase 91 — ExpandAutoSegmentsAsync (a different method entirely) is the one
+        // place in this reader that still asks the live catalog, because it samples the column's actual
+        // value distribution, which no cache could substitute for. This read of a segment's *shape* has
+        // no such excuse. Resolved only for a segment that actually names a column: SegmentScope.Build
+        // never consults it for null/FullSegment, so a plain reload shouldn't have to pay for a
+        // populated cache it doesn't need.
+        IReadOnlyList<ColumnMetadata> columns = segment is ListSegment or RangeSegment
+            ? sourceColumns.RequireAll(mappingName, "source")
+            : [];
         var scope = SegmentScope.Build(dialect, binder, segment, columns);
 
         var rows = ReadRowsAsync(sourceConnection, source, scope, SourceProjection.Render(dialect, columnMappings), cancellationToken);

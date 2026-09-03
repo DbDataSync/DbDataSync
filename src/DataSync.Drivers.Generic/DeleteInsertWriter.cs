@@ -48,12 +48,14 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
         TableRef target,
         StagedChangeSet staged,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
         await dialect.UseDatabaseAsync(targetConnection, target.Database, cancellationToken);
 
-        var shape = await TargetShape.LoadAsync(dialect, catalog, targetConnection, target, columnMappings, cancellationToken);
+        var shape = TargetShape.FromCachedColumns(dialect, mappingName, targetColumns, target, columnMappings);
         var scope = SegmentScope.Build(dialect, binder, SegmentSerializer.ReadOptional(options), shape.Columns, columnMappings);
 
         await using var transaction = await targetConnection.BeginTransactionAsync(cancellationToken);

@@ -138,6 +138,14 @@ public static class RunFailureKinds
     /// <summary>The source discarded the history the reader needed. The fix is a reload, which the UI
     /// offers as one click — see <c>PositionExpiredException</c>.</summary>
     public const string PositionExpired = "PositionExpired";
+
+    /// <summary>
+    /// A reader, writer or staging provider needed a column's cached shape and the mapping's metadata
+    /// cache (phase 90) didn't have it — see <c>MetadataNotCachedException</c>. The fix is Refresh
+    /// metadata on the mapping, not a reload: nothing about the *position* is wrong, only the picture of
+    /// the table's shape this pass needed to run at all — phase 91.
+    /// </summary>
+    public const string MetadataNotCached = "MetadataNotCached";
 }
 
 /// <param name="ResultPath">Where the parquet is. The index says where; the file says what.</param>

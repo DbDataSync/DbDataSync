@@ -22,6 +22,12 @@ namespace DataSync.Scripting;
 /// picker and nothing else is silently reshaped — the lesson phase 23 learned when the column-expression
 /// hook moved out of <c>SourceProjection</c>.
 /// </para>
+/// <para>
+/// <paramref name="catalog"/> is no longer read by <see cref="ReadChangesAsync"/> as of phase 91 — the
+/// source's shape comes from the mapping's cache instead — but stays a constructor parameter because
+/// <see cref="ScriptedQueryRegistration.RegisterWithScripting"/> gates offering this Kind on a driver
+/// supplying one, and changing that gate is a separate decision from this phase's.
+/// </para>
 /// </summary>
 public sealed class ScriptedQueryReader(ScriptHost scriptHost, SqlDialect dialect, string engineName, ITableCatalog catalog)
     : IChangeReader
@@ -68,6 +74,8 @@ public sealed class ScriptedQueryReader(ScriptHost scriptHost, SqlDialect dialec
         SourceTableRef source,
         string? previousWatermark,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -78,7 +86,14 @@ public sealed class ScriptedQueryReader(ScriptHost scriptHost, SqlDialect dialec
         var builder = scriptHost.Resolve<ISourceQueryBuilder>(scriptName);
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
-        var columns = await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
+        // Cache-only as of phase 91, and deliberately not required to be non-empty the way the other
+        // five consumers' lookups are: a query source names no table, so it has no catalog to
+        // introspect in the first place, and phase 90's own capture already leaves SourceColumns empty
+        // for exactly this reader — that is a query source's normal state, not a missing refresh. A
+        // script that wants column facts anyway reads SourceQueryContext.SourceColumns and finds
+        // whatever was captured; one that ignores it (most of them, since the query already says what
+        // it selects) pays nothing either way.
+        var columns = sourceColumns.Select(c => c.ToColumnMetadata()).ToList();
 
         var context = new SourceQueryContext(
             source, columnMappings, columns, previousWatermark, EndWatermark: null,

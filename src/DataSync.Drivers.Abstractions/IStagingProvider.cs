@@ -16,11 +16,22 @@ public interface IStagingProvider
     /// <inheritdoc cref="IChangeReader.Parameters"/>
     IReadOnlyList<ParameterDescriptor> Parameters => [];
 
+    /// <param name="mappingName">The table mapping this staging call belongs to — see
+    /// <see cref="IChangeReader.ReadChangesAsync"/>'s identical parameter.</param>
+    /// <param name="targetColumns">
+    /// The target's shape as of the mapping's last save or explicit refresh (phase 90) —
+    /// <see cref="TableMappingConfig.TargetColumns"/>, verbatim. A provider that needs the target's
+    /// column types to build a staging table looks them up here and throws
+    /// <see cref="MetadataNotCachedException"/> when the cache is empty or a mapped column isn't in it,
+    /// rather than querying the target's catalog live — see phase 91.
+    /// </param>
     Task<StagedChangeSet> StageAsync(
         DbConnection targetConnection,
         TableRef target,
         IAsyncEnumerable<ChangeRow> rows,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken);
 

@@ -1,5 +1,6 @@
 using DataSync.Core.Config;
 using DataSync.Drivers.Abstractions;
+using DataSync.Drivers.Generic;
 using DataSync.Scripting;
 using DataSync.Scripting.Abstractions;
 using Microsoft.Data.SqlClient;
@@ -135,7 +136,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
     };
 
     private Task<ReadResult> ReadAsync(string? watermark) =>
-        _reader.ReadChangesAsync(_connection, Source(), watermark, [], Options(), CancellationToken.None);
+        _reader.ReadChangesAsync(_connection, Source(), watermark, [], "mapping", [], Options(), CancellationToken.None);
 
     [Fact]
     public async Task ReadsInsertsUpdatesAndDeletesFromAnAuditTable()
@@ -217,7 +218,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
     {
         var ex = await Assert.ThrowsAsync<ScriptExecutionException>(() =>
             _reader.ReadChangesAsync(
-                _connection, Source(), null, [], new Dictionary<string, string>(), CancellationToken.None));
+                _connection, Source(), null, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains(ScriptedQueryReader.ScriptOption, ex.Message);
     }
@@ -244,10 +245,43 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
 
         var options = new Dictionary<string, string> { [ScriptedQueryReader.ScriptOption] = "wrong-op" };
         var read = await _reader.ReadChangesAsync(
-            _connection, Source(), null, [], options, CancellationToken.None);
+            _connection, Source(), null, [], "mapping", [], options, CancellationToken.None);
 
         var ex = await Assert.ThrowsAsync<ScriptExecutionException>(() => CollectAsync(read.Rows));
         Assert.Contains("NotThere", ex.Message);
         Assert.Contains("Id", ex.Message);
+    }
+
+    /// <summary>
+    /// Throws if invoked — see the identical fake in <c>TriggerAuditReaderTests</c>. Unlike the other
+    /// five consumers, this reader has no "cache empty" throw to test: a query source names no table, so
+    /// an empty cache is its normal state, not a missing refresh — see the reasoning in
+    /// <see cref="ScriptedQueryReader.ReadChangesAsync"/>. What is worth proving is the same as
+    /// everywhere else — that a live catalog is never consulted, populated cache or not.
+    /// </summary>
+    private sealed class ThrowingTableCatalog : ITableCatalog
+    {
+        public Task<IReadOnlyList<ColumnMetadata>> GetColumnsAsync(
+            System.Data.Common.DbConnection connection, string schema, string table, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(
+                "ITableCatalog.GetColumnsAsync was called — phase 91's cache-only reader must never do this.");
+    }
+
+    [Fact]
+    public async Task ReadChangesAsync_NeverCallsTheLiveCatalog_CacheEmptyOrNot()
+    {
+        var host = new ScriptHost(
+            _configRepository, new ScriptCompiler(new ScriptCacheDirectory(Path.Combine(_repoRoot, "cache2"))));
+        var reader = new ScriptedQueryReader(host, MsSqlDialect.Instance, "MsSql", new ThrowingTableCatalog());
+        RegisterScript();
+        await ExecuteAsync($"INSERT INTO dbo.[{_audit}] (Op, Id, Name) VALUES ('I', 1, 'Alice');");
+
+        var read = await reader.ReadChangesAsync(
+            _connection, Source(), null, [], "mapping",
+            [new CachedColumn("Id", "int", false, true, false)], Options(), CancellationToken.None);
+        var rows = await CollectAsync(read.Rows);
+
+        // Reaching here at all is the proof: ThrowingTableCatalog would have failed the test otherwise.
+        Assert.Single(rows);
     }
 }

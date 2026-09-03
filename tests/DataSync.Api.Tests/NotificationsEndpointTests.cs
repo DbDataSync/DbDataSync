@@ -197,6 +197,48 @@ public sealed class NotificationsEndpointTests
     }
 
     /// <summary>
+    /// Phase 91's failure, on <see cref="WatermarkExpiry"/>'s exact footing: the real
+    /// <see cref="MetadataNotCachedException"/>, so the point is the same one that test makes — the
+    /// exception's own wording survives into the notification, and this rides <c>CompleteRun</c>'s
+    /// existing producer with nothing new wired for it.
+    /// </summary>
+    public sealed class MetadataNotCached(TestApiFactory factory) : IClassFixture<TestApiFactory>
+    {
+        [Fact]
+        public void AMissingCacheDuringARun_ProducesOneNotification_NamingTheMappingAndColumn()
+        {
+            var notifications = factory.Services.GetRequiredService<NotificationStore>();
+            var task = $"crm-{Guid.NewGuid():N}";
+            var before = notifications.List().Count;
+
+            var missing = new MetadataNotCachedException(
+                mappingName: "orders", side: "source", column: "UpdatedAt");
+
+            var runId = factory.Services.GetRequiredService<WorkQueueStore>()
+                .Enqueue(task, RunKind.Primary, "orders");
+            var runs = factory.Services.GetRequiredService<TaskRunStore>();
+            runs.BeginRun(runId, pid: null);
+            runs.CompleteRun(
+                runId, RunStatus.Failed, 0, 0, missing.Message, RunFailureKinds.MetadataNotCached);
+
+            var produced = notifications.List().Skip(before).ToList();
+            var notification = Assert.Single(produced);
+
+            Assert.Equal(NotificationKinds.MetadataNotCached, notification.Kind);
+            Assert.Equal(task, notification.TaskName);
+            Assert.Equal("orders", notification.MappingName);
+            Assert.Equal(runId, notification.RunId);
+
+            // Specific, not "something's missing": the mapping, the side and the column are all in the
+            // sentence a bell renders, plus the action that actually fixes it.
+            Assert.Contains(missing.MappingName, notification.Message);
+            Assert.Contains(missing.Side, notification.Message);
+            Assert.Contains(missing.Column!, notification.Message);
+            Assert.Contains("Refresh metadata", notification.Message);
+        }
+    }
+
+    /// <summary>
     /// That the feed is swept by the service that already sweeps run history, on the same tick — the
     /// claim that justifies this table having no background service of its own, and the one that
     /// would quietly stop being true if the third delete were dropped from

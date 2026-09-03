@@ -309,6 +309,17 @@ public sealed class RunExecutor(
                 item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.PositionExpired);
             state.MarkFailed(item.Id);
         }
+        catch (MetadataNotCachedException ex)
+        {
+            // Phase 91's own failure, on the same footing as PositionExpiredException just above: a
+            // known cause with a known fix (Refresh metadata, not a reload), so it gets its own
+            // FailureKind rather than falling into the generic catch below and reading like a mystery.
+            Log(item.RunId, LogSeverity.Error, ex.Message);
+            state.Flush();
+            state.CompleteRun(
+                item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.MetadataNotCached);
+            state.MarkFailed(item.Id);
+        }
         catch (ConnectivityException ex)
         {
             Log(item.RunId, LogSeverity.Error, $"Run failed: {ex.Message}");
@@ -639,7 +650,8 @@ public sealed class RunExecutor(
                 var passTiming = trace ? new ReaderTimingRecorder() : null;
 
                 var read = await reader.ReadChangesAsync(
-                    sourceConnection, source, previousWatermark, columnMappings, readerOptions, cancellationToken);
+                    sourceConnection, source, previousWatermark, columnMappings, mapping.Name, mapping.SourceColumns,
+                    readerOptions, cancellationToken);
                 var readRows = passTiming is null ? read.Rows : read.Rows.WithTiming(passTiming, cancellationToken);
                 var rows = transforms.IsEmpty
                     ? readRows
@@ -660,7 +672,8 @@ public sealed class RunExecutor(
                 // provider's own work — which is the number worth having.
                 var stagingClock = trace ? Stopwatch.StartNew() : null;
                 var staged = await stagingProvider.StageAsync(
-                    targetConnection, target, rows, mapping.ColumnMappings, cacheOptions, cancellationToken);
+                    targetConnection, target, rows, mapping.ColumnMappings, mapping.Name, mapping.TargetColumns,
+                    cacheOptions, cancellationToken);
                 if (stagingClock is not null)
                     stagingMs += stagingClock.ElapsedMilliseconds;
 
@@ -686,7 +699,8 @@ public sealed class RunExecutor(
 
                     var writerClock = trace ? Stopwatch.StartNew() : null;
                     var written = await writer.ApplyAsync(
-                        targetConnection, target, staged, mapping.ColumnMappings, writerOptions, cancellationToken);
+                        targetConnection, target, staged, mapping.ColumnMappings, mapping.Name, mapping.TargetColumns,
+                        writerOptions, cancellationToken);
                     if (writerClock is not null)
                         writerMs += writerClock.ElapsedMilliseconds;
 

@@ -66,14 +66,29 @@ public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixtu
     private TableRef Target() =>
         new() { ConnectionName = "tgt", Database = db.DatabaseName, Schema = "public", Table = _targetTable };
 
+    private const string MappingName = "postgres-pipeline";
+
+    /// <summary>Matches both Source()'s and Target()'s CREATE TABLE above — phase 91's cache-only
+    /// reader/staging/writer trio all resolve column shape from here.</summary>
+    private static List<CachedColumn> Columns() =>
+    [
+        new("id", "integer", false, true, false),
+        new("name", "text", false, false, false),
+        new("amount", "numeric(18,2)", true, false, false),
+        new("modified_at", "timestamp", true, false, false),
+    ];
+
     private async Task<long> ReloadAsync(IReadOnlyDictionary<string, string>? options = null)
     {
         options ??= new Dictionary<string, string>();
-        var read = await _reader.ReadChangesAsync(_source, Source(), null, Mappings, options, CancellationToken.None);
-        var staged = await _staging.StageAsync(_target, Target(), read.Rows, Mappings, options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(
+            _source, Source(), null, Mappings, MappingName, Columns(), options, CancellationToken.None);
+        var staged = await _staging.StageAsync(
+            _target, Target(), read.Rows, Mappings, MappingName, Columns(), options, CancellationToken.None);
         try
         {
-            return (await _writer.ApplyAsync(_target, Target(), staged, Mappings, options, CancellationToken.None)).RowsWritten;
+            return (await _writer.ApplyAsync(
+                _target, Target(), staged, Mappings, MappingName, Columns(), options, CancellationToken.None)).RowsWritten;
         }
         finally
         {
@@ -166,12 +181,14 @@ public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixtu
         await ExecuteAsync(_source, $"INSERT INTO public.\"{_sourceTable}\" VALUES (1, 'a', 1, '2026-01-01 00:00:00');");
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "modified_at" };
 
-        var first = await _watermark.ReadChangesAsync(_source, Source(), null, Mappings, options, CancellationToken.None);
+        var first = await _watermark.ReadChangesAsync(
+            _source, Source(), null, Mappings, MappingName, Columns(), options, CancellationToken.None);
         Assert.Single(await CollectAsync(first.Rows));
 
         await ExecuteAsync(_source, $"INSERT INTO public.\"{_sourceTable}\" VALUES (2, 'b', 2, '2026-02-01 00:00:00');");
 
-        var second = await _watermark.ReadChangesAsync(_source, Source(), first.NewWatermark, Mappings, options, CancellationToken.None);
+        var second = await _watermark.ReadChangesAsync(
+            _source, Source(), first.NewWatermark, Mappings, MappingName, Columns(), options, CancellationToken.None);
         var rows = await CollectAsync(second.Rows);
 
         Assert.Equal(2, (int)Assert.Single(rows)["id"]!);
@@ -198,10 +215,17 @@ public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixtu
         var src = new SourceTableRef { ConnectionName = "src", Database = db.DatabaseName, Schema = "public", Table = table };
         var tgt = new TableRef { ConnectionName = "tgt", Database = db.DatabaseName, Schema = "public", Table = $"{table}_t" };
         var options = new Dictionary<string, string>();
+        List<CachedColumn> targetColumns =
+        [
+            new("id", "integer", false, true, true),
+            new("name", "text", true, false, false),
+        ];
 
-        var read = await _reader.ReadChangesAsync(_source, src, null, mappings, options, CancellationToken.None);
-        var staged = await _staging.StageAsync(_target, tgt, read.Rows, mappings, options, CancellationToken.None);
-        var written = await _writer.ApplyAsync(_target, tgt, staged, mappings, options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_source, src, null, mappings, MappingName, [], options, CancellationToken.None);
+        var staged = await _staging.StageAsync(
+            _target, tgt, read.Rows, mappings, MappingName, targetColumns, options, CancellationToken.None);
+        var written = await _writer.ApplyAsync(
+            _target, tgt, staged, mappings, MappingName, targetColumns, options, CancellationToken.None);
         await _staging.CleanupAsync(_target, staged, CancellationToken.None);
 
         Assert.Equal(2, written.RowsWritten);

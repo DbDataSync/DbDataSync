@@ -43,6 +43,8 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
         TableRef target,
         IAsyncEnumerable<ChangeRow> rows,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -51,16 +53,10 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
 
         await dialect.UseDatabaseAsync(targetConnection, target.Database, cancellationToken);
 
-        var targetColumns = await catalog.GetColumnsAsync(targetConnection, target.Schema, target.Table, cancellationToken);
-        var typeByName = targetColumns.ToDictionary(c => c.Name, c => c.NativeType, StringComparer.OrdinalIgnoreCase);
-
         var mappedTargetColumns = columnMappings.Select(m => m.TargetColumn).Distinct().ToList();
-        foreach (var column in mappedTargetColumns)
-        {
-            if (!typeByName.ContainsKey(column))
-                throw new InvalidOperationException(
-                    $"Target column '{column}' was not found on '{target.Schema}.{target.Table}'.");
-        }
+        var typeByName = mappedTargetColumns.ToDictionary(
+            c => c, c => targetColumns.RequireColumn(mappingName, "target", c).NativeType,
+            StringComparer.OrdinalIgnoreCase);
 
         // In the target's own schema, because there is no portable scratch namespace. The GUID is what
         // keeps concurrent runs — and concurrent segments of one run — from colliding.

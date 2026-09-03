@@ -51,6 +51,8 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         SourceTableRef source,
         string? previousWatermark,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -72,13 +74,12 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
               ?? "0";
 
         // Resolved only when there is a bound to bind — a first pass has no predicate, so it needs no
-        // column type and should not pay for a catalog round trip to learn one.
+        // column type and should not pay for a cache lookup to learn one. Cache-only as of phase 91: no
+        // live catalog call left in this path at all, so an unrefreshed mapping fails loudly here rather
+        // than querying the source.
         var column = previousWatermark is null
             ? null
-            : (await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken))
-                .FirstOrDefault(c => string.Equals(c.Name, watermarkColumn, StringComparison.OrdinalIgnoreCase))
-                ?? throw new InvalidOperationException(
-                    $"Watermark column '{watermarkColumn}' was not found on '{source.Schema}.{source.Table}'.");
+            : sourceColumns.RequireColumn(mappingName, "source", watermarkColumn);
 
         var projection = SourceProjection.Render(dialect, columnMappings);
         var bounded = maxRows is null ? null : new BoundedReadPosition();

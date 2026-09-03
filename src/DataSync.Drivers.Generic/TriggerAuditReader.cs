@@ -65,6 +65,8 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
         SourceTableRef source,
         string? previousWatermark,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -88,7 +90,9 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
             return new ReadResult(Empty(), previousWatermark, diagnostics);
 
         return new ReadResult(
-            ReadIncrementalAsync(sourceConnection, source, previous, target, columnMappings, diagnostics, cancellationToken),
+            ReadIncrementalAsync(
+                sourceConnection, source, previous, target, columnMappings, mappingName, sourceColumns, diagnostics,
+                cancellationToken),
             target.ToString(),
             diagnostics);
     }
@@ -163,15 +167,33 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
         options.TryGetValue(PruneOption, out var raw)
         && (string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase) || raw == "1");
 
+    /// <summary>Live — used only by <see cref="DescribeAsync"/>'s preview, which shows an operator
+    /// today's real table. The run path below uses <see cref="ResolveColumnsFromCache"/> instead.</summary>
     private async Task<(IReadOnlyList<string> Keys, IReadOnlyList<string> NonKeys)> ResolveColumnsAsync(
         DbConnection connection, SourceTableRef source, CancellationToken cancellationToken)
     {
         var columns = await catalog.GetColumnsAsync(connection, source.Schema, source.Table, cancellationToken);
+        return SplitKeys(columns, source.Schema, source.Table);
+    }
+
+    /// <summary>
+    /// The key/non-key split this reader actually runs on as of phase 91 — read from the mapping's
+    /// cached <see cref="TableMappingConfig.SourceColumns"/>, never from <see cref="ITableCatalog"/>.
+    /// An empty or incomplete cache throws <see cref="MetadataNotCachedException"/> here, before this
+    /// pass issues a single statement against the shadow table.
+    /// </summary>
+    private static (IReadOnlyList<string> Keys, IReadOnlyList<string> NonKeys) ResolveColumnsFromCache(
+        IReadOnlyList<CachedColumn> sourceColumns, string mappingName, SourceTableRef source) =>
+        SplitKeys(sourceColumns.RequireAll(mappingName, "source"), source.Schema, source.Table);
+
+    private static (IReadOnlyList<string> Keys, IReadOnlyList<string> NonKeys) SplitKeys(
+        IReadOnlyList<ColumnMetadata> columns, string schema, string table)
+    {
         var keys = columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ToList();
 
         if (keys.Count == 0)
             throw new InvalidOperationException(
-                $"Table '{source.Schema}.{source.Table}' has no primary key. A trigger-audit shadow " +
+                $"Table '{schema}.{table}' has no primary key. A trigger-audit shadow " +
                 "table is keyed by it — without one there is nothing to collapse changes by and " +
                 "nothing to identify a deleted row with.");
 
@@ -228,10 +250,12 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
         long previous,
         long target,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> sourceColumns,
         ReadDiagnostics diagnostics,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var (keys, nonKeys) = await ResolveColumnsAsync(connection, source, cancellationToken);
+        var (keys, nonKeys) = ResolveColumnsFromCache(sourceColumns, mappingName, source);
         var schema = new ChangeSchema([.. keys, .. nonKeys]);
 
         using var cmd = connection.CreateTimedCommand();

@@ -65,9 +65,32 @@ public sealed class HistorizedWriterTests(PostgresTestDatabase db) : IClassFixtu
         ConnectionName = "test", Database = db.DatabaseName, Schema = "public", Table = _target,
     };
 
-    private Task<WriteResult> ApplyAsync(IChangeWriter writer) =>
+    private const string MappingName = "historized-writer";
+
+    /// <summary>Matches CreateScd2TargetAsync's own CREATE TABLE — the default, since every test but
+    /// the snapshot one below writes into that shape.</summary>
+    private static List<CachedColumn> Scd2TargetColumns() =>
+    [
+        new("DS_VersionKey", "varchar(200)", false, true, false),
+        new("Id", "int", false, false, false),
+        new("Name", "varchar(50)", true, false, false),
+        new("DS_ValidFrom", "timestamp", false, false, false),
+        new("DS_ValidTo", "timestamp", true, false, false),
+        new("DS_IsCurrent", "boolean", false, false, false),
+    ];
+
+    /// <summary>Matches the snapshot test's own CREATE TABLE.</summary>
+    private static List<CachedColumn> SnapshotTargetColumns() =>
+    [
+        new("Id", "int", false, false, false),
+        new("Name", "varchar(50)", true, false, false),
+        new("DS_SnapshotAt", "timestamp", false, false, false),
+    ];
+
+    private Task<WriteResult> ApplyAsync(IChangeWriter writer, IReadOnlyList<CachedColumn>? targetColumns = null) =>
         writer.ApplyAsync(
-            _connection, Target(), new StagedChangeSet($"public.\"{_staging}\"", 0), Mappings,
+            _connection, Target(), new StagedChangeSet($"public.\"{_staging}\"", 0), Mappings, MappingName,
+            targetColumns ?? Scd2TargetColumns(),
             // The business key, which cannot be inferred from an SCD2 target whose primary key is the
             // generated surrogate — see Scd2Writer.NaturalKeyOption.
             new Dictionary<string, string> { [Scd2Writer.NaturalKeyOption] = "Id" },
@@ -112,8 +135,8 @@ public sealed class HistorizedWriterTests(PostgresTestDatabase db) : IClassFixtu
         var writer = new SnapshotWriter(PostgresDialect.Instance, PostgresCatalog.Instance);
 
         await StageAsync((1, "a", "I"), (2, "b", "I"));
-        await ApplyAsync(writer);
-        await ApplyAsync(writer);
+        await ApplyAsync(writer, SnapshotTargetColumns());
+        await ApplyAsync(writer, SnapshotTargetColumns());
 
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText =

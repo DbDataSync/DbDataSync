@@ -54,9 +54,20 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = _tableName,
     };
 
+    private const string MappingName = "trigger-audit-probe";
+
+    /// <summary>Matches InitializeAsync's own CREATE TABLE — the key/non-key split this reader runs on
+    /// as of phase 91 comes from here, never a live catalog call.</summary>
+    private static List<CachedColumn> Columns() =>
+    [
+        new("Id", "int", false, true, false),
+        new("Name", "nvarchar(50)", false, false, false),
+    ];
+
     private Task<ReadResult> ReadAsync(string? watermark, IReadOnlyDictionary<string, string>? options = null) =>
         _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], options ?? new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), watermark, [], MappingName, Columns(), options ?? new Dictionary<string, string>(),
+            CancellationToken.None);
 
     private static async Task<List<ChangeRow>> CollectAsync(IAsyncEnumerable<ChangeRow> rows)
     {
@@ -216,10 +227,15 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
             ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = keyless,
         };
 
+        // A column cached with no primary key among it — not an empty cache, which would raise
+        // MetadataNotCachedException instead and prove nothing about this specific message.
+        List<CachedColumn> keylessColumns = [new("Id", "int", false, false, false)];
+
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             var result = await _reader.ReadChangesAsync(
-                _connection, source, "0", [], new Dictionary<string, string>(), CancellationToken.None);
+                _connection, source, "0", [], MappingName, keylessColumns, new Dictionary<string, string>(),
+                CancellationToken.None);
             await CollectAsync(result.Rows);
         });
 
@@ -240,8 +256,55 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         };
 
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => _reader.ReadChangesAsync(
-            _connection, source, null, [], new Dictionary<string, string>(), CancellationToken.None));
+            _connection, source, null, [], MappingName, [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains("Setup card", problem.Message);
+    }
+
+    /// <summary>Throws if invoked — the same technique phase 87 used for <c>IChangeCounterSource</c>.</summary>
+    private sealed class ThrowingTableCatalog : ITableCatalog
+    {
+        public Task<IReadOnlyList<ColumnMetadata>> GetColumnsAsync(
+            System.Data.Common.DbConnection connection, string schema, string table, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(
+                "ITableCatalog.GetColumnsAsync was called — phase 91's cache-only reader must never do this.");
+    }
+
+    [Fact]
+    public async Task Incremental_WithAPopulatedCache_NeverCallsTheLiveCatalog()
+    {
+        var reader = new TriggerAuditReader(MsSqlDialect.Instance, new ThrowingTableCatalog());
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+        var start = (await reader.ReadChangesAsync(
+            _connection, Source(), null, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None)).NewWatermark;
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
+        var result = await reader.ReadChangesAsync(
+            _connection, Source(), start, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None);
+
+        // The key/non-key split is read lazily, as part of enumerating the row stream — so reaching a
+        // row at all is the proof that it came from Columns() rather than ThrowingTableCatalog.
+        var rows = await CollectAsync(result.Rows);
+        Assert.Single(rows);
+    }
+
+    [Fact]
+    public async Task Incremental_WithAnEmptyCache_ThrowsMetadataNotCached_AndNeverCallsTheLiveCatalog()
+    {
+        var reader = new TriggerAuditReader(MsSqlDialect.Instance, new ThrowingTableCatalog());
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+        var start = (await reader.ReadChangesAsync(
+            _connection, Source(), null, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None)).NewWatermark;
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
+        var result = await reader.ReadChangesAsync(
+            _connection, Source(), start, [], MappingName, [], new Dictionary<string, string>(), CancellationToken.None);
+
+        // MetadataNotCachedException, not ThrowingTableCatalog's InvalidOperationException — the empty
+        // cache fails loudly on its own, before any live query, exactly as it does with a populated one.
+        var ex = await Assert.ThrowsAsync<MetadataNotCachedException>(() => CollectAsync(result.Rows));
+        Assert.Equal(MappingName, ex.MappingName);
+        Assert.Equal("source", ex.Side);
+        Assert.Null(ex.Column);
     }
 }

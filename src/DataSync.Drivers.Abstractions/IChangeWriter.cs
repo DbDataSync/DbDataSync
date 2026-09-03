@@ -27,11 +27,18 @@ public interface IChangeWriter
     /// </summary>
     bool SupportsReconciliation { get; }
 
+    /// <param name="mappingName">The table mapping this write belongs to — see
+    /// <see cref="IChangeReader.ReadChangesAsync"/>'s identical parameter.</param>
+    /// <param name="targetColumns">The target's cached shape — see
+    /// <see cref="IStagingProvider.StageAsync"/>'s identical parameter. Every writer here resolves it
+    /// through <c>TargetShape</c>/<c>MsSqlTargetShape</c> rather than reading it directly.</param>
     Task<WriteResult> ApplyAsync(
         DbConnection targetConnection,
         TableRef target,
         StagedChangeSet staged,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken);
 }

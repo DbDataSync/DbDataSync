@@ -71,6 +71,24 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
             ? []
             : new Dictionary<string, string> { [SegmentSerializer.SegmentOptionKey] = SegmentSerializer.Serialize(segment) };
 
+    private const string MappingName = "mssql-batch-reload";
+
+    /// <summary>The standard target's shape — Id/Region/Name, Id the primary key — matching the
+    /// fixture's own CREATE TABLE. Callers against a keyless or identity target pass their own.</summary>
+    private static List<CachedColumn> TargetColumns(bool identity = false) =>
+    [
+        new("Id", "int", false, true, identity),
+        new("Region", "nvarchar(20)", false, false, false),
+        new("Name", "nvarchar(50)", false, false, false),
+    ];
+
+    private static List<CachedColumn> KeylessTargetColumns() =>
+    [
+        new("Id", "int", false, false, false),
+        new("Region", "nvarchar(20)", false, false, false),
+        new("Name", "nvarchar(50)", false, false, false),
+    ];
+
     /// <summary>One reload of one segment, end to end: read the segment, stage it, apply it — the same
     /// sequence RunExecutor performs per work item.</summary>
     private async Task<long> ReloadAsync(
@@ -78,17 +96,20 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         BatchReloadSegment? segment,
         IReadOnlyList<ColumnMapping>? mappings = null,
         string? sourceTable = null,
-        string? targetTable = null)
+        string? targetTable = null,
+        IReadOnlyList<CachedColumn>? targetColumns = null)
     {
         var options = SegmentOptions(segment);
         var columnMappings = mappings ?? Mappings;
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(sourceTable), previousWatermark: null, [], options, CancellationToken.None);
+            _sourceConnection, Source(sourceTable), previousWatermark: null, [], MappingName, [], options, CancellationToken.None);
         var staged = await _staging.StageAsync(
-            _targetConnection, Target(targetTable), read.Rows, columnMappings, new Dictionary<string, string>(), CancellationToken.None);
+            _targetConnection, Target(targetTable), read.Rows, columnMappings, MappingName, [], new Dictionary<string, string>(),
+            CancellationToken.None);
         var written = await writer.ApplyAsync(
-            _targetConnection, Target(targetTable), staged, columnMappings, options, CancellationToken.None);
+            _targetConnection, Target(targetTable), staged, columnMappings, MappingName, targetColumns ?? TargetColumns(), options,
+            CancellationToken.None);
 
         return written.RowsWritten;
     }
@@ -225,14 +246,18 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Region, Name) VALUES (1, 'EU', 'Alice');");
         await ExecuteAsync(_targetConnection, $"INSERT INTO dbo.[{keyless}] (Id, Region, Name) VALUES (99, 'EU', 'Stale');");
 
-        await ReloadAsync(new MsSqlDeleteInsertWriter(), new ListSegment("Region", ["EU"]), targetTable: keyless);
+        await ReloadAsync(
+            new MsSqlDeleteInsertWriter(), new ListSegment("Region", ["EU"]), targetTable: keyless,
+            targetColumns: KeylessTargetColumns());
 
         var rows = await GetTargetRowsAsync(keyless);
         Assert.Equal(["Alice"], rows.Values.Select(v => v.Name));
 
         // The same reload through a MERGE writer is rejected up front rather than half-applied.
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => ReloadAsync(new MsSqlMergeReconcileWriter(), new ListSegment("Region", ["EU"]), targetTable: keyless));
+            () => ReloadAsync(
+                new MsSqlMergeReconcileWriter(), new ListSegment("Region", ["EU"]), targetTable: keyless,
+                targetColumns: KeylessTargetColumns()));
     }
 
     /// <summary>
@@ -298,7 +323,9 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
             ? new MsSqlMergeReconcileWriter()
             : new MsSqlDeleteInsertWriter();
 
-        await ReloadAsync(writer, new ListSegment("Region", ["EU"]), targetTable: identityTable);
+        await ReloadAsync(
+            writer, new ListSegment("Region", ["EU"]), targetTable: identityTable,
+            targetColumns: TargetColumns(identity: true));
 
         var rows = await GetTargetRowsAsync(identityTable);
         Assert.Equal([41, 42], rows.Keys.Order());
@@ -314,7 +341,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
             """);
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(), previousWatermark: "999", [], new Dictionary<string, string>(), CancellationToken.None);
+            _sourceConnection, Source(), previousWatermark: "999", [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
 
         var rows = new List<ChangeRow>();
         await foreach (var row in read.Rows)
@@ -339,7 +366,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         source.Filter = "Name = 'keep'";
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, source, null, [], SegmentOptions(new ListSegment("Region", ["EU"])), CancellationToken.None);
+            _sourceConnection, source, null, [], "mapping", [], SegmentOptions(new ListSegment("Region", ["EU"])), CancellationToken.None);
 
         var ids = new List<object?>();
         await foreach (var row in read.Rows)

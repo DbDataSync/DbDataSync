@@ -7,10 +7,17 @@ namespace DataSync.Drivers.Generic;
 
 /// <summary>
 /// The target-side facts a generic writer needs — mapped columns, primary key, whether a generated
-/// column is being written explicitly — resolved from the catalog once, plus the SQL fragments built
-/// from them.
+/// column is being written explicitly — plus the SQL fragments built from them.
 /// <para>
 /// Assumes the caller has already pointed the connection at the target's database.
+/// </para>
+/// <para>
+/// **Two ways in, deliberately kept apart.** <see cref="LoadAsync"/> asks the live catalog and stays
+/// live for preview (<c>IStatementPreview.DescribeAsync</c>), which shows an operator today's real
+/// table. <see cref="FromCachedColumns"/> reads the mapping's cache instead and is what every writer's
+/// actual <c>ApplyAsync</c> uses as of phase 91 — no catalog call, no exception, ever, from that path.
+/// Folding them into one method with a "use the cache if you have it" flag would have made the one thing
+/// this phase is not allowed to do — a live fallback — one `if` away from creeping back in.
 /// </para>
 /// </summary>
 public sealed class TargetShape
@@ -61,6 +68,34 @@ public sealed class TargetShape
         if (unknown.Count > 0)
             throw new InvalidOperationException(
                 $"Target column(s) {string.Join(", ", unknown)} were not found on '{target.Schema}.{target.Table}'.");
+
+        return new TargetShape(
+            target, dialect, columns, mappedTargetColumns, mappedTargetColumns.Any(c => byName[c].IsIdentity));
+    }
+
+    /// <summary>
+    /// The cache-only path every writer's real <c>ApplyAsync</c> uses. Synchronous — there is no I/O
+    /// left once the columns are already in hand — but returns nothing without them: a mapped column
+    /// missing from <paramref name="targetColumns"/> throws <see cref="MetadataNotCachedException"/>
+    /// naming this mapping and the column, exactly where the catalog-backed path above would have thrown
+    /// a generic "not found" instead.
+    /// </summary>
+    public static TargetShape FromCachedColumns(
+        SqlDialect dialect,
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
+        TableRef target,
+        IReadOnlyList<ColumnMapping> columnMappings)
+    {
+        // The full cached set, not just the mapped columns: SegmentScope.Build resolves a reload's
+        // segment column against Columns, and that column need not be one this mapping writes.
+        var columns = targetColumns.RequireAll(mappingName, "target");
+        var byName = columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+
+        var mappedTargetColumns = columnMappings.Select(m => m.TargetColumn).Distinct().ToList();
+        foreach (var column in mappedTargetColumns)
+            if (!byName.ContainsKey(column))
+                throw new MetadataNotCachedException(mappingName, "target", column);
 
         return new TargetShape(
             target, dialect, columns, mappedTargetColumns, mappedTargetColumns.Any(c => byName[c].IsIdentity));

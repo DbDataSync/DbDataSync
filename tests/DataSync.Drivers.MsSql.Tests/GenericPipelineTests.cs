@@ -69,14 +69,29 @@ public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<M
     private TableRef Target() =>
         new() { ConnectionName = "tgt", Database = db.DatabaseName, Schema = "dbo", Table = _targetTable };
 
+    private const string MappingName = "generic-pipeline";
+
+    /// <summary>Matches both Source()'s and Target()'s CREATE TABLE above — phase 91's cache-only
+    /// BatchReloadReader/BatchInsertStagingProvider/DeleteInsertWriter all resolve column shape from
+    /// here rather than a live catalog call.</summary>
+    private static List<CachedColumn> Columns() =>
+    [
+        new("Id", "int", false, true, false),
+        new("Name", "nvarchar(50)", false, false, false),
+        new("Amount", "decimal(18,2)", false, false, false),
+    ];
+
     private async Task<long> RunOnceAsync(IReadOnlyDictionary<string, string>? options = null, string? filter = null)
     {
         options ??= new Dictionary<string, string>();
-        var read = await _reader.ReadChangesAsync(_sourceConnection, Source(filter), null, Mappings, options, CancellationToken.None);
-        var staged = await _staging.StageAsync(_targetConnection, Target(), read.Rows, Mappings, options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(
+            _sourceConnection, Source(filter), null, Mappings, MappingName, Columns(), options, CancellationToken.None);
+        var staged = await _staging.StageAsync(
+            _targetConnection, Target(), read.Rows, Mappings, MappingName, Columns(), options, CancellationToken.None);
         try
         {
-            var written = await _writer.ApplyAsync(_targetConnection, Target(), staged, Mappings, options, CancellationToken.None);
+            var written = await _writer.ApplyAsync(
+                _targetConnection, Target(), staged, Mappings, MappingName, Columns(), options, CancellationToken.None);
             return written.RowsWritten;
         }
         finally
@@ -207,5 +222,67 @@ public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<M
         // Every row landed exactly once — buckets tile the range with no gap and no overlap.
         Assert.Equal(100, total);
         Assert.Equal(100, (await GetTargetRowsAsync()).Count);
+    }
+
+    /// <summary>Throws if invoked — the same technique phase 87 used to prove <c>ReaderLagService</c>
+    /// stopped calling <c>IChangeCounterSource</c>. Wired into a fresh reader/staging/writer trio here so
+    /// a regression back to a live catalog call fails the test directly, rather than being inferred from
+    /// the pipeline merely having worked.</summary>
+    private sealed class ThrowingTableCatalog : ITableCatalog
+    {
+        public Task<IReadOnlyList<ColumnMetadata>> GetColumnsAsync(
+            System.Data.Common.DbConnection connection, string schema, string table, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(
+                "ITableCatalog.GetColumnsAsync was called — phase 91's cache-only pipeline must never do this.");
+    }
+
+    [Fact]
+    public async Task FullReload_WithAPopulatedCache_NeverCallsTheLiveCatalogAnywhereInThePipeline()
+    {
+        var reader = new BatchReloadReader(MsSqlDialect.Instance, new ThrowingTableCatalog(), MsSqlValueBinding.Instance);
+        var staging = new BatchInsertStagingProvider(MsSqlDialect.Instance, new ThrowingTableCatalog());
+        var writer = new DeleteInsertWriter(MsSqlDialect.Instance, new ThrowingTableCatalog(), MsSqlValueBinding.Instance);
+
+        await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{_sourceTable}] VALUES (1, 'Alice', 10.50);");
+        var options = new Dictionary<string, string>();
+
+        var read = await reader.ReadChangesAsync(
+            _sourceConnection, Source(), null, Mappings, MappingName, Columns(), options, CancellationToken.None);
+        var staged = await staging.StageAsync(
+            _targetConnection, Target(), read.Rows, Mappings, MappingName, Columns(), options, CancellationToken.None);
+        try
+        {
+            var written = await writer.ApplyAsync(
+                _targetConnection, Target(), staged, Mappings, MappingName, Columns(), options, CancellationToken.None);
+
+            // Reaching here at all is the proof: any of the three would have thrown
+            // InvalidOperationException instead of running to completion if it had reached the catalog.
+            Assert.Equal(1, written.RowsWritten);
+        }
+        finally
+        {
+            await staging.CleanupAsync(_targetConnection, staged, CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task StagingWithACacheMissingAMappedColumn_ThrowsMetadataNotCached_NeverReachingTheLiveCatalog()
+    {
+        var staging = new BatchInsertStagingProvider(MsSqlDialect.Instance, new ThrowingTableCatalog());
+        List<CachedColumn> incomplete = [new("Id", "int", false, true, false), new("Name", "nvarchar(50)", false, false, false)];
+
+        await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{_sourceTable}] VALUES (1, 'Alice', 10.50);");
+        var read = await _reader.ReadChangesAsync(
+            _sourceConnection, Source(), null, Mappings, MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None);
+
+        // Missing "Amount", which Mappings writes to the target — MetadataNotCachedException, not the
+        // ThrowingTableCatalog's InvalidOperationException, is what proves no live query ran first.
+        var ex = await Assert.ThrowsAsync<MetadataNotCachedException>(() => staging.StageAsync(
+            _targetConnection, Target(), read.Rows, Mappings, MappingName, incomplete, new Dictionary<string, string>(),
+            CancellationToken.None));
+
+        Assert.Equal(MappingName, ex.MappingName);
+        Assert.Equal("target", ex.Side);
+        Assert.Equal("Amount", ex.Column);
     }
 }

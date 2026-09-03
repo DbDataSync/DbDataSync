@@ -364,6 +364,14 @@ public sealed class TaskRunStore(StateDatabase database)
     /// mapping this row identifies. Specific by construction rather than by reassembling four fields
     /// into a worse sentence than the exception already wrote.
     /// </para>
+    /// <para>
+    /// **A missing metadata cache (phase 91) is its own kind for the same reason.** Its fix is Refresh
+    /// metadata rather than a reload, so folding it into <see cref="RunFailureKinds.PositionExpired"/>
+    /// would point an operator at the wrong button, and folding it into the generic
+    /// <see cref="NotificationKinds.RunFailed"/> would hide a failure this specific behind "read the
+    /// logs". <c>MetadataNotCachedException</c>'s own message already names the mapping, the side and
+    /// the column, so this branch reassembles nothing either.
+    /// </para>
     /// </summary>
     private void NotifyIfNewlyFailed(
         DbConnection connection, DbTransaction transaction, Guid runId, RunStatus status,
@@ -380,9 +388,14 @@ public sealed class TaskRunStore(StateDatabase database)
             ? $"'{run.TaskName}' (mapping '{mapping}')"
             : $"'{run.TaskName}'";
 
-        var (kind, message) = failureKind == RunFailureKinds.PositionExpired
-            ? (NotificationKinds.PositionExpired, $"Source position for {subject} has expired. {errorSummary}")
-            : (NotificationKinds.RunFailed, $"Run of {subject} failed: {errorSummary ?? "no error was recorded."}");
+        var (kind, message) = failureKind switch
+        {
+            RunFailureKinds.PositionExpired =>
+                (NotificationKinds.PositionExpired, $"Source position for {subject} has expired. {errorSummary}"),
+            RunFailureKinds.MetadataNotCached =>
+                (NotificationKinds.MetadataNotCached, $"Cached metadata for {subject} is missing. {errorSummary}"),
+            _ => (NotificationKinds.RunFailed, $"Run of {subject} failed: {errorSummary ?? "no error was recorded."}"),
+        };
 
         NotificationStore.Insert(
             database, connection, transaction, kind, message, run.TaskName, run.MappingName, runId);

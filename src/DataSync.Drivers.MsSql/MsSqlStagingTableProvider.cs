@@ -32,6 +32,8 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
         TableRef target,
         IAsyncEnumerable<ChangeRow> rows,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> targetColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

@@ -55,11 +55,25 @@ public interface IChangeReader
     /// the source for columns nobody mapped.
     /// </para>
     /// </param>
+    /// <param name="mappingName">The table mapping this read belongs to, named as an operator would —
+    /// for a <see cref="MetadataNotCachedException"/> that says which mapping needs Refresh metadata,
+    /// not merely that some mapping does.</param>
+    /// <param name="sourceColumns">
+    /// The source's shape as of the mapping's last save or explicit refresh (phase 90) —
+    /// <see cref="TableMappingConfig.SourceColumns"/>, verbatim. A reader that needs a specific column's
+    /// type or key-ness (a watermark column, a segment column, a key/non-key split) looks it up here and
+    /// throws <see cref="MetadataNotCachedException"/> if it's missing, rather than querying
+    /// <see cref="ITableCatalog"/> or the driver live — see phase 91. Readers with no such need (a
+    /// change-log mechanism that carries its own row shape, a scripted query) ignore this parameter
+    /// entirely.
+    /// </param>
     Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
         IReadOnlyList<ColumnMapping> columnMappings,
+        string mappingName,
+        IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken);
 }
