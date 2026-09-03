@@ -51,6 +51,7 @@ public sealed class RunExecutorTests : IDisposable
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, _runLockStore,
                 new ChangeWatermarkStore(_stateDatabase), new VerificationResultStore(_stateDatabase), _logWriter),
+            new LocalRunnerConfig(_configRepository, Author),
             Scripting.ForTests(_configRepository, _repoRoot),
             Path.Combine(_repoRoot, "state.db"));
     }

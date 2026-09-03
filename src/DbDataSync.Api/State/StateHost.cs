@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json.Serialization;
 using DbDataSync.Api.Configuration;
+using DbDataSync.Core.Config;
 using DbDataSync.State;
 using DbDataSync.State.Remote;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -21,11 +22,14 @@ namespace DbDataSync.Api.State;
 /// </para>
 /// <para>
 /// It shares the owning process's <see cref="LocalRunnerState"/>, which is the whole point: one process
-/// writes the state file, and this is how the runners it spawns reach it.
+/// writes the state file, and this is how the runners it spawns reach it. Since phase 94 it shares the
+/// process's config writer on the same terms — see <see cref="RunnerConfigEndpoints"/> for why that is
+/// a second route group rather than a second server.
 /// </para>
 /// </summary>
 public sealed class StateHost(
-    LocalRunnerState state, RunnerToken token, ApiOptions options, ILoggerFactory loggerFactory)
+    LocalRunnerState state, IRunnerConfig config, RunnerToken token, ApiOptions options,
+    ILoggerFactory loggerFactory)
     : IHostedService, IAsyncDisposable
 {
     private WebApplication? _app;
@@ -62,6 +66,7 @@ public sealed class StateHost(
         _app = builder.Build();
         _app.UseMiddleware<RunnerStateGuard>(token);
         RunnerStateEndpoints.Map(_app, state);
+        RunnerConfigEndpoints.Map(_app, config);
 
         await _app.StartAsync(cancellationToken);
 

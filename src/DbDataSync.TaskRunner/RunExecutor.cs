@@ -39,6 +39,11 @@ public sealed class RunExecutor(
     DriverRegistry driverRegistry,
     SecretStore secretStore,
     IRunnerState state,
+    /// <summary>How the one config write a run can make — its provisioning report, phase 94 — reaches
+    /// the process that owns the repository. Never a <see cref="ConfigRepository"/> write of its own:
+    /// this process reads config and reports to the owner, for the reason it does the same with
+    /// state.</summary>
+    IRunnerConfig runnerConfig,
     ScriptHost scriptHost,
     /// <summary>Not opened — this process never touches the state file (phase 39). It is here because
     /// a verification result is written beside it, which is the one directory every process in a
@@ -828,6 +833,13 @@ public sealed class RunExecutor(
     /// when the target table does not exist at all. Off by default (<see cref="ProvisioningConfig.CreateTargetTableIfMissing"/>);
     /// when the table already exists this is a no-op — no ALTER, no column reconciliation, and a
     /// mapped column missing from an existing table still fails with the ordinary staging error.
+    /// <para>
+    /// It is also the one thing in a run that writes config, through
+    /// <see cref="CacheProvisionedTargetColumnsAsync"/>: a table this method creates has a shape
+    /// nothing else in the system has ever seen, and phase 91's writers read that shape from the
+    /// mapping's cache and nowhere else. Provisioning the table without recording what it provisioned
+    /// left every such mapping failing its own first pass — see phase 94.
+    /// </para>
     /// </summary>
     private async Task EnsureTargetTableProvisionedAsync(
         ReplicationTaskConfig task,
@@ -865,9 +877,11 @@ public sealed class RunExecutor(
 
         var plan = create is { State: ProvisioningState.Missing or ProvisioningState.Unsupported }
             ? create
+            // A satisfied create plan and no alter permission still leaves something to say — see the
+            // cache decision below — so it is the create plan that stands rather than nothing.
             : mayAlter
                 ? await provisioner.PlanAsync(targetConnection, Request(ProvisioningActions.AlterTargetTable), cancellationToken)
-                : null;
+                : create;
 
         if (plan is null)
             return;
@@ -881,19 +895,97 @@ public sealed class RunExecutor(
             return;
         }
 
-        if (plan.State != ProvisioningState.Missing)
+        // Whether this pass has DDL to run and whether it has something to record about the target's
+        // shape are two questions (phase 94). DDL having run is one reason to record; the other is a
+        // target already in shape whose shape has never been cached — which is the state that made
+        // this gap survive into a *second* pass, and the reason a report that fails to land costs one
+        // more pass rather than an operator's manual Refresh. Nothing to record when the plan could
+        // not be worked out at all: there is no table this pass can vouch for.
+        var ddlRan = plan.State == ProvisioningState.Missing;
+        var uncachedButInShape = plan.State == ProvisioningState.Satisfied && mapping.TargetColumns.Count == 0;
+        if (!ddlRan && !uncachedButInShape)
             return;
 
-        foreach (var warning in identityWarnings.Concat(plan.Warnings))
-            Log(runId, LogSeverity.Warning, $"'{mapping.Name}': {warning}");
-
-        foreach (var step in plan.Steps)
+        if (ddlRan)
         {
-            using var cmd = targetConnection.CreateTimedCommand();
-            cmd.CommandText = step.CommandText;
-            await cmd.ExecuteNonQueryAsync(cancellationToken);
-            Log(runId, LogSeverity.Info, $"'{mapping.Name}': target table {what} — {step.CommandText}");
+            foreach (var warning in identityWarnings.Concat(plan.Warnings))
+                Log(runId, LogSeverity.Warning, $"'{mapping.Name}': {warning}");
+
+            foreach (var step in plan.Steps)
+            {
+                using var cmd = targetConnection.CreateTimedCommand();
+                cmd.CommandText = step.CommandText;
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+                Log(runId, LogSeverity.Info, $"'{mapping.Name}': target table {what} — {step.CommandText}");
+            }
         }
+
+        await CacheProvisionedTargetColumnsAsync(
+            task, targetDriver, targetConnection, target, mapping, runId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Puts the target's shape into the mapping's phase-90 cache, now that provisioning can vouch for
+    /// it — in memory for this pass, and reported to the config owner for every pass after it.
+    /// <para>
+    /// **Read back from the catalog, not taken from the plan.** The plan's <c>provisioned</c> list is
+    /// what was asked for; the cache's contract (see <see cref="CachedColumn"/>) is what somebody saw
+    /// when they last looked, and only the catalog can answer the three things that differ. A
+    /// <see cref="ProvisioningColumn"/> carries a <see cref="CanonicalType"/> rather than the native
+    /// type the target rendered it to, which is the string staging builds its own DDL from; it carries
+    /// no identity flag, which is what a writer decides <c>IDENTITY_INSERT</c> on; and on the alter
+    /// path it names only the mapped columns, so caching it would report a narrower table than the one
+    /// that is there. Reading the catalog is also, exactly, what Refresh metadata does — so the cache
+    /// has one answer in it rather than two that can disagree.
+    /// </para>
+    /// <para>
+    /// This is a live introspection inside a run, which phase 91 otherwise has none of. It is the same
+    /// exemption provisioning already takes: this method's caller reads the *source* catalog on every
+    /// pass it runs, because provisioning cannot be planned without looking. The exemption is
+    /// provisioning's, not the pipeline's.
+    /// </para>
+    /// </summary>
+    private async Task CacheProvisionedTargetColumnsAsync(
+        ReplicationTaskConfig task, IDriver targetDriver, DbConnection targetConnection, TableRef target,
+        TableMappingConfig mapping, Guid runId, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ColumnMetadata> columns;
+        try
+        {
+            columns = await targetDriver.ListColumnsAsync(
+                targetConnection, target.Database, target.Schema, target.Table, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Warned, not thrown. Whatever this leaves the pass unable to do it will say for itself a
+            // moment later, in MetadataNotCachedException's own words — which name the mapping and the
+            // action to take. Failing here would replace that with this.
+            Log(runId, LogSeverity.Warning,
+                $"'{mapping.Name}': the target's shape could not be read back after provisioning it — " +
+                $"{ex.Message}");
+            return;
+        }
+
+        if (columns.Count == 0)
+            return;
+
+        var cached = columns
+            .Select(c => new CachedColumn(c.Name, c.NativeType, c.IsNullable, c.IsPrimaryKey, c.IsIdentity))
+            .ToList();
+
+        // This pass first, and without waiting on anything: every consumer after this point reads the
+        // object this method was handed, and a table this run created itself is not a table it should
+        // need a round trip's permission to write to.
+        mapping.TargetColumns = cached;
+
+        // Then the durable half, which is what fixes every pass after this one — those load the mapping
+        // fresh and would otherwise find the same empty cache. Best-effort by design: see
+        // IRunnerConfig.ReportProvisionedTargetColumns.
+        runnerConfig.ReportProvisionedTargetColumns(task.Name, mapping.Name, cached);
+
+        Log(runId, LogSeverity.Info,
+            $"'{mapping.Name}': cached the provisioned target's {cached.Count} column(s) — " +
+            $"{string.Join(", ", cached.Select(c => c.Name))}.");
     }
 
     /// <summary>

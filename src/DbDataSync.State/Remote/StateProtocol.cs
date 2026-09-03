@@ -1,3 +1,5 @@
+using DbDataSync.Core.Config;
+
 namespace DbDataSync.State.Remote;
 
 /// <summary>
@@ -62,6 +64,19 @@ public sealed record SetWatermarkRequest(
     string? MappingName = null,
     DateTimeOffset? WatermarkTimeUtc = null);
 public sealed record RecordVerificationResultRequest(VerificationResultRecord Result);
+
+/// <summary>
+/// A runner reporting the target shape its own provisioning just produced, for the owner to write into
+/// the mapping's column cache (phase 94).
+/// <para>
+/// The one request here that is not a state operation. It rides this channel rather than one of its
+/// own because the channel is about *how a child reaches its parent* — loopback, one token, one guard —
+/// and none of that changes with what is being written; see <c>IRunnerConfig</c> for why the interface
+/// it belongs to is nonetheless a separate one.
+/// </para>
+/// </summary>
+public sealed record ReportProvisionedTargetColumnsRequest(
+    string ReplicationName, string MappingName, IReadOnlyList<CachedColumn> Columns);
 public sealed record LogRequest(Guid RunId, LogSeverity Level, string Message, DateTimeOffset TimestampUtc);
 
 /// <summary>Log lines are batched: they are the highest-rate write here, and one HTTP round trip per

@@ -96,12 +96,15 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
                 new ChangeWatermarkStore(stateDatabase), new VerificationResultStore(stateDatabase),
                 _logWriter = new LogWriter(stateDatabase)),
+            new LocalRunnerConfig(_configRepository, Author),
             Scripting.ForTests(_configRepository, _repoRoot),
             Path.Combine(_repoRoot, "state.db"));
 
-        await ProvisionTargetAsync(_orders, _ordersTarget, [("Id", "Id"), ("Customer", "Customer"), ("Total", "Total")]);
-        await ProvisionTargetAsync(_lines, _linesTarget, [("OrderId", "OrderId"), ("LineNumber", "LineNumber"), ("Sku", "Sku")]);
-
+        // Neither history target is created here. Both are left to the run's own
+        // CreateTargetTableIfMissing, which is what makes this fixture a test of phase 94: the mapping
+        // is saved with an empty target cache (there is no table to capture at save time), and the pass
+        // has to provision the table, record what it provisioned, and then write to it — all before
+        // anything has pressed Refresh metadata. See CachedColumnsAsync.
         await SetUpConfigAsync();
     }
 
@@ -125,45 +128,6 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Creates one SCD2 history target ahead of the first pass, through the production provisioner
-    /// rather than hand-written DDL — the <c>DS_</c> version columns are
-    /// <see cref="HistorizedProvisioning"/>'s to decide, and a copy of them here would be a second
-    /// answer to drift from.
-    /// <para>
-    /// This fixture used to leave the table for the run's own <c>CreateTargetTableIfMissing</c> to
-    /// create. That still happens and still finds the table already there, harmlessly — but it cannot
-    /// be what creates it any more, because of the order phase 90 and 91 put things in. Phase 90
-    /// captures a table's shape when the mapping is *saved*; phase 91's writers refuse to run without
-    /// it. A target that does not exist until halfway through the first pass has nothing to capture at
-    /// save time, so every pass would fail with <c>MetadataNotCachedException</c>. Provisioning it
-    /// first is what gives <see cref="SaveMappingAsync"/> a real table to read.
-    /// </para>
-    /// </summary>
-    private async Task ProvisionTargetAsync(
-        string sourceTable, string targetTable, (string Source, string Target)[] columns)
-    {
-        var sourceColumns = await _driver.ListColumnsAsync(
-            _adminConnection, _databaseName, "dbo", sourceTable, CancellationToken.None);
-        var (mapped, _) = ProvisioningColumnBuilder.Build(
-            MsSqlDialect.Instance, sourceColumns,
-            [.. columns.Select(c => new ColumnMapping { SourceColumn = c.Source, TargetColumn = c.Target })]);
-
-        var plan = await ((IProvisioner)_driver).PlanAsync(
-            _adminConnection,
-            new ProvisioningRequest(
-                ProvisioningActions.CreateTargetTable,
-                new TableRef { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = targetTable },
-                ReaderKind: null,
-                ReaderOptions: new Dictionary<string, string>(),
-                HistorizedProvisioning.Extend(mapped, GenericDriverKinds.Scd2),
-                GenericDriverKinds.Scd2),
-            CancellationToken.None);
-
-        foreach (var step in plan.Steps)
-            await ExecuteAsync(_adminConnection, step.CommandText);
-    }
-
-    /// <summary>
     /// Saves a mapping with its phase-90 column cache populated from the real catalog first, which is
     /// what phase 91's readers and writers require. See the same helper on
     /// <see cref="RunExecutorIntegrationTests"/> for why a fixture saving through
@@ -176,11 +140,32 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
         _configRepository.SaveTableMapping(replicationName, mapping, Author);
     }
 
-    private async Task<List<CachedColumn>> CachedColumnsAsync(string schema, string table) =>
-    [
-        .. (await _driver.ListColumnsAsync(_adminConnection, _databaseName, schema, table, CancellationToken.None))
-            .Select(c => new CachedColumn(c.Name, c.NativeType, c.IsNullable, c.IsPrimaryKey, c.IsIdentity)),
-    ];
+    /// <summary>
+    /// One table's shape as the cache stores it, or nothing at all for a table that is not there yet.
+    /// <para>
+    /// Every target in this fixture is in that second state, deliberately. Between phases 90 and 91
+    /// that combination was fatal — the cache is captured when a mapping is *saved*, a target that
+    /// provisioning has yet to create has nothing to capture, and phase 91's writers refuse to run on
+    /// an empty cache — which is why this fixture used to create its history targets up front through
+    /// the production provisioner. Phase 94 removed the need: the pass that creates the table records
+    /// what it created, so an empty cache here is the honest starting state rather than a broken one.
+    /// </para>
+    /// </summary>
+    private async Task<List<CachedColumn>> CachedColumnsAsync(string schema, string table)
+    {
+        IReadOnlyList<ColumnMetadata> columns;
+        try
+        {
+            columns = await _driver.ListColumnsAsync(
+                _adminConnection, _databaseName, schema, table, CancellationToken.None);
+        }
+        catch (InvalidOperationException)
+        {
+            return [];
+        }
+
+        return [.. columns.Select(c => new CachedColumn(c.Name, c.NativeType, c.IsNullable, c.IsPrimaryKey, c.IsIdentity))];
+    }
 
     /// <summary>
     /// The replication states no natural key at all — since phase 68 there is nowhere at this level to

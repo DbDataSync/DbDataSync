@@ -35,9 +35,12 @@ driverRegistry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
 
 // Phase 39: a runner spawned by the API never opens the state file. It applies its changes over
 // loopback to the process that owns it, and journals to disk if that process goes away mid-run.
-var (state, disposeState) = RunnerStateFactory.Create(options);
+// Phase 94: the same is true of the one config write a run makes — the target shape its own
+// provisioning produced. It reports it; the API commits it.
+var (state, runnerConfig, disposeState) = RunnerStateFactory.Create(options);
 using var _stateScope = disposeState;
-var executor = new RunExecutor(configRepository, driverRegistry, secretStore, state, scriptHost, options.StateDbPath);
+var executor = new RunExecutor(
+    configRepository, driverRegistry, secretStore, state, runnerConfig, scriptHost, options.StateDbPath);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>

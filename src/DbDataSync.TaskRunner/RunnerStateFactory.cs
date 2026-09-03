@@ -1,11 +1,12 @@
+using DbDataSync.Core.Config;
 using DbDataSync.State;
 using DbDataSync.State.Remote;
 
 namespace DbDataSync.TaskRunner;
 
 /// <summary>
-/// Builds the state surface this runner will use. There is exactly one: over loopback, to the process
-/// that owns the state file.
+/// Builds the two owner-facing surfaces this runner will use — state, and the one config write a run
+/// can make. There is exactly one route to each: over loopback, to the process that owns them.
 /// <para>
 /// There is deliberately no local fallback. A runner started without an endpoint would open the state
 /// file itself, and a runner started by hand while the API is up would then be a second writer to it —
@@ -19,7 +20,7 @@ namespace DbDataSync.TaskRunner;
 /// </summary>
 internal static class RunnerStateFactory
 {
-    public static (IRunnerState State, IDisposable Scope) Create(TaskRunnerOptions options)
+    public static (IRunnerState State, IRunnerConfig Config, IDisposable Scope) Create(TaskRunnerOptions options)
     {
         if (string.IsNullOrWhiteSpace(options.StateEndpoint))
         {
@@ -55,7 +56,12 @@ internal static class RunnerStateFactory
         var remote = new RemoteRunnerState(
             http, journal, TimeSpan.FromSeconds(options.StateGraceSeconds), Console.Error.WriteLine);
 
-        return (remote, new Scope(() => { remote.Dispose(); http.Dispose(); }));
+        // The same client, so the same endpoint, token and timeout: what a child writes is a different
+        // question from how it reaches its parent. No journal of its own, and no grace period —
+        // RemoteRunnerConfig explains why a provisioning report needs neither.
+        var config = new RemoteRunnerConfig(http, Console.Error.WriteLine);
+
+        return (remote, config, new Scope(() => { remote.Dispose(); http.Dispose(); }));
     }
 
     private sealed class Scope(Action dispose) : IDisposable

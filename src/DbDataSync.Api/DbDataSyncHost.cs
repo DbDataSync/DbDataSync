@@ -120,6 +120,13 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<RunnerToken>();
         builder.Services.AddSingleton<JournalRecovery>();
 
+        // And it owns config, on the same terms — LocalRunnerConfig is the one path by which a runner's
+        // provisioning report becomes a real commit here (phase 94). Attributed to SystemAuthor: there
+        // is no request and no operator behind this write, and CurrentUser.Author's own doc comment
+        // reserves that identity for exactly this case.
+        builder.Services.AddSingleton<IRunnerConfig>(sp =>
+            new LocalRunnerConfig(sp.GetRequiredService<ConfigRepository>(), CurrentUser.SystemAuthor));
+
         // The state endpoint is a server of its own, listening on loopback only, so a remote connection is
         // refused by the OS and no application code has to be correct for that to hold — including when
         // someone puts the main API behind a reverse proxy or binds it to 0.0.0.0, which is how this would

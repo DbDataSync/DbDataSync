@@ -87,6 +87,10 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
                 _watermarkStore, new VerificationResultStore(stateDatabase), new LogWriter(stateDatabase)),
+            // The real thing, not a fake: what this fixture wants to be able to assert is that a
+            // provisioning report becomes a committed change to the mapping on disk, which is
+            // LocalRunnerConfig's whole job. In a deployment the runner reaches it over loopback.
+            new LocalRunnerConfig(_configRepository, Author),
             Scripting.ForTests(_configRepository, _repoRoot),
             Path.Combine(_repoRoot, "state.db"));
 
@@ -803,6 +807,139 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         // Not pruned, and no watermark stored — the two go together, and that pairing is the invariant.
         Assert.True(await ShadowRowCountAsync() > 0);
         Assert.Null(WatermarkFor("trg-fail", "main", _sourceTable));
+    }
+
+    #endregion
+
+    #region Auto-provisioning reports what it provisioned (phase 94)
+
+    /// <summary>
+    /// A replication that provisions its own target, with a mapping saved the way a real one would be:
+    /// through the same capture every other fixture here uses, which finds nothing to capture for a
+    /// table that does not exist yet.
+    /// </summary>
+    private async Task SetUpProvisioningAsync(
+        string replicationName, string targetTable, bool create = false, bool alter = false)
+    {
+        _configRepository.SaveReplicationTask(new ReplicationTaskConfig
+        {
+            Name = replicationName,
+            Scheduling = new SchedulingConfig
+            {
+                Mode = ScheduleMode.Continuous, FrequencySeconds = 1, IdleTimeoutSeconds = 2,
+            },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = MsSqlDriverKinds.ChangeTracking },
+                Cache = new CacheConfig { Kind = MsSqlDriverKinds.StagingTable },
+                Writer = new WriterConfig { Kind = MsSqlDriverKinds.Merge },
+            },
+            Provisioning = new ProvisioningConfig
+            {
+                CreateTargetTableIfMissing = create,
+                AlterTargetTableColumnsIfMissingOrChanged = alter,
+            },
+        }, Author);
+
+        await SaveMappingAsync(replicationName, new TableMappingConfig
+        {
+            Name = "main",
+            Sources = [new SourceTableSpec { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableSpec { ConnectionName = "tgt-conn", Database = _databaseName, Schema = "dbo", Table = targetTable }],
+            ColumnMappings =
+            [
+                new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
+            ],
+        });
+    }
+
+    /// <summary>
+    /// **The gap phase 94 closes, end to end.** A mapping whose target does not exist has nothing to
+    /// capture when it is saved, so its phase-90 cache is empty; phase 91's writers refuse to run on an
+    /// empty cache. Provisioning creating the table and saying nothing about it left that mapping
+    /// failing its own first pass — correct table, failed run — until an operator pressed Refresh
+    /// metadata once. It succeeds here on the first pass, with nothing pressed.
+    /// </summary>
+    [Fact]
+    public async Task AMappingThatProvisionsItsOwnTarget_SucceedsOnItsFirstPass()
+    {
+        var target = $"ProvTgt_{Guid.NewGuid():N}";
+        await SetUpProvisioningAsync("prov-create", target, create: true);
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        // The premise: nothing was cached at save time, because there was no table to read.
+        Assert.Empty(_configRepository.LoadTableMapping("prov-create", "main").TargetColumns);
+
+        var runId = _workQueueStore.Enqueue("prov-create", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("prov-create", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
+        Assert.Equal(new Dictionary<int, string> { [1] = "Alice" }, await GetRowsAsync(target));
+    }
+
+    /// <summary>
+    /// The durable half. The pass above would also pass on an in-memory fix alone — it holds the
+    /// mapping it provisioned for. This one re-reads the mapping from disk, which is what the *next*
+    /// pass and every other process does, and is the only thing that proves the report reached the
+    /// owner and was committed rather than living in one run's memory.
+    /// </summary>
+    [Fact]
+    public async Task TheProvisionedShape_IsOnDiskForTheNextPassToRead()
+    {
+        var target = $"ProvTgt_{Guid.NewGuid():N}";
+        await SetUpProvisioningAsync("prov-create", target, create: true);
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        _workQueueStore.Enqueue("prov-create", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("prov-create", degreeOfParallelism: 1, CancellationToken.None);
+
+        var reloaded = _configRepository.LoadTableMapping("prov-create", "main");
+        Assert.Equal(["Id", "Name"], reloaded.TargetColumns.Select(c => c.Name));
+        Assert.NotNull(reloaded.ColumnsCapturedUtc);
+
+        // The catalog's own answer, not the plan's request — which is why the cache can be trusted by
+        // the consumers that build DDL from these type strings.
+        Assert.Equal(
+            await CachedColumnsAsync("dbo", target),
+            reloaded.TargetColumns,
+            (a, b) => a.Name == b.Name && a.SameShapeAs(b));
+
+        // And a second pass runs from it, reading a freshly-loaded mapping like any other process.
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
+        var second = _workQueueStore.Enqueue("prov-create", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("prov-create", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(second)!.Status);
+        Assert.Equal(new Dictionary<int, string> { [1] = "Alice", [2] = "Bob" }, await GetRowsAsync(target));
+    }
+
+    /// <summary>
+    /// The alter path reports its result on the same terms the create path does. Both produce a target
+    /// whose shape only they know, and a cache left describing the table as it was before the ALTER is
+    /// a cache missing the column the pass just added.
+    /// </summary>
+    [Fact]
+    public async Task AnAlteredTarget_ReportsTheShapeItEndedUpWith()
+    {
+        var target = $"AlterTgt_{Guid.NewGuid():N}";
+        await ExecuteAsync(_adminConnection,
+            $"CREATE TABLE dbo.[{target}] (Id INT NOT NULL PRIMARY KEY);");
+        await SetUpProvisioningAsync("prov-alter", target, alter: true);
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        // The premise here is the opposite of the create case: the table existed, so its shape *was*
+        // captured — accurately, and without the mapped column the pass is about to add.
+        Assert.Equal(["Id"], _configRepository.LoadTableMapping("prov-alter", "main").TargetColumns.Select(c => c.Name));
+
+        var runId = _workQueueStore.Enqueue("prov-alter", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("prov-alter", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
+        Assert.Equal(new Dictionary<int, string> { [1] = "Alice" }, await GetRowsAsync(target));
+        Assert.Equal(
+            ["Id", "Name"],
+            _configRepository.LoadTableMapping("prov-alter", "main").TargetColumns.Select(c => c.Name));
     }
 
     #endregion
