@@ -29,13 +29,18 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **034** — PostgreSQL logical replication | |
-| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 3 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **096** — adding a target column, and two grid rows that lie | three defects in daily use; two are CSS, one is a control |
+| 2 | **034** — PostgreSQL logical replication | |
+| 3 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-03: 096 goes to the top. Three defects reported from daily use, all small, and one of
+them — a mapping column that cannot be added back once removed — blocks an ordinary edit with no
+workaround. Cheap enough that queueing it behind an engine phase would mean living with it for weeks.
 
 Set 2026-09-01; 083 done and removed — the admin-screen/config/certificate arc (079, 081, 082, 083) is
-now fully shipped, end to end. What's left is the three engine phases that have been waiting since
-distribution and auth moved above them — with 032 and 033 done there were three change-tracking
+now fully shipped, end to end. What's left below 096 is the three engine phases that have been waiting
+since distribution and auth moved above them — with 032 and 033 done there were three change-tracking
 mechanisms and no way for anyone outside this repo to install any of them, and nothing guarding the
 port. A phase moving up or down is an ordinary decision and only this table changes.
 
