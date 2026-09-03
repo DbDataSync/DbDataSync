@@ -74,7 +74,7 @@ public sealed class LocalRunnerConfig(ConfigRepository configRepository, GitAuth
         // provisioning pass rather than only the one that ran DDL: a repeat report on a cache that
         // already agrees produces no commit at all, so the recurrence that makes journalling
         // unnecessary does not cost a commit per pass to buy.
-        if (Matches(mapping.TargetColumns, columns))
+        if (CachedColumn.SameShape(mapping.TargetColumns, columns))
             return;
 
         mapping.TargetColumns = [.. columns];
@@ -85,12 +85,4 @@ public sealed class LocalRunnerConfig(ConfigRepository configRepository, GitAuth
         configRepository.SaveTableMapping(replicationName, mapping, author);
     }
 
-    /// <summary>The same equality <c>MappingMetadataCapture</c> decides "this save changed nothing"
-    /// by, and order-sensitive for the same reason: a catalog's column order is part of what was
-    /// captured.</summary>
-    private static bool Matches(List<CachedColumn> stored, IReadOnlyList<CachedColumn> incoming) =>
-        stored.Count == incoming.Count
-        && stored.Zip(incoming).All(pair =>
-            string.Equals(pair.First.Name, pair.Second.Name, StringComparison.Ordinal)
-            && pair.First.SameShapeAs(pair.Second));
 }

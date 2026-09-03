@@ -24,7 +24,8 @@ namespace DbDataSync.Api.Services;
 /// </para>
 /// </summary>
 public sealed class ProvisioningService(
-    ConfigRepository configRepository, DriverConnectionFactory connections, CurrentUser currentUser)
+    ConfigRepository configRepository, DriverConnectionFactory connections, CurrentUser currentUser,
+    MappingColumnReader columnReader)
 {
     public async Task<ProvisioningPlanReport> GetPlansAsync(
         string replicationName, string mappingName, CancellationToken cancellationToken)
@@ -84,7 +85,15 @@ public sealed class ProvisioningService(
             var finalState = results.Count > 0 && results.All(r => r.Succeeded) ? ProvisioningState.Satisfied : plan.State;
 
             if (finalState == ProvisioningState.Satisfied)
+            {
                 MarkRenamesApplied(replicationName, mapping);
+
+                // Whoever creates the table records what it created — phase 94's principle, applied to
+                // the other path that creates one. Only the target actions: this method's source action
+                // holds a connection to the *source*, and has nothing to say about the target's shape.
+                if (action is ProvisioningActions.CreateTargetTable or ProvisioningActions.AlterTargetTable)
+                    await CacheTargetColumnsAsync(replicationName, mapping.Name, target, cancellationToken);
+            }
 
             return new ApplyResult(results, finalState);
         }
@@ -329,6 +338,54 @@ public sealed class ProvisioningService(
 
         foreach (var rename in pending)
             rename.Applied = true;
+
+        configRepository.SaveTableMapping(replicationName, mapping, currentUser.Author);
+    }
+
+    /// <summary>
+    /// Puts the target's shape into the mapping's phase-90 cache, now that Apply has vouched for it.
+    /// <para>
+    /// Phase 91 made writers read that cache and nowhere else, and phase 94 gave the *unattended*
+    /// provisioning path a way to fill it. The Apply button runs the identical DDL through the
+    /// identical planner and filled nothing — so the deliberate flow, previewing the DDL before
+    /// running it, created its target correctly and then failed its own first run on an empty cache.
+    /// See phase 97.
+    /// </para>
+    /// <para>
+    /// **Read back from the catalog, not taken from the plan** — the same three reasons
+    /// <c>RunExecutor.CacheProvisionedTargetColumnsAsync</c> gives: a <c>ProvisioningColumn</c> carries
+    /// a canonical type rather than the native one the target rendered it to, carries no identity
+    /// flag, and on the alter path names only the mapped columns. Through
+    /// <see cref="MappingColumnReader"/> specifically, so what Apply caches is the same answer Refresh
+    /// metadata would have given — one introspection path, so a cache cannot disagree with the editor
+    /// beside it.
+    /// </para>
+    /// <para>
+    /// Re-loads the mapping rather than writing back the copy this request opened with: that copy is
+    /// as old as the start of the Apply, and <see cref="MarkRenamesApplied"/> may already have saved
+    /// it. This write is about one field, so it is applied to one field of the current file — the same
+    /// rule <c>LocalRunnerConfig</c> follows.
+    /// </para>
+    /// </summary>
+    private async Task CacheTargetColumnsAsync(
+        string replicationName, string mappingName, TableRef target, CancellationToken cancellationToken)
+    {
+        var read = await columnReader.ReadAsync(target, cancellationToken);
+
+        // Nothing to record, on either count. A target that could not be read is not a target with no
+        // columns, and an empty capture is a state phase 91 acts on — writing one would replace a
+        // usable picture with a worse answer than the one that is there.
+        if (read.Shape is not { } shape)
+            return;
+
+        var mapping = configRepository.LoadTableMapping(replicationName, mappingName);
+        if (CachedColumn.SameShape(mapping.TargetColumns, shape))
+            return;
+
+        mapping.TargetColumns = shape;
+        // Stamped for the reason a Refresh stamps it: the target really was read just now, and the age
+        // on screen is what an operator decides staleness from.
+        mapping.ColumnsCapturedUtc = DateTime.UtcNow;
 
         configRepository.SaveTableMapping(replicationName, mapping, currentUser.Author);
     }

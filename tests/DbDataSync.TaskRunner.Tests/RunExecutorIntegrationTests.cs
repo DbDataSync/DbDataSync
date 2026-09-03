@@ -45,6 +45,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     private WorkQueueStore _workQueueStore = null!;
     private TaskRunStore _taskRunStore = null!;
     private ChangeWatermarkStore _watermarkStore = null!;
+    private LogWriter _logWriter = null!;
     private SqlConnection _adminConnection = null!;
 
     public async Task InitializeAsync()
@@ -83,10 +84,11 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _taskRunStore = new TaskRunStore(stateDatabase);
         _workQueueStore = new WorkQueueStore(stateDatabase);
         _watermarkStore = new ChangeWatermarkStore(stateDatabase);
+        _logWriter = new LogWriter(stateDatabase);
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
-                _watermarkStore, new VerificationResultStore(stateDatabase), new LogWriter(stateDatabase)),
+                _watermarkStore, new VerificationResultStore(stateDatabase), _logWriter),
             // The real thing, not a fake: what this fixture wants to be able to assert is that a
             // provisioning report becomes a committed change to the mapping on disk, which is
             // LocalRunnerConfig's whole job. In a deployment the runner reaches it over loopback.
@@ -940,6 +942,113 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.Equal(
             ["Id", "Name"],
             _configRepository.LoadTableMapping("prov-alter", "main").TargetColumns.Select(c => c.Name));
+    }
+
+    #endregion
+
+    #region An empty cache recovers even with provisioning off (phase 97)
+
+    /// <summary>The one line the recovery inspection writes, which is how these two tests tell "it
+    /// looked" from "it did not".</summary>
+    private const string InspectedToRecover = "inspecting the target to recover it";
+
+    private bool LoggedInspection(Guid runId) =>
+        _logWriter.GetLogs(runId).Any(e => e.Message.Contains(InspectedToRecover, StringComparison.Ordinal));
+
+    /// <summary>
+    /// **The gap phase 97 closes.** Phase 94's recovery — a target already in shape whose shape has
+    /// never been cached — sat below the <c>mayCreate</c>/<c>mayAlter</c> early return, so it could
+    /// never fire for a mapping with both settings off. Which is every mapping provisioned by hand,
+    /// since that is *why* it was provisioned by hand: the operator applied the DDL themselves and left
+    /// automation off, and the run then refused to look at a table it could see was correct.
+    /// <para>
+    /// The fixture is that sequence exactly: save the mapping while the target is missing (nothing to
+    /// capture, so an empty cache), then create the target by hand in the shape the mapping wants. No
+    /// Refresh is pressed.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task AMappingWithProvisioningOff_RecoversAnEmptyCacheFromATargetAlreadyInShape()
+    {
+        var target = $"HandTgt_{Guid.NewGuid():N}";
+        await SetUpProvisioningAsync("prov-off", target);
+
+        Assert.Empty(_configRepository.LoadTableMapping("prov-off", "main").TargetColumns);
+
+        // Provisioned by hand, after the mapping was described — the Apply button's outcome, or an
+        // operator's own script.
+        await ExecuteAsync(_adminConnection,
+            $"CREATE TABLE dbo.[{target}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        var runId = _workQueueStore.Enqueue("prov-off", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("prov-off", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
+        Assert.Equal(new Dictionary<int, string> { [1] = "Alice" }, await GetRowsAsync(target));
+        Assert.True(LoggedInspection(runId));
+
+        // On disk, so the next pass never has to look again — and the catalog's answer, not the plan's.
+        var reloaded = _configRepository.LoadTableMapping("prov-off", "main");
+        Assert.Equal(["Id", "Name"], reloaded.TargetColumns.Select(c => c.Name));
+        Assert.NotNull(reloaded.ColumnsCapturedUtc);
+        Assert.Equal(
+            await CachedColumnsAsync("dbo", target),
+            reloaded.TargetColumns,
+            (a, b) => a.Name == b.Name && a.SameShapeAs(b));
+    }
+
+    /// <summary>
+    /// The other half of that bargain: recovery is for the pass that needs it and costs nothing after.
+    /// The cache is tested *before* a plan is asked for, so a mapping with provisioning off and a
+    /// populated cache leaves <c>EnsureTargetTableProvisionedAsync</c> at the same early return it
+    /// always did — no plan, no catalog read, and nothing rewritten.
+    /// <para>
+    /// The stamp is the sharp end. It moves whenever a capture is recorded, so asserting it did not
+    /// move is asserting no second picture was taken of a table nobody had a reason to look at.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task AMappingWithProvisioningOffAndAFullCache_InspectsNothingOnALaterPass()
+    {
+        var target = $"HandTgt_{Guid.NewGuid():N}";
+        await ExecuteAsync(_adminConnection,
+            $"CREATE TABLE dbo.[{target}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+
+        // Saved with the target already there, so the capture at save time filled the cache — the
+        // steady state every mapping reaches once, however it got there.
+        await SetUpProvisioningAsync("prov-off", target);
+        var captured = _configRepository.LoadTableMapping("prov-off", "main").ColumnsCapturedUtc;
+        Assert.Equal(["Id", "Name"], _configRepository.LoadTableMapping("prov-off", "main").TargetColumns.Select(c => c.Name));
+
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+        var runId = _workQueueStore.Enqueue("prov-off", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("prov-off", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
+        Assert.False(LoggedInspection(runId));
+        Assert.Equal(captured, _configRepository.LoadTableMapping("prov-off", "main").ColumnsCapturedUtc);
+    }
+
+    /// <summary>
+    /// The line the hoist must not cross. A mapping with both settings off and a target that does not
+    /// exist reaches a <c>Missing</c> create plan it is not allowed to run — and must run none of it.
+    /// This is the assertion behind the claim that phase 97 leaves "provisioning off" meaning exactly
+    /// what it meant: the pass fails on the missing table, and the table is still missing after.
+    /// </summary>
+    [Fact]
+    public async Task AMappingWithProvisioningOff_NeverCreatesTheTargetItInspectedFor()
+    {
+        var target = $"NeverTgt_{Guid.NewGuid():N}";
+        await SetUpProvisioningAsync("prov-off", target);
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+
+        var runId = _workQueueStore.Enqueue("prov-off", RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync("prov-off", degreeOfParallelism: 1, CancellationToken.None);
+
+        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(runId)!.Status);
+        Assert.Empty(await CachedColumnsAsync("dbo", target));
+        Assert.Empty(_configRepository.LoadTableMapping("prov-off", "main").TargetColumns);
     }
 
     #endregion

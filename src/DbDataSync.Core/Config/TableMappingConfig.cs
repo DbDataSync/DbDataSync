@@ -293,6 +293,22 @@ public sealed class CachedColumn
         && IsNullable == other.IsNullable
         && IsPrimaryKey == other.IsPrimaryKey
         && IsIdentity == other.IsIdentity;
+
+    /// <summary>
+    /// Whether two captures of a side are the same picture — the question every writer of this cache
+    /// asks before deciding it has nothing to record.
+    /// <para>
+    /// Order-sensitive, and by name as well as shape: a catalog's column order is part of what was
+    /// captured, so a table whose columns were reordered is a table whose picture changed. One
+    /// implementation because the three callers must agree — a save deciding "unchanged" on a rule a
+    /// provisioning report disagrees with would restamp a capture nobody took.
+    /// </para>
+    /// </summary>
+    public static bool SameShape(IReadOnlyList<CachedColumn> a, IReadOnlyList<CachedColumn> b) =>
+        a.Count == b.Count
+        && a.Zip(b).All(pair =>
+            string.Equals(pair.First.Name, pair.Second.Name, StringComparison.Ordinal)
+            && pair.First.SameShapeAs(pair.Second));
 }
 
 /// <summary>

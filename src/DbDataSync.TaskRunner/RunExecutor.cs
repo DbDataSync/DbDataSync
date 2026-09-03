@@ -842,6 +842,14 @@ public sealed class RunExecutor(
     /// mapping's cache and nowhere else. Provisioning the table without recording what it provisioned
     /// left every such mapping failing its own first pass — see phase 94.
     /// </para>
+    /// <para>
+    /// Which is why an empty cache is a third reason to run this method at all, alongside the two
+    /// permissions (phase 97). A mapping with both settings off and a target already in shape has a
+    /// picture to take and no DDL to run, and it is the commonest such mapping there is — anything
+    /// provisioned by hand. That inspection is a <c>PlanAsync</c> and a catalog read, both
+    /// side-effect-free and both things the Setup card's preview already does; nothing here issues
+    /// <c>CREATE</c> or <c>ALTER</c> without the setting that authorises it.
+    /// </para>
     /// </summary>
     private async Task EnsureTargetTableProvisionedAsync(
         ReplicationTaskConfig task,
@@ -851,8 +859,32 @@ public sealed class RunExecutor(
     {
         var mayCreate = ProvisioningResolution.CreateTargetTableIfMissing(task, mapping);
         var mayAlter = ProvisioningResolution.AlterTargetTableColumns(task, mapping);
-        if ((!mayCreate && !mayAlter) || targetDriver is not IProvisioner provisioner)
+
+        // The third reason to be here, and it is not a provisioning permission (phase 97). A mapping
+        // with an empty cache has something to learn from the target whether or not it may change it —
+        // and a mapping provisioned by hand has both settings off, which is *why* it was provisioned by
+        // hand, so phase 94's recovery below could never once fire for the case that needed it most.
+        // This inspects; it never provisions. See `mayRunDdl`, which is what keeps that true.
+        //
+        // Tested first so the steady state pays nothing: a mapping whose cache is populated returns
+        // here exactly as it always did, without a plan, a catalog read or a connection round trip.
+        //
+        // Not for a source that names no table. Planning needs the source's catalog, and a query
+        // source has none to read — the same condition MappingColumnReader states in words. Such a
+        // mapping cannot run on an empty cache either way (phase 91 says so, in its own words); what
+        // this avoids is answering it with a catalog error instead.
+        var uncached = mapping.TargetColumns.Count == 0 && !string.IsNullOrWhiteSpace(source.Table);
+        if ((!mayCreate && !mayAlter && !uncached) || targetDriver is not IProvisioner provisioner)
             return;
+
+        // Said out loud, because it is the one case where a pass looks at catalogs nothing in its
+        // configuration asked it to look at. It happens once — the next pass finds the cache filled and
+        // returns at the gate above — and an operator reading "why did my provisioning-off run touch
+        // the target's catalog" deserves the answer in the log rather than in this file.
+        if (!mayCreate && !mayAlter)
+            Log(runId, LogSeverity.Info,
+                $"'{mapping.Name}': no target column metadata is cached, so this pass is inspecting the " +
+                "target to recover it. Provisioning stays off — nothing will be created or altered.");
 
         var sourceColumns = await sourceDriver.ListColumnsAsync(
             sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
@@ -872,8 +904,10 @@ public sealed class RunExecutor(
 
         // Create if the table is missing, alter if it is there and out of shape — the two are mutually
         // exclusive, and each is gated by its own resolved setting. A replication that creates missing
-        // tables but does not want columns changed underneath it gets exactly that.
-        var create = mayCreate
+        // tables but does not want columns changed underneath it gets exactly that. Planned when there
+        // is DDL to consider *or* a shape to learn: a create plan's Satisfied is precisely "the table
+        // is there", which is the question an empty cache needs answered.
+        var create = mayCreate || uncached
             ? await provisioner.PlanAsync(targetConnection, Request(ProvisioningActions.CreateTargetTable), cancellationToken)
             : null;
 
@@ -890,8 +924,19 @@ public sealed class RunExecutor(
 
         var what = plan.Action == ProvisioningActions.CreateTargetTable ? "created" : "altered";
 
+        // Which permission this particular plan's steps would need. Since `uncached` can now bring a
+        // plan back that no setting authorised, the authorisation is asked of the plan in hand rather
+        // than inferred from having got this far — a mapping with both settings off reaches a Missing
+        // create plan and runs none of it.
+        var mayRunDdl = plan.Action == ProvisioningActions.CreateTargetTable ? mayCreate : mayAlter;
+
         if (plan.State == ProvisioningState.Unsupported)
         {
+            // Only where DDL was actually wanted. "Cannot be auto-created" is a non-sequitur to a
+            // mapping that never asked for anything to be created.
+            if (!mayRunDdl)
+                return;
+
             foreach (var warning in plan.Warnings)
                 Log(runId, LogSeverity.Warning, $"'{mapping.Name}': target table cannot be auto-{what} — {warning}");
             return;
@@ -903,7 +948,7 @@ public sealed class RunExecutor(
         // this gap survive into a *second* pass, and the reason a report that fails to land costs one
         // more pass rather than an operator's manual Refresh. Nothing to record when the plan could
         // not be worked out at all: there is no table this pass can vouch for.
-        var ddlRan = plan.State == ProvisioningState.Missing;
+        var ddlRan = plan.State == ProvisioningState.Missing && mayRunDdl;
         var uncachedButInShape = plan.State == ProvisioningState.Satisfied && mapping.TargetColumns.Count == 0;
         if (!ddlRan && !uncachedButInShape)
             return;

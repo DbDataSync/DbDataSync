@@ -35,8 +35,8 @@ public static class MappingMetadataCapture
             incoming.TargetColumns = stored.TargetColumns;
 
         var unchanged = stored is not null
-            && Same(incoming.SourceColumns, stored.SourceColumns)
-            && Same(incoming.TargetColumns, stored.TargetColumns);
+            && CachedColumn.SameShape(incoming.SourceColumns, stored.SourceColumns)
+            && CachedColumn.SameShape(incoming.TargetColumns, stored.TargetColumns);
 
         if (unchanged)
         {
@@ -52,11 +52,4 @@ public static class MappingMetadataCapture
                 : now;
     }
 
-    /// <summary>Order-sensitive, because a catalog's column order is part of what was captured — a
-    /// table whose columns were reordered is a table whose picture changed.</summary>
-    private static bool Same(List<CachedColumn> a, List<CachedColumn> b) =>
-        a.Count == b.Count
-        && a.Zip(b).All(pair =>
-            string.Equals(pair.First.Name, pair.Second.Name, StringComparison.Ordinal)
-            && pair.First.SameShapeAs(pair.Second));
 }
