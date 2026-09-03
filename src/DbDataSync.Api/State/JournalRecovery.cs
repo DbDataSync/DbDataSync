@@ -177,7 +177,8 @@ public sealed class JournalRecovery(
 
         state.CompleteRun(
             request.RunId, request.Status, request.RowsRead, request.RowsWritten, request.ErrorSummary,
-            request.FailureKind, request.Timing, request.PreviousWatermark, request.NewWatermark);
+            request.FailureKind, request.Timing, request.PreviousWatermark, request.NewWatermark,
+            request.ErrorDetail);
     }
 
     private static string Truncate(string line) => line.Length <= 200 ? line : line[..200] + "…";

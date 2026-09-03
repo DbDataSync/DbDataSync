@@ -59,7 +59,8 @@ public interface IRunnerState
         string? failureKind = null,
         RunTiming? timing = null,
         string? previousWatermark = null,
-        string? newWatermark = null);
+        string? newWatermark = null,
+        string? errorDetail = null);
 
     /// <summary>
     /// Only ever called after the target write has committed — the watermark-on-success-only rule the

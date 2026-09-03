@@ -299,7 +299,7 @@ public sealed class RunExecutor(
         {
             Log(item.RunId, LogSeverity.Error, $"Config error: {ex.Message}");
             state.Flush();
-            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
+            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message, errorDetail: ex.ToString());
             state.MarkFailed(item.Id);
         }
         catch (PositionExpiredException ex)
@@ -311,7 +311,8 @@ public sealed class RunExecutor(
             Log(item.RunId, LogSeverity.Error, ex.Message);
             state.Flush();
             state.CompleteRun(
-                item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.PositionExpired);
+                item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.PositionExpired,
+                errorDetail: ex.ToString());
             state.MarkFailed(item.Id);
         }
         catch (MetadataNotCachedException ex)
@@ -322,14 +323,15 @@ public sealed class RunExecutor(
             Log(item.RunId, LogSeverity.Error, ex.Message);
             state.Flush();
             state.CompleteRun(
-                item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.MetadataNotCached);
+                item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.MetadataNotCached,
+                errorDetail: ex.ToString());
             state.MarkFailed(item.Id);
         }
         catch (ConnectivityException ex)
         {
             Log(item.RunId, LogSeverity.Error, $"Run failed: {ex.Message}");
             state.Flush();
-            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
+            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message, errorDetail: ex.ToString());
             state.MarkFailed(item.Id);
         }
         // Deliberately not caught: the owner being gone is not this item failing. Recording it as
@@ -339,7 +341,7 @@ public sealed class RunExecutor(
         {
             Log(item.RunId, LogSeverity.Error, $"Run failed: {ex.Message}");
             state.Flush();
-            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message);
+            state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message, errorDetail: ex.ToString());
             state.MarkFailed(item.Id);
         }
         finally

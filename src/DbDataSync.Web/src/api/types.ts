@@ -791,6 +791,14 @@ export interface TaskRunRecord {
   rowsRead: number
   rowsWritten: number
   errorSummary: string | null
+  /**
+   * The full exception a failed run raised — type, message, stack trace, and every inner exception's
+   * own — for the Runs tab's failure popup. `errorSummary` stays the short one-liner used everywhere
+   * else; this is the separate, longer field for the one place that wants the whole picture. Null on
+   * success, and null for a run recorded before this field existed, in which case the popup falls
+   * back to `errorSummary`.
+   */
+  errorDetail: string | null
   /** Why it failed, when the product can act on it — `"PositionExpired"` means the source discarded
    * the history this pass needed, and the fix is a resync rather than a retry. Null for the ordinary
    * case, which is nearly all of them. */

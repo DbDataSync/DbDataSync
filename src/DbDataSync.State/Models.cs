@@ -106,7 +106,16 @@ public sealed record TaskRunRecord(
     /// position durable: a Backfill or Verification, or any failed run.
     /// </summary>
     string? PreviousWatermark = null,
-    string? NewWatermark = null);
+    string? NewWatermark = null,
+    /// <summary>
+    /// The full exception a failed run raised — type, message, stack trace, and every inner
+    /// exception's own — for the Runs tab's failure popup. <see cref="ErrorSummary"/> stays the short
+    /// one-liner used everywhere space is tight; this is the separate, longer field for the one place
+    /// that wants the whole picture. Null on success, and null for a run recorded before this field
+    /// existed or one whose failure path never had an exception object to hand it, in which case the
+    /// popup falls back to <see cref="ErrorSummary"/>.
+    /// </summary>
+    string? ErrorDetail = null);
 
 /// <param name="ReaderTimeToFirstRowMs">
 /// From just before <c>ReadChangesAsync</c> to the first row arriving. A prefix of

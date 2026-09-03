@@ -88,12 +88,13 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
         string? failureKind = null,
         RunTiming? timing = null,
         string? previousWatermark = null,
-        string? newWatermark = null) =>
+        string? newWatermark = null,
+        string? errorDetail = null) =>
         Outcome(
             "complete-run",
             new CompleteRunRequest(
                 runId, status, rowsRead, rowsWritten, errorSummary, failureKind, timing,
-                previousWatermark, newWatermark),
+                previousWatermark, newWatermark, errorDetail),
             JournalOperation.CompleteRun);
 
     public void SetWatermark(

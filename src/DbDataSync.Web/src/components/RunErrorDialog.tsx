@@ -55,7 +55,7 @@ export function RunErrorDialog({ run, onClose }: { run: TaskRunRecord; onClose: 
           <div>
             <div className="hint" style={{ marginBottom: 4 }}>Error</div>
             <div className="run-error-detail modal-error" data-testid="run-error-dialog-message">
-              {run.errorSummary ?? 'No error message was recorded for this run.'}
+              {run.errorDetail ?? run.errorSummary ?? 'No error message was recorded for this run.'}
             </div>
           </div>
 

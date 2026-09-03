@@ -17,7 +17,8 @@ public sealed class TaskRunStore(StateDatabase database)
         "RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, " +
         "EnqueuedAtUtc, ClaimedAtUtc, StartedAtUtc, EndedAtUtc, RowsRead, RowsWritten, " +
         "ErrorSummary, FailureKind, ReaderKind, ReaderTimeToFirstRowMs, ReaderLifetimeMs, " +
-        "StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark";
+        "StagingKind, StagingDurationMs, WriterKind, WriterDurationMs, PreviousWatermark, NewWatermark, " +
+        "ErrorDetail";
 
     /// <summary>Last Primary-run enqueue time per table mapping, in one query — what
     /// SchedulerService's due-ness check needs. One query per replication per tick, not one per
@@ -274,10 +275,14 @@ public sealed class TaskRunStore(StateDatabase database)
     /// that did not happen.
     /// </param>
     /// <param name="newWatermark">See <paramref name="previousWatermark"/>.</param>
+    /// <param name="errorDetail">The full exception — type, message, stack trace, inner exceptions —
+    /// for the Runs tab's failure popup. Null on success, and null on a failure path that has no
+    /// exception object to hand it (a supervisor-recorded cancellation or orphan, not one raised by
+    /// the work itself), in which case the popup falls back to <paramref name="errorSummary"/>.</param>
     public void CompleteRun(
         Guid runId, RunStatus status, long rowsRead, long rowsWritten, string? errorSummary,
         string? failureKind = null, RunTiming? timing = null,
-        string? previousWatermark = null, string? newWatermark = null) =>
+        string? previousWatermark = null, string? newWatermark = null, string? errorDetail = null) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
@@ -297,7 +302,8 @@ public sealed class TaskRunStore(StateDatabase database)
                     ReaderLifetimeMs = $readerLifetime,
                     StagingKind = $stagingKind, StagingDurationMs = $stagingDuration,
                     WriterKind = $writerKind, WriterDurationMs = $writerDuration,
-                    PreviousWatermark = $previousWatermark, NewWatermark = $newWatermark
+                    PreviousWatermark = $previousWatermark, NewWatermark = $newWatermark,
+                    ErrorDetail = $errorDetail
                 WHERE RunId = $runId;
                 """);
             cmd.Bind(database, "status", status.ToString());
@@ -315,6 +321,7 @@ public sealed class TaskRunStore(StateDatabase database)
             cmd.Bind(database, "writerDuration", (object?)timing?.WriterDurationMs ?? DBNull.Value);
             cmd.Bind(database, "previousWatermark", (object?)previousWatermark ?? DBNull.Value);
             cmd.Bind(database, "newWatermark", (object?)newWatermark ?? DBNull.Value);
+            cmd.Bind(database, "errorDetail", (object?)errorDetail ?? DBNull.Value);
             cmd.Bind(database, "runId", runId.ToString());
             cmd.ExecuteNonQuery();
 
@@ -616,7 +623,8 @@ public sealed class TaskRunStore(StateDatabase database)
         reader.IsDBNull(14) ? null : reader.GetString(14),
         ReadTiming(reader),
         reader.IsDBNull(22) ? null : reader.GetString(22),
-        reader.IsDBNull(23) ? null : reader.GetString(23));
+        reader.IsDBNull(23) ? null : reader.GetString(23),
+        reader.IsDBNull(24) ? null : reader.GetString(24));
 
     /// <summary>
     /// The timing columns as a record, or null when the run was never traced.

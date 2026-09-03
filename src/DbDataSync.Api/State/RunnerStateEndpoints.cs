@@ -67,7 +67,7 @@ public static class RunnerStateEndpoints
         {
             state.CompleteRun(
                 r.RunId, r.Status, r.RowsRead, r.RowsWritten, r.ErrorSummary, r.FailureKind, r.Timing,
-                r.PreviousWatermark, r.NewWatermark);
+                r.PreviousWatermark, r.NewWatermark, r.ErrorDetail);
             return Results.Ok();
         });
 

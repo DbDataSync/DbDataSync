@@ -47,7 +47,11 @@ public sealed record CompleteRunRequest(
     /// <summary>Where this run's watermark started and ended (phase 71). Defaulted for the same reason
     /// the two above are — a journal entry written before these existed has to replay.</summary>
     string? PreviousWatermark = null,
-    string? NewWatermark = null);
+    string? NewWatermark = null,
+    /// <summary>The full exception — type, message, stack trace, inner exceptions — for the Runs tab's
+    /// failure popup. Defaulted for the same reason as the others above: a journal entry written
+    /// before this existed still has to deserialize.</summary>
+    string? ErrorDetail = null);
 /// <param name="MappingName">Which mapping's position this is (phase 74). Defaulted, and nullable,
 /// for the reason <see cref="CompleteRunRequest.FailureKind"/> is: an entry journalled before this
 /// existed still has to deserialize. Recovery skips such an entry rather than inventing a mapping for

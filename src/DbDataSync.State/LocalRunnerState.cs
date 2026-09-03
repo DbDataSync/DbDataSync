@@ -46,10 +46,11 @@ public sealed class LocalRunnerState(
         string? failureKind = null,
         RunTiming? timing = null,
         string? previousWatermark = null,
-        string? newWatermark = null) =>
+        string? newWatermark = null,
+        string? errorDetail = null) =>
         taskRuns.CompleteRun(
             runId, status, rowsRead, rowsWritten, errorSummary, failureKind, timing,
-            previousWatermark, newWatermark);
+            previousWatermark, newWatermark, errorDetail);
 
     public void SetWatermark(
         string taskName,

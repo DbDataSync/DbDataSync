@@ -671,5 +671,21 @@ internal static class Migrations
         -- demand meant asking once per mapping per thirty-second screen refresh, where the gate asks
         -- once per group per tick. See DriverChangeCounterSource.FetchAsync.
         """,
+
+        """
+        -- The full exception a failed run raised — type, message, stack trace, and every inner
+        -- exception .ToString() recurses into — as its own column, separate from ErrorSummary.
+        --
+        -- ErrorSummary (ex.Message) stays what it always was: short enough for the run list's inline
+        -- note and a log line. Neither of those wants a stack trace competing for space with the rest
+        -- of the row. But the Runs tab's failure popup exists precisely so somebody can see *why* a
+        -- run failed, and a one-line message often is not enough to tell a config error from a driver
+        -- bug from a transient network blip — the distinction the stack trace and inner exceptions
+        -- carry that the message alone does not.
+        --
+        -- Nullable, and no backfill: a run recorded before this shipped has no exception object left
+        -- to recover one from. The popup falls back to ErrorSummary for such a run.
+        ALTER TABLE TaskRuns {{addcolumn}} ErrorDetail {{text}} NULL;
+        """,
     ];
 }
