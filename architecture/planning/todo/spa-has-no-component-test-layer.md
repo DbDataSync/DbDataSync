@@ -1,6 +1,8 @@
 # The SPA has no component-test layer, so every UI assertion is an E2E one
 
-**Status: noted 2026-09-03, not yet agreed. Raised while building phase 96.**
+**Status: resolved 2026-09-03 — the E2E-in-CI half is worth building now
+(`architecture/planning/done/playwright-suite-in-ci.md`); a component-test toolchain stays deferred, not
+urgent enough to justify a second toolchain to maintain indefinitely.**
 
 Phase 96's plan called for "unit / component" tests of one control's validation — that adding a target
 column appends a row, that a duplicate is refused, that the control renders when the catalog offers
@@ -35,4 +37,5 @@ one did: see `apply-button-does-not-cache-provisioned-columns.md`, which test 18
 locally since phase 94 with nobody looking. Adding a component layer while the E2E suite still runs
 nowhere but a developer's machine would be solving the smaller half.
 
-**Next step**: decide whether the answer is a component layer, E2E in CI, or both — and in which order.
+**Next step**: E2E in CI is being built (`playwright-suite-in-ci.md` → phase 98). The component-test
+layer stays a recorded thought, not scheduled.
