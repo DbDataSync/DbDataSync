@@ -291,6 +291,68 @@ per-task files:
 7. On failure, `TaskRuns.Status = Failed` with an error summary; the watermark is *not* advanced past
    the last successfully-applied point, so the next run retries from a consistent position.
 
+### 4.1 How a pass decides between an initial load and an incremental read
+
+Two separate questions, answered in two different places. Nothing in the system inspects the source or
+the target to guess at either.
+
+**Which reader runs is configuration.** `PipelineResolution.ReaderKind` resolves most-specific-first —
+the work item's transient Kind (a Backfill's), then `TableMappingConfig.ReaderOverride`, then
+`ChangeProcessingConfig.Reader`. A mapping is *configured* for Change Tracking or CDC or Watermark; it
+never decides for itself, and there is no auto-detection anywhere.
+
+**Whether that reader does a full load turns on one fact: is there a stored watermark.**
+`RunExecutor` looks it up once per pass and passes it down:
+
+```csharp
+var watermarkKey = WatermarkKey.Build(source, ResolveDialect(sourceDriver));
+var previousWatermark = item.RunKind == RunKind.Primary
+    ? state.GetWatermark(task.Name, mapping.Name, watermarkKey)
+    : null;
+```
+
+Two consequences are in those three lines. The key is `(task, mapping, connection/database/schema.table)`
+— see §3.7's `ChangeWatermarks` row for why each part is in it and how it is spelled. And **a Backfill
+is handed `null` unconditionally**, so it can never disturb the cursor an incremental sync depends on,
+whatever reader Kind it happens to use internally.
+
+Every reader then branches on `previousWatermark is null`:
+
+| Reader | no stored watermark | with one |
+| --- | --- | --- |
+| `MsSqlChangeTrackingReader` | reads the source table itself | `CHANGETABLE(CHANGES …)` between versions |
+| `MsSqlCdcReader` | reads the source table, after waiting for the capture floor to be published | `fn_cdc_get_all_changes_*` between LSNs |
+| `TriggerAuditReader` | reads the source table | the shadow table between sequence numbers |
+| `WatermarkReader` | the same `SELECT`, with no predicate | `WHERE <col> > @previous` |
+| `BatchReloadReader`, `MsSqlBatchReloadReader` | every row — **always**, by design | every row; the argument is ignored |
+| `ScriptedQueryReader`, `DuckDbQueryReader` | whatever the script or query returns | the script is given the watermark and decides |
+
+The first four share one reason, and it is the reason the rule exists at all: **a change feed only knows
+about changes since it was switched on.** `CHANGETABLE`, CDC's change table and a trigger's shadow table
+all start empty against a source table that may already hold millions of rows, so a mapping that began
+incrementally would be permanently, silently half-replicated. The first pass reads the table; every pass
+after it reads the feed.
+
+Two behaviours follow from the same branch and are worth knowing:
+
+- **A first pass is unbounded even when a row cap is configured.** A capped full load has no resumable
+  position to record — the cap only starts applying once there is a change window to take a slice of.
+- **Re-pointing a mapping at a different source table starts it over.** The table is part of the
+  watermark key, so the old cursor is simply not found and the next pass is a full load. That is
+  correct — the new table's history was never read — but nothing announces it.
+
+**What writes and clears the cursor.** Only a `Primary` pass advances `ChangeWatermarks`, only after the
+target write has committed, and the source is acknowledged (`IPositionAcknowledging`) only after *that* —
+acknowledging early would tell the source it may discard history a failed run still needs. Resync
+(`ResyncService`) is the deliberate way back to an initial load: it clears the watermark and queues a
+`BatchReload` over a full segment, which is also what a `PositionExpiredException` offers when the source
+has already discarded history the stored position needed.
+
+**Keeping this true.** The rule is implemented independently in each reader, so
+`ChangeReaderFirstPassContractTests` enumerates every `IChangeReader` in the solution and fails until a
+new one is declared as either following the rule or exempt from it, naming the test that proves its
+behaviour. A sixth reader cannot quietly get this wrong; it has to be classified first.
+
 ## 5. Extensibility Model
 
 - **New source/target database engine**: implement `IDriver` plus whichever `IChangeReader` /

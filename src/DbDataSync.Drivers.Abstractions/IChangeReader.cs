@@ -67,6 +67,23 @@ public interface IChangeReader
     /// change-log mechanism that carries its own row shape, a scripted query) ignore this parameter
     /// entirely.
     /// </param>
+    /// <param name="previousWatermark">
+    /// Where the last successful <c>Primary</c> pass got to, or null when there is none — a mapping
+    /// that has never run, one whose source table changed, or one a resync cleared. A Backfill is
+    /// always handed null.
+    /// <para>
+    /// **Null means read the whole source table, not read nothing.** A reader over a change feed —
+    /// Change Tracking, CDC, a trigger's shadow table — only knows about changes since that feed was
+    /// switched on, so a source table that already held rows would start permanently and silently
+    /// half-replicated if the first pass read the feed. The failure is invisible: the pass succeeds
+    /// and the counts look plausible. Readers with nothing to be behind (a reload, a query source)
+    /// are exempt and say so.
+    /// <br/>
+    /// See <c>architecture/detailed-design.md</c> §4.1 for the rule and the per-reader table.
+    /// <c>ChangeReaderFirstPassContractTests</c> fails until a new reader is declared as either
+    /// following it or exempt from it.
+    /// </para>
+    /// </param>
     Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
