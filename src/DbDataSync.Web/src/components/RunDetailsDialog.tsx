@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { RunKindBadge, StatusBadge } from './StatusBadge'
 import { TimingDetail, WatermarkCell } from './RunFigures'
 import { processingTime, queueTime } from './runTimes'
@@ -36,6 +36,13 @@ export function RunDetailsDialog({ run, times, onClose }: {
 
   const failed = run.status === 'Failed'
   const queued = queueTime(run)
+  const [detailExpanded, setDetailExpanded] = useState(false)
+
+  // The full exception is what somebody debugging a failure actually wants, but it is a stack trace —
+  // the summary is the one line that says what went wrong, and is what belongs on screen unasked. Only
+  // offer the expansion when there is something in it beyond the summary already shown.
+  const summary = run.errorSummary ?? run.errorDetail ?? 'No error message was recorded for this run.'
+  const hasExpandableDetail = !!run.errorDetail && run.errorDetail !== run.errorSummary
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -106,8 +113,31 @@ export function RunDetailsDialog({ run, times, onClose }: {
             <div>
               <div className="hint" style={{ marginBottom: 4 }}>Error</div>
               <div className="run-error-detail modal-error" data-testid="run-details-dialog-message">
-                {run.errorDetail ?? run.errorSummary ?? 'No error message was recorded for this run.'}
+                {summary}
               </div>
+              {hasExpandableDetail && (
+                <>
+                  <button
+                    type="button"
+                    className="btn-link quiet"
+                    style={{ padding: 0, marginTop: 4 }}
+                    aria-expanded={detailExpanded}
+                    onClick={() => setDetailExpanded(!detailExpanded)}
+                    data-testid="run-details-dialog-expand-error"
+                  >
+                    {detailExpanded ? '▾ Hide full error' : '▸ Show full error'}
+                  </button>
+                  {detailExpanded && (
+                    <div
+                      className="run-error-detail modal-error"
+                      style={{ marginTop: 4 }}
+                      data-testid="run-details-dialog-error-detail"
+                    >
+                      {run.errorDetail}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 

@@ -233,9 +233,16 @@ test.describe('run details dialog and the status column', () => {
 
     // Every field the succeeded run got, *plus* the error — one adaptive dialog, not two.
     await expect(page.getByTestId('run-details-figures')).toContainText('Processing time')
-    // The full detail, not the one-line summary the row used to carry as a tooltip.
+
+    // The summary shows by default — the one line that says what went wrong, not a stack trace
+    // nobody asked for yet.
     await expect(page.getByTestId('run-details-dialog-message')).toContainText('Invalid object name')
-    await expect(page.getByTestId('run-details-dialog-message')).toContainText('ExecuteNonQueryAsync')
+    await expect(page.getByTestId('run-details-dialog-message')).not.toContainText('ExecuteNonQueryAsync')
+    await expect(page.getByTestId('run-details-dialog-error-detail')).toHaveCount(0)
+
+    // The full exception is behind an explicit expand, for whoever needs the stack trace.
+    await page.getByTestId('run-details-dialog-expand-error').click()
+    await expect(page.getByTestId('run-details-dialog-error-detail')).toContainText('ExecuteNonQueryAsync')
 
     await page.screenshot({ path: path.join(screenshotsDir, '72-run-details-failed.png'), fullPage: true })
   })
