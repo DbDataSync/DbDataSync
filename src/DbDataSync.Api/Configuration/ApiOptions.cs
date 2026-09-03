@@ -10,6 +10,16 @@ namespace DbDataSync.Api.Configuration;
 /// </summary>
 public sealed class ApiOptions
 {
+    // Named so the admin config screen's "Reset" action (phase 81 follow-up) can offer exactly the
+    // literal FromConfiguration falls back to, rather than a second copy of these numbers that could
+    // drift from the one actually applied.
+    public const StateEngine DefaultStateEngine = StateEngine.Sqlite;
+    public const int DefaultStatePort = 0;
+    public const int DefaultRunRetentionDays = 90;
+    public const int DefaultRunRetentionMaxPerMapping = 1_000;
+    public const int DefaultChangeCheckRetentionDays = 7;
+    public const int DefaultRunPruningIntervalMinutes = 60;
+
     public required string RepoRoot { get; init; }
     public required string StateDbPath { get; init; }
 
@@ -125,17 +135,19 @@ public sealed class ApiOptions
             // engine name should not stop the API starting on the store it has always used.
             StateEngine = Enum.TryParse<StateEngine>(section["StateEngine"], ignoreCase: true, out var engine)
                 ? engine
-                : StateEngine.Sqlite,
+                : DefaultStateEngine,
             StateConnectionString = section["StateConnectionString"],
             TaskRunnerDllPath = taskRunnerDllPath,
-            StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : 0,
+            StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : DefaultStatePort,
             // Defaults applied when unset, rather than "unset means no limit". An operator who wants
             // no limit says so with 0, which is a decision; silence is not.
-            RunRetentionDays = ReadCap(section["RunRetentionDays"], defaultValue: 90),
-            RunRetentionMaxPerMapping = ReadCap(section["RunRetentionMaxPerMapping"], defaultValue: 1_000),
-            ChangeCheckRetentionDays = ReadCap(section["ChangeCheckRetentionDays"], defaultValue: 7),
+            RunRetentionDays = ReadCap(section["RunRetentionDays"], DefaultRunRetentionDays),
+            RunRetentionMaxPerMapping = ReadCap(section["RunRetentionMaxPerMapping"], DefaultRunRetentionMaxPerMapping),
+            ChangeCheckRetentionDays = ReadCap(section["ChangeCheckRetentionDays"], DefaultChangeCheckRetentionDays),
             RunPruningInterval = TimeSpan.FromMinutes(
-                int.TryParse(section["RunPruningIntervalMinutes"], out var minutes) && minutes > 0 ? minutes : 60),
+                int.TryParse(section["RunPruningIntervalMinutes"], out var minutes) && minutes > 0
+                    ? minutes
+                    : DefaultRunPruningIntervalMinutes),
         };
     }
 

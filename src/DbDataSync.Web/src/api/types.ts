@@ -1031,12 +1031,27 @@ export interface UserSummary {
  */
 export interface AdminConfigEntry {
   key: string
+  /** The configured value — what `source` says right now, and what `editable` lets you change.
+   * Independent of whether the running process has picked it up yet; see `runningValue`. */
   value: string | null
+  /** What this process actually loaded at startup and is running with right now, frozen at boot.
+   * Differs from `value` exactly when a change is queued and not yet applied — a save made here, or
+   * an override that just moved this key from its environment/CLI/default source into the file. */
+  runningValue: string | null
   source: 'file' | 'environment variable' | 'command line' | 'appsettings.json' | 'default'
   editable: boolean
   canAdopt: boolean
+  /** True for a file-sourced key with a known application default that `value` doesn't already equal —
+   * the inverse of `canAdopt`: putting the factory value back rather than taking a non-file one out. */
+  canReset: boolean
+  /** What Reset would write, or null when this key's default is contextual (a machine-derived path)
+   * rather than a fixed literal. `canReset` is never true when this is null. */
+  defaultValue: string | null
   masked: boolean
   description: string
+  /** What a numeric value is counted in ("days", "minutes", "runs") — null for a key that isn't a
+   * plain magnitude. Shown as a pill only beside a value that's actually numeric. */
+  unit: string | null
 }
 
 // The Certificates section of the Admin screen (phase 83) — a second door onto the operations

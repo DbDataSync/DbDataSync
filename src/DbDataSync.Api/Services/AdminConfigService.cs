@@ -33,7 +33,8 @@ public sealed class AdminConfigService(
     GitCommitService git,
     SecretStore secrets)
 {
-    private sealed record KeyDefinition(string Key, string Description, bool SupportsWrite, bool IsSecret = false);
+    private sealed record KeyDefinition(
+        string Key, string Description, bool SupportsWrite, bool IsSecret = false, string? Unit = null);
 
     private static readonly IReadOnlyList<KeyDefinition> Keys =
     [
@@ -49,8 +50,9 @@ public sealed class AdminConfigService(
             "The SQLite state file. Ignored when StateEngine is MsSql or Postgres.",
             SupportsWrite: true),
         new("DbDataSync:StateEngine",
-            "Sqlite, MsSql or Postgres — which database backs run history, the work queue, watermarks, " +
-            "users and sessions. An unrecognized value falls back to Sqlite rather than refusing to start.",
+            "Which database backs the state store. Sqlite, MsSql or Postgres — run history, the work " +
+            "queue, watermarks, users and sessions all live here. An unrecognized value falls back to " +
+            "Sqlite rather than refusing to start.",
             SupportsWrite: true),
         new("DbDataSync:StateConnectionString",
             "How to reach StateEngine when it isn't Sqlite. Never carries a password — set that " +
@@ -64,16 +66,16 @@ public sealed class AdminConfigService(
             SupportsWrite: true),
         new("DbDataSync:RunRetentionDays",
             "Finished runs older than this are pruned hourly. 0 keeps forever.",
-            SupportsWrite: true),
+            SupportsWrite: true, Unit: "days"),
         new("DbDataSync:RunRetentionMaxPerMapping",
             "Most recent N finished runs kept, per table mapping. 0 = no cap.",
-            SupportsWrite: true),
+            SupportsWrite: true, Unit: "runs"),
         new("DbDataSync:RunPruningIntervalMinutes",
             "How often the retention sweep runs.",
-            SupportsWrite: true),
+            SupportsWrite: true, Unit: "minutes"),
         new("DbDataSync:ChangeCheckRetentionDays",
             "How long the scheduler's change-check history (phase 75) is kept. 0 keeps forever.",
-            SupportsWrite: true),
+            SupportsWrite: true, Unit: "days"),
         new("DbDataSync:Auth:Disabled",
             "Runs with no authentication at all. Nested under Auth, one level past what " +
             "dbdatasync.config.yaml's writer can address — set via environment variable or CLI flag.",
@@ -146,30 +148,68 @@ public sealed class AdminConfigService(
 
     private AdminConfigEntry ToEntry(KeyDefinition definition)
     {
-        var (source, raw) = ResolveSource(definition.Key);
+        // What this process actually loaded at startup and is running with right now — ApiOptions (and
+        // its siblings) are resolved once, in DbDataSyncHost.Build, and never again, so reading straight
+        // off them is the running value by construction: no second snapshot to keep in sync, and no way
+        // for it to drift from what the process is really doing.
+        var runningValue = DefaultFor(definition.Key);
 
-        // For a key whose winning provider is the file, re-read the file directly rather than trusting
-        // the provider's boot-time snapshot: IConfigurationRoot loads every provider once at startup, so
-        // a save made through this very screen would otherwise not show up until the process restarts —
-        // which is true of what the *running process* uses (the restart banner says so), but would also
-        // make Save look like it silently did nothing. The file itself is cheap to re-read on every GET,
-        // so "what is on disk right now" and "what an admin who just saved sees" can agree without
-        // claiming the change is live anywhere else.
-        string? value = source == "file"
-            ? DbDataSyncConfigFile.Read(apiOptions.RepoRoot).GetValueOrDefault(definition.Key)
-            : raw ?? DefaultFor(definition.Key);
+        // The file is checked directly and unconditionally, never inferred from which IConfiguration
+        // provider won at boot. That provider list is frozen at startup — DbDataSyncConfigFileProvider's
+        // own Data dictionary is loaded once and never reloaded — so a key that started life sourced from
+        // an environment variable or a CLI flag would keep reporting that as its source *forever*, even
+        // after Set() (below) writes it into the file: an adopted key would look permanently un-adopted,
+        // and a second edit to it would silently stop showing up. The file itself is cheap to re-read on
+        // every GET, so "is this key in the file right now" is asked directly rather than trusted from a
+        // snapshot that can go stale the moment this very class writes to it. This is what makes editing
+        // an adopted value actually work — an admin can queue up several such edits before ever
+        // restarting, each one independent of the last.
+        var fileData = DbDataSyncConfigFile.Read(apiOptions.RepoRoot);
+        var fileHasKey = fileData.TryGetValue(definition.Key, out var fileValue);
+
+        string source;
+        string? value;
+        if (fileHasKey)
+        {
+            source = "file";
+            value = fileValue;
+        }
+        else
+        {
+            (source, var raw) = ResolveSource(definition.Key);
+            value = raw ?? runningValue;
+        }
 
         var masked = false;
-        if (definition.IsSecret && source != "file" && value is not null && ConfigValidation.ContainsEmbeddedCredential(value))
+        if (definition.IsSecret)
         {
-            masked = true;
-            value = null;
+            // Configured and running are masked independently — a running process booted before this
+            // key's value was ever put through the secret store (an old raw-password environment
+            // variable, say) can carry a credential the current file no longer does, and each has to be
+            // judged on what it actually contains rather than one flag standing in for both.
+            if (source != "file" && value is not null && ConfigValidation.ContainsEmbeddedCredential(value))
+            {
+                masked = true;
+                value = null;
+            }
+            if (runningValue is not null && ConfigValidation.ContainsEmbeddedCredential(runningValue))
+            {
+                masked = true;
+                runningValue = null;
+            }
         }
 
         var editable = definition.SupportsWrite && source == "file";
         var canAdopt = definition.SupportsWrite && source != "file" && !masked && value is not null;
 
-        return new AdminConfigEntry(definition.Key, value, source, editable, canAdopt, masked, definition.Description);
+        // Only offered once there's something to undo: a file-sourced key already sitting at its
+        // application default has nothing for Reset to do.
+        var defaultValue = DefaultValueFor(definition.Key);
+        var canReset = editable && defaultValue is not null && !string.Equals(value, defaultValue, StringComparison.Ordinal);
+
+        return new AdminConfigEntry(
+            definition.Key, value, runningValue, source, editable, canAdopt, canReset, defaultValue, masked,
+            definition.Description, definition.Unit);
     }
 
     /// <summary>
@@ -230,19 +270,68 @@ public sealed class AdminConfigService(
         "DbDataSync:Auth:Passkeys:Origins" => string.Join("; ", passkeyOptions.Origins),
         _ => null,
     };
+
+    /// <summary>
+    /// The literal this key falls back to when nothing configures it at all — what Reset writes into
+    /// the file. Deliberately not <see cref="DefaultFor"/>: that reads the *running* options object,
+    /// which for a key that has always been file-sourced already reflects the file rather than the
+    /// application's own fallback, so it can't tell "reset to factory" from "reset to whatever this
+    /// happened to be at boot". These come from the same named constants <see cref="ApiOptions
+    /// .FromConfiguration"/> itself falls back to, so the two can never quietly disagree.
+    /// <para>
+    /// Null for a key whose default is contextual rather than a fixed literal (RepoRoot, StateDbPath and
+    /// TaskRunnerDllPath are all derived from the machine/working directory; Url and
+    /// StateConnectionString have none at this layer) — Reset has nothing sensible to offer there, and
+    /// says so by staying hidden rather than resetting to a value nobody chose.
+    /// </para>
+    /// </summary>
+    private static string? DefaultValueFor(string key) => key switch
+    {
+        "DbDataSync:StateEngine" => ApiOptions.DefaultStateEngine.ToString(),
+        "DbDataSync:StatePort" => ApiOptions.DefaultStatePort.ToString(),
+        "DbDataSync:RunRetentionDays" => ApiOptions.DefaultRunRetentionDays.ToString(),
+        "DbDataSync:RunRetentionMaxPerMapping" => ApiOptions.DefaultRunRetentionMaxPerMapping.ToString(),
+        "DbDataSync:RunPruningIntervalMinutes" => ApiOptions.DefaultRunPruningIntervalMinutes.ToString(),
+        "DbDataSync:ChangeCheckRetentionDays" => ApiOptions.DefaultChangeCheckRetentionDays.ToString(),
+        _ => null,
+    };
 }
 
 /// <param name="Key">The full <c>DbDataSync:*</c> key, colon-separated, matching CONFIG.md exactly.</param>
 /// <param name="Value">
-/// The effective value, or null when there is none — either genuinely unset, or (StateConnectionString
-/// only) withheld because <see cref="Masked"/> is true.
+/// The <b>configured</b> value — what the winning provider says right now, re-read fresh for a
+/// file-sourced key so a save this screen just made shows up immediately. This is what
+/// <see cref="Editable"/> lets an admin change, independently of whether the running process has picked
+/// it up yet. Null when there is none — either genuinely unset, or (StateConnectionString only)
+/// withheld because <see cref="Masked"/> is true.
+/// </param>
+/// <param name="RunningValue">
+/// What this process actually loaded at startup and is running with right now — frozen the moment
+/// <c>ApiOptions</c> (or its siblings) was built, and never re-read. Differs from <see cref="Value"/>
+/// exactly when a change is queued and not yet applied: a save through this screen, or an override that
+/// moved a key from an environment variable/CLI flag/default into the file. The restart banner is what
+/// closes that gap. Null under the same rules as <see cref="Value"/>.
 /// </param>
 /// <param name="Source">One of <c>"file"</c>, <c>"environment variable"</c>, <c>"command line"</c>,
-/// <c>"appsettings.json"</c> or <c>"default"</c>.</param>
+/// <c>"appsettings.json"</c> or <c>"default"</c> — describes <see cref="Value"/>, not
+/// <see cref="RunningValue"/>, which by definition came from whatever won at startup.</param>
 /// <param name="Editable">True for a file-sourced key this screen can write.</param>
 /// <param name="CanAdopt">True for a non-file-sourced key this screen can write, with a real value to
 /// adopt and nothing to hide.</param>
-/// <param name="Masked">True only for StateConnectionString, sourced from something other than the
-/// file, that contains an embedded credential — the value is withheld, never sent.</param>
+/// <param name="CanReset">True for a file-sourced key with a known application default
+/// (<see cref="DefaultValue"/>) that <see cref="Value"/> doesn't already equal — the inverse of
+/// <see cref="CanAdopt"/>: putting the factory value back into the file rather than taking a non-file
+/// one out of it.</param>
+/// <param name="DefaultValue">What Reset would write, or null when this key's default is contextual
+/// rather than a fixed literal (a path derived from the machine, say) — Reset has nothing to offer
+/// there, which is exactly why <see cref="CanReset"/> is never true when this is null.</param>
+/// <param name="Masked">True only for StateConnectionString, when <see cref="Value"/> or
+/// <see cref="RunningValue"/> (independently) contains an embedded credential — that one is withheld,
+/// never sent.</param>
+/// <param name="Unit">What a numeric <see cref="Value"/>/<see cref="RunningValue"/> is counted in
+/// ("days", "minutes", "runs") — null for a key that isn't a plain magnitude (a path, an engine name,
+/// a boolean). The screen only renders it beside a value that's actually numeric, so a key with a unit
+/// but an unset/non-numeric value shows no pill either.</param>
 public sealed record AdminConfigEntry(
-    string Key, string? Value, string Source, bool Editable, bool CanAdopt, bool Masked, string Description);
+    string Key, string? Value, string? RunningValue, string Source, bool Editable, bool CanAdopt, bool CanReset,
+    string? DefaultValue, bool Masked, string Description, string? Unit);

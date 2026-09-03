@@ -91,6 +91,20 @@ public sealed class AdminConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public void ADurationOrCountKey_ReportsItsUnit_AndAPathOrEngineKeyReportsNone()
+    {
+        var service = Build(ConfigurationWithFile());
+
+        Assert.Equal("days", service.Get("DbDataSync:RunRetentionDays")!.Unit);
+        Assert.Equal("runs", service.Get("DbDataSync:RunRetentionMaxPerMapping")!.Unit);
+        Assert.Equal("minutes", service.Get("DbDataSync:RunPruningIntervalMinutes")!.Unit);
+        Assert.Equal("days", service.Get("DbDataSync:ChangeCheckRetentionDays")!.Unit);
+        // Not a plain magnitude — an engine name and a filesystem path, not a count of anything.
+        Assert.Null(service.Get("DbDataSync:StateEngine")!.Unit);
+        Assert.Null(service.Get(UrlKey)!.Unit);
+    }
+
+    [Fact]
     public void AFileSourcedKey_IsEditable_AndSetWritesAndCommitsIt()
     {
         DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://initial/");
@@ -112,6 +126,102 @@ public sealed class AdminConfigServiceTests : IDisposable
 
         using var repo = new LibGit2Sharp.Repository(_repoRoot);
         Assert.Contains("DbDataSync:Url", repo.Head.Tip.Message);
+    }
+
+    /// <summary>Reset is Adopt's inverse: putting the factory default back into the file rather than
+    /// taking a non-file value out of it. Offered only while there's something to undo, and Set(key,
+    /// DefaultValue) is genuinely all it takes — no separate endpoint or code path.</summary>
+    [Fact]
+    public void AFileSourcedKeyAwayFromItsDefault_CanBeReset_BackToTheApplicationDefault()
+    {
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "StateEngine", "Postgres");
+        var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
+
+        var before = service.Get("DbDataSync:StateEngine")!;
+        Assert.Equal("Postgres", before.Value);
+        Assert.Equal("Sqlite", before.DefaultValue);
+        Assert.True(before.CanReset);
+
+        var author = new GitAuthor("Test Admin", "admin@example.com");
+        var reset = service.Set("DbDataSync:StateEngine", before.DefaultValue!, author)!;
+
+        Assert.Equal("Sqlite", reset.Value);
+        Assert.Equal("Sqlite", DbDataSyncConfigFile.Read(_repoRoot)["DbDataSync:StateEngine"]);
+        // Already at the default — nothing left to reset.
+        Assert.False(reset.CanReset);
+    }
+
+    /// <summary>A key whose default is contextual (derived from the machine or working directory, not a
+    /// fixed literal) has nothing for Reset to write — so it stays hidden rather than resetting to a
+    /// value nobody actually chose.</summary>
+    [Fact]
+    public void AFileSourcedKeyWithNoFixedDefault_CanNeverBeReset()
+    {
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://initial/");
+        var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
+
+        var entry = service.Get(UrlKey)!;
+        Assert.Null(entry.DefaultValue);
+        Assert.False(entry.CanReset);
+    }
+
+    /// <summary>The whole point of RunningValue: it's frozen at ApiOptions construction, so a file
+    /// write made after the service was built — the same thing a save through this screen does — moves
+    /// Value without moving RunningValue. An admin can queue several such edits, and each one is
+    /// independently visible as "configured, but not running yet" until a restart rebuilds ApiOptions.</summary>
+    [Fact]
+    public void EditingAFileSourcedKey_MovesValue_ButNotTheFrozenRunningValue()
+    {
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "StateEngine", "MsSql");
+        var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
+
+        var before = service.Get("DbDataSync:StateEngine")!;
+        Assert.Equal("file", before.Source);
+        Assert.Equal("MsSql", before.Value);
+        Assert.Equal("MsSql", before.RunningValue);
+
+        var author = new GitAuthor("Test Admin", "admin@example.com");
+        var after = service.Set("DbDataSync:StateEngine", "Postgres", author)!;
+
+        Assert.Equal("Postgres", after.Value);
+        // Still MsSql: ApiOptions was built once, from the configuration this service was constructed
+        // with, and Set() never touches it — only a fresh process picks up the new file value.
+        Assert.Equal("MsSql", after.RunningValue);
+    }
+
+    /// <summary>The full flow this exists for: override a non-file-sourced key (adopting its current
+    /// value into the file changes nothing yet — the file now just says what was already running), then
+    /// edit it again. Only that second edit actually queues a change RunningValue doesn't reflect until
+    /// a restart.</summary>
+    [Fact]
+    public void OverridingThenEditingAnEnvVarSourcedKey_OnlyDivergesAfterTheSecondEdit()
+    {
+        Environment.SetEnvironmentVariable("DbDataSync__StateEngine", "MsSql");
+        try
+        {
+            var service = Build(ConfigurationWithFile());
+            var author = new GitAuthor("Test Admin", "admin@example.com");
+
+            var entry = service.Get("DbDataSync:StateEngine")!;
+            Assert.Equal("environment variable", entry.Source);
+            Assert.Equal("MsSql", entry.Value);
+            Assert.Equal("MsSql", entry.RunningValue);
+            Assert.True(entry.CanAdopt);
+
+            var adopted = service.Set("DbDataSync:StateEngine", entry.Value!, author)!;
+            Assert.Equal("file", adopted.Source);
+            Assert.Equal("MsSql", adopted.Value);
+            Assert.Equal("MsSql", adopted.RunningValue);
+            Assert.Equal(adopted.Value, adopted.RunningValue); // Just adopted — nothing to apply yet.
+
+            var edited = service.Set("DbDataSync:StateEngine", "Postgres", author)!;
+            Assert.Equal("Postgres", edited.Value);
+            Assert.Equal("MsSql", edited.RunningValue); // Still frozen — this is the queued, unapplied change.
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DbDataSync__StateEngine", null);
+        }
     }
 
     [Fact]

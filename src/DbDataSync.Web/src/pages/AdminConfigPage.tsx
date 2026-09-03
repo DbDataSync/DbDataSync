@@ -4,12 +4,33 @@ import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { EditableValue } from '../components/EditableValue'
 import { RestartRequiredBanner } from '../components/RestartRequiredBanner'
+import { CheckIcon, HelpIcon } from '../components/icons'
 import { useIsAdmin } from '../components/useIsAdmin'
 import { useAdminConfig, useSetAdminConfig, useSetAdminConfigSecret } from '../api/hooks'
 import type { AdminConfigEntry } from '../api/types'
 
-const COLUMNS = '1.7fr 1.9fr 1fr 1.3fr'
+const COLUMNS = '1.3fr 1.6fr 1.3fr 1.3fr'
 const STATE_CONNECTION_STRING_KEY = 'DbDataSync:StateConnectionString'
+const NUMERIC = /^-?\d+(\.\d+)?$/
+
+/** The first sentence, as a quick-read summary — the full description is one hover away on the
+ * "?" icon, so the row itself only has to carry enough to place the key, not explain it fully. */
+function shortDescription(description: string): string {
+  const match = /^.*?[.!?](?=\s|$)/.exec(description.trim())
+  return match ? match[0] : description
+}
+
+/** A value with its unit pill beside it, or just the value — a key can carry a unit
+ * (RunRetentionDays' is "days") and still have a non-numeric or unset value nothing should be
+ * attached to, so the check is on the actual value in front of you, not on the key alone. */
+function ValueWithUnit({ value, unit, testId }: { value: string; unit: string | null; testId: string }) {
+  return (
+    <span className="row" style={{ gap: 6 }} data-testid={testId}>
+      <span className="mono">{value}</span>
+      {unit && NUMERIC.test(value) && <span className="unit-pill">{unit}</span>}
+    </span>
+  )
+}
 
 /**
  * Every DbDataSync:* key CONFIG.md documents, its live effective value and source, and — for the keys
@@ -77,7 +98,7 @@ export function AdminConfigPage() {
 
         <div className="card flush" data-testid="admin-config-table">
           <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
-            <span>Key</span><span>Value</span><span>Source</span><span />
+            <span>Key</span><span>Value</span><span>Running</span><span>Source</span>
           </div>
           {isLoading && <div className="empty">Loading…</div>}
           {(entries ?? []).map((entry) => (
@@ -103,12 +124,32 @@ function Row({ entry, onSave, onSaveSecret, busy }: {
   busy: boolean
 }) {
   const shortKey = entry.key.replace(/^DbDataSync:/, '')
+  const short = shortDescription(entry.description)
+  const hasMore = short !== entry.description.trim()
 
   return (
-    <div className="grid-row" style={{ gridTemplateColumns: COLUMNS, gap: 14, alignItems: 'start' }} data-testid={`admin-config-row-${shortKey}`}>
+    <div
+      className="grid-row"
+      style={{ gridTemplateColumns: COLUMNS, gap: 14, alignItems: 'start', height: 'auto', paddingTop: 10 }}
+      data-testid={`admin-config-row-${shortKey}`}
+    >
       <div>
         <span className="mono">{shortKey}</span>
-        <div className="hint">{entry.description}</div>
+        <div
+          className="hint wrap row"
+          style={{ gap: 4, marginBottom: 8 }}
+          data-testid={`admin-config-description-${shortKey}`}
+        >
+          {hasMore && (
+            <span
+              title={entry.description}
+              style={{ cursor: 'help', flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}
+            >
+              <HelpIcon />
+            </span>
+          )}
+          <span>{short}</span>
+        </div>
       </div>
 
       <div>
@@ -117,35 +158,72 @@ function Row({ entry, onSave, onSaveSecret, busy }: {
             hidden — carries a credential from its source, never shown here
           </span>
         ) : entry.editable ? (
-          <EditableValue
-            value={entry.value}
-            onChange={(next) => next && onSave(entry.key, next)}
-            label={shortKey}
-            monospace
-            testId={`admin-config-value-${shortKey}`}
-          />
-        ) : (
-          <span className="mono" data-testid={`admin-config-value-${shortKey}`}>
-            {entry.value ?? <span className="faint">not set</span>}
+          <span className="row" style={{ gap: 6 }}>
+            <EditableValue
+              value={entry.value}
+              onChange={(next) => next && onSave(entry.key, next)}
+              label={shortKey}
+              monospace
+              testId={`admin-config-value-${shortKey}`}
+            />
+            {entry.unit && entry.value && NUMERIC.test(entry.value) && (
+              <span className="unit-pill">{entry.unit}</span>
+            )}
           </span>
+        ) : entry.value ? (
+          <ValueWithUnit value={entry.value} unit={entry.unit} testId={`admin-config-value-${shortKey}`} />
+        ) : (
+          <span className="faint" data-testid={`admin-config-value-${shortKey}`}>not set</span>
         )}
 
         {onSaveSecret && <SetSecretControl onSet={(value) => onSaveSecret(entry.key, value)} busy={busy} />}
       </div>
 
-      <span className="dim" data-testid={`admin-config-source-${shortKey}`}>{entry.source}</span>
+      {/* Its own column, not a note under Value — a save or an override changes Value immediately,
+          and Running is the whole reason to still be able to see what was there before, side by side. */}
+      {entry.masked ? (
+        <span className="faint" data-testid={`admin-config-running-${shortKey}`}>hidden</span>
+      ) : entry.runningValue === entry.value ? (
+        <span className="row" style={{ gap: 5, color: 'var(--ok)' }} data-testid={`admin-config-running-${shortKey}`}>
+          <CheckIcon />
+          Same
+        </span>
+      ) : entry.runningValue ? (
+        <ValueWithUnit
+          value={entry.runningValue}
+          unit={entry.unit}
+          testId={`admin-config-running-${shortKey}`}
+        />
+      ) : (
+        <span className="faint" data-testid={`admin-config-running-${shortKey}`}>not set</span>
+      )}
 
-      <span>
+      <span className="row" style={{ gap: 6 }}>
+        <span className="dim" data-testid={`admin-config-source-${shortKey}`}>{entry.source}</span>
+
         {entry.canAdopt && (
           <button
             type="button"
-            className="btn-link"
+            className="btn-link quiet"
             disabled={busy}
-            title="Write this value into dbdatasync.config.yaml, making it the value used after a restart"
+            title="Write the current value into dbdatasync.config.yaml, making it the value used after a restart"
             onClick={() => entry.value && onSave(entry.key, entry.value)}
             data-testid={`admin-config-adopt-${shortKey}`}
           >
-            Adopt into file
+            Override
+          </button>
+        )}
+
+        {entry.canReset && (
+          <button
+            type="button"
+            className="btn-link quiet"
+            disabled={busy}
+            title={`Reset to the application default (${entry.defaultValue}), used after a restart`}
+            onClick={() => entry.defaultValue && onSave(entry.key, entry.defaultValue)}
+            data-testid={`admin-config-reset-${shortKey}`}
+          >
+            Reset
           </button>
         )}
       </span>
