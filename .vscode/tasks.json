@@ -8,12 +8,12 @@
       "args": [
         "run",
         "--project",
-        "src/DataSync.Api"
+        "src/DbDataSync.Api"
       ],
       "options": {
         "cwd": "${workspaceFolder}",
         "env":{
-          "DataSync__Auth__Disabled":"true"
+          "DbDataSync__Auth__Disabled":"true"
         }
       },
       "dependsOn": "Build solution",
@@ -46,7 +46,7 @@
         "dev"
       ],
       "options": {
-        "cwd": "${workspaceFolder}/src/DataSync.Web"
+        "cwd": "${workspaceFolder}/src/DbDataSync.Web"
       },
       "isBackground": true,
       "problemMatcher": {
@@ -107,7 +107,7 @@
         "install"
       ],
       "options": {
-        "cwd": "${workspaceFolder}/src/DataSync.Web"
+        "cwd": "${workspaceFolder}/src/DbDataSync.Web"
       },
       "problemMatcher": [],
       "presentation": {

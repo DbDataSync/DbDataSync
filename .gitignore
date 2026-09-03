@@ -13,9 +13,9 @@ dist-ssr/
 # Local tooling state
 .claude/
 
-# DataSync.Api dev-time default RepoRoot/StateDbPath (auto-created git repo + state db from running
+# DbDataSync.Api dev-time default RepoRoot/StateDbPath (auto-created git repo + state db from running
 # the API locally) — runtime state, not source.
-src/DataSync.Api/datasync-repo/
+src/DbDataSync.Api/dbdatasync-repo/
 
 # IDE
 .vs/

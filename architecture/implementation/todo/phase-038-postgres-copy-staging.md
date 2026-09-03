@@ -57,7 +57,7 @@ Every reader in this codebase goes through `ResultSetSchema.ReadValues`, which i
 saves the *second* boxing, not the first.
 
 **So this phase measures before it designs.** Three configurations through
-`tools/DataSync.Benchmarks`, which already exists for exactly this:
+`tools/DbDataSync.Benchmarks`, which already exists for exactly this:
 
 1. today's row array → `COPY` (unbox on the way out)
 2. typed columnar → `COPY`, with the source still boxing (the half-measure)

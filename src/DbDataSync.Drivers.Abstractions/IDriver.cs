@@ -1,0 +1,49 @@
+using System.Data.Common;
+using DbDataSync.Core.Config;
+
+namespace DbDataSync.Drivers.Abstractions;
+
+/// <summary>
+/// Identifies a database engine and advertises which readers/staging providers/writers it supports,
+/// per architecture/detailed-design.md §3.4. Also owns connection creation and metadata introspection
+/// so credential resolution (via ClrKernel.Core.Secrets.SecretStore) happens in exactly one place per
+/// engine rather than being duplicated across every reader/writer.
+/// </summary>
+public interface IDriver
+{
+    ConnectionDriverType DriverType { get; }
+
+    /// <summary>
+    /// Everything this driver's connections take — addressing, authentication, database, and the
+    /// free-form properties bag — with each parameter's visibility already decided from
+    /// <paramref name="values"/>.
+    /// <para>
+    /// A method rather than a property because the answer depends on the answers: once an operator
+    /// picks connection-string addressing, Host is not a setting with an empty value, it is not a
+    /// setting. Deciding that here rather than in the form keeps the rule with the thing that owns it,
+    /// and means a new driver with different addressing needs no change to the connection screen.
+    /// </para>
+    /// </summary>
+    IReadOnlyList<ParameterDescriptor> ConnectionParameters(IReadOnlyDictionary<string, string> values) =>
+        DriverParameters.ForConnection(values, DefaultPort);
+
+    /// <summary>The port this engine listens on unless told otherwise, pre-filled on a new connection.
+    /// Null for a driver that has no such notion — ODBC through a DSN, for instance.</summary>
+    int? DefaultPort => null;
+
+    IReadOnlyList<IChangeReader> Readers { get; }
+    IReadOnlyList<IStagingProvider> StagingProviders { get; }
+    IReadOnlyList<IChangeWriter> Writers { get; }
+
+    /// <summary>Opens a connection for the given config. <paramref name="credential"/> is the
+    /// already-resolved plaintext secret (via SecretStore), or null for IntegratedAuth.</summary>
+    DbConnection CreateConnection(ConnectionConfig connection, string? credential);
+
+    Task<IReadOnlyList<string>> ListDatabasesAsync(DbConnection connection, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<TableMetadata>> ListTablesAsync(
+        DbConnection connection, string database, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<ColumnMetadata>> ListColumnsAsync(
+        DbConnection connection, string database, string schema, string table, CancellationToken cancellationToken);
+}

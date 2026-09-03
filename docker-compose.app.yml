@@ -6,15 +6,15 @@
 #
 #   docker compose -f docker-compose.app.yml up
 services:
-  datasync:
+  dbdatasync:
     build:
       context: .
-    container_name: datasync
+    container_name: dbdatasync
     ports:
       - "8080:8080"
     volumes:
-      - datasync-data:/var/lib/datasync
+      - dbdatasync-data:/var/lib/dbdatasync
     restart: unless-stopped
 
 volumes:
-  datasync-data:
+  dbdatasync-data:

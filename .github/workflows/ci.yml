@@ -31,13 +31,13 @@ jobs:
         env:
           ACCEPT_EULA: "Y"
           MSSQL_PID: Developer
-          MSSQL_SA_PASSWORD: DataSync_Test_Pw1
+          MSSQL_SA_PASSWORD: DbDataSync_Test_Pw1
           # CDC captures through a SQL Server Agent job — see docker-compose.yml.
           MSSQL_AGENT_ENABLED: "true"
         ports:
           - 14330:1433
         options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1'"
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DbDataSync_Test_Pw1 -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DbDataSync_Test_Pw1 -Q 'SELECT 1'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -46,24 +46,24 @@ jobs:
         env:
           ACCEPT_EULA: "Y"
           MSSQL_PID: Developer
-          MSSQL_SA_PASSWORD: DataSync_Test_Pw1
+          MSSQL_SA_PASSWORD: DbDataSync_Test_Pw1
         ports:
           - 14331:1433
         options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DataSync_Test_Pw1 -Q 'SELECT 1'"
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DbDataSync_Test_Pw1 -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DbDataSync_Test_Pw1 -Q 'SELECT 1'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_PASSWORD: DataSync_Test_Pw1
-          POSTGRES_USER: datasync
-          POSTGRES_DB: datasync
+          POSTGRES_PASSWORD: DbDataSync_Test_Pw1
+          POSTGRES_USER: dbdatasync
+          POSTGRES_DB: dbdatasync
         ports:
           - 15432:5432
         options: >-
-          --health-cmd "pg_isready -U datasync"
+          --health-cmd "pg_isready -U dbdatasync"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -85,14 +85,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: src/DataSync.Web
+        working-directory: src/DbDataSync.Web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: src/DataSync.Web/package-lock.json
+          cache-dependency-path: src/DbDataSync.Web/package-lock.json
       - name: Install
         run: npm ci
       - name: Build
@@ -111,28 +111,28 @@ jobs:
         with:
           node-version: "22"
       - name: Pack the global tool
-        run: dotnet pack src/DataSync.Cli/DataSync.Cli.csproj -c Release -o artifacts
+        run: dotnet pack src/DbDataSync.Cli/DbDataSync.Cli.csproj -c Release -o artifacts
       - name: Install it into a clean tool root and run it
         run: |
-          dotnet tool install --tool-path /tmp/datasync-tool --add-source artifacts DataSync
-          /tmp/datasync-tool/datasync version
-          /tmp/datasync-tool/datasync --help
+          dotnet tool install --tool-path /tmp/dbdatasync-tool --add-source artifacts DbDataSync
+          /tmp/dbdatasync-tool/dbdatasync version
+          /tmp/dbdatasync-tool/dbdatasync --help
       - name: Build the container image
-        run: docker build -t datasync:ci .
+        run: docker build -t dbdatasync:ci .
       - name: Start it and check it answers
         run: |
-          docker run -d --name datasync-ci -p 18080:8080 datasync:ci
+          docker run -d --name dbdatasync-ci -p 18080:8080 dbdatasync:ci
           for i in $(seq 1 30); do
-            if docker exec datasync-ci dotnet /app/DataSync.Cli.dll health --url http://127.0.0.1:8080; then
+            if docker exec dbdatasync-ci dotnet /app/DbDataSync.Cli.dll health --url http://127.0.0.1:8080; then
               exit 0
             fi
             sleep 2
           done
           echo "the container never became healthy"
-          docker logs datasync-ci
+          docker logs dbdatasync-ci
           exit 1
       - name: Upload the tool package
         uses: actions/upload-artifact@v4
         with:
-          name: datasync-tool
+          name: dbdatasync-tool
           path: artifacts/*.nupkg

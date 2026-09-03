@@ -2,7 +2,7 @@
 
   <!-- Applied to every project, so `dotnet test` picks it up with no argument to remember. -->
   <PropertyGroup>
-    <RunSettingsFilePath Condition="'$(RunSettingsFilePath)' == ''">$(MSBuildThisFileDirectory)datasync.runsettings</RunSettingsFilePath>
+    <RunSettingsFilePath Condition="'$(RunSettingsFilePath)' == ''">$(MSBuildThisFileDirectory)dbdatasync.runsettings</RunSettingsFilePath>
   </PropertyGroup>
 
 </Project>

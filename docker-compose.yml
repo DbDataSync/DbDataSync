@@ -5,11 +5,11 @@ services:
   # working — which is not hypothetical, since `:2022-latest` moves under you.
   mssql-source:
     image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: datasync-mssql-source
+    container_name: dbdatasync-mssql-source
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer
-      MSSQL_SA_PASSWORD: ${DATASYNC_MSSQL_SA_PASSWORD:-DataSync_Test_Pw1}
+      MSSQL_SA_PASSWORD: ${DBDATASYNC_MSSQL_SA_PASSWORD:-DbDataSync_Test_Pw1}
       # CDC's capture is a SQL Server Agent job, so without Agent `sp_cdc_enable_table` succeeds and
       # then nothing is ever captured — `fn_cdc_get_max_lsn()` stays null forever. The image ships
       # Agent but leaves it stopped, which made "the container has Agent" true and useless. Source
@@ -29,11 +29,11 @@ services:
 
   mssql-target:
     image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: datasync-mssql-target
+    container_name: dbdatasync-mssql-target
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer
-      MSSQL_SA_PASSWORD: ${DATASYNC_MSSQL_SA_PASSWORD:-DataSync_Test_Pw1}
+      MSSQL_SA_PASSWORD: ${DBDATASYNC_MSSQL_SA_PASSWORD:-DbDataSync_Test_Pw1}
     ports:
       - "14331:1433"
     volumes:
@@ -47,17 +47,17 @@ services:
 
   postgres:
     image: postgres:17-alpine
-    container_name: datasync-postgres
+    container_name: dbdatasync-postgres
     environment:
-      POSTGRES_PASSWORD: ${DATASYNC_POSTGRES_PASSWORD:-DataSync_Test_Pw1}
-      POSTGRES_USER: datasync
-      POSTGRES_DB: datasync
+      POSTGRES_PASSWORD: ${DBDATASYNC_POSTGRES_PASSWORD:-DbDataSync_Test_Pw1}
+      POSTGRES_USER: dbdatasync
+      POSTGRES_DB: dbdatasync
     ports:
       - "15432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U datasync"]
+      test: ["CMD-SHELL", "pg_isready -U dbdatasync"]
       interval: 5s
       timeout: 5s
       retries: 10

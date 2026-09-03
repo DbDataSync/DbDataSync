@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Generic\DbDataSync.Drivers.Generic.csproj" />
+    <ProjectReference Include="..\DbDataSync.Scripting.Abstractions\DbDataSync.Scripting.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Parquet.Net" Version="6.1.0" />
+    <!-- Reads the parquet a check produced, with SQL. A result can have millions of groups, and
+         paging one by hand means re-implementing predicate pushdown and offset over row groups —
+         which is a lot of engineering to end up slower than a database that already does it. -->
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

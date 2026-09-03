@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
+    <ProjectReference Include="..\DbDataSync.Scripting\DbDataSync.Scripting.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.MsSql\DbDataSync.Drivers.MsSql.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.DuckDb\DbDataSync.Drivers.DuckDb.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Postgres\DbDataSync.Drivers.Postgres.csproj" />
+    <ProjectReference Include="..\DbDataSync.State\DbDataSync.State.csproj" />
+    <ProjectReference Include="..\DbDataSync.Verification\DbDataSync.Verification.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

@@ -1,6 +1,6 @@
 # Implementation Docs — Planning & Tracking Convention
 
-This folder is where every non-trivial unit of work on DataSync is planned *before* it's built and
+This folder is where every non-trivial unit of work on DbDataSync is planned *before* it's built and
 documented *after* it's built — in the repo, in git history, not in a chat transcript, a temporary
 plan file outside the repo, or an AI assistant's own context. If it isn't written here, it doesn't
 count as planned or as done.
@@ -30,7 +30,7 @@ So the order lives here, and is the one to work through:
 | | phase | why here |
 | --- | --- | --- |
 | 1 | **034** — PostgreSQL logical replication | |
-| 2 | **035** — config history diff and revert | now also covers `datasync.config.yaml`'s missing history view, carried forward from 081 |
+| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
 Set 2026-09-01; 083 done and removed — the admin-screen/config/certificate arc (079, 081, 082, 083) is

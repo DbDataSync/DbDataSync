@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Generic\DbDataSync.Drivers.Generic.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="9.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DbDataSync.Drivers.Postgres.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

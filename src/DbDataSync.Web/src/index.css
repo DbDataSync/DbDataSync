@@ -1,0 +1,718 @@
+/* Design language from the "Data sync webapp mockups" Claude Design project — values lifted from
+   `DbDataSync Mockups.dc.html` rather than approximated. See
+   architecture/implementation/done/phase-015-clrkernel-restyle.md. */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces, from the outside in. */
+  --canvas: #eeece7;
+  --surface: #ffffff;
+  --content: #fafaf8;
+  --rail: #fbfaf8;
+  --row-head: #fcfbf9;
+  --sunken: #fbfaf8;
+
+  /* Borders, coarse to fine. */
+  --edge: #dedbd4;
+  --chrome-edge: #ebe9e3;
+  --card-edge: #e6e3dc;
+  --card-inner-edge: #edeae3;
+  --row-edge: #f2efe9;
+  --row-edge-soft: #f4f1eb;
+  --control-edge: #ddd9d0;
+  --control-edge-soft: #e4e1da;
+
+  /* Ink, darkest to lightest. */
+  --ink: #1a1a17;
+  --ink-2: #3a3833;
+  --ink-3: #4a4841;
+  --ink-4: #5c5a53;
+  --ink-5: #6f6d66;
+  --ink-6: #7c7a72;
+  --ink-7: #8b8981;
+  --ink-8: #96948c;
+  --ink-9: #9b998f;
+  --ink-10: #a5a29a;
+  --ink-faint: #c3c0b7;
+  --ink-sep: #cbc8bf;
+
+  --accent: #0f7a55;
+  --accent-hover: #0b5c40;
+  --accent-tint: #eef2f0;
+  --accent-row: #f0f3f1;
+  --accent-row-alt: #f7f9f8;
+
+  /* Which side of a mapping you are looking at, as a colour. Defined here rather than per component
+     so the association holds everywhere a side is shown — an operator who learns "teal is where it
+     comes from" should not have to relearn it on the next screen. Deliberately not the accent green,
+     which already means "this is the active thing". */
+  --accent-source: #2a6f97;
+  --accent-target: #8a5a2b;
+
+  /* Whether a replication is running at all, as a colour. Same mechanism as the source/target accents
+     above — a coloured top border means something about this card — so the visual language stays one
+     idea rather than each screen inventing its own. */
+  --accent-enabled: #12a06a;
+  --accent-disabled: #d1912b;
+
+  --ok: #12a06a;
+  --warn: #d1912b;
+  --bad: #c9522e;
+  --idle: #a5a29a;
+
+  --danger-edge: #e3c9c4;
+  --danger-ink: #a8402f;
+
+  --mono: ui-monospace, Menlo, "SFMono-Regular", Consolas, monospace;
+  --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--ui);
+  background: var(--surface);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+button { font-family: inherit; }
+
+#root { min-height: 100vh; display: flex; }
+
+/* ── App chrome ─────────────────────────────────────────────────────────────── */
+
+.rail {
+  width: 46px;
+  flex: none;
+  border-right: 1px solid var(--chrome-edge);
+  background: var(--rail);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 9px 0;
+  gap: 3px;
+}
+
+.rail-mark {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 9px;
+}
+
+.rail-item {
+  width: 30px; height: 30px;
+  border: none; background: none; padding: 0;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-7);
+  text-decoration: none;
+  cursor: pointer;
+}
+.rail-item:hover { background: #f2f0ec; }
+.rail-item.active { background: var(--accent-tint); color: var(--accent); }
+.rail-spacer { margin-top: auto; }
+
+.app { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  height: 42px; flex: none;
+  border-bottom: 1px solid var(--chrome-edge);
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 13px;
+}
+.topbar .brand { font: 600 12.5px var(--ui); color: var(--ink); }
+.topbar .sep { color: var(--ink-sep); }
+.topbar .crumb { font: 500 12.5px var(--ui); color: var(--ink-6); }
+.topbar .crumb.mono { font-family: var(--mono); }
+.topbar .crumb.here { color: var(--ink); }
+.topbar .right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+
+/* Where a panel beneath the shell renders its own chrome — see ShellActions. Contributes no gap of
+   its own when nothing is mounted into it, so a screen with no countdown is unchanged. */
+.shell-actions { display: contents; }
+
+/* A panel's countdown to its own next refresh (phase 88). Quiet by construction: this sits in the
+   chrome of every monitoring screen and is read at a glance or not at all, so it carries the
+   secondary ink weight rather than competing with the buttons beside it. */
+.refresh-countdown {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 0 7px; height: 22px;
+  border: 1px solid var(--chrome-edge); border-radius: 11px;
+  font: 500 11px var(--ui); color: var(--ink-4);
+  white-space: nowrap;
+}
+.refresh-countdown-label { color: var(--ink-4); }
+/* Tabular figures so the number does not shuffle the label sideways as it counts down. */
+.refresh-countdown-value { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.tabbar {
+  height: 46px; flex: none;
+  border-bottom: 1px solid var(--chrome-edge);
+  display: flex; align-items: stretch;
+  padding: 0 13px;
+  gap: 18px;
+}
+/* Element-agnostic: tabs are <a> now that every one of them is a real route, so that middle-click,
+   copy-link and the browser's own back button work on them. */
+.tabbar .tab {
+  display: flex; align-items: center;
+  border: none; background: none; padding: 0;
+  font: 500 13px var(--ui);
+  color: var(--ink-6);
+  text-decoration: none;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tabbar .tab:hover { color: var(--ink-3); }
+.tabbar .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+.tabbar .actions { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.tabbar .actions > * { align-self: center; }
+
+.content {
+  flex: 1; min-height: 0;
+  background: var(--content);
+  display: flex;
+  overflow: hidden;
+}
+.pane {
+  flex: 1; min-width: 0;
+  padding: 20px 22px;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow: auto;
+}
+
+/* ── Replication detail: a pane (or a sidebar-and-pane) with a rail beside it ─────────────────── */
+
+.detail-body { flex: 1; min-height: 0; display: flex; }
+
+/* Flex, so a tab that brings its own sidebar puts it *beside* the pane and lets it run the full
+   height — the mappings tab does exactly that, and in a block container it stacked instead. */
+.detail-main { flex: 1; min-width: 0; min-height: 0; display: flex; }
+
+/* The same top padding the pane has, so the first card in each column starts on the same line. The
+   right padding lives here rather than as a gap, so the rail's own scrollbar sits at the edge. */
+.detail-rail {
+  width: 288px; flex: none;
+  padding: 20px 22px 20px 0;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow: auto;
+}
+
+/* ── Explorer sidebar ───────────────────────────────────────────────────────── */
+
+.sidebar {
+  width: 212px; flex: none;
+  border-right: 1px solid var(--chrome-edge);
+  background: var(--rail);
+  display: flex; flex-direction: column;
+  overflow: auto;
+}
+.sidebar-head {
+  height: 32px; flex: none;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 11px 0 13px;
+  border-bottom: 1px solid #efede7;
+  font: 600 10px var(--ui);
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-8);
+}
+.sidebar-list { display: flex; flex-direction: column; padding: 6px; gap: 1px; }
+.sidebar-item {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 7px; border-radius: 5px;
+  border: none; background: none; width: 100%;
+  font: 500 12px var(--mono); color: var(--ink-3);
+  cursor: pointer; text-align: left; text-decoration: none;
+}
+.sidebar-item:hover { background: #f2f0ec; }
+.sidebar-item.active {
+  background: var(--accent-row);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--ink);
+}
+.sidebar-item .meta { margin-left: auto; font: 400 10.5px var(--mono); color: var(--ink-7); }
+/* min-width: 0 is the load-bearing half — a flex item defaults to min-width: auto and refuses to
+   shrink below its content, so without it the ellipsis never happens and the row pushes the sidebar
+   wide. The count keeps its size regardless; only the name truncates. */
+.sidebar-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sidebar-item .badge { margin-left: auto; flex-shrink: 0; }
+
+/* ── Cards ──────────────────────────────────────────────────────────────────── */
+
+.card {
+  border: 1px solid var(--card-edge);
+  border-radius: 7px;
+  background: var(--surface);
+}
+.card.flush { overflow: hidden; }
+
+/* A source or target card, marked by a top border in its side's colour. A 2px border rather than a
+   tinted background: the cards sit beside each other and a wash of colour on a whole card competes
+   with the form controls inside it. */
+.card.enabled { border-top: 2px solid var(--accent-enabled); }
+.card.disabled { border-top: 2px solid var(--accent-disabled); }
+
+.card.side-source { border-top: 2px solid var(--accent-source); }
+.card.side-target { border-top: 2px solid var(--accent-target); }
+.card-title.side-source { color: var(--accent-source); }
+.card-title.side-target { color: var(--accent-target); }
+
+/* Source, arrow, target. The arrow is a grid column rather than a border or a pseudo-element so it
+   stays put when the two cards are different heights, which they are while one side is still being
+   filled in. */
+.side-pair {
+  display: grid;
+  grid-template-columns: 1fr 28px 1fr;
+  gap: 0;
+  align-items: stretch;
+}
+.side-pair > .side-arrow {
+  display: flex; align-items: center; justify-content: center;
+  font: 400 13px var(--ui); color: var(--ink-faint);
+}
+@media (max-width: 900px) {
+  /* Stacked, and the arrow turns to point down rather than disappearing — it is the thing that says
+     which way the data moves. */
+  .side-pair { grid-template-columns: 1fr; }
+  .side-pair > .side-arrow { height: 22px; }
+  .side-pair > .side-arrow::before { content: "↓"; }
+  .side-pair > .side-arrow > span { display: none; }
+}
+.card-head {
+  min-height: 36px;
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--card-inner-edge);
+}
+.card-head.tight { min-height: 34px; }
+.card-title {
+  font: 600 11px var(--ui);
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-5);
+}
+.card-title.sm { font-size: 10px; letter-spacing: .08em; color: var(--ink-8); }
+.card-note { font: 400 11px var(--ui); color: var(--ink-9); }
+.card-body { padding: 13px 14px; display: flex; flex-direction: column; gap: 11px; }
+
+.page-title { font: 600 15px var(--ui); color: var(--ink); margin: 0; }
+h1.crumb, h1.crumb.here { margin: 0; font: 500 12.5px var(--ui); color: var(--ink); display: inline; }
+h1.crumb.mono { font-family: var(--mono); }
+.page-note { font: 400 12px var(--ui); color: var(--ink-7); }
+.page-head { display: flex; align-items: center; gap: 10px; }
+.page-head .right { margin-left: auto; display: flex; gap: 8px; }
+
+/* ── Grid tables ────────────────────────────────────────────────────────────── */
+
+.grid-head {
+  display: grid;
+  padding: 0 14px;
+  height: 30px;
+  align-items: center;
+  background: var(--row-head);
+  border-bottom: 1px solid var(--card-inner-edge);
+  font: 600 10px var(--ui);
+  letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-8);
+}
+.grid-row {
+  display: grid;
+  padding: 0 14px;
+  height: 38px;
+  align-items: center;
+  border-bottom: 1px solid var(--row-edge);
+  font: 400 11.5px var(--mono);
+  color: var(--ink-2);
+  text-align: left;
+}
+.grid-row.tall { height: 40px; }
+.grid-row.short { height: 34px; }
+.grid-row:last-child { border-bottom: none; }
+button.grid-row { border-left: none; border-right: none; border-top: none; background: none; width: 100%; cursor: pointer; }
+button.grid-row:hover { background: var(--row-head); }
+button.grid-row.active { background: var(--accent-row-alt); box-shadow: inset 2px 0 0 var(--accent); }
+/* Every row is its own grid sharing one gridTemplateColumns string, not one grid and not a <table>.
+   Grid items default to `min-width: auto`, so a cell whose content is wider than its `fr` share grows
+   that track — and since each row is its own formatting context, only *that* row's columns move. The
+   result is a table whose rows stop lining up with the header as soon as one value is long.
+
+   `min-width: 0` is the fix; the truncation is what makes it look deliberate rather than clipped. An
+   inner flex container needs the same, because `overflow: hidden` on the outer cell does not stop a
+   flex child refusing to shrink below its content. */
+.grid-head > *, .grid-row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-head > * > .row, .grid-row > * > .row,
+.grid-head > .row, .grid-row > .row,
+.grid-row .editable-value { min-width: 0; }
+
+/* For the rare cell that should wrap rather than truncate — opt in, so nothing inherits wrapping by
+   accident and quietly makes rows different heights. */
+.grid-row > .wrap { overflow: visible; white-space: normal; text-overflow: clip; }
+
+.grid-row .name { font-weight: 500; color: var(--ink); }
+.grid-row .dim { color: var(--ink-4); }
+.grid-row .faint { color: var(--ink-10); }
+
+/* ── Controls ───────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--control-edge);
+  border-radius: 5px;
+  background: var(--surface);
+  padding: 5px 11px;
+  font: 500 12px var(--ui);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.btn:hover { background: #f7f5f1; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-danger { border-color: var(--danger-edge); color: var(--danger-ink); background: var(--surface); }
+.btn-danger:hover { background: #fdf4f2; }
+.btn-sm { padding: 3px 9px; font-size: 11.5px; }
+.btn-chrome { padding: 6px 12px; font-size: 11.5px; }
+.btn-link {
+  border: none; background: none; padding: 0;
+  font: 500 11.5px var(--ui); color: var(--accent); cursor: pointer; text-decoration: none;
+}
+.btn-link.quiet { color: var(--ink-10); }
+.btn-link.quiet:hover { color: var(--danger-ink); }
+
+.field { display: flex; flex-direction: column; }
+.field > label { font: 500 11px var(--ui); color: var(--ink-5); margin-bottom: 5px; }
+.field > label.right { text-align: right; font-size: 10.5px; color: var(--ink-7); }
+
+.input, .select, select.select {
+  height: 30px;
+  border: 1px solid var(--control-edge);
+  border-radius: 5px;
+  background: var(--surface);
+  padding: 0 9px;
+  font: 400 12.5px var(--mono);
+  color: var(--ink);
+  width: 100%;
+  appearance: none;
+}
+.input:focus, .select:focus { outline: 2px solid var(--accent-tint); outline-offset: -1px; border-color: var(--accent); }
+.input::placeholder { color: var(--ink-10); }
+.input:disabled, .select:disabled { background: var(--sunken); color: var(--ink-3); border-color: #f0eee8; }
+.input.sm, .select.sm { height: 25px; font-size: 11.5px; border-radius: 4px; padding: 0 8px; }
+
+/* Native selects lose their arrow to `appearance:none`; this restores the design's caret. */
+select.select {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='6' viewBox='0 0 9 6'%3E%3Cpath fill='%23a5a29a' d='M0 0h9L4.5 6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  padding-right: 24px;
+}
+
+.toggle {
+  width: 26px; height: 15px; flex: none;
+  border: none; padding: 0;
+  border-radius: 9px;
+  background: var(--control-edge);
+  position: relative;
+  cursor: pointer;
+}
+.toggle.on { background: var(--accent); }
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 11px; height: 11px; border-radius: 50%; background: #fff;
+  transition: left .12s ease;
+}
+.toggle.on::after { left: 13px; }
+
+.form-row { display: flex; align-items: flex-end; gap: 10px; }
+.form-row > .field { flex: 1; min-width: 0; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+
+/* ── Badges, dots, chips ────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex; align-items: center;
+  border: 1px solid var(--control-edge-soft);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font: 600 9px var(--mono);
+  letter-spacing: .04em;
+  color: var(--ink-7);
+  white-space: nowrap;
+}
+.badge-accent { border-color: #cdd8d2; color: #4d7a66; }
+.badge-primary { background: #f4f3f0; border-color: #e2dfd8; color: #75726a; }
+.badge-backfill { background: #f4f0f8; border-color: #e0d6ec; color: #665081; }
+
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; display: inline-block; }
+.dot-ok { background: var(--ok); }
+.dot-warn { background: var(--warn); }
+.dot-bad { background: var(--bad); }
+.dot-idle { background: var(--idle); }
+
+.status { display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px var(--ui); color: var(--ink-3); }
+
+.chip {
+  border: 1px solid var(--control-edge-soft);
+  border-radius: 20px;
+  background: none;
+  padding: 2px 9px;
+  font: 500 11px var(--ui);
+  color: var(--ink-6);
+  cursor: pointer;
+}
+.chip.active { background: #f4f2ee; border-color: var(--control-edge); color: var(--ink-2); }
+
+/* ── Pipeline stage tabs ────────────────────────────────────────────────────── */
+
+.stages { flex: 1; display: flex; align-items: flex-start; justify-content: center; gap: 6px; }
+.stage {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  border: none; background: none;
+  padding: 6px 14px 10px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+}
+.stage .stage-name { font: 600 12.5px var(--ui); color: var(--ink-4); }
+.stage .stage-impl { font: 400 10.5px var(--mono); color: var(--ink-7); white-space: nowrap; }
+.stage.active { background: var(--accent-row); box-shadow: inset 0 -2px 0 var(--accent); }
+.stage.active .stage-name { color: var(--accent); }
+.arrow { font: 400 13px var(--ui); color: var(--ink-faint); padding-top: 11px; }
+
+/* ── Log viewer ─────────────────────────────────────────────────────────────── */
+
+.log {
+  background: #1c1b18;
+  border-radius: 5px;
+  padding: 11px 13px;
+  display: flex; flex-direction: column; gap: 3px;
+  font: 400 11.5px var(--mono);
+  line-height: 1.55;
+  max-height: 260px;
+  overflow: auto;
+}
+.log-line { color: #e8e6df; }
+.log-time { color: #8f8d85; }
+.log-line.level-Error { color: #f0836a; }
+.log-line.level-Warning { color: #e2be6b; }
+.log-line.ok { color: #6fd39d; }
+
+/* ── Messages ───────────────────────────────────────────────────────────────── */
+
+.banner {
+  border: 1px solid #f0dfc9;
+  border-radius: 7px;
+  background: #fdfaf4;
+  padding: 11px 13px;
+  display: flex; gap: 9px; align-items: flex-start;
+  font: 400 12px var(--ui);
+  color: #7a6134;
+  line-height: 1.5;
+}
+.banner.error { border-color: #eccfc8; background: #fdf6f4; color: #8c3d2c; }
+.banner .mark {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 1px solid #d9a94f; color: #b5822a;
+  font: 600 10px var(--ui);
+  display: flex; align-items: center; justify-content: center;
+  flex: none; margin-top: 1px;
+}
+.banner.error .mark { border-color: #d99b8c; color: #a8402f; }
+
+.empty { padding: 22px 14px; text-align: center; font: 400 12px var(--ui); color: var(--ink-7); }
+.hint { font: 400 11px var(--ui); color: var(--ink-9); line-height: 1.5; }
+/* A hint about a consequence rather than a hint about a field. Used where a choice has an effect
+   that keeps happening — a query bound as a default runs on every scheduled pass, forever — and the
+   operator can only weigh that if it is visible at the moment they choose. */
+.hint.warn { color: var(--warn); }
+.mono { font-family: var(--mono); }
+.row { display: flex; align-items: center; gap: 8px; }
+.row-between { display: flex; align-items: center; justify-content: space-between; }
+.spacer { margin-left: auto; }
+.stack { display: flex; flex-direction: column; gap: 11px; }
+.divider { height: 1px; background: var(--row-edge); }
+.field-error { margin: 4px 0 0; font: 400 11px var(--ui); color: var(--danger-ink); }
+
+/* ── Code editor ────────────────────────────────────────────────────────────── */
+
+.code-editor {
+  border: 1px solid var(--control-edge);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.code-editor.loading { background: var(--sunken); }
+/* Monaco draws its own focus affordance inside; the border tracks it so the control reads like every
+   other input on the page. */
+.code-editor:focus-within { border-color: var(--accent); }
+
+/* --- Editable value (see EditableValue.tsx) ------------------------------------------------- */
+/* The pencil stays out of the way until the row is hovered: a table of forty columns with forty
+   permanently-visible edit buttons reads as a form, which is the opposite of what text-until-clicked
+   is for. It is always in the layout, never display:none, so nothing reflows on hover — and it stays
+   visible on :focus-visible, so the keyboard path is not the one that disappears. */
+.editable-value { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.editable-value > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pencil {
+  border: none; background: none; padding: 0; line-height: 1;
+  font-size: 11px; color: var(--ink-10); cursor: pointer;
+  opacity: 0; transition: opacity 90ms ease;
+}
+.grid-row:hover .pencil, .pencil:focus-visible, .pencil:hover { opacity: 1; }
+.pencil:hover { color: var(--accent); }
+
+/* The Overview entry is the section's landing page rather than one mapping among many, so it reads
+   as a heading in the list — the same weight the list's own header carries, not a bolder mapping. */
+.sidebar-item.strong { font-family: var(--ui); font-weight: 600; color: var(--ink); }
+
+/* --- Chips (see ColumnMultiPicker.tsx) ------------------------------------------------------ */
+/* A selection that stays readable without opening anything — which a <select multiple> is not. */
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 30px; }
+.chip {
+  border: 1px solid var(--control-edge);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 3px 10px;
+  font: 500 11.5px var(--mono);
+  color: var(--ink-4);
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); color: var(--ink-2); }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip.on.unknown { background: var(--danger-ink); border-color: var(--danger-ink); }
+
+/* ── Sub-tabs (see SubTabs.tsx) ─────────────────────────────────────────────── */
+/* A second row of tabs, inside a panel. Deliberately lighter than .tabbar: it is a level down, and
+   two identical tab strips stacked would leave nobody sure which one they were on. */
+.subtabbar {
+  display: flex; align-items: stretch; flex-wrap: wrap;
+  gap: 16px;
+  border-bottom: 1px solid var(--chrome-edge);
+  padding: 0 2px;
+}
+.subtab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 0 8px;
+  font: 500 12px var(--ui);
+  color: var(--ink-6);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.subtab:hover { color: var(--ink-3); }
+.subtab.active { color: var(--ink); border-bottom-color: var(--accent); }
+/* Never rendered at zero — see SubTabs.tsx. */
+.subtab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent); color: #fff;
+  font: 600 10px var(--ui);
+}
+.subtab-panel { display: flex; flex-direction: column; gap: 14px; }
+
+/* ── Markdown (see Markdown.tsx) ────────────────────────────────────────────── */
+/* Notes are prose in a product that is otherwise dense controls, so this deliberately reads like a
+   document: wider line height, real paragraph spacing, and headings that sit below the page's own. */
+.markdown { font: 400 12.5px/1.6 var(--ui); color: var(--ink-2); max-width: 74ch; }
+.markdown > *:first-child { margin-top: 0; }
+.markdown > *:last-child { margin-bottom: 0; }
+.md-p { margin: 0 0 9px; white-space: pre-wrap; }
+.md-h { margin: 16px 0 7px; color: var(--ink); font-family: var(--ui); }
+.md-h1 { font-size: 14px; font-weight: 600; }
+.md-h2 { font-size: 13px; font-weight: 600; }
+.md-h3, .md-h4, .md-h5, .md-h6 { font-size: 12.5px; font-weight: 600; }
+.md-list { margin: 0 0 9px; padding-left: 20px; }
+.md-list li { margin: 2px 0; }
+.md-quote {
+  margin: 0 0 9px; padding: 2px 0 2px 11px;
+  border-left: 2px solid var(--chrome-edge);
+  color: var(--ink-5);
+}
+.md-hr { border: none; border-top: 1px solid var(--card-inner-edge); margin: 13px 0; }
+.md-code { font: 400 11.5px var(--mono); background: var(--sunken); border-radius: 3px; padding: 1px 4px; }
+.md-pre {
+  margin: 0 0 9px; padding: 9px 11px;
+  background: var(--sunken); border: 1px solid var(--card-inner-edge); border-radius: 4px;
+  font: 400 11.5px/1.5 var(--mono);
+  overflow-x: auto;
+}
+.md-pre code { font: inherit; background: none; padding: 0; }
+.markdown a { color: var(--accent); }
+
+/* The Notes editor is prose, so it gets prose room rather than an input's one line. */
+.notes-editor {
+  min-height: 220px; resize: vertical;
+  font: 400 12.5px/1.6 var(--mono);
+  padding: 9px 11px;
+  white-space: pre-wrap;
+}
+
+/* ── Modal (see PauseDialog.tsx) ────────────────────────────────────────────── */
+/* Centred over the whole app rather than anchored to the control that opened it: the pause popup is
+   a decision with a consequence, and something you have to answer reads differently from something
+   that dropped out of a button. */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(28, 26, 23, .32);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.modal {
+  width: min(460px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--card-edge);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(28, 26, 23, .18);
+  max-height: 100%; overflow: auto;
+}
+
+/* ── Run timing detail (see RunsPanel.tsx) ──────────────────────────────────── */
+/* Opens beneath a traced run's row. Deliberately not part of the grid: it spans the whole width
+   rather than participating in the table's column tracks, which is what keeps an untraced row —
+   nearly every row — exactly as it was. */
+.timing-detail {
+  display: flex; flex-wrap: wrap; gap: 18px;
+  padding: 9px 14px 11px 26px;
+  background: var(--sunken);
+  border-bottom: 1px solid var(--row-edge);
+}
+.timing-stage { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.timing-stage-name {
+  font: 600 10px var(--ui);
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-5);
+  min-width: 52px;
+}
+.timing-figure { font: 500 12px var(--ui); color: var(--ink-2); }
+/* .faint and .sm are scoped to .grid-row elsewhere, and this panel is deliberately outside the grid. */
+.timing-detail .faint { color: var(--ink-10); font-weight: 400; }
+.timing-detail .mono { font-family: var(--mono); color: var(--ink-4); }
+.timing-detail .sm { font-size: 11.5px; }
+
+/* ── Run error detail (see RunsPanel.tsx) ───────────────────────────────────── */
+/* Same "opens beneath the row, outside the grid" shape as .timing-detail, so a run that is both
+   traced and failed can show both without fighting over the same slot. */
+.run-error-detail {
+  padding: 9px 14px 11px 26px;
+  background: var(--sunken);
+  border-bottom: 1px solid var(--row-edge);
+  font: 400 12px var(--mono);
+  color: #8c3d2c;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# Launcher for tools/DataSync.DevHarness. See `tools/dev-harness help`.
+# Launcher for tools/DbDataSync.DevHarness. See `tools/dev-harness help`.
 #
 # `dotnet build` unconditionally, then `exec` into the built assembly. Two deliberate choices:
 #
 #   * Build every time, with no staleness check of our own. MSBuild already decides correctly what
-#     needs rebuilding, including changes in referenced projects such as DataSync.Core — which a
+#     needs rebuilding, including changes in referenced projects such as DbDataSync.Core — which a
 #     hand-rolled check here got wrong, silently running a stale binary.
 #
 #   * `dotnet exec` on the DLL rather than `dotnet run`, and `exec` so this script's own shell is
@@ -19,8 +19,8 @@ set -e
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(dirname "$script_dir")
-project="$repo_root/tools/DataSync.DevHarness/DataSync.DevHarness.csproj"
+project="$repo_root/tools/DbDataSync.DevHarness/DbDataSync.DevHarness.csproj"
 
 dotnet build "$project" -v quiet --nologo >&2
 
-exec dotnet exec "$repo_root/tools/DataSync.DevHarness/bin/Debug/net10.0/DataSync.DevHarness.dll" "$@"
+exec dotnet exec "$repo_root/tools/DbDataSync.DevHarness/bin/Debug/net10.0/DbDataSync.DevHarness.dll" "$@"

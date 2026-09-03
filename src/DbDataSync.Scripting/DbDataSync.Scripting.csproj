@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Generic\DbDataSync.Drivers.Generic.csproj" />
+    <ProjectReference Include="..\DbDataSync.Scripting.Abstractions\DbDataSync.Scripting.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DbDataSync.Scripting.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

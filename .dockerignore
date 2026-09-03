@@ -3,5 +3,5 @@
 **/node_modules/
 **/dist/
 .git/
-tests/DataSync.Web.Tests/test-results/
-tests/DataSync.Web.Tests/screenshots/
+tests/DbDataSync.Web.Tests/test-results/
+tests/DbDataSync.Web.Tests/screenshots/

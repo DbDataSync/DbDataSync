@@ -15,7 +15,7 @@ The reason this is a reader and not a subsystem is the first finding in
 
 ```sql
 SELECT lsn, xid, data
-FROM pg_logical_slot_peek_changes('datasync_orders', :uptoLsn, NULL,
+FROM pg_logical_slot_peek_changes('dbdatasync_orders', :uptoLsn, NULL,
                                   'format-version', '2', 'add-tables', 'public.orders');
 ```
 
@@ -27,7 +27,7 @@ to `IChangeReader`, and the LSN stores as a string like every other position.
 
 `pg_logical_slot_get_changes` **consumes**. Once read, those changes are gone from the slot forever.
 
-DataSync persists a watermark only after the write succeeds. A consuming read breaks that invariant
+DbDataSync persists a watermark only after the write succeeds. A consuming read breaks that invariant
 outright: the slot advances at read time, the write then fails, and the changes are unrecoverable —
 silent data loss, of the kind that shows up only as a target that quietly disagrees with its source.
 
@@ -36,7 +36,7 @@ So:
 1. `SELECT pg_current_wal_lsn()` — fix the window's end
 2. `pg_logical_slot_peek_changes(slot, <that lsn>, NULL, …)` — read without consuming
 3. stage, write, commit, persist the watermark
-4. **then** `pg_replication_slot_advance('datasync_orders', <that lsn>)`
+4. **then** `pg_replication_slot_advance('dbdatasync_orders', <that lsn>)`
 
 Step 4 is `IPositionAcknowledging`, which phase 33 builds for shadow-table pruning. This phase is the
 second caller and the one that makes the interface's ordering guarantee load-bearing: acknowledge
@@ -44,7 +44,7 @@ second caller and the one that makes the interface's ordering guarantee load-bea
 
 ## The slot is server-side state we create, and it can fill the source's disk
 
-Nothing in DataSync has ever created persistent state on a source before. A slot nobody consumes pins
+Nothing in DbDataSync has ever created persistent state on a source before. A slot nobody consumes pins
 WAL indefinitely. This is the failure mode where **this tool takes a production database down**, and it
 deserves more than a comment.
 
@@ -54,7 +54,7 @@ deserves more than a comment.
 - **Lag surfaced.** `pg_replication_slots.confirmed_flush_lsn` against `pg_current_wal_lsn()` gives
   retained bytes. The phase 19 connection card is the natural home; an operator needs to see this
   before the disk fills, not after.
-- **Orphan detection.** Slots named `datasync_%` with no matching config are findable and worth
+- **Orphan detection.** Slots named `dbdatasync_%` with no matching config are findable and worth
   reporting rather than leaving to be tripped over.
 - **One slot per replication**, not per mapping: a slot decodes the whole database and filters by
   table, so per-mapping multiplies slots for no gain.
@@ -85,7 +85,7 @@ because it needs no extension. Not first.
 - `wal_level = logical` — **requires a restart**, and is the single biggest adoption obstacle
 - a role with `REPLICATION` (or `rds_replication`)
 - `REPLICA IDENTITY` — the **default** is right. It puts the primary key in the delete and update-old
-  record, which is exactly what DataSync needs, and `FULL` only matters if a transform wants
+  record, which is exactly what DbDataSync needs, and `FULL` only matters if a transform wants
   pre-update values while making the WAL substantially larger. Say so, so nobody enables `FULL`
   reflexively.
 - **A table with no primary key and `REPLICA IDENTITY DEFAULT` produces no delete records at all.**
@@ -94,7 +94,7 @@ because it needs no extension. Not first.
 
 ## Delivery guarantees, and what not to build
 
-Logical decoding is **at-least-once**: after a crash a change can be re-delivered. DataSync's writers
+Logical decoding is **at-least-once**: after a crash a change can be re-delivered. DbDataSync's writers
 upsert and its reconciling writers replace a scope wholesale, so a duplicate is harmless. Worth stating
 because the instinct is to build deduplication that is not needed.
 

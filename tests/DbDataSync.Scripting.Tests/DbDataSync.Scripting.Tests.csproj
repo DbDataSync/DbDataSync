@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DbDataSync.Scripting\DbDataSync.Scripting.csproj" />
+    <ProjectReference Include="..\..\src\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
+    <!-- Test-only: proving phase 27's ILifecycleHook contract against both real dialects (the
+         cross-engine schema-evolution case it exists for), without pulling either driver into
+         DbDataSync.Scripting itself. -->
+    <ProjectReference Include="..\..\src\DbDataSync.Drivers.MsSql\DbDataSync.Drivers.MsSql.csproj" />
+    <ProjectReference Include="..\..\src\DbDataSync.Drivers.Postgres\DbDataSync.Drivers.Postgres.csproj" />
+  </ItemGroup>
+
+</Project>

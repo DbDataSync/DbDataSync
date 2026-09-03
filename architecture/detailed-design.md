@@ -1,4 +1,4 @@
-# DataSync — Detailed Architecture
+# DbDataSync — Detailed Architecture
 
 This document expands the concepts in `architecture/planning/` (`overview.md`, `architecture.md`,
 `tech-stack.md`) into a concrete system design. It supersedes nothing there — the planning docs
@@ -6,7 +6,7 @@ remain the source notes; this is the resolved design built from them.
 
 ## 1. System Overview
 
-DataSync is an open-source, cross-platform data replication tool. v1 supports MSSQL → MSSQL
+DbDataSync is an open-source, cross-platform data replication tool. v1 supports MSSQL → MSSQL
 replication only, using SQL Server's native Change Tracking / CDC features to detect source changes.
 The architecture is intentionally engine-agnostic at its core so that additional source/target
 database engines can be added later without redesigning the system (see [§5](#5-extensibility-model)).
@@ -22,7 +22,7 @@ Four pillars shape every component decision in this design:
    trades away some write-concurrency headroom for simpler cross-task querying and a single place to
    back up/inspect; the design below (§3.6) exists specifically to make that trade-off safe.
 3. **Data movement happens in a separate OS process per task run.** The web app never moves data
-   in-process. It spawns a short-lived `DataSync.TaskRunner` process for each replication run, and
+   in-process. It spawns a short-lived `DbDataSync.TaskRunner` process for each replication run, and
    that process is solely responsible for reading, staging, and applying changes for that one task.
 4. **The web app is the orchestrator, not a data mover.** It hosts the UI, the config/git layer, an
    in-process scheduler, and process supervision — but the actual driver/reader/writer/caching logic
@@ -38,13 +38,13 @@ flowchart TB
     end
 
     subgraph Host["Single Host (v1)"]
-        API["DataSync.Api\n(ASP.NET Core)"]
+        API["DbDataSync.Api\n(ASP.NET Core)"]
         SCHED["In-process Scheduler\n(IHostedService)"]
         SUP["Process Supervisor"]
         GITREPO[("Config Git Repo\n(YAML on disk)")]
         SQLITE[("Central SQLite\nstate db (WAL)")]
-        RUNNER1["DataSync.TaskRunner\n(process, run #1)"]
-        RUNNER2["DataSync.TaskRunner\n(process, run #2)"]
+        RUNNER1["DbDataSync.TaskRunner\n(process, run #1)"]
+        RUNNER2["DbDataSync.TaskRunner\n(process, run #2)"]
     end
 
     SRC[("Source SQL Server")]
@@ -67,7 +67,7 @@ flowchart TB
 
 ## 3. Component Details
 
-### 3.1 Web API / Orchestrator (`DataSync.Api`, ASP.NET Core)
+### 3.1 Web API / Orchestrator (`DbDataSync.Api`, ASP.NET Core)
 
 The API process is the only long-running server component in v1. It owns:
 
@@ -80,7 +80,7 @@ The API process is the only long-running server component in v1. It owns:
 - **Scheduler** (`IHostedService`) — evaluates every enabled task's scheduling config
   (`Continuous` with a frequency, or `Periodic` on a cron expression, per
   `architecture/planning/done/architecture.md`) on a tick and decides which tasks are due to run.
-- **Process Supervisor** — spawns a `DataSync.TaskRunner` child process for each due run
+- **Process Supervisor** — spawns a `DbDataSync.TaskRunner` child process for each due run
   (`System.Diagnostics.Process`), passing the task's config path and a generated run id. Tracks PID,
   start time, and liveness; writes/updates the run's row in the central SQLite `TaskRuns` table;
   detects crashed/orphaned processes on API restart by reconciling PIDs still marked `Running` in
@@ -94,9 +94,9 @@ The API process is the only long-running server component in v1. It owns:
   in-process by the supervisor for its own spawned processes) and republishes over the hub. A plain
   polling REST endpoint exists as a fallback/for non-realtime clients.
 
-### 3.2 React / TypeScript SPA (`DataSync.Web`)
+### 3.2 React / TypeScript SPA (`DbDataSync.Web`)
 
-Talks to `DataSync.Api` over REST for CRUD and SignalR for live updates. Core views:
+Talks to `DbDataSync.Api` over REST for CRUD and SignalR for live updates. Core views:
 
 - **Connections** — list/create/edit connections (hostname, auth, which database engine driver).
 - **Replication / Task Builder** — the main authoring surface: pick source connection/database/table
@@ -110,12 +110,12 @@ Talks to `DataSync.Api` over REST for CRUD and SignalR for live updates. Core vi
 - **Config History** — a read-only view of a replication's git log (commit list + diffs), giving
   visibility into the auto-commit trail without needing a separate git client.
 
-### 3.3 Task Runner (`DataSync.TaskRunner`)
+### 3.3 Task Runner (`DbDataSync.TaskRunner`)
 
 A console application, one OS process per task run. Invoked by the Supervisor as:
 
 ```
-DataSync.TaskRunner --task-config <path/to/task.yaml> --run-id <guid>
+DbDataSync.TaskRunner --task-config <path/to/task.yaml> --run-id <guid>
 ```
 
 Pipeline, all stages driven by the driver abstraction (§3.4):
@@ -138,9 +138,9 @@ Pipeline, all stages driven by the driver abstraction (§3.4):
 Throughout, structured log lines are written to the central SQLite `Logs` table (batched, not one
 transaction per line — see §3.6 concurrency notes) so the API can surface them live.
 
-### 3.4 Driver Abstraction Layer (`DataSync.Drivers.Abstractions`)
+### 3.4 Driver Abstraction Layer (`DbDataSync.Drivers.Abstractions`)
 
-Shared library referenced by both `DataSync.Api` (metadata browsing) and `DataSync.TaskRunner` (data
+Shared library referenced by both `DbDataSync.Api` (metadata browsing) and `DbDataSync.TaskRunner` (data
 movement). Directly mirrors `architecture/planning/done/architecture.md`'s concepts as interfaces:
 
 - `IDriver` — identifies a database engine; advertises which `IChangeReader`, `IStagingProvider`, and
@@ -153,11 +153,11 @@ movement). Directly mirrors `architecture/planning/done/architecture.md`'s conce
 - `IChangeWriter` — applies a staged change set to the target. Implementations may be generic
   (ordered insert/update/delete) or target-specific (merge, bulk operations).
 
-A **driver registry** in `DataSync.Api` and `DataSync.TaskRunner` startup enumerates registered
+A **driver registry** in `DbDataSync.Api` and `DbDataSync.TaskRunner` startup enumerates registered
 `IDriver` implementations so the UI can only offer combinations a driver actually supports, and so a
 task config referencing an unsupported reader/writer/cache combination fails validation early.
 
-### 3.5 MSSQL Driver v1 (`DataSync.Drivers.MsSql`)
+### 3.5 MSSQL Driver v1 (`DbDataSync.Drivers.MsSql`)
 
 The only driver implemented in v1, built against the abstractions above:
 
@@ -206,20 +206,20 @@ reads as a real per-user audit trail, with a generated message summarizing what 
 files store only a **secret reference** (a key/identifier), never an inline password. Actual
 credential values are resolved at runtime through
 **[`ClrKernel.Core.Secrets.SecretStore`](https://www.nuget.org/)** (public NuGet package, maintained
-by the DataSync team), which wraps the OS-native credential store (Windows Credential Manager /
+by the DbDataSync team), which wraps the OS-native credential store (Windows Credential Manager /
 macOS Keychain / Linux Secret Service, depending on platform) behind a single cross-platform API.
-`DataSync.Core` takes a package dependency on it; both `DataSync.Api` (for saving/testing
-connections from the UI) and `DataSync.TaskRunner` (for resolving credentials before connecting to a
+`DbDataSync.Core` takes a package dependency on it; both `DbDataSync.Api` (for saving/testing
+connections from the UI) and `DbDataSync.TaskRunner` (for resolving credentials before connecting to a
 source/target) use it identically, so there is exactly one code path that ever touches a raw
 credential value. Because the underlying store is per-OS-user, this implies **v1 deployment runs the
 API and every spawned Task Runner process under one consistent local account** — see the deployment
 note in [§7](#7-deployment-topology-v1).
 
-### 3.7 Central SQLite State Store (`DataSync.State`)
+### 3.7 Central SQLite State Store (`DbDataSync.State`)
 
-A single database, shared by `DataSync.Api` and every `DataSync.TaskRunner` process. **SQLite by
+A single database, shared by `DbDataSync.Api` and every `DbDataSync.TaskRunner` process. **SQLite by
 default** — a file, no server to run — and since phase 63 optionally SQL Server or PostgreSQL, chosen
-once per deployment via `DataSync:StateEngine`. The stores are written against one SQL text and one
+once per deployment via `DbDataSync:StateEngine`. The stores are written against one SQL text and one
 parameter spelling; `StateDialect` renders the four things the engines actually disagree about
 (auto-assigned keys, unbounded vs indexable text, integer width, and `ALTER TABLE ... ADD`) plus the
 three that differ structurally (upsert, row limiting, and where the schema version is kept).
@@ -266,12 +266,12 @@ per-task files:
   threshold, *and* immediately before any run's terminal status is written — see the phase-8 doc's log-
   flush-ordering fix) rather than one commit per line, and watermark/status updates are single-row
   upserts, minimizing the time any writer holds the write lock.
-- All of the above lives in **one shared library** (`DataSync.State`) used identically by the API
+- All of the above lives in **one shared library** (`DbDataSync.State`) used identically by the API
   process and every Task Runner process, so the concurrency pattern can't silently drift between
   callers. A dedicated concurrency stress test (`architecture/implementation/done/phase-007-e2e-validation.md`)
   found no contention failures at 8 concurrently-processed mappings — a realistic v1 scale. If
   contention proves problematic at larger scale in practice, the per-task-SQLite-files fallback behind
-  this same `DataSync.State` interface remains available.
+  this same `DbDataSync.State` interface remains available.
 
 ## 4. End-to-End Data Flow
 
@@ -282,7 +282,7 @@ per-task files:
 3. Scheduler tick evaluates the task's schedule; when due (and no `RunLocks` row for that task), it
    asks the Supervisor to start a run.
 4. Supervisor creates a `TaskRuns` row (`Pending`→`Running`), acquires the `RunLocks` row, and spawns
-   `DataSync.TaskRunner --task-config ... --run-id ...`.
+   `DbDataSync.TaskRunner --task-config ... --run-id ...`.
 5. Task Runner: reads changes (Change Tracking/CDC/batch) → stages them (staging table) → applies
    them to target (merge/ordered statements) → updates `ChangeWatermarks` → writes final `TaskRuns`
    status → releases the run (Supervisor clears `RunLocks` on process exit).
@@ -295,15 +295,15 @@ per-task files:
 
 - **New source/target database engine**: implement `IDriver` plus whichever `IChangeReader` /
   `IStagingProvider` / `IChangeWriter` variants make sense for that engine, and register it in the
-  driver registry. No changes to `DataSync.Api`, `DataSync.TaskRunner`, or the SPA's core flow are
+  driver registry. No changes to `DbDataSync.Api`, `DbDataSync.TaskRunner`, or the SPA's core flow are
   required — the task builder UI and validation already work off what a driver advertises as
   supported.
 - **New staging method** (e.g. parquet, as floated in the planning docs): implement
   `IStagingProvider` once, and it becomes selectable by any driver whose writer can consume it,
   without touching driver-specific code.
-- **State store beyond SQLite**: `DataSync.State` is the sole point of contact for run/log/watermark
+- **State store beyond SQLite**: `DbDataSync.State` is the sole point of contact for run/log/watermark
   persistence. A future non-SQLite backend would implement the same internal interface; nothing in
-  `DataSync.Api` or `DataSync.TaskRunner` talks to SQLite directly.
+  `DbDataSync.Api` or `DbDataSync.TaskRunner` talks to SQLite directly.
 
 ## 6. Security Considerations
 
@@ -319,7 +319,7 @@ per-task files:
 
 ## 7. Deployment Topology (v1)
 
-Single host: the `DataSync.Api` process and every `DataSync.TaskRunner` child process it spawns run
+Single host: the `DbDataSync.Api` process and every `DbDataSync.TaskRunner` child process it spawns run
 on the same machine, with local filesystem access to the config git repo and the central SQLite file.
 Multi-node execution (remote agents running Task Runner elsewhere) is explicitly **out of scope for
 v1** — the Process Supervisor design (§3.1) assumes local `System.Diagnostics.Process` spawning, not
@@ -351,7 +351,7 @@ the implementation phases that depend on them (see `implementation-plan.md`):
   the *same* file now serialize safely (no crash, no interleaved/corrupt commit) but still get
   last-write-wins with no conflict warning — that UX decision remains unmade.
 - **Central SQLite contention in practice** — **investigated in Phase 7** with a stress test
-  triggering 8 concurrent replications (each a real spawned `DataSync.TaskRunner` child process
+  triggering 8 concurrent replications (each a real spawned `DbDataSync.TaskRunner` child process
   writing `TaskRuns`/`Logs`/`RunLocks`/`ChangeWatermarks` rows to the same central SQLite file at
   once), run repeatedly with no failures. The existing mitigations (`busy_timeout`, `SqliteRetry`,
   and the self-healing schema re-check added in Phase 6 — see

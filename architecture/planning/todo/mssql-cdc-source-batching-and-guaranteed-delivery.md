@@ -9,7 +9,7 @@ Deferred out of phase 56 (`chunked-apply-and-bounded-reads.md`), which scoped ro
 and Change Tracking only. Named there as real, separate work because an LSN can cover a whole
 transaction's worth of rows.
 
-**Transactional integrity across a bounded read is explicitly not a goal.** DataSync doesn't promise to
+**Transactional integrity across a bounded read is explicitly not a goal.** DbDataSync doesn't promise to
 apply a source transaction atomically as a unit today, and this follow-up shouldn't invent that guarantee
 just because row-bounding makes a split more visible than an unbounded read did. What has to be preserved
 is row-level ordering — LSN, then `__$seqval` within an LSN — not transaction grouping. The tie-safe

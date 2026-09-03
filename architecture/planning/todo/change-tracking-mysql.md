@@ -36,7 +36,7 @@ rather than by defaulting to "CDC means binlog".
 ## Option 1 — trigger shadow table (`MySqlTriggerAudit`)
 
 ```sql
-CREATE TABLE datasync_changes_orders (
+CREATE TABLE dbdatasync_changes_orders (
   seq        BIGINT AUTO_INCREMENT PRIMARY KEY,
   op         CHAR(1) NOT NULL,
   id         INT NOT NULL,              -- the tracked table's key, one column per key column
@@ -44,7 +44,7 @@ CREATE TABLE datasync_changes_orders (
 ) ENGINE=InnoDB;
 
 CREATE TRIGGER orders_ai AFTER INSERT ON orders FOR EACH ROW
-  INSERT INTO datasync_changes_orders (op, id) VALUES ('I', NEW.id);
+  INSERT INTO dbdatasync_changes_orders (op, id) VALUES ('I', NEW.id);
 -- …and _au / _ad for UPDATE and DELETE
 ```
 
@@ -66,7 +66,7 @@ Two traps worth writing into the implementation from the start, both already lea
 
 Costs: DDL rights on the source, a write-path latency penalty on every transaction touching a tracked
 table, and shadow-table pruning — which needs an owner. Pruning to below the persisted watermark is
-safe and is the obvious place for it, but the watermark lives in DataSync's state store, not the
+safe and is the obvious place for it, but the watermark lives in DbDataSync's state store, not the
 source, so something has to carry it back. Probably a `CleanupAsync`-style call after a successful
 write, which is a contract question the Postgres slot-advance decision also raises. **They are the same
 question and should be answered once.**
@@ -86,7 +86,7 @@ triggers on the source.
 
 **The watermark is the GTID set**, not the file-and-position pair. `binlog.000042:19483` is meaningless
 after a failover to a replica; a GTID set (`3E11FA47-…:1-1004`) survives it and is comparable across
-servers. Given that DataSync's watermark is already an opaque string, a GTID set stores as-is with no
+servers. Given that DbDataSync's watermark is already an opaque string, a GTID set stores as-is with no
 model change. Anyone reaching for file+position because it is simpler is choosing a position that
 breaks on the day the source fails over — which is precisely the day nobody wants a second incident.
 

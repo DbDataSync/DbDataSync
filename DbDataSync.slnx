@@ -1,0 +1,37 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DbDataSync.Api/DbDataSync.Api.csproj" />
+    <Project Path="src/DbDataSync.Certificates/DbDataSync.Certificates.csproj" />
+    <Project Path="src/DbDataSync.Cli/DbDataSync.Cli.csproj" />
+    <Project Path="src/DbDataSync.Core/DbDataSync.Core.csproj" />
+    <Project Path="src/DbDataSync.Drivers.Abstractions/DbDataSync.Drivers.Abstractions.csproj" />
+    <Project Path="src/DbDataSync.Drivers.DuckDb/DbDataSync.Drivers.DuckDb.csproj" />
+    <Project Path="src/DbDataSync.Drivers.Generic/DbDataSync.Drivers.Generic.csproj" />
+    <Project Path="src/DbDataSync.Drivers.MsSql/DbDataSync.Drivers.MsSql.csproj" />
+    <Project Path="src/DbDataSync.Drivers.Postgres/DbDataSync.Drivers.Postgres.csproj" />
+    <Project Path="src/DbDataSync.Scripting/DbDataSync.Scripting.csproj" />
+    <Project Path="src/DbDataSync.Scripting.Abstractions/DbDataSync.Scripting.Abstractions.csproj" />
+    <Project Path="src/DbDataSync.State/DbDataSync.State.csproj" />
+    <Project Path="src/DbDataSync.Verification/DbDataSync.Verification.csproj" />
+    <Project Path="src/DbDataSync.TaskRunner/DbDataSync.TaskRunner.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/DbDataSync.Benchmarks/DbDataSync.Benchmarks.csproj" />
+    <Project Path="tools/DbDataSync.DevHarness/DbDataSync.DevHarness.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DbDataSync.Api.Tests/DbDataSync.Api.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Certificates.Tests/DbDataSync.Certificates.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Cli.Tests/DbDataSync.Cli.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Core.Tests/DbDataSync.Core.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Drivers.Abstractions.Tests/DbDataSync.Drivers.Abstractions.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Drivers.DuckDb.Tests/DbDataSync.Drivers.DuckDb.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Drivers.Generic.Tests/DbDataSync.Drivers.Generic.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Drivers.MsSql.Tests/DbDataSync.Drivers.MsSql.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Drivers.Postgres.Tests/DbDataSync.Drivers.Postgres.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Scripting.Tests/DbDataSync.Scripting.Tests.csproj" />
+    <Project Path="tests/DbDataSync.State.Tests/DbDataSync.State.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Verification.Tests/DbDataSync.Verification.Tests.csproj" />
+    <Project Path="tests/DbDataSync.TaskRunner.Tests/DbDataSync.TaskRunner.Tests.csproj" />
+  </Folder>
+</Solution>
