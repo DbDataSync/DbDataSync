@@ -98,6 +98,64 @@ jobs:
       - name: Build
         run: npm run build
 
+  # The Playwright E2E suite. Not running it anywhere but a developer's machine is what let
+  # apply-button-does-not-cache-provisioned-columns.md's golden-path test 18 sit failing on main from
+  # phase 94 until somebody happened to run it (architecture/planning/done/playwright-suite-in-ci.md).
+  playwright:
+    runs-on: ubuntu-latest
+    # docker-compose.yml rather than `services:` above, which is otherwise the same three containers on
+    # the same three ports. The suite's tests/DbDataSync.Web.Tests/test-db.ts reaches SQL Server by
+    # `docker exec dbdatasync-mssql-source sqlcmd ...` — by container *name*, not through a published
+    # port — and service containers are named by the runner, so nothing the suite runs would find them.
+    # Compose's container_name is what makes that name exist, and it is the same file the suite is
+    # already written against locally, so CI runs the topology unchanged rather than a lookalike.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: |
+            src/DbDataSync.Web/package-lock.json
+            tests/DbDataSync.Web.Tests/package-lock.json
+      - name: Start the databases
+        # --wait blocks on the healthchecks docker-compose.yml already declares, so the suite never
+        # opens a connection to a SQL Server that is still coming up.
+        run: docker compose up -d --wait mssql-source mssql-target postgres
+      - name: Build the API
+        # Debug, deliberately: playwright.config.ts's webServer runs
+        # src/DbDataSync.Api/bin/Debug/net10.0/DbDataSync.Api.dll through `dotnet exec`, so a Release
+        # build would leave that path empty and the API would never start.
+        run: dotnet build src/DbDataSync.Api
+      - name: Install the SPA's dependencies
+        working-directory: src/DbDataSync.Web
+        run: npm ci
+      - name: Install the suite's dependencies
+        # Its own package.json — @playwright/test lives here, not in the SPA's tree.
+        working-directory: tests/DbDataSync.Web.Tests
+        run: npm ci
+      - name: Install Chromium
+        # The browser binary is not part of npm ci, and the runner has no usable one pre-installed.
+        working-directory: tests/DbDataSync.Web.Tests
+        run: npx playwright install --with-deps chromium
+      - name: Test (Playwright)
+        # The config's webServer array starts and stops both the API and the SPA dev server, and
+        # globalSetup/globalTeardown build and drop the test database — nothing to orchestrate here.
+        working-directory: tests/DbDataSync.Web.Tests
+        run: npx playwright test
+      - name: Upload traces and screenshots from a failed run
+        # trace: 'retain-on-failure' is already on; without this the trace of a CI-only failure is
+        # thrown away with the runner, which is the one case it exists for.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-artifacts
+          path: tests/DbDataSync.Web.Tests/test-results/
+          retention-days: 7
+
   # Built on every push rather than only at release time, because the first time anyone finds out the
   # Dockerfile or the tool package is broken should not be the release.
   package:
