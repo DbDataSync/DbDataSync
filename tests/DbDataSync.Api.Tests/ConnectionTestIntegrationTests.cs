@@ -93,8 +93,11 @@ public sealed class ConnectionTestIntegrationTests(TestApiFactory factory) : ICl
         var source = await _client.GetFromJsonAsync<Source>($"/api/connections/{name}/credential-source", JsonOptions);
 
         Assert.Equal($"dbdatasync:connection:{name}", source!.SecretRef);
+        // Phase 93: DBDATASYNC_SECRET_* now, not the package's unconfigured "ClrKernel" default — the
+        // repeated "DBDATASYNC" is inherent to the two prefixes (SecretStore's provider-naming prefix
+        // and SecretRefs' own "dbdatasync:" ref-namespacing) serving different purposes, not a bug.
         Assert.Equal(
-            $"CLRKERNEL_SECRET_DBDATASYNC_CONNECTION_{name.Replace('-', '_').ToUpperInvariant()}",
+            $"DBDATASYNC_SECRET_DBDATASYNC_CONNECTION_{name.Replace('-', '_').ToUpperInvariant()}",
             source.EnvironmentVariable);
         Assert.True(source.RequiresCredential);
     }

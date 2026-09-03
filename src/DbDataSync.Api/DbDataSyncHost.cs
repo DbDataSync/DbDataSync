@@ -75,7 +75,7 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<PasskeyService>();
         builder.Services.AddSingleton(sp => CertificateOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
 
-        builder.Services.AddSingleton(new SecretStore(true));
+        builder.Services.AddSingleton(new SecretStore("DbDataSync", true));
 
         // One GitCommitService per process, not one per consumer — its own doc comment explains why:
         // the in-process write lock that makes concurrent commits safe only holds if every writer to

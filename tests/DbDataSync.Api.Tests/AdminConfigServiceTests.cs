@@ -246,4 +246,27 @@ public sealed class AdminConfigServiceTests : IDisposable
 
         Assert.False(service.SetStateConnectionSecret(UrlKey, "nope"));
     }
+
+    /// <summary>
+    /// Phase 93: the same helper, through a store built with the "DbDataSync" prefix — as the real
+    /// composition root builds it — end to end against the new naming, not just against an unprefixed
+    /// test double.
+    /// </summary>
+    [Fact]
+    public void TheSecretEndpointHelper_AgainstADbDataSyncPrefixedStore_ResolvesUnderTheNewPrefix()
+    {
+        var secrets = SecretStore.ForProviders("DbDataSync", [new InMemorySecretProvider()]);
+        var service = new AdminConfigService(
+            ConfigurationWithFile(),
+            ApiOptions.FromConfiguration(ConfigurationWithFile()),
+            AuthOptions.FromConfiguration(ConfigurationWithFile()),
+            PasskeyOptions.FromConfiguration(ConfigurationWithFile()),
+            new GitCommitService(_repoRoot),
+            secrets);
+
+        var secretRef = DbDataSync.Core.Secrets.SecretRefs.ForAppSetting("stateConnectionString");
+        Assert.True(service.SetStateConnectionSecret(StateConnectionStringKey, "hunter2"));
+        Assert.Equal("hunter2", secrets.Resolve(secretRef));
+        Assert.Equal("DBDATASYNC_SECRET_DBDATASYNC_CONFIG_STATECONNECTIONSTRING", secrets.EnvName(secretRef));
+    }
 }

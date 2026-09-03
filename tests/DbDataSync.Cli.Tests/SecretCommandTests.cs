@@ -5,10 +5,10 @@ namespace DbDataSync.Cli.Tests;
 /// <summary>
 /// <c>dbdatasync secret set|list|remove</c> — thin wrappers over <see cref="SecretStore"/>, reachable
 /// without going through a connection's own save flow (phase 79). <c>SecretCommand</c> constructs its
-/// own <c>new SecretStore(true)</c> per call rather than taking one as a parameter, the same shape
-/// every other CLI command in this file uses for its own dependencies — so these tests exercise it
-/// through the real store (env-var-backed in this environment; see <c>EnvironmentSecretProvider</c>),
-/// cleaning up what they write rather than injecting a fake.
+/// own <c>new SecretStore("DbDataSync", true)</c> per call rather than taking one as a parameter, the
+/// same shape every other CLI command in this file uses for its own dependencies — so these tests
+/// exercise it through the real store (env-var-backed in this environment; see
+/// <c>EnvironmentSecretProvider</c>), cleaning up what they write rather than injecting a fake.
 /// </summary>
 public sealed class SecretCommandTests : IDisposable
 {
@@ -58,6 +58,26 @@ public sealed class SecretCommandTests : IDisposable
         Assert.NotEqual(0, code);
         var (_, output) = Run(["list", _ref]);
         Assert.Contains("not set", output);
+    }
+
+    /// <summary>
+    /// Phase 93: <c>SecretCommand</c> now constructs <c>new SecretStore("DbDataSync", true)</c>, not the
+    /// old unprefixed <c>new SecretStore(true)</c> — proven here by resolving what it wrote through a
+    /// freshly-constructed, differently-prefixed store of each: a "DbDataSync"-prefixed store (matching
+    /// production) finds it, the package's own unconfigured default ("ClrKernel") does not, since they
+    /// are different provider namespaces (different Windows Credential Manager target names / env var
+    /// names) even for the exact same secret ref string.
+    /// </summary>
+    [Fact]
+    public void Set_IsResolvableUnderTheDbDataSyncPrefix_ButNotUnderThePackagesUnconfiguredDefault()
+    {
+        Run(["set", _ref, "sup3r-secret"]);
+
+        var dbDataSyncPrefixed = new SecretStore("DbDataSync", true);
+        Assert.Equal("sup3r-secret", dbDataSyncPrefixed.Resolve(_ref));
+
+        var packageDefault = new SecretStore(true);
+        Assert.False(packageDefault.TryResolve(_ref, out _));
     }
 
     private static (int ExitCode, string Output) Run(string[] args)

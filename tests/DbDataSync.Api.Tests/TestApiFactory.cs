@@ -38,7 +38,10 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<SecretStore>();
-            services.AddSingleton(SecretStore.ForProviders([new InMemorySecretProvider()]));
+            // Prefixed "DbDataSync" to match the real composition root (DbDataSyncHost.cs) — tests that
+            // set an env var for a connection's credential (SecretStore.EnvName) need this store to name
+            // things exactly as production does, not under SecretPrefix.Default's "ClrKernel".
+            services.AddSingleton(SecretStore.ForProviders("DbDataSync", [new InMemorySecretProvider()]));
         });
     }
 

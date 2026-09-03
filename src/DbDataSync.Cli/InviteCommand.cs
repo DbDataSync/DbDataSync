@@ -61,7 +61,7 @@ public static class InviteCommand
         StateDatabase database;
         try
         {
-            database = StateDatabase.FromOptions(engine, stateDb, stateConnectionString, new SecretStore(true));
+            database = StateDatabase.FromOptions(engine, stateDb, stateConnectionString, new SecretStore("DbDataSync", true));
         }
         catch (InvalidOperationException ex)
         {

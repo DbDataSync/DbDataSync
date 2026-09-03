@@ -2,9 +2,11 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace DbDataSync.Api.Tests;
@@ -36,6 +38,7 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
 
     private readonly TestApiFactory _factory;
     private readonly HttpClient _client;
+    private readonly SecretStore _secrets;
     private readonly string _databaseName = $"DbDataSyncE2E_{Guid.NewGuid():N}";
     private readonly string _sourceTable = $"Src_{Guid.NewGuid():N}";
     private readonly string _targetTable = $"Tgt_{Guid.NewGuid():N}";
@@ -47,6 +50,7 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
     {
         _factory = factory;
         _client = factory.CreateClient();
+        _secrets = factory.Services.GetRequiredService<SecretStore>();
     }
 
     public async Task InitializeAsync()
@@ -193,14 +197,14 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
         return connection;
     }
 
-    private static void SetSecretEnvVar(string connectionName, string password) =>
+    private void SetSecretEnvVar(string connectionName, string password) =>
         Environment.SetEnvironmentVariable(SecretEnvVarName(connectionName), password);
 
-    private static void ClearSecretEnvVar(string connectionName) =>
+    private void ClearSecretEnvVar(string connectionName) =>
         Environment.SetEnvironmentVariable(SecretEnvVarName(connectionName), null);
 
-    private static string SecretEnvVarName(string connectionName) =>
-        SecretRefs.EnvironmentVariableFor(SecretRefs.ForConnection(connectionName));
+    private string SecretEnvVarName(string connectionName) =>
+        _secrets.EnvName(SecretRefs.ForConnection(connectionName));
 
     private static async Task ExecuteAsync(SqlConnection connection, string sql)
     {

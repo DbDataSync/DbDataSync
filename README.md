@@ -89,7 +89,7 @@ configured with, including authentication.
 
 Secrets (connection passwords) need an OS keychain in production; in a sandboxed/CI environment
 without one, `SecretStore` falls back to environment variables named
-`CLRKERNEL_SECRET_DBDATASYNC_CONNECTION_<NAME>` (uppercased connection name) — set these before
+`DBDATASYNC_SECRET_DBDATASYNC_CONNECTION_<NAME>` (uppercased connection name) — set these before
 triggering a run if you hit that fallback path locally.
 
 ## 4. Run the SPA

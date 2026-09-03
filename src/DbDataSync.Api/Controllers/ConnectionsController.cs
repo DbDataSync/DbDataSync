@@ -2,6 +2,7 @@ using DbDataSync.Core.Config;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Net.Sockets;
+using ClrKernel.Core.Secrets;
 using DbDataSync.Api.Services;
 using DbDataSync.Core.Git;
 using DbDataSync.Core.Secrets;
@@ -20,7 +21,8 @@ public sealed class ConnectionsController(
     DriverConnectionFactory connectionFactory,
     ParameterCheck parameterCheck,
     ScriptTestService testService,
-    CurrentUser currentUser) : ControllerBase
+    CurrentUser currentUser,
+    SecretStore secrets) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
@@ -189,7 +191,7 @@ public sealed class ConnectionsController(
         return Ok(new CredentialSource(
             Store: "Environment / OS keyring",
             secretRef,
-            SecretRefs.EnvironmentVariableFor(secretRef),
+            secrets.EnvName(secretRef),
             RequiresCredential: connection.AuthMode == AuthMode.SqlAuth));
     }
 

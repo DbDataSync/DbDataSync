@@ -25,7 +25,7 @@ public static class SecretCommand
             return 1;
         }
 
-        var secrets = new SecretStore(true);
+        var secrets = new SecretStore("DbDataSync", true);
 
         return args[0].ToLowerInvariant() switch
         {

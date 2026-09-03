@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClrKernel.Core.Secrets;
 using DbDataSync.Api.Services;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
@@ -43,6 +44,7 @@ public sealed class ChangeCounterSourceIntegrationTests : IClassFixture<TestApiF
 
     private readonly TestApiFactory _factory;
     private readonly HttpClient _client;
+    private readonly SecretStore _secrets;
     private readonly string _databaseName = $"DbDataSyncCounterTest_{Guid.NewGuid():N}";
     private readonly string _connectionName = $"counter-src-{Guid.NewGuid():N}";
 
@@ -50,6 +52,7 @@ public sealed class ChangeCounterSourceIntegrationTests : IClassFixture<TestApiF
     {
         _factory = factory;
         _client = factory.CreateClient();
+        _secrets = factory.Services.GetRequiredService<SecretStore>();
     }
 
     public async Task InitializeAsync()
@@ -74,7 +77,7 @@ public sealed class ChangeCounterSourceIntegrationTests : IClassFixture<TestApiF
         await ExecuteAsync(db, "INSERT INTO dbo.[Orders] (Id, Name) VALUES (1, 'one');");
 
         Environment.SetEnvironmentVariable(
-            SecretRefs.EnvironmentVariableFor(SecretRefs.ForConnection(_connectionName)), "DbDataSync_Test_Pw1");
+            _secrets.EnvName(SecretRefs.ForConnection(_connectionName)), "DbDataSync_Test_Pw1");
 
         (await _client.PutAsJsonAsync($"/api/connections/{_connectionName}", new ConnectionInput
         {
@@ -92,7 +95,7 @@ public sealed class ChangeCounterSourceIntegrationTests : IClassFixture<TestApiF
     public async Task DisposeAsync()
     {
         Environment.SetEnvironmentVariable(
-            SecretRefs.EnvironmentVariableFor(SecretRefs.ForConnection(_connectionName)), null);
+            _secrets.EnvName(SecretRefs.ForConnection(_connectionName)), null);
 
         await using var connection = new SqlConnection(ServerConnectionString);
         await connection.OpenAsync();

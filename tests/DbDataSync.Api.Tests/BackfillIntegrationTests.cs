@@ -3,10 +3,12 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
 using DbDataSync.Drivers.Abstractions;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace DbDataSync.Api.Tests;
@@ -33,6 +35,7 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
         ?? "Data Source=localhost,14330;User ID=sa;Password=DbDataSync_Test_Pw1;TrustServerCertificate=True";
 
     private readonly HttpClient _client;
+    private readonly SecretStore _secrets;
     private readonly string _databaseName = $"DbDataSyncBackfillTest_{Guid.NewGuid():N}";
     private readonly string _connectionName = $"bf-conn-{Guid.NewGuid():N}";
     private readonly string _replicationName;
@@ -40,6 +43,7 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
     public BackfillIntegrationTests(TestApiFactory factory)
     {
         _client = factory.CreateClient();
+        _secrets = factory.Services.GetRequiredService<SecretStore>();
         _replicationName = $"bf-{Guid.NewGuid():N}";
     }
 
@@ -329,7 +333,7 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
             ],
         }, JsonOptions)).EnsureSuccessStatusCode();
 
-    private static void SetSecretEnvVar(string connectionName, string? password) =>
+    private void SetSecretEnvVar(string connectionName, string? password) =>
         Environment.SetEnvironmentVariable(
-            SecretRefs.EnvironmentVariableFor(SecretRefs.ForConnection(connectionName)), password);
+            _secrets.EnvName(SecretRefs.ForConnection(connectionName)), password);
 }

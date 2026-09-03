@@ -323,13 +323,19 @@ the parent API when it spawns a runner, never something an operator sets by hand
 
 ## Secrets
 
-Connection credentials go through `ClrKernel.Core.Secrets.SecretStore` (an external package). The
-secret ref for a connection named `<name>` is `dbdatasync:connection:<name>`. When no OS keyring is
-available (a sandboxed or CI environment, most commonly), `SecretStore` falls back to an environment
-variable: the ref uppercased, with every non-alphanumeric character replaced by `_`, prefixed
-`CLRKERNEL_SECRET_`.
+Connection credentials go through `ClrKernel.Core.Secrets.SecretStore` (an external package),
+constructed with `"DbDataSync"` as its configured prefix — every provider's naming (this environment
+variable fallback, the Windows Credential Manager target name, the macOS Keychain/Linux Secret Service
+service name) derives from it, rather than the package's own unconfigured `ClrKernel` default. The
+secret ref for a connection named `<name>` is `dbdatasync:connection:<name>` — a separate, this-app-owned
+namespacing convention inside the ref string itself, unrelated to the store's own prefix. When no OS
+keyring is available (a sandboxed or CI environment, most commonly), `SecretStore` falls back to an
+environment variable: the ref uppercased, with every non-alphanumeric character replaced by `_`, prefixed
+`DBDATASYNC_SECRET_`.
 
-Example: a connection named `orders-db` resolves to `CLRKERNEL_SECRET_DBDATASYNC_CONNECTION_ORDERS_DB`.
+Example: a connection named `orders-db` resolves to `DBDATASYNC_SECRET_DBDATASYNC_CONNECTION_ORDERS_DB`
+— the repeated `DBDATASYNC` is expected: the store's prefix and the ref's own namespacing are two
+different things that happen to share a name.
 
 ## SPA dev server (`src/DbDataSync.Web`)
 

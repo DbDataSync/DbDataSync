@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.State;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace DbDataSync.Api.Tests;
@@ -91,6 +93,26 @@ public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.DoesNotContain(
             "hunter2", DbDataSyncConfigFile.Read(factory.RepoRoot).GetValueOrDefault(StateConnectionStringKey) ?? "");
+    }
+
+    /// <summary>
+    /// Phase 93: the endpoint writes through the same <see cref="SecretStore"/> singleton DI hands every
+    /// other consumer, and that singleton is built with the "DbDataSync" prefix in this host exactly as
+    /// production is — not the package's unconfigured "ClrKernel" default.
+    /// </summary>
+    [Fact]
+    public async Task TheSecretEndpoint_ResolvesThroughTheDbDataSyncPrefixedStore()
+    {
+        var client = await factory.SignedInAsAsync(UserRole.Admin);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/admin/config/{Uri.EscapeDataString(StateConnectionStringKey)}/secret", new { value = "hunter2" });
+        response.EnsureSuccessStatusCode();
+
+        var secrets = factory.Services.GetRequiredService<SecretStore>();
+        Assert.Equal("DbDataSync", secrets.Prefix);
+        Assert.Equal(
+            "hunter2", secrets.Resolve(DbDataSync.Core.Secrets.SecretRefs.ForAppSetting("stateConnectionString")));
     }
 
     /// <summary>

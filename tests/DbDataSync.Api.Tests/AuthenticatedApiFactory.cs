@@ -46,7 +46,9 @@ public sealed class AuthenticatedApiFactory : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<SecretStore>();
-            services.AddSingleton(SecretStore.ForProviders([new InMemorySecretProvider()]));
+            // Prefixed "DbDataSync" to match the real composition root — see TestApiFactory's identical
+            // override for why this matters now that SecretStore.EnvName is prefix-sensitive.
+            services.AddSingleton(SecretStore.ForProviders("DbDataSync", [new InMemorySecretProvider()]));
         });
     }
 

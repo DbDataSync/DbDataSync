@@ -49,8 +49,13 @@ public sealed class ConfigRepository
             }
             else if (!_secrets.TryResolve(secretRef, out _))
             {
+                // Names the exact ref and the env var SecretStore would have fallen back to — the same
+                // two things ConnectionsController.GetCredentialSource shows on the credential-source
+                // panel, not just the connection name — since this is often the first place an operator
+                // learns anything is missing at all.
                 throw new ConfigValidationException(
-                    $"No password was provided and no existing credential is stored for connection '{input.Name}'.");
+                    $"No password was provided and no existing credential is stored for connection " +
+                    $"'{input.Name}' (secret ref '{secretRef}', environment variable '{_secrets.EnvName(secretRef)}').");
             }
         }
 

@@ -2,9 +2,11 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DbDataSync.Api.Tests;
 
@@ -31,13 +33,18 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         ?? "Data Source=localhost,14330;User ID=sa;Password=DbDataSync_Test_Pw1;TrustServerCertificate=True";
 
     private readonly HttpClient _client;
+    private readonly SecretStore _secrets;
     private readonly string _databaseName = $"DbDataSyncPreview_{Guid.NewGuid():N}";
     private readonly string _sourceTable = $"Src_{Guid.NewGuid():N}";
     private readonly string _targetTable = $"Tgt_{Guid.NewGuid():N}";
     private readonly string _connectionName = $"preview-conn-{Guid.NewGuid():N}";
     private readonly string _replicationName = $"preview-repl-{Guid.NewGuid():N}";
 
-    public PreviewIntegrationTests(TestApiFactory factory) => _client = factory.CreateClient();
+    public PreviewIntegrationTests(TestApiFactory factory)
+    {
+        _client = factory.CreateClient();
+        _secrets = factory.Services.GetRequiredService<SecretStore>();
+    }
 
     public async Task InitializeAsync()
     {
@@ -60,7 +67,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         await ExecuteAsync(connection, "CREATE TABLE dbo.PreviewHookLog (Note NVARCHAR(100) NOT NULL);");
 
         Environment.SetEnvironmentVariable(
-            SecretRefs.EnvironmentVariableFor(SecretRefs.ForConnection(_connectionName)), "DbDataSync_Test_Pw1");
+            _secrets.EnvName(SecretRefs.ForConnection(_connectionName)), "DbDataSync_Test_Pw1");
 
         (await _client.PutAsJsonAsync($"/api/connections/{_connectionName}", new ConnectionInput
         {
@@ -115,7 +122,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
     public async Task DisposeAsync()
     {
         Environment.SetEnvironmentVariable(
-            SecretRefs.EnvironmentVariableFor(SecretRefs.ForConnection(_connectionName)), null);
+            _secrets.EnvName(SecretRefs.ForConnection(_connectionName)), null);
 
         await using var connection = new SqlConnection(ServerConnectionString);
         await connection.OpenAsync();

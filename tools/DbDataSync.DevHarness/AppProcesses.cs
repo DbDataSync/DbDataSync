@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using ClrKernel.Core.Secrets;
+using DbDataSync.Core.Secrets;
 
 namespace DbDataSync.DevHarness;
 
@@ -71,7 +73,8 @@ public sealed class AppProcesses : IAsyncDisposable
         startInfo.Environment["DbDataSync__Auth__Disabled"] = "true";
 
         // The spawned TaskRunner inherits these. In an environment with no OS keychain, SecretStore
-        // falls back to CLRKERNEL_SECRET_* variables — without them a run fails to resolve the
+        // falls back to DBDATASYNC_SECRET_* variables (phase 93: prefixed "DbDataSync", not the
+        // package's own unconfigured "ClrKernel" default) — without them a run fails to resolve the
         // connection password. Same workaround the Playwright suite and the integration tests use.
         foreach (var name in new[] { Scenario.SourceConnectionName, Scenario.TargetConnectionName })
             startInfo.Environment[SecretEnvVarName(name)] = Scenario.SaPassword;
@@ -152,12 +155,13 @@ public sealed class AppProcesses : IAsyncDisposable
             throw new HarnessException($"npm exited with code {process.ExitCode}.");
     }
 
-    public static string SecretEnvVarName(string connectionName)
-    {
-        var key = $"dbdatasync:connection:{connectionName}".ToUpperInvariant();
-        var sanitized = new string(key.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
-        return $"CLRKERNEL_SECRET_{sanitized}";
-    }
+    // A prefix-only store (no providers) purely to compute the name SecretStore.EnvName would give this
+    // ref under the real "DbDataSync" prefix — the harness never reads or writes through this store
+    // itself, it only sets the environment variable the *spawned* process's own SecretStore resolves.
+    private static readonly SecretStore EnvNamer = SecretStore.ForProviders("DbDataSync", []);
+
+    public static string SecretEnvVarName(string connectionName) =>
+        EnvNamer.EnvName(SecretRefs.ForConnection(connectionName));
 
     /// <summary>Completes when any child exits, so <c>up</c> stops pretending the environment is
     /// healthy after the API has fallen over.</summary>

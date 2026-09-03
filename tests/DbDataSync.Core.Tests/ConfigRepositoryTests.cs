@@ -1,6 +1,7 @@
 using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
+using DbDataSync.Core.Secrets;
 using LibGit2Sharp;
 
 namespace DbDataSync.Core.Tests;
@@ -102,6 +103,31 @@ public sealed class ConfigRepositoryTests : IDisposable
         };
 
         Assert.Throws<ConfigValidationException>(() => _repository.SaveConnection(input, Author));
+    }
+
+    /// <summary>
+    /// Phase 93: the message an operator sees here has to name the exact secret ref and the
+    /// environment variable <see cref="SecretStore"/> would have fallen back to — not just the
+    /// connection name — since this is often the first place anybody learns a credential is missing at
+    /// all.
+    /// </summary>
+    [Fact]
+    public void SaveConnection_SqlAuthWithoutPasswordOrExistingSecret_MessageNamesRefAndEnvVar()
+    {
+        var input = new ConnectionInput
+        {
+            Name = "orders-db",
+            DriverType = ConnectionDriverType.MsSql,
+            Host = "sql01",
+            AuthMode = AuthMode.SqlAuth,
+            UserId = "svc_orders",
+        };
+
+        var secretRef = SecretRefs.ForConnection("orders-db");
+        var ex = Assert.Throws<ConfigValidationException>(() => _repository.SaveConnection(input, Author));
+
+        Assert.Contains(secretRef, ex.Message);
+        Assert.Contains(_secrets.EnvName(secretRef), ex.Message);
     }
 
     [Fact]

@@ -25,9 +25,11 @@ const authEnv = {
   DbDataSync__Auth__Disabled: 'true',
 }
 
+// Phase 93: DBDATASYNC_SECRET_* now, not the package's unconfigured "ClrKernel" default — the API's
+// SecretStore is constructed with "DbDataSync" as its prefix.
 const secretEnv = {
-  CLRKERNEL_SECRET_DBDATASYNC_CONNECTION_PLAYWRIGHT_SRC: 'DbDataSync_Test_Pw1',
-  CLRKERNEL_SECRET_DBDATASYNC_CONNECTION_PLAYWRIGHT_TGT: 'DbDataSync_Test_Pw1',
+  DBDATASYNC_SECRET_DBDATASYNC_CONNECTION_PLAYWRIGHT_SRC: 'DbDataSync_Test_Pw1',
+  DBDATASYNC_SECRET_DBDATASYNC_CONNECTION_PLAYWRIGHT_TGT: 'DbDataSync_Test_Pw1',
 }
 
 export default defineConfig({
