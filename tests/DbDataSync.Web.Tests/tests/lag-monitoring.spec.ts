@@ -173,4 +173,52 @@ test.describe('lag monitoring', () => {
     await page.goto(`/replications/${REPLICATION_NAME}/monitoring`)
     await expect(page.getByTestId('monitoring-range-figure')).toContainText('no mapping reports lag yet')
   })
+
+  /**
+   * The row has to be tall enough for the cell it contains — phase 96.
+   *
+   * `.grid-row` sets a **fixed** height, not a floor, and `LagCell` in its fullest state stacks three
+   * things: the figure with its badge, "N versions behind", and the "as of" line phase 88 added. That
+   * is roughly 50px of content, and in the 40px `tall` box it used to sit in it spilled above *and*
+   * below into the rows on either side.
+   *
+   * **The fixture has to be the fullest state, not the default one.** Every other payload in this
+   * file omits `asOfUtc`, which is exactly why this survived: a test built on those rows passes
+   * against the broken CSS.
+   */
+  test('05 - a lag cell in its fullest state stays inside its row', async ({ page }) => {
+    await stub(page)
+    await page.route(`**/api/replications/${REPLICATION_NAME}/lag`, (route) => route.fulfill(json({
+      ...LAG_PAYLOAD,
+      mappings: {
+        ...LAG_PAYLOAD.mappings,
+        // All three lines at once: a figure, a version count beside it, and the reading's own time.
+        orders: {
+          readerKind: 'MsSqlChangeTracking',
+          supported: true,
+          exactLagMs: 300_000,
+          versionsBehind: 4200,
+          estimatedLagMs: null,
+          asOfUtc: '2026-05-01T09:30:00Z',
+        },
+      },
+    })))
+
+    await page.goto(`/replications/${REPLICATION_NAME}/monitoring`)
+    await expect(page.getByTestId('monitoring-asof-orders')).toBeVisible()
+
+    const row = await page.getByTestId('monitoring-row-orders').boundingBox()
+    const cell = await page.getByTestId('monitoring-lag-orders').boundingBox()
+    expect(row).not.toBeNull()
+    expect(cell).not.toBeNull()
+
+    // Inside its row at both ends. `align-items: center` in a too-short row spills equally in both
+    // directions, so asserting only the bottom would pass with the top still overlapping.
+    expect(cell!.y).toBeGreaterThanOrEqual(row!.y - 0.5)
+    expect(cell!.y + cell!.height).toBeLessThanOrEqual(row!.y + row!.height + 0.5)
+
+    // And it does not overlap the row beneath it, which is what the spill actually looked like.
+    const next = await page.getByTestId('monitoring-row-invoices').boundingBox()
+    expect(cell!.y + cell!.height).toBeLessThanOrEqual(next!.y + 0.5)
+  })
 })

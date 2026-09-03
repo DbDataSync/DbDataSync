@@ -346,6 +346,12 @@ h1.crumb.mono { font-family: var(--mono); }
 }
 .grid-row.tall { height: 40px; }
 .grid-row.short { height: 34px; }
+/* A floor rather than a fixed height, for the one grid whose cells genuinely grow: the monitoring
+   screen's lag cell stacks a figure, a versions-behind line and an "as of" line, and outgrew `tall`
+   when phase 88 added the third. Its own variant and not a change to `tall` — ReplicationsPage uses
+   that one and is not broken — and not a change to `.grid-row`, whose fixed height is load-bearing
+   for the dense tables that are most of this app. */
+.grid-row.auto { height: auto; min-height: 40px; padding-top: 6px; padding-bottom: 6px; }
 .grid-row:last-child { border-bottom: none; }
 button.grid-row { border-left: none; border-right: none; border-top: none; background: none; width: 100%; cursor: pointer; }
 button.grid-row:hover { background: var(--row-head); }
@@ -402,6 +408,21 @@ button.grid-row.active { background: var(--accent-row-alt); box-shadow: inset 2p
 }
 .btn-link.quiet { color: var(--ink-10); }
 .btn-link.quiet:hover { color: var(--danger-ink); }
+
+/* A button that is only there to be clickable: the run-history status cell, where every row opens a
+   details popup. Deliberately not .btn-link, which is accent coloured — applied to every row that
+   would turn the status column blue and bury the badge's own status colour, which is the thing being
+   read. The affordance is hover and focus, not colour.
+
+   `text-align: left` because a button's UA default is `center`, and this cell sits under a
+   left-aligned header. */
+.status-button {
+  border: none; background: none; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  border-radius: 3px;
+}
+.status-button:hover { opacity: .78; }
+.status-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .field { display: flex; flex-direction: column; }
 .field > label { font: 500 11px var(--ui); color: var(--ink-5); margin-bottom: 5px; }
@@ -690,7 +711,7 @@ select.select {
   box-shadow: 0 12px 32px rgba(28, 26, 23, .18);
   max-height: 100%; overflow: auto;
 }
-/* For a modal showing content rather than asking a short question (see RunErrorDialog.tsx) — wide
+/* For a modal showing content rather than asking a short question (see RunDetailsDialog.tsx) — wide
    enough that a long error message wraps into something readable instead of a tall, narrow ribbon. */
 .modal.wide { width: min(640px, 100%); }
 

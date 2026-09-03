@@ -1,6 +1,7 @@
 # Phase 96 — adding a target column, and two grid rows that lie
 
-**Status**: Planned, not started
+**Status**: Built; verification in progress — see "Progress" at the end. Stays in `todo/` until it is
+settled, per this folder's rule that a phase moves to `done/` only once it is verified.
 **Plan reference**: `architecture/planning/done/mapping-add-column-and-two-grid-layout-defects.md`,
 resolved 2026-09-03.
 
@@ -161,3 +162,74 @@ would pass against the broken code, which is how both of these survived this lon
   reported `unmappable` by the planner, so the mapping would save and then fail at provisioning. Warning
   at the row is certain; refusing the save is a stronger claim about what the operator meant, and
   probably belongs to the provisioning card rather than the editor.
+
+---
+
+## Progress, 2026-09-03
+
+All three defects are implemented and all of this phase's own tests pass. One pre-existing test is
+unresolved, which is why this is not in `done/` yet.
+
+### Built
+
+1. **Add-column control** — `ColumnMappingEditor.tsx`. Text input with a `<datalist>` of the unmapped
+   catalog columns, always rendered. Trimmed; empty and duplicate-`targetColumn` both refused with the
+   reason shown beside the control. `MISSING` became `WILL ADD`.
+2. **Status column and dialog** — every status is a button opening `RunDetailsDialog` (was
+   `RunErrorDialog`), which now carries rows read/written, processing time, queue time, the watermark
+   and the stage trace, with the error block conditional.
+3. **Row height** — `.grid-row.auto` (`height: auto; min-height: 40px` with vertical padding), used
+   only by `MappingLagRow`.
+
+### Decisions taken during implementation
+
+- **The open question is resolved as "warn, do not block".** A `WILL ADD` row whose source type the
+  canonical system cannot translate — `InferredColumnType.problem` set — gets a `CANNOT ADD` badge in
+  the old warning voice instead, and the save is still allowed. Refusing it would be a stronger claim
+  about what the operator meant than the editor is in a position to make, and the provisioning card is
+  where that claim belongs.
+- **The row's expand-chevron stays.** The plan's "rather than making it the row's separate chevron"
+  is read as "the dialog carries the trace too", not "remove the inline one": the chevron is covered
+  by golden-path tests and removing shipped UI is not in this phase's scope.
+- **`RunsPanel` gave up its shared pieces rather than the dialog duplicating them.** `processingTime`
+  and `queueTime` moved to `components/runTimes.ts`, and `WatermarkCell`/`TimingDetail` to
+  `components/RunFigures.tsx`, verbatim. The panel imports the dialog, so the dialog importing back
+  out of the panel would have been a cycle. `RunsPanel` is ~150 lines shorter.
+- **`text-align: left`, not only `justify-self: start`.** The plan names `justify-self: start` as what
+  fixes the column. It is `text-align: left` on `.status-button` that actually does — a button's UA
+  default is `center`, and overriding it is what puts the badge back at the cell's left edge.
+  `justify-self: start` is still set, for a different reason: it shrinks the button to its badge, so
+  the thing that looks clickable is the thing that is.
+
+### A test that was written wrong first, and is worth recording
+
+The alignment assertion initially measured the **wrapper's** bounding box and **passed against the
+unfixed markup**. `text-align: center` centres a badge inside a wrapper that still spans the grid
+column, so the wrapper's left edge is the column's left edge either way. Measuring `.status` — the
+badge itself — shows the real difference: 16.4px with the old markup, under 1px with the fix.
+
+This is exactly the failure mode the plan warned about, and it was only caught by deliberately
+reverting the fix and re-running. Both layout assertions have now been run against the broken code
+and seen to fail:
+
+- status alignment: `Expected: < 1, Received: 16.359375`
+- lag row overflow: `Expected: >= 276, Received: 271` (the cell's top spilling above its row)
+
+### Verified
+
+- `tests/mapping-column-add.spec.ts` — 5 tests, all passing.
+- `tests/run-details-dialog.spec.ts` — 4 tests, all passing.
+- `tests/lag-monitoring.spec.ts` test 05 — passing, and failing without the CSS fix.
+- `tsc -b`, the SPA build, and `oxlint` all clean, with no new warnings.
+
+### Outstanding
+
+`golden-path.spec.ts` test 18 ("a target table that does not exist is named, created from the plan,
+and replicated into") failed once in a whole-suite run, at 1.6m against its 3m timeout. Not yet
+attributed. It is not obviously related — it counts `.grid-row` elements in the mapping editor, and
+the always-rendered add control is a `.row`, not a `.grid-row` — and its last step polls for a real
+replication pass to succeed within 90s, which is the kind of thing a busy SQL Server misses. Running
+the golden-path file on its own to see whether it reproduces; if it does, the next step is to stash
+this phase's source changes and run it clean, to establish whether this phase caused it.
+
+**This phase is not done until that is answered.**

@@ -61,6 +61,9 @@ export function ColumnMappingEditor({
   const targetColumns = targetExists === false ? sourceColumns : catalogTargetColumns
   const { data: inferred } = useInferredColumnTypes(replicationName, mappingName)
   const [columnToAdd, setColumnToAdd] = useState('')
+  // Why the last Add was refused, shown beside the control. Surfaced rather than the input silently
+  // doing nothing, which is indistinguishable from a broken button.
+  const [addProblem, setAddProblem] = useState<string | null>(null)
 
   // The same-name auto-suggestion used to live here, and moved up to TableMappingForm when this
   // editor became one tab among several (phase 64): a mapping whose columns were never suggested
@@ -139,6 +142,33 @@ export function ColumnMappingEditor({
       .map((tc) => ({ sourceColumn: tc.name, targetColumn: tc.name, transform: null })))
   }
 
+  /**
+   * Append a row for a target column named by hand.
+   *
+   * The name is not required to be on the target: provisioning adds one that is not, which is the
+   * whole point of the control (see below). What it may not be is a second row targeting a column
+   * this mapping already targets — two rows writing the same target column is a config error that
+   * fails at staging with a message naming neither of them.
+   */
+  const addColumn = () => {
+    const name = columnToAdd.trim()
+    if (!name) {
+      setAddProblem('Name the target column to add.')
+      return
+    }
+    if (mapped.has(name)) {
+      setAddProblem(`'${name}' is already mapped — edit that row instead of adding a second one.`)
+      return
+    }
+
+    // Unchanged from the picker this replaces: the same-named source column when there is one, else
+    // the first, so the row arrives with something plausible rather than empty.
+    const suggestion = sourceColumns.find((c) => c.name === name)?.name ?? sourceColumns[0]?.name ?? ''
+    onChange([...mappings, { sourceColumn: suggestion, targetColumn: name, transform: null }])
+    setColumnToAdd('')
+    setAddProblem(null)
+  }
+
   return (
     <div className="card flush" data-testid="column-mappings-table">
       <div className="card-head tight">
@@ -197,10 +227,39 @@ export function ColumnMappingEditor({
                 RENAMED
               </span>
             )}
-            {/* Same honesty on the other side: a target column the catalog does not have is a mapping
-                that will fail at staging, and saying so here beats finding out on the next pass. */}
+            {/* A target column the catalog does not have used to be reported as a fault — MISSING,
+                "this column is not on the target table" — because the only way to reach that state
+                was by accident. It is now something an operator can ask for deliberately (see the
+                add control below), and provisioning can carry it out: AlterTargetTablePlanner emits
+                RenderAddColumn for exactly this case. So the badge reports an intention, in the same
+                voice as RENAMED beside it.
+
+                Unless nothing can carry it out. A source column the canonical type system cannot
+                translate has no inferred target type, and provisioning has no ALTER to generate for
+                it — there the old warning wording is still the honest one. */}
             {targetExists === true && !targetColumns.some((c) => c.name === m.targetColumn) && (
-              <span className="badge" title="This column is not on the target table.">MISSING</span>
+              inferenceFor(m.sourceColumn)?.problem
+                ? (
+                  <span
+                    className="badge"
+                    title={
+                      'This column is not on the target table, and cannot be added: ' +
+                      `${inferenceFor(m.sourceColumn)!.problem}`
+                    }
+                    data-testid={`column-mapping-unaddable-${m.targetColumn}`}
+                  >
+                    CANNOT ADD
+                  </span>
+                )
+                : (
+                  <span
+                    className="badge"
+                    title="Not on the target table yet — provisioning adds it when it is applied."
+                    data-testid={`column-mapping-will-add-${m.targetColumn}`}
+                  >
+                    WILL ADD
+                  </span>
+                )
             )}
           </span>
           <span title={inferenceFor(m.sourceColumn)?.fidelity ?? inferenceFor(m.sourceColumn)?.problem ?? undefined}>
@@ -239,34 +298,46 @@ export function ColumnMappingEditor({
 
       {mappings.length === 0 && <div className="empty">No columns mapped yet.</div>}
 
-      {unmapped.length > 0 && (
-        <div className="row" style={{ height: 38, padding: '0 14px', gap: 8, borderTop: '1px solid var(--row-edge)' }}>
-          <select
-            className="select sm"
-            style={{ maxWidth: 240 }}
-            value={columnToAdd}
-            onChange={(e) => setColumnToAdd(e.target.value)}
-            data-testid="add-target-column-select"
-          >
-            <option value="">Add target column…</option>
-            {unmapped.map((c) => <option key={c.name} value={c.name}>{c.name}{c.isPrimaryKey ? ' (PK)' : ''}</option>)}
-          </select>
-          <button
-            type="button"
-            className="btn btn-sm"
-            data-testid="add-target-column-button"
-            disabled={!columnToAdd}
-            onClick={() => {
-              if (!columnToAdd) return
-              const suggestion = sourceColumns.find((c) => c.name === columnToAdd)?.name ?? sourceColumns[0]?.name ?? ''
-              onChange([...mappings, { sourceColumn: suggestion, targetColumn: columnToAdd, transform: null }])
-              setColumnToAdd('')
-            }}
-          >
-            Add
-          </button>
-        </div>
-      )}
+      {/* A text input with the catalog's unmapped columns as suggestions, not a picker of them.
+          One control rather than two, because "map a column the target already has" and "map one
+          provisioning will add" are the same act from the operator's side, and which of the two it
+          turned out to be is already shown by the badge on the row it produces.
+
+          Always rendered. It used to be gated on there being an unmapped catalog column left, which
+          is what made the reported defect: remove a row whose target column is not on the target and
+          there was nothing left to add it back with. A new column can always be added, so the
+          condition had nothing left to justify it. */}
+      <div className="row" style={{ minHeight: 38, padding: '6px 14px', gap: 8, borderTop: '1px solid var(--row-edge)' }}>
+        <input
+          className="input sm"
+          style={{ maxWidth: 240 }}
+          list="add-target-column-options"
+          placeholder="Add target column…"
+          aria-label="Add target column"
+          value={columnToAdd}
+          onChange={(e) => { setColumnToAdd(e.target.value); setAddProblem(null) }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addColumn() } }}
+          data-testid="add-target-column-input"
+        />
+        <datalist id="add-target-column-options">
+          {unmapped.map((c) => (
+            <option key={c.name} value={c.name}>{c.isPrimaryKey ? 'PK' : ''}</option>
+          ))}
+        </datalist>
+        <button
+          type="button"
+          className="btn btn-sm"
+          data-testid="add-target-column-button"
+          onClick={addColumn}
+        >
+          Add
+        </button>
+        {addProblem && (
+          <span className="hint" data-testid="add-target-column-problem" style={{ color: 'var(--danger-ink)' }}>
+            {addProblem}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

@@ -90,7 +90,7 @@ function MappingLagRow({ name, task, source, target, lag }: {
 }) {
   return (
     <div
-      className="grid-row tall"
+      className="grid-row auto"
       style={{ gridTemplateColumns: COLUMNS, gap: 14 }}
       data-testid={`monitoring-row-${name}`}
       data-lag-state={lag ? lagStateOf(lag) : undefined}
