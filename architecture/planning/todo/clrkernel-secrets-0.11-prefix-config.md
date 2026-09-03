@@ -1,7 +1,8 @@
 # ClrKernel.Core.Secrets 0.9.2 → 0.11.0: a configurable prefix, and what it means for an existing install
 
-**Status: draft — real open questions, not resolved. Depends on the concurrent DataSync→DbDataSync
-rename; do not assign an implementation phase number until that lands (see note at the end).**
+**Status: resolved, except the package's own API surface, which can't be verified from outside it. New
+prefix and migration stance both decided below. Still depends on the concurrent DataSync→DbDataSync
+rename landing in this checkout before a phase number is assigned — see note at the end.**
 
 ## What's there today, confirmed by reading the code
 
@@ -36,31 +37,26 @@ hand-editing, and 0.11.0's configurable prefix is the mechanism to do it properl
 with that effort rather than picking a new prefix unilaterally here — the new prefix should be whatever
 the rename settles the product's name on, not a guess made in this doc.
 
-## The real, unresolved question: what happens to secrets already stored under the old prefix
+## Resolved: the new prefix, and no migration
 
-This is the part that isn't a metrics figure or a cached timestamp — it's a password. Every existing
-install has real credentials sitting in an OS keyring (or its environment-variable fallback) under
-`datasync:connection:<name>` and `datasync:config:<key>` keys, or under `CLRKERNEL_SECRET_...`
-environment variables built from them. Changing the prefix without a migration path means every one of
-those installs loses access to its own stored credentials on upgrade — not a degraded feature, a hard
-failure to connect to every configured source and target at once.
+**New prefix: `DbDataSync`**, matching the rename. Applied with the same casing convention each existing
+consumer already uses rather than pasted in verbatim everywhere: `SecretRefs.cs`'s key namespace stays
+lowercase-with-colons (`dbdatasync:connection:<name>`, `dbdatasync:config:<key>`), and the env var
+fallback keeps whatever casing the package's own convention uses today (`CLRKERNEL_SECRET_` was already
+uppercase regardless of the ref's own casing, since `EnvironmentVariableFor` uppercases the whole
+sanitized string — confirm 0.11.0's configurable version preserves that rather than taking the prefix
+case-sensitively as given).
 
-This needs one of:
-
-- **A one-time migration** that reads every secret under the old prefix and rewrites it under the new
-  one, run explicitly (a CLI command, likely — matching how `datasync secret set` already exists as an
-  explicit, operator-run action rather than something automatic) rather than silently at process start.
-- **Dual-read, single-write**: `SecretStore` (or `SecretRefs`) reads the new prefix first, falls back to
-  the old one if not found, and only ever writes under the new one — so nothing breaks immediately, and
-  secrets migrate naturally as they're rewritten, with an explicit migration command still worth having
-  for anyone who wants to close out the transition deliberately rather than let it happen implicitly.
-- **A hard cutover with a clear, upfront failure** — matching the tone phase 91 just took for the
-  metadata cache: fail loud, name exactly which secret refs are missing and why, tell the operator to
-  run the migration. Consistent with this session's recent preference for explicit, operator-driven
-  transitions over silent ones — but a **materially higher-stakes** version of it, since the earlier
-  case degrades a run; this one can take down every configured connection in an install at once. Worth
-  explicit confirmation before assuming this is the wanted shape, given the stakes are a step up from
-  where that preference was last stated.
+**No migration.** Confirmed explicitly: secrets stored under the old `datasync:`/`CLRKERNEL_SECRET_...`
+names are not carried forward. An install upgrading past this change re-enters its credentials under the
+new prefix — the same `datasync secret set`-equivalent action already exists for setting a secret in the
+first place, so there is no new UI or command needed for this, just the expectation that it happens once
+per install, at the same time as everything else the rename touches. Nothing in this change needs to
+special-case a stale old-prefix secret in the codebase; it simply won't be found, and every path that
+looks a secret up already has to handle "secret is missing" as a normal case (a fresh install has never
+set any). Confirm that existing missing-secret handling produces a clear enough message on its own —
+if it doesn't already say plainly which ref it was looking for, that's worth a small fix alongside this,
+not a new migration mechanism.
 
 ## What's genuinely unverified
 
@@ -74,23 +70,24 @@ and the right files, not the package's exact new surface.
 
 ## What this update should not do
 
-- Pick a specific new prefix string in this doc — that's the rename effort's decision, not this one's.
-- Silently migrate or drop secrets on upgrade without an explicit, confirmed transition plan — see above.
+- Build any migration mechanism for old-prefix secrets — explicitly decided against.
 - Touch the unrelated `DataSync:*`/`DataSync__*` configuration-section prefix — a different concern,
   possibly the rename's to handle separately, not this package upgrade's.
 
 ## Open questions, to resolve before an implementation phase doc exists
 
-1. What does 0.11.0's actual API look like for setting the prefix — confirm against the real package.
-2. What should the new prefix be — depends on where the DataSync→DbDataSync rename lands.
-3. Migration strategy for secrets already stored under the old prefix — one-time explicit migration,
-   dual-read-single-write, or a confirmed hard cutover with clear failure messaging. This is the
-   question this doc most needs a real answer to before implementation starts.
-4. Does "various password providers" mean this package wraps more than the OS-native keyring + env-var
-   fallback already known about — confirm the actual provider list in 0.11.0.
+1. What does 0.11.0's actual API look like for setting the prefix — a `SecretStore` constructor
+   parameter, a separate configuration call, environment-variable-only vs. also covering whichever
+   "various password providers" the package abstracts (confirm the actual provider list, don't assume
+   it means every OS-native store uniformly). Not verifiable from outside the package — pull the real
+   0.11.0 release and read it before writing an implementation phase doc.
+2. Whether `SecretRefs.cs` and its file path/namespace (`DataSync.Core/Secrets/`) themselves get renamed
+   as part of the broader rename effort, or only the string values inside them change — affects whether
+   this phase touches file paths or just literals. Check the state of the rename once it's landed here
+   rather than assuming either way.
 
-**Next step**: do not assign a phase number yet — the user has a concurrent agent renaming the project
-from DataSync to DbDataSync, and this plan's prefix choice and file paths (`SecretRefs.cs` lives under
-`DataSync.Core`) both depend on how that lands. Once it's landed and the open questions above are
-answered, this becomes ready for an implementation phase doc, numbered against whatever
-`implementation/todo/`/`done/` looks like at that point.
+**Next step**: do not assign a phase number yet — the concurrent DataSync→DbDataSync rename (a separate
+session, already underway per the user) hasn't landed in this checkout, and this change's file paths
+(`SecretRefs.cs` lives under `DataSync.Core`) depend on how it does. Once it's landed and question 1
+above is answered against the real package, this is ready for an implementation phase doc, numbered
+against whatever `implementation/todo/`/`done/` looks like at that point.
