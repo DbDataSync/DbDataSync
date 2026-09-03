@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
+import { RunErrorDialog } from '../../components/RunErrorDialog'
 import { RunKindBadge, StatusBadge } from '../../components/StatusBadge'
 import { BackfillForm } from './BackfillForm'
 import {
@@ -73,6 +74,9 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
   const [showBackfill, setShowBackfill] = useState(false)
   const [filter, setFilter] = useState<Filter>('all')
+  // The one run whose failure is open in the popup — see RunErrorDialog. Independent of expandedRunId,
+  // which is only ever a traced run's stage timings now.
+  const [errorRun, setErrorRun] = useState<TaskRunRecord | null>(null)
 
   const isWatching = !!activeRunId
 
@@ -234,21 +238,20 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
           )}
           {visible.map((r) => {
             const hasError = r.status === 'Failed' && !!r.errorSummary
-            const expandable = !!r.timing || hasError
             return (
             <div key={r.runId} style={{ display: 'contents' }}>
             <div className="grid-row short" style={{ gridTemplateColumns: COLUMNS, gap: 12 }}>
               <span className="dim row" style={{ gap: 5 }}>
-                {/* Only a traced or failed run gets the affordance — for nearly every row there is
-                    nothing to open, and a disabled chevron on every line would be the whole table
-                    advertising a feature it is not using. */}
-                {expandable && (
+                {/* Only a traced run gets the affordance — for nearly every row there is nothing to
+                    open, and a disabled chevron on every line would be the whole table advertising a
+                    feature it is not using. A failed run's details are a popup now, not this. */}
+                {r.timing && (
                   <button
                     type="button"
                     className="btn-link quiet"
                     style={{ padding: 0 }}
                     aria-expanded={expandedRunId === r.runId}
-                    title={r.timing ? 'This pass was traced — stage timings' : 'This pass failed — error details'}
+                    title="This pass was traced — stage timings"
                     onClick={() => setExpandedRunId(expandedRunId === r.runId ? null : r.runId)}
                     data-testid={`run-timing-toggle-${r.runId}`}
                   >
@@ -267,7 +270,20 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
               <span>{r.rowsWritten.toLocaleString()}</span>
               <span className="dim" title={queueTime(r) ?? undefined}>{processingTime(r)}</span>
               <WatermarkCell run={r} times={watermarkTimes?.[r.runId]} />
-              <span title={r.errorSummary ?? undefined}><StatusBadge status={r.status} /></span>
+              {hasError ? (
+                <button
+                  type="button"
+                  className="btn-link"
+                  style={{ padding: 0 }}
+                  title="See why this run failed"
+                  onClick={() => setErrorRun(r)}
+                  data-testid={`run-status-${r.runId}`}
+                >
+                  <StatusBadge status={r.status} />
+                </button>
+              ) : (
+                <span><StatusBadge status={r.status} /></span>
+              )}
               {/* Offered, not performed. A full reload of a table that fell behind can be hours of
                   work, so a pass failing because its source dropped the history it needed reports
                   that and puts the fix one click away — rather than starting it unasked. */}
@@ -290,14 +306,13 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
               </span>
             </div>
             {expandedRunId === r.runId && r.timing && <TimingDetail timing={r.timing} runId={r.runId} />}
-            {expandedRunId === r.runId && hasError && (
-              <div className="run-error-detail" data-testid={`run-error-${r.runId}`}>{r.errorSummary}</div>
-            )}
             </div>
             )
           })}
         </div>
       </div>
+
+      {errorRun && <RunErrorDialog run={errorRun} onClose={() => setErrorRun(null)} />}
     </div>
   )
 }

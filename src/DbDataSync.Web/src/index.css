@@ -690,6 +690,20 @@ select.select {
   box-shadow: 0 12px 32px rgba(28, 26, 23, .18);
   max-height: 100%; overflow: auto;
 }
+/* For a modal showing content rather than asking a short question (see RunErrorDialog.tsx) — wide
+   enough that a long error message wraps into something readable instead of a tall, narrow ribbon. */
+.modal.wide { width: min(640px, 100%); }
+
+/* .run-error-detail (below) is tuned to sit flush under a run-history row; inside a modal it needs its
+   own box rather than the row's borders, and a cap so a very long message scrolls instead of pushing
+   the Close button off screen. */
+.run-error-detail.modal-error {
+  padding: 10px 12px;
+  border: 1px solid var(--danger-edge);
+  border-radius: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
 
 /* ── Run timing detail (see RunsPanel.tsx) ──────────────────────────────────── */
 /* Opens beneath a traced run's row. Deliberately not part of the grid: it spans the whole width
