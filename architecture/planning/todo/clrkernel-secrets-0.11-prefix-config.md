@@ -86,8 +86,8 @@ and the right files, not the package's exact new surface.
    this phase touches file paths or just literals. Check the state of the rename once it's landed here
    rather than assuming either way.
 
-**Next step**: do not assign a phase number yet — the concurrent DataSync→DbDataSync rename (a separate
-session, already underway per the user) hasn't landed in this checkout, and this change's file paths
-(`SecretRefs.cs` lives under `DataSync.Core`) depend on how it does. Once it's landed and question 1
-above is answered against the real package, this is ready for an implementation phase doc, numbered
-against whatever `implementation/todo/`/`done/` looks like at that point.
+**Next step**: the rename itself has been numbered phase 92 (not yet committed to this repo as of this
+writing — re-check `implementation/todo/`/`done/` before assuming that's still open, per this repo's
+"not reserved until committed" numbering rule). This plan is the natural phase 93, once phase 92 has
+actually landed in this checkout and question 1 above is answered against the real 0.11.0 package —
+re-verify the number against both directories at that point rather than assuming 93 is still free.
