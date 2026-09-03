@@ -125,6 +125,14 @@ export function ColumnMappingEditor({
     })
   }
 
+  /**
+   * Pair every target column that the source also has, by name, 1:1.
+   *
+   * **The server implements this same rule in `ColumnAutoMap` (C#)**, because a mapping created in
+   * bulk is never opened in this editor and has to arrive with the columns pressing this button would
+   * have produced — see phase 95. The two cannot share code across the language boundary; if this one
+   * changes, that one changes with it.
+   */
   const autoMap = () => {
     const sourceNames = new Set(sourceColumns.map((c) => c.name))
     onChange(targetColumns.filter((tc) => sourceNames.has(tc.name))

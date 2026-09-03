@@ -38,6 +38,11 @@ Updated 2026-09-03: 096 goes to the top. Three defects reported from daily use, 
 them — a mapping column that cannot be added back once removed — blocks an ordinary edit with no
 workaround. Cheap enough that queueing it behind an engine phase would mean living with it for weeks.
 
+Updated 2026-09-03: 095 went in at the top and is already done and removed — a mapping the bulk screen
+creates now arrives with its columns cached and mapped, so it runs without anyone opening it. It jumped
+the queue because it was much smaller than the three below it and it fixed a shipped screen that was
+producing mappings which could not run at all. Those three engine phases are again what is left.
+
 Set 2026-09-01; 083 done and removed — the admin-screen/config/certificate arc (079, 081, 082, 083) is
 now fully shipped, end to end. What's left below 096 is the three engine phases that have been waiting
 since distribution and auth moved above them — with 032 and 033 done there were three change-tracking

@@ -1388,12 +1388,21 @@ public sealed class Shout : IValueColumnExpression
     expect(created.sources[0].connectionName ?? null).toBeNull()
     expect(created.sources[0].database ?? null).toBeNull()
 
+    // The columns are not part of "unset" — phase 95. A mapping created here is introspected as it is
+    // created, so it arrives with the cache phase 91's readers and writers run from and the column
+    // mappings staging refuses to work without. Without them it would need a visit to the editor
+    // before it could run, which is the gesture this screen exists to remove.
+    expect(created.columnMappings.map((c: { sourceColumn: string; targetColumn: string }) =>
+      [c.sourceColumn, c.targetColumn])).toEqual([['Id', 'Id'], ['Name', 'Name']])
+    expect(created.sourceColumns.map((c: { name: string }) => c.name)).toEqual(['Id', 'Name'])
+    expect(created.columnsCapturedUtc).toBeTruthy()
+
     // A second attempt at the same table is a skip, not a failure: ticking every row on a
     // replication that already maps half of them means "map the rest".
     const again = await (await page.request.post(
       `/api/replications/${REPLICATION_NAME}/table-mappings/bulk`,
       { data: { tables: [{ schema: 'dbo', table: TARGET_TABLE }] } })).json()
-    expect(again).toEqual({ created: [], skipped: [`dbo.${TARGET_TABLE}`] })
+    expect(again).toEqual({ created: [], skipped: [`dbo.${TARGET_TABLE}`], notes: [] })
 
     // Put the sidebar back the way the rest of the suite left it.
     expect((await page.request.delete(

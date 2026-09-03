@@ -935,12 +935,29 @@ export interface BulkCreateResult {
   /** Tables that already had a mapping — reported rather than dropped, so "create 40" answering with
    * 12 is explained on screen instead of looking like a failure. */
   skipped: string[]
+  /** Mappings created without a full capture, and why. Empty in the ordinary case. */
+  notes: BulkCreateNote[]
+}
+
+/**
+ * One side of one created mapping that could not be captured — a target provisioning has yet to
+ * create, a source that could not be read. Named rather than counted: the operator has to know which
+ * mapping to go and refresh.
+ */
+export interface BulkCreateNote {
+  mapping: string
+  /** `source` or `target`. */
+  side: string
+  reason: string
 }
 
 export interface BulkCreateProgress {
   done: number
   total: number
   name: string
+  /** `reading` while this table's two catalogs are being read, `created` once it is saved. Reading is
+   * the slow part, so a button that only counted saves would look stalled through it. */
+  stage: string
 }
 
 /**

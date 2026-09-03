@@ -159,11 +159,14 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<ScriptedMetadata>();
         builder.Services.AddSingleton<DriverConnectionFactory>();
         builder.Services.AddSingleton<MetadataService>();
-        // Refreshing a mapping's cached column metadata goes through MetadataService above rather
-        // than a catalog of its own, so what gets cached is the same answer the editor's picker
-        // showed — see phase 90. Registered by interface as well, not instead: MetadataController
-        // still resolves the concrete service for the questions the cache does not ask.
+        // Writing a mapping's cached column metadata goes through MetadataService above rather than
+        // a catalog of its own, so what gets cached is the same answer the editor's picker showed —
+        // see phase 90. Registered by interface as well, not instead: MetadataController still
+        // resolves the concrete service for the questions the cache does not ask.
         builder.Services.AddSingleton<IColumnCatalog>(sp => sp.GetRequiredService<MetadataService>());
+        // One reader behind both writers of that cache — Refresh, and the capture a bulk create does
+        // as it creates (phase 95).
+        builder.Services.AddSingleton<MappingColumnReader>();
         builder.Services.AddSingleton<MappingMetadataService>();
         builder.Services.AddSingleton<ProvisioningService>();
         builder.Services.AddSingleton<ScriptUsageScanner>();

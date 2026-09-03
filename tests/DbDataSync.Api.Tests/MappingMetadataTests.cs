@@ -40,7 +40,7 @@ public sealed class MappingMetadataTests : IDisposable
         _config = new ConfigRepository(
             Path.Combine(_root, "config"), new GitCommitService(_root),
             SecretStore.ForProviders([new InMemorySecretProvider()]));
-        _service = new MappingMetadataService(_config, _catalog);
+        _service = new MappingMetadataService(_config, new MappingColumnReader(_catalog));
 
         // Both endpoints on the replication, neither on the mapping — so every test below also
         // exercises the inheritance a refresh has to resolve before it knows what to introspect.

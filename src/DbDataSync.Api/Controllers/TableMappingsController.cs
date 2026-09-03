@@ -14,7 +14,7 @@ namespace DbDataSync.Api.Controllers;
 public sealed class TableMappingsController(
     ConfigRepository configRepository, CurrentUser currentUser, IHubContext<RunHub> hub,
     ParameterCheck parameterCheck, ReaderLagService lag,
-    MappingMetadataService mappingMetadata) : ControllerBase
+    MappingMetadataService mappingMetadata, MappingColumnReader columnReader) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
@@ -141,6 +141,14 @@ public sealed class TableMappingsController(
     /// thing to keep working. The response still carries the full result, so a client that misses
     /// every event is late, not wrong.
     /// </para>
+    /// <para>
+    /// **Each mapping is introspected as it is created** — phase 95. A mapping created here used to
+    /// arrive with an empty metadata cache *and* no column mappings, which are two independent
+    /// reasons it could not run: phase 91 made an empty cache throw, and staging has always thrown on
+    /// an empty <c>ColumnMappings</c>. Both are filled from one read of each side, before the single
+    /// save, so forty tables is still forty commits and not eighty. What a side that cannot be read
+    /// does instead is <see cref="CaptureAsync"/>'s subject.
+    /// </para>
     /// </summary>
     [HttpPost("bulk")]
     public async Task<ActionResult<BulkCreateResult>> BulkCreate(
@@ -149,11 +157,25 @@ public sealed class TableMappingsController(
         if (request.Tables.Count == 0)
             return BadRequest(new { error = "No tables were selected." });
 
+        ReplicationTaskConfig task;
+        try
+        {
+            // Loaded once, up front, because capture has to resolve each side's endpoint against it —
+            // a bulk-created mapping states only its tables, so the replication is what says where
+            // they live. Once, not per table: it does not change under a batch it is the subject of.
+            task = configRepository.LoadReplicationTask(replicationName);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { error = $"Replication '{replicationName}' was not found." });
+        }
+
         var existing = configRepository.ListTableMappings(replicationName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var created = new List<string>();
         var skipped = new List<string>();
+        var notes = new List<BulkCreateNote>();
 
         foreach (var table in request.Tables)
         {
@@ -171,7 +193,17 @@ public sealed class TableMappingsController(
 
             try
             {
-                configRepository.SaveTableMapping(replicationName, NewMapping(name, table), currentUser.Author);
+                var mapping = NewMapping(name, table);
+
+                await ReportAsync(request.BatchId, BulkCreateProgress.Reading(
+                    created.Count + skipped.Count, request.Tables.Count, name), cancellationToken);
+                var captured = await CaptureAsync(task, mapping, cancellationToken);
+
+                configRepository.SaveTableMapping(replicationName, mapping, currentUser.Author);
+
+                // Only once it exists. A note about a mapping the save then rejected would name a
+                // mapping the operator cannot go and look at.
+                notes.AddRange(captured);
             }
             catch (FileNotFoundException)
             {
@@ -190,16 +222,67 @@ public sealed class TableMappingsController(
             existing.Add(name);
             created.Add(name);
 
-            if (!string.IsNullOrEmpty(request.BatchId))
-            {
-                await hub.Clients.Group(request.BatchId).SendAsync(
-                    "bulkMappingProgress",
-                    new BulkCreateProgress(created.Count + skipped.Count, request.Tables.Count, name),
-                    cancellationToken);
-            }
+            await ReportAsync(request.BatchId, BulkCreateProgress.Created(
+                created.Count + skipped.Count, request.Tables.Count, name), cancellationToken);
         }
 
-        return Ok(new BulkCreateResult(created, skipped));
+        return Ok(new BulkCreateResult(created, skipped, notes));
+    }
+
+    /// <summary>
+    /// Reads both of a mapping's sides and fills in everything a mapping needs to be runnable that
+    /// nobody typed: the metadata cache phase 91's readers and writers run from, and the column
+    /// mappings staging refuses to work without. Returns what it could not do, in the operator's
+    /// terms; it never throws for a side it could not read.
+    /// <para>
+    /// **A side that cannot be read is never fatal here.** Two of the three ways it happens are not
+    /// faults at all: a target that provisioning has yet to create genuinely is not in the catalog,
+    /// and that is the ordinary case for a mapping being created from a source table. The third — a
+    /// source that could not be read — leaves the mapping exactly as this endpoint left every mapping
+    /// before this phase, which is to say uncaptured and needing one Refresh, so failing the batch
+    /// over it would withhold a mapping that used to be created without complaint.
+    /// </para>
+    /// </summary>
+    private async Task<IReadOnlyList<BulkCreateNote>> CaptureAsync(
+        ReplicationTaskConfig task, TableMappingConfig mapping, CancellationToken cancellationToken)
+    {
+        var source = await columnReader.ReadAsync(
+            EndpointResolution.ResolveSource(task, mapping.Sources[0]), cancellationToken);
+        var target = await columnReader.ReadAsync(
+            EndpointResolution.ResolveTarget(task, mapping.Targets[0]), cancellationToken);
+
+        if (source.Shape is not null) mapping.SourceColumns = source.Shape;
+        if (target.Shape is not null) mapping.TargetColumns = target.Shape;
+        if (source.Shape is not null || target.Shape is not null)
+            mapping.ColumnsCapturedUtc = DateTime.UtcNow;
+
+        // Same rule as the editor's "Auto-map by name" — see ColumnAutoMap. A target that is not
+        // there yet maps every source column, which is also what provisioning will then create.
+        mapping.ColumnMappings = ColumnAutoMap.Between(source.Shape, target.Shape);
+
+        return
+        [
+            .. Note(mapping.Name, "source", source,
+                "the source table is not in the catalog, so nothing was captured and no columns were mapped"),
+            .. Note(mapping.Name, "target", target,
+                "the target table does not exist yet — its shape is captured when provisioning creates it"),
+        ];
+    }
+
+    /// <summary>Nothing at all for a side that read cleanly, which is what makes the list worth
+    /// showing: it is the exceptions, not a row per table.</summary>
+    private static IEnumerable<BulkCreateNote> Note(string mapping, string side, SideRead read, string missing)
+    {
+        if (read.Unavailable is not null) yield return new BulkCreateNote(mapping, side, read.Unavailable);
+        else if (read.IsMissingTable) yield return new BulkCreateNote(mapping, side, missing);
+    }
+
+    private async Task ReportAsync(string? batchId, BulkCreateProgress progress, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(batchId))
+            return;
+
+        await hub.Clients.Group(batchId).SendAsync("bulkMappingProgress", progress, cancellationToken);
     }
 
     /// <summary>
@@ -207,6 +290,10 @@ public sealed class TableMappingsController(
     /// the provisioning settings, the scripts and the hooks all inherit, so forty mappings created this
     /// way are forty mappings that follow the replication rather than forty copies of its settings.
     /// The target mirrors the source's schema and table — the same autofill the form does by hand.
+    /// <para>
+    /// The columns are not part of "unset": <see cref="CaptureAsync"/> fills them in before this is
+    /// saved. They are not a setting to inherit — they are what the two tables are.
+    /// </para>
     /// </summary>
     private static TableMappingConfig NewMapping(string name, BulkCreateTable table) => new()
     {
@@ -229,11 +316,33 @@ public sealed record BulkCreateRequest(IReadOnlyList<BulkCreateTable> Tables, st
 
 public sealed record BulkCreateTable(string Schema, string Table);
 
-public sealed record BulkCreateProgress(int Done, int Total, string Name);
+/// <param name="Stage">What is happening to <paramref name="Name"/> right now — <c>"reading"</c> while
+/// its two catalogs are being read, <c>"created"</c> once it is saved. There because reading them is
+/// the slow part and a screen that only counted saves would look stalled through it.
+/// <para>
+/// A closed set of strings rather than an enum, deliberately. These go out over SignalR, whose
+/// protocol has its own serializer configuration separate from MVC's <c>JsonStringEnumConverter</c> —
+/// an enum here would be a number on the wire the day someone changed one of them, and a client
+/// comparing it to a name would silently stop matching.
+/// </para></param>
+public sealed record BulkCreateProgress(int Done, int Total, string Name, string Stage)
+{
+    public static BulkCreateProgress Reading(int done, int total, string name) => new(done, total, name, "reading");
+
+    public static BulkCreateProgress Created(int done, int total, string name) => new(done, total, name, "created");
+}
+
+/// <param name="Side">"source" or "target" — which of the two could not be fully captured.</param>
+public sealed record BulkCreateNote(string Mapping, string Side, string Reason);
 
 /// <param name="Skipped">Tables that already had a mapping. Reported rather than silently dropped, so
 /// "create 40" answering with 12 is explained on screen instead of looking like a failure.</param>
-public sealed record BulkCreateResult(IReadOnlyList<string> Created, IReadOnlyList<string> Skipped);
+/// <param name="Notes">Mappings that were created but could not be fully captured, and why — a target
+/// provisioning has yet to create, a source that could not be read. Named reasons rather than a count,
+/// for the same reason <see cref="MetadataRefreshSide"/> names columns rather than counting them: a
+/// count leaves the operator to go and find which one.</param>
+public sealed record BulkCreateResult(
+    IReadOnlyList<string> Created, IReadOnlyList<string> Skipped, IReadOnlyList<BulkCreateNote> Notes);
 
 /// <summary>
 /// A mapping's staleness, over the wire — see <c>ReaderLagService</c> for what each figure is and how

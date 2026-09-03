@@ -14,7 +14,7 @@ namespace DbDataSync.Api.Tests;
 /// DbDataSync.TaskRunner.dll in this repo's dev layout — Integration-tagged tests that actually trigger
 /// a run rely on that.
 /// </summary>
-public sealed class TestApiFactory : WebApplicationFactory<Program>
+public class TestApiFactory : WebApplicationFactory<Program>
 {
     public string RepoRoot { get; } = Directory.CreateTempSubdirectory("dbdatasync-api-tests-").FullName;
 
@@ -42,8 +42,17 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>
             // set an env var for a connection's credential (SecretStore.EnvName) need this store to name
             // things exactly as production does, not under SecretPrefix.Default's "ClrKernel".
             services.AddSingleton(SecretStore.ForProviders("DbDataSync", [new InMemorySecretProvider()]));
+            ConfigureTestServices(services);
         });
     }
+
+    /// <summary>
+    /// For a subclass that needs one more service swapped — a fake catalog in place of the one that
+    /// opens real connections, say. Everything above stays shared rather than being copied per
+    /// factory, since a second copy of the repo-root/state-db/runner-path wiring is a second thing to
+    /// keep in step with the composition root.
+    /// </summary>
+    protected virtual void ConfigureTestServices(IServiceCollection services) { }
 
     protected override void Dispose(bool disposing)
     {

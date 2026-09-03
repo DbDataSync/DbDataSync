@@ -1,6 +1,5 @@
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
-using DbDataSync.Drivers.Abstractions;
 
 namespace DbDataSync.Api.Services;
 
@@ -9,13 +8,13 @@ namespace DbDataSync.Api.Services;
 /// the only thing in the system that writes <see cref="TableMappingConfig.SourceColumns"/> and
 /// <see cref="TableMappingConfig.TargetColumns"/> other than a save whose table changed.
 /// <para>
-/// It goes through <see cref="MetadataService"/> rather than a driver catalog of its own, which is
-/// what makes "Refresh" show the operator the same answer the column-mapping picker beside it shows:
-/// one introspection path, so a connection with a bound <c>metadataProvider</c> script is honoured
-/// here too, and the cache cannot disagree with the editor that populated it.
+/// It reads through <see cref="MappingColumnReader"/> rather than a driver catalog of its own, which
+/// is what makes "Refresh" show the operator the same answer the column-mapping picker beside it
+/// shows — and the same answer a bulk create captures. See that class for why there is exactly one
+/// introspection path.
 /// </para>
 /// </summary>
-public sealed class MappingMetadataService(ConfigRepository configRepository, IColumnCatalog metadata)
+public sealed class MappingMetadataService(ConfigRepository configRepository, MappingColumnReader reader)
 {
     /// <summary>
     /// Refreshes both sides, saves, and reports what moved. Throws <see cref="FileNotFoundException"/>
@@ -34,12 +33,12 @@ public sealed class MappingMetadataService(ConfigRepository configRepository, IC
         var mapping = configRepository.LoadTableMapping(replicationName, mappingName);
 
         var source = mapping.Sources.Count == 1
-            ? await ReadAsync(EndpointResolution.ResolveSource(task, mapping.Sources[0]), cancellationToken)
-            : Unreadable("This mapping does not have exactly one source table to introspect.");
+            ? await reader.ReadAsync(EndpointResolution.ResolveSource(task, mapping.Sources[0]), cancellationToken)
+            : MappingColumnReader.Unreadable("This mapping does not have exactly one source table to introspect.");
 
         var target = mapping.Targets.Count == 1
-            ? await ReadAsync(EndpointResolution.ResolveTarget(task, mapping.Targets[0]), cancellationToken)
-            : Unreadable("This mapping does not have exactly one target table to introspect.");
+            ? await reader.ReadAsync(EndpointResolution.ResolveTarget(task, mapping.Targets[0]), cancellationToken)
+            : MappingColumnReader.Unreadable("This mapping does not have exactly one target table to introspect.");
 
         var sourceSide = MetadataRefreshSide.Between(
             "source", mapping.SourceColumns, source.Columns, source.Unavailable);
@@ -57,38 +56,6 @@ public sealed class MappingMetadataService(ConfigRepository configRepository, IC
         var saved = configRepository.SaveTableMapping(replicationName, mapping, author);
         return new MetadataRefreshResult(saved, sourceSide, targetSide);
     }
-
-    /// <summary>
-    /// A table that is not in the catalog is a normal state here, not a fault: the target of a
-    /// mapping whose provisioning has yet to run genuinely has no columns, and the source of a
-    /// query-configured reader has no catalog entry at all. Both come back as a stated reason.
-    /// </summary>
-    private async Task<SideRead> ReadAsync(TableRef table, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(table.Table))
-            return Unreadable("This side names no table — a query source has no catalog to read.");
-
-        try
-        {
-            var columns = await metadata.ListColumnsAsync(
-                table.ConnectionName, table.Database, table.Schema, table.Table, cancellationToken);
-
-            return new SideRead(
-                columns.Select(c => new CachedColumn(c.Name, c.NativeType, c.IsNullable, c.IsPrimaryKey, c.IsIdentity))
-                    .ToList(),
-                null);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Unreadable(ex.Message);
-        }
-    }
-
-    private static SideRead Unreadable(string reason) => new(null, reason);
-
-    /// <param name="Columns">Null when the side could not be read at all — distinct from an empty
-    /// list, which would be a table the catalog says has no columns.</param>
-    private sealed record SideRead(List<CachedColumn>? Columns, string? Unavailable);
 }
 
 /// <summary>

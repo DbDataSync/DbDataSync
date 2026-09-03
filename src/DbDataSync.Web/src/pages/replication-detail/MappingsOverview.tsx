@@ -3,7 +3,7 @@ import * as signalR from '@microsoft/signalr'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { useBulkCreateMappings, useReplication, useTableMappingDetails, useTables } from '../../api/hooks'
-import type { BulkCreateProgress } from '../../api/types'
+import type { BulkCreateNote, BulkCreateProgress } from '../../api/types'
 import type { MappingsOutletContext } from './TableMappingsPanel'
 
 const COLUMNS = '26px 1fr 90px'
@@ -42,6 +42,7 @@ export function MappingsOverview() {
   const [filter, setFilter] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [progress, setProgress] = useState<BulkCreateProgress | null>(null)
+  const [notes, setNotes] = useState<BulkCreateNote[]>([])
   const create = useBulkCreateMappings(replicationName)
 
   /**
@@ -79,7 +80,8 @@ export function MappingsOverview() {
     if (chosen.length === 0) return
 
     const batchId = crypto.randomUUID()
-    setProgress({ done: 0, total: chosen.length, name: '' })
+    setNotes([])
+    setProgress({ done: 0, total: chosen.length, name: '', stage: 'reading' })
 
     // Joined *before* the request goes out, so the first table's event is not lost to a handshake
     // that is still in flight. A dropped connection costs granularity, never correctness — the
@@ -91,7 +93,13 @@ export function MappingsOverview() {
         batchId,
       })
       setSelected(new Set())
-      if (result.created.length > 0) navigate(`${base}/${encodeURIComponent(result.created[0])}`)
+      setNotes(result.notes ?? [])
+
+      // Straight to the first new mapping, as before — but only when there is nothing to say. A
+      // batch that could not capture one of its forty tables has to report that where the operator
+      // just was, and navigating away is exactly how they would never see it.
+      if (result.created.length > 0 && (result.notes ?? []).length === 0)
+        navigate(`${base}/${encodeURIComponent(result.created[0])}`)
     } finally {
       setProgress(null)
       await connection?.stop()
@@ -101,6 +109,34 @@ export function MappingsOverview() {
   return (
     <>
       <ErrorBanner error={error ?? create.error} />
+
+      {notes.length > 0 && (
+        <div className="card flush" data-testid="bulk-create-notes">
+          <div className="card-head tight">
+            <span className="card-title sm">Created, but not fully captured</span>
+            <span className="card-note">
+              these mappings exist and inherit the replication, but a side of each could not be read —
+              a target that provisioning has yet to create fills itself in on its first pass, anything
+              else needs Refresh metadata on the mapping
+            </span>
+          </div>
+          {notes.map((note) => (
+            // Truncated with the full text on hover, as every other long value in these grids is —
+            // a reason can be a whole driver error, and a row that grew to fit one would break the
+            // alignment the rest of the screen keeps.
+            <div
+              key={`${note.mapping}:${note.side}`}
+              className="grid-row"
+              style={{ gridTemplateColumns: '1.1fr 58px 2fr', gap: 8 }}
+              data-testid={`bulk-create-note-${note.mapping}`}
+            >
+              <span className="name">{note.mapping}</span>
+              <span className="faint">{note.side}</span>
+              <span title={note.reason}>{note.reason}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card flush" data-testid="mappings-overview">
         <div className="card-head tight">
@@ -127,7 +163,9 @@ export function MappingsOverview() {
             data-testid="create-mappings-button"
           >
             {progress
-              ? `Created ${progress.done} of ${progress.total}…`
+              ? progress.stage === 'reading' && progress.name
+                ? `Reading ${progress.name}… (${progress.done} of ${progress.total})`
+                : `Created ${progress.done} of ${progress.total}…`
               : selected.size === 0
                 ? 'Create mappings'
                 : `Create ${selected.size} mapping${selected.size === 1 ? '' : 's'}`}
