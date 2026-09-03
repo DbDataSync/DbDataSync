@@ -29,14 +29,16 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **096** — adding a target column, and two grid rows that lie | three defects in daily use; two are CSS, one is a control |
-| 2 | **034** — PostgreSQL logical replication | |
-| 3 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **034** — PostgreSQL logical replication | |
+| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-03: 096 goes to the top. Three defects reported from daily use, all small, and one of
-them — a mapping column that cannot be added back once removed — blocks an ordinary edit with no
-workaround. Cheap enough that queueing it behind an engine phase would mean living with it for weeks.
+Updated 2026-09-03: 096 is done and removed — the three daily-use defects are fixed, and both layout
+ones now have assertions that were seen to fail against the broken code. It found a fourth defect on
+the way out, which is *not* fixed and is not a phase yet: a target table created by the Setup card's
+Apply button never gets its shape cached, so the mapping fails its first run
+(`planning/todo/apply-button-does-not-cache-provisioned-columns.md`). That one is server-side and
+blocks an ordinary flow, so it is likely to jump this queue once it is agreed.
 
 Updated 2026-09-03: 095 went in at the top and is already done and removed — a mapping the bulk screen
 creates now arrives with its columns cached and mapped, so it runs without anyone opening it. It jumped
