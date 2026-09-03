@@ -144,6 +144,12 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
         using var bulkCopy = new SqlBulkCopy((SqlConnection)targetConnection)
         {
             DestinationTableName = stagingTable,
+            // SqlBulkCopy is not a DbCommand, so it never went through CreateTimedCommand and quietly
+            // ran on its own 30-second default regardless of the operator's configured command
+            // timeout — the same class of long-running target operation as a chunked MERGE, timed out
+            // by a completely different number. Reusing the connection's own stamp keeps one dial for
+            // "how long may work against this target run" rather than adding a second one.
+            BulkCopyTimeout = ConnectionTimeouts.CommandTimeoutOf(targetConnection),
         };
         foreach (var column in mappedTargetColumns)
             bulkCopy.ColumnMappings.Add(column, column);
