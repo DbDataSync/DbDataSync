@@ -1,3 +1,5 @@
+using DbDataSync.Core.Config;
+
 namespace DbDataSync.State.Tests;
 
 public sealed class ChangeWatermarkStoreTests : IDisposable
@@ -141,4 +143,132 @@ public sealed class ChangeWatermarkStoreTests : IDisposable
     [Fact]
     public void GetAppliedPosition_WhenTheMappingHasNeverRun_ReturnsNull() =>
         Assert.Null(_store.GetAppliedPosition("crm-sync", "orders", "orders-db/App/dbo.Orders"));
+
+    // ---- Read intent and hold, and Watermark going nullable (phase 100) --------------------------
+
+    [Fact]
+    public void GetReadState_WhenNoneStored_ReturnsNull() =>
+        Assert.Null(_store.GetReadState("crm-sync", "orders", "orders-db/App/dbo.Orders"));
+
+    /// <summary>
+    /// The migration's own backfill claim, exercised through the mechanism that actually produces it:
+    /// <c>ALTER TABLE ... ADD COLUMN ReadIntent {{text}} NOT NULL DEFAULT 'Changes'</c> gives every row
+    /// that already existed — written by code with no notion of an intent at all — exactly this value,
+    /// the moment the column is added. <see cref="ChangeWatermarkStore.SetWatermark"/> is that code: it
+    /// never mentions <c>ReadIntent</c>/<c>ReadHold</c>, so a row it writes is indistinguishable, at the
+    /// database level, from a row the migration found already there.
+    /// </summary>
+    [Fact]
+    public void ARowWrittenWithNoNotionOfIntent_ReadsBackAsChangesAndNone()
+    {
+        _store.SetWatermark("crm-sync", "orders", "orders-db/App/dbo.Orders", "12345");
+
+        var state = _store.GetReadState("crm-sync", "orders", "orders-db/App/dbo.Orders");
+
+        Assert.NotNull(state);
+        Assert.Equal(ReadIntent.Changes, state!.Intent);
+        Assert.Equal(ReadHold.None, state.Hold);
+        Assert.Equal("12345", state.Watermark);
+    }
+
+    /// <summary>
+    /// The row shape the old schema could not express at all: an intent with no position behind it yet
+    /// — <c>ChangesFromEarliest</c> on a mapping that has not completed its first pass under it.
+    /// </summary>
+    [Fact]
+    public void SetReadIntent_WithNoWatermarkEverSet_StoresTheIntentAndANullWatermark()
+    {
+        _store.SetReadIntent("crm-sync", "orders", "orders-db/App/dbo.Orders", ReadIntent.ChangesFromEarliest);
+
+        var state = _store.GetReadState("crm-sync", "orders", "orders-db/App/dbo.Orders");
+
+        Assert.NotNull(state);
+        Assert.Equal(ReadIntent.ChangesFromEarliest, state!.Intent);
+        Assert.Equal(ReadHold.None, state.Hold);
+        Assert.Null(state.Watermark);
+    }
+
+    [Fact]
+    public void SetReadIntent_ThenGet_RoundTrips()
+    {
+        _store.SetReadIntent("crm-sync", "orders", "orders-db/App/dbo.Orders", ReadIntent.ChangesFromLatest);
+        Assert.Equal(
+            ReadIntent.ChangesFromLatest,
+            _store.GetReadState("crm-sync", "orders", "orders-db/App/dbo.Orders")!.Intent);
+    }
+
+    [Fact]
+    public void SetReadHold_ThenGet_RoundTrips()
+    {
+        _store.SetReadHold("crm-sync", "orders", "orders-db/App/dbo.Orders", ReadHold.Paused);
+        Assert.Equal(
+            ReadHold.Paused,
+            _store.GetReadState("crm-sync", "orders", "orders-db/App/dbo.Orders")!.Hold);
+    }
+
+    /// <summary>Setting the intent must not touch a hold or a position already sitting on the row —
+    /// the property that makes "set each independently" true rather than aspirational.</summary>
+    [Fact]
+    public void SetReadIntent_LeavesAnExistingHoldAndWatermarkAlone()
+    {
+        const string table = "orders-db/App/dbo.Orders";
+        _store.SetWatermark("crm-sync", "orders", table, "999");
+        _store.SetReadHold("crm-sync", "orders", table, ReadHold.PositionExpired);
+
+        _store.SetReadIntent("crm-sync", "orders", table, ReadIntent.ChangesFromEarliest);
+
+        var state = _store.GetReadState("crm-sync", "orders", table)!;
+        Assert.Equal(ReadIntent.ChangesFromEarliest, state.Intent);
+        Assert.Equal(ReadHold.PositionExpired, state.Hold);
+        Assert.Equal("999", state.Watermark);
+    }
+
+    /// <summary>The other direction: a hold set on a mapping mid-<c>ChangesFromEarliest</c> must not
+    /// silently rewrite the intent underneath it — the whole reason a hold is a column of its own.</summary>
+    [Fact]
+    public void SetReadHold_LeavesAnExistingIntentAndWatermarkAlone()
+    {
+        const string table = "orders-db/App/dbo.Orders";
+        _store.SetWatermark("crm-sync", "orders", table, "999");
+        _store.SetReadIntent("crm-sync", "orders", table, ReadIntent.ChangesFromEarliest);
+
+        _store.SetReadHold("crm-sync", "orders", table, ReadHold.PositionExpired);
+
+        var state = _store.GetReadState("crm-sync", "orders", table)!;
+        Assert.Equal(ReadIntent.ChangesFromEarliest, state.Intent);
+        Assert.Equal(ReadHold.PositionExpired, state.Hold);
+        Assert.Equal("999", state.Watermark);
+    }
+
+    /// <summary>A pass advancing the watermark must not reset the intent back to a stale value or clear
+    /// a hold nobody resolved — <c>SetWatermark</c> only ever touches its own two columns.</summary>
+    [Fact]
+    public void SetWatermark_LeavesAnExistingIntentAndHoldAlone()
+    {
+        const string table = "orders-db/App/dbo.Orders";
+        _store.SetReadIntent("crm-sync", "orders", table, ReadIntent.ChangesFromEarliest);
+        _store.SetReadHold("crm-sync", "orders", table, ReadHold.PositionExpired);
+
+        _store.SetWatermark("crm-sync", "orders", table, "42");
+
+        var state = _store.GetReadState("crm-sync", "orders", table)!;
+        Assert.Equal(ReadIntent.ChangesFromEarliest, state.Intent);
+        Assert.Equal(ReadHold.PositionExpired, state.Hold);
+        Assert.Equal("42", state.Watermark);
+    }
+
+    /// <summary>The one call that moves both at once — an operator recovering from a hold, in a single
+    /// write rather than two that could be observed half-done.</summary>
+    [Fact]
+    public void SetReadIntentAndHold_SetsBothInOneWrite()
+    {
+        const string table = "orders-db/App/dbo.Orders";
+        _store.SetReadHold("crm-sync", "orders", table, ReadHold.PositionExpired);
+
+        _store.SetReadIntentAndHold("crm-sync", "orders", table, ReadIntent.ChangesFromEarliest, ReadHold.None);
+
+        var state = _store.GetReadState("crm-sync", "orders", table)!;
+        Assert.Equal(ReadIntent.ChangesFromEarliest, state.Intent);
+        Assert.Equal(ReadHold.None, state.Hold);
+    }
 }

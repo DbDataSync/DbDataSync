@@ -65,6 +65,25 @@ public sealed class ReplicationTaskConfig
     public List<SegmentingStrategyConfig> SegmentingStrategies { get; set; } = new();
 
     /// <summary>
+    /// What every table mapping under this replication reads next, unless the mapping says otherwise —
+    /// resolved by <see cref="ReadIntentResolution"/>. Null means nobody has said, which resolves to
+    /// the application default (<see cref="ReadIntent.InitialLoad"/>), the same as leaving this unset
+    /// always has.
+    /// <para>
+    /// **Nullable rather than defaulted to <see cref="ReadIntent.InitialLoad"/> outright**, for the
+    /// reason <see cref="TableMappingConfig.DefaultReadIntent"/>'s own doc gives: phase 46's <c>Enabled</c>
+    /// bug is a non-nullable value at its default being omitted by the YAML serializer, so an explicit
+    /// choice that happens to equal the default would silently not survive being written down.
+    /// </para>
+    /// <para>
+    /// Setting this to either <c>ChangesFrom…</c> value is what makes "the application never decides on
+    /// a full load by itself" true for this replication: after that, every full load traces to somebody
+    /// choosing one, rather than to a mapping that simply had not run yet.
+    /// </para>
+    /// </summary>
+    public ReadIntent? DefaultReadIntent { get; set; }
+
+    /// <summary>
     /// Whatever whoever owns this replication needs the next person to know. Markdown, git-tracked and
     /// diffed like every other field here — see phase 64.
     /// <para>

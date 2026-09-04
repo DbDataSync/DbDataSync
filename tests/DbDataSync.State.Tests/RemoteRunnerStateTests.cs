@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using DbDataSync.Core.Config;
 using DbDataSync.State.Remote;
 
 namespace DbDataSync.State.Tests;
@@ -122,6 +123,31 @@ public sealed class RemoteRunnerStateTests : IDisposable
         // A clean shutdown should not re-spend the grace period per call.
         Assert.Equal(afterFirst, owner.Requests.Count);
         Assert.Equal(3, StateJournal.Read(JournalPath).Count);
+    }
+
+    // ---- Read intent and hold (phase 100) ----
+
+    /// <summary>Nothing consumes these yet, but an owner that goes away must not silently drop them any
+    /// more than it drops a watermark — the whole point of wiring the journal through now.</summary>
+    [Fact]
+    public void SetReadIntent_and_SetReadHold_are_journalled_like_any_other_outcome_when_the_owner_is_gone()
+    {
+        using (var state = Create(new FakeOwner { Reachable = false }))
+        {
+            state.SetReadIntent("sales", "orders", "dbo.Orders", ReadIntent.ChangesFromEarliest);
+            state.SetReadHold("sales", "orders", "dbo.Orders", ReadHold.PositionExpired);
+        }
+
+        var entries = StateJournal.Read(JournalPath);
+        Assert.Equal(
+            [JournalOperation.SetReadIntent, JournalOperation.SetReadHold],
+            entries.Select(e => e.Operation));
+        Assert.Equal(
+            ReadIntent.ChangesFromEarliest,
+            StateJournal.PayloadOf<SetReadIntentRequest>(entries[0])!.Intent);
+        Assert.Equal(
+            ReadHold.PositionExpired,
+            StateJournal.PayloadOf<SetReadHoldRequest>(entries[1])!.Hold);
     }
 
     // ---- Logs ----

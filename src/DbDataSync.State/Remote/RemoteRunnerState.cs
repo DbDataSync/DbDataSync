@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DbDataSync.Core.Config;
 
 namespace DbDataSync.State.Remote;
 
@@ -68,6 +69,12 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
             $"&mappingName={Uri.EscapeDataString(mappingName)}" +
             $"&sourceTable={Uri.EscapeDataString(sourceTable)}").Watermark;
 
+    public MappingReadState? GetReadState(string taskName, string mappingName, string sourceTable) =>
+        Required<ReadStateResponse>(
+            $"read-state?taskName={Uri.EscapeDataString(taskName)}" +
+            $"&mappingName={Uri.EscapeDataString(mappingName)}" +
+            $"&sourceTable={Uri.EscapeDataString(sourceTable)}").State;
+
     public void BeginRun(Guid runId, int? pid) => Required("begin-run", new BeginRunRequest(runId, pid));
 
     // ---- Outcomes: journal rather than lose ----
@@ -107,6 +114,18 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
             "set-watermark",
             new SetWatermarkRequest(taskName, sourceTable, watermark, mappingName, watermarkTimeUtc),
             JournalOperation.SetWatermark);
+
+    public void SetReadIntent(string taskName, string mappingName, string sourceTable, ReadIntent intent) =>
+        Outcome(
+            "set-read-intent",
+            new SetReadIntentRequest(taskName, sourceTable, intent, mappingName),
+            JournalOperation.SetReadIntent);
+
+    public void SetReadHold(string taskName, string mappingName, string sourceTable, ReadHold hold) =>
+        Outcome(
+            "set-read-hold",
+            new SetReadHoldRequest(taskName, sourceTable, hold, mappingName),
+            JournalOperation.SetReadHold);
 
     public void RecordVerificationResult(VerificationResultRecord result) =>
         Outcome("record-verification-result", new RecordVerificationResultRequest(result),

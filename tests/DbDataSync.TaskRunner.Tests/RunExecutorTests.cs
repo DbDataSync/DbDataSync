@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
+using DbDataSync.Core.Sql;
 using DbDataSync.Scripting;
 using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
@@ -224,6 +225,76 @@ public sealed class RunExecutorTests : IDisposable
         Assert.Equal("customers", customersRun!.MappingName);
         Assert.False(_runLockStore.IsLocked("crm-sync", RunKind.Primary, "orders"));
         Assert.False(_runLockStore.IsLocked("crm-sync", RunKind.Primary, "customers"));
+    }
+
+    /// <summary>
+    /// Phase 100's own seam test, in the shape phase 90 used for the metadata cache: storage exists,
+    /// nothing consumes it yet, and that is worth pinning on its own rather than trusting by inspection.
+    /// A mapping with a read intent stored ahead of its first pass must behave identically to one with
+    /// nothing stored at all — <c>RunExecutor</c> still infers a full load from a null watermark exactly
+    /// as it always has, because nothing in it looks at <c>ReadIntent</c> yet. Phase 101 is the change
+    /// that makes this test's premise stop being true, on purpose and under its own review.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteWorkerAsync_AStoredReadIntent_ChangesNothingAboutThisPass()
+    {
+        SaveTask("crm-sync");
+        foreach (var name in new[] { "with-intent", "without-intent" })
+        {
+            _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+            {
+                Name = name,
+                Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+                Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+            }, Author);
+        }
+
+        // Both mappings share this same unreachable source, so any difference between their runs can
+        // only come from the stored intent — never from the connection.
+        _configRepository.SaveConnection(new ConnectionInput
+        {
+            Name = "src",
+            DriverType = ConnectionDriverType.MsSql,
+            Host = "127.0.0.1",
+            Port = 1,
+            Database = "App",
+            AuthMode = AuthMode.IntegratedAuth,
+            Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
+        }, Author);
+
+        var watermarks = new ChangeWatermarkStore(_stateDatabase);
+        var watermarkKey = WatermarkKey.Build(
+            new SourceTableRef { ConnectionName = "src", Database = "App", Schema = "dbo", Table = "Orders" },
+            MsSqlDialect.Instance);
+
+        // Set ahead of the run, with no watermark behind it — exactly the "brand-new mapping under a
+        // configured ChangesFromEarliest default" case the plan doc calls out as the one real decision
+        // this whole design makes about data. Phase 100 says storing this changes nothing yet.
+        watermarks.SetReadIntent("crm-sync", "with-intent", watermarkKey, ReadIntent.ChangesFromEarliest);
+
+        var withIntentRunId = await EnqueueAndDrainAsync("crm-sync", "with-intent");
+        var withoutIntentRunId = await EnqueueAndDrainAsync("crm-sync", "without-intent");
+
+        var withIntentRun = _taskRunStore.GetRun(withIntentRunId)!;
+        var withoutIntentRun = _taskRunStore.GetRun(withoutIntentRunId)!;
+
+        Assert.Equal(RunStatus.Failed, withIntentRun.Status);
+        Assert.Equal(withoutIntentRun.Status, withIntentRun.Status);
+        Assert.Equal(withoutIntentRun.FailureKind, withIntentRun.FailureKind);
+        Assert.NotNull(withIntentRun.ErrorSummary);
+        Assert.NotNull(withoutIntentRun.ErrorSummary);
+
+        // Neither pass ever opened the connection, so neither wrote a watermark — the stored intent did
+        // not make this pass behave as though it had read something.
+        Assert.Null(watermarks.GetWatermark("crm-sync", "with-intent", watermarkKey));
+        Assert.Null(watermarks.GetWatermark("crm-sync", "without-intent", watermarkKey));
+
+        // And the intent itself is exactly what was set before the run: nothing read it, let alone
+        // consumed or transitioned it — the "nothing reads the intent when this phase ends" guarantee,
+        // checked rather than assumed.
+        Assert.Equal(
+            ReadIntent.ChangesFromEarliest,
+            watermarks.GetReadState("crm-sync", "with-intent", watermarkKey)!.Intent);
     }
 
     #region The continuous worker's idle timeout

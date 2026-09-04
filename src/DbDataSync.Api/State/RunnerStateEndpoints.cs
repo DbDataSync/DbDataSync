@@ -44,6 +44,9 @@ public static class RunnerStateEndpoints
         group.MapGet("/watermark", (string taskName, string mappingName, string sourceTable) =>
             new WatermarkResponse(state.GetWatermark(taskName, mappingName, sourceTable)));
 
+        group.MapGet("/read-state", (string taskName, string mappingName, string sourceTable) =>
+            new ReadStateResponse(state.GetReadState(taskName, mappingName, sourceTable)));
+
         group.MapPost("/begin-run", (BeginRunRequest r) =>
         {
             state.BeginRun(r.RunId, r.Pid);
@@ -83,6 +86,28 @@ public static class RunnerStateEndpoints
             // there is no wrong place for it to land: it is written to the row the watermark is
             // written to, and its absence is already a state a lag report answers for.
             state.SetWatermark(r.TaskName, r.MappingName, r.SourceTable, r.Watermark, r.WatermarkTimeUtc);
+            return Results.Ok();
+        });
+
+        // Neither of these is called by anything yet — phase 100 wires the whole remote path through
+        // before phase 101 has an intent transition or a hold to write with it. See JournalRecoveryTests.
+        group.MapPost("/set-read-intent", (SetReadIntentRequest r) =>
+        {
+            // Same refusal as set-watermark, for the same reason: there is no mapping to guess and no
+            // row it could safely land in.
+            if (r.MappingName is null)
+                return Results.BadRequest("set-read-intent requires a mapping name.");
+
+            state.SetReadIntent(r.TaskName, r.MappingName, r.SourceTable, r.Intent);
+            return Results.Ok();
+        });
+
+        group.MapPost("/set-read-hold", (SetReadHoldRequest r) =>
+        {
+            if (r.MappingName is null)
+                return Results.BadRequest("set-read-hold requires a mapping name.");
+
+            state.SetReadHold(r.TaskName, r.MappingName, r.SourceTable, r.Hold);
             return Results.Ok();
         });
 

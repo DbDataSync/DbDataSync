@@ -67,6 +67,16 @@ public sealed record SetWatermarkRequest(
     string Watermark,
     string? MappingName = null,
     DateTimeOffset? WatermarkTimeUtc = null);
+/// <param name="MappingName">Defaulted and nullable for the reason <see cref="SetWatermarkRequest.MappingName"/>
+/// is: an entry journalled before this operation existed still has to deserialize, though in this case
+/// none ever will, since nothing writes this request until phase 101.</param>
+public sealed record SetReadIntentRequest(
+    string TaskName, string SourceTable, ReadIntent Intent, string? MappingName = null);
+
+/// <param name="MappingName">See <see cref="SetReadIntentRequest.MappingName"/>.</param>
+public sealed record SetReadHoldRequest(
+    string TaskName, string SourceTable, ReadHold Hold, string? MappingName = null);
+
 public sealed record RecordVerificationResultRequest(VerificationResultRecord Result);
 
 /// <summary>
@@ -89,4 +99,5 @@ public sealed record LogBatchRequest(IReadOnlyList<LogRequest> Entries);
 
 public sealed record BoolResponse(bool Value);
 public sealed record WatermarkResponse(string? Watermark);
+public sealed record ReadStateResponse(MappingReadState? State);
 public sealed record WorkItemResponse(WorkItem? Item);

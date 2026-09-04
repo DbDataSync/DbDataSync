@@ -137,6 +137,24 @@ public sealed class TableMappingConfig
     public ProvisioningConfig Provisioning { get; set; } = new();
 
     /// <summary>
+    /// What this mapping reads next, in place of the replication's <see cref="ReplicationTaskConfig.DefaultReadIntent"/>.
+    /// Resolved by <see cref="ReadIntentResolution"/>, and only for a mapping that has never completed a
+    /// pass — once one has, its own stored intent (<c>ChangeWatermarkStore.GetReadState</c>) is the
+    /// answer and this is never consulted again for it.
+    /// <para>
+    /// Null means inherit the replication's answer. **Nullable at both levels, deliberately**: null on
+    /// the replication means nobody has said, which resolves to the application default
+    /// (<see cref="ReadIntent.InitialLoad"/>) — the same shape <see cref="ProvisioningConfig"/> already
+    /// uses, and for the same reason phase 46 found in <c>ReplicationTaskConfig.Enabled</c>. A
+    /// non-nullable value sitting at its default is omitted by the YAML serializer, so an explicit
+    /// choice equal to the default — including explicitly choosing <see cref="ReadIntent.InitialLoad"/>
+    /// on a mapping under a replication defaulting to something else — would silently fail to survive
+    /// being written down.
+    /// </para>
+    /// </summary>
+    public ReadIntent? DefaultReadIntent { get; set; }
+
+    /// <summary>
     /// This mapping's own reader, in place of the replication's. Null — the normal case — inherits
     /// <see cref="ChangeProcessingConfig.Reader"/> entirely.
     /// <para>

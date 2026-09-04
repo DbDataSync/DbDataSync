@@ -142,6 +142,30 @@ public sealed class JournalRecovery(
                     s.TaskName, s.MappingName, s.SourceTable, s.Watermark, s.WatermarkTimeUtc);
                 break;
 
+            // Nothing writes either of these yet — phase 100 wires the journal through so a
+            // cross-instance deployment does not silently drop them once phase 101 does. Both are
+            // idempotent by construction (the payload names the value the row should end up at, not a
+            // transition), so replaying one twice is exactly as safe as replaying it once.
+            case JournalOperation.SetReadIntent when StateJournal.PayloadOf<SetReadIntentRequest>(entry) is { } i:
+                if (i.MappingName is null)
+                {
+                    logger.LogWarning(
+                        "Skipping journalled read intent for run {RunId}: it names no mapping.", runId);
+                    break;
+                }
+                state.SetReadIntent(i.TaskName, i.MappingName, i.SourceTable, i.Intent);
+                break;
+
+            case JournalOperation.SetReadHold when StateJournal.PayloadOf<SetReadHoldRequest>(entry) is { } h:
+                if (h.MappingName is null)
+                {
+                    logger.LogWarning(
+                        "Skipping journalled read hold for run {RunId}: it names no mapping.", runId);
+                    break;
+                }
+                state.SetReadHold(h.TaskName, h.MappingName, h.SourceTable, h.Hold);
+                break;
+
             default:
                 logger.LogWarning(
                     "Ignoring unrecognised state journal entry {Sequence} ({Operation}) for run {RunId}.",

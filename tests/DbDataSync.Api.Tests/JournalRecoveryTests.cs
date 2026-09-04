@@ -1,5 +1,6 @@
 using DbDataSync.Api.Configuration;
 using DbDataSync.Api.State;
+using DbDataSync.Core.Config;
 using DbDataSync.State;
 using DbDataSync.State.Remote;
 using Microsoft.Extensions.Logging;
@@ -232,6 +233,71 @@ public sealed class JournalRecoveryTests : IDisposable
 
         Assert.Equal("1234", applied!.Watermark);
         Assert.Null(applied.WatermarkTimeUtc);
+    }
+
+    // ---- Read intent and hold (phase 100) ----------------------------------------------------
+
+    /// <summary>The operations exist in the journal from phase 100 on even though nothing writes them
+    /// yet, so a cross-instance deployment does not silently drop them the day phase 101 does.</summary>
+    [Fact]
+    public void Journalled_read_intent_and_hold_are_applied()
+    {
+        _state.UpsertTask(TaskName, enabled: true);
+
+        WriteJournal(Guid.NewGuid(),
+            (JournalOperation.SetReadIntent,
+                new SetReadIntentRequest(TaskName, "dbo.Orders", ReadIntent.ChangesFromEarliest, MappingName)),
+            (JournalOperation.SetReadHold,
+                new SetReadHoldRequest(TaskName, "dbo.Orders", ReadHold.PositionExpired, MappingName)));
+
+        _recovery.Recover(TaskName);
+
+        var state = new ChangeWatermarkStore(_database).GetReadState(TaskName, MappingName, "dbo.Orders");
+        Assert.Equal(ReadIntent.ChangesFromEarliest, state!.Intent);
+        Assert.Equal(ReadHold.PositionExpired, state.Hold);
+    }
+
+    /// <summary>Both are idempotent by construction — the payload names the value the row should end up
+    /// at, not a transition — so replaying the same journal twice must not, say, toggle a hold back off.</summary>
+    [Fact]
+    public void Replaying_read_intent_and_hold_twice_leaves_the_same_value_the_first_replay_did()
+    {
+        _state.UpsertTask(TaskName, enabled: true);
+        (JournalOperation, object)[] entries =
+        [
+            (JournalOperation.SetReadIntent,
+                new SetReadIntentRequest(TaskName, "dbo.Orders", ReadIntent.ChangesFromLatest, MappingName)),
+            (JournalOperation.SetReadHold,
+                new SetReadHoldRequest(TaskName, "dbo.Orders", ReadHold.Paused, MappingName)),
+        ];
+
+        WriteJournal(Guid.NewGuid(), entries);
+        _recovery.Recover(TaskName);
+        WriteJournal(Guid.NewGuid(), entries);
+        _recovery.Recover(TaskName);
+
+        var state = new ChangeWatermarkStore(_database).GetReadState(TaskName, MappingName, "dbo.Orders");
+        Assert.Equal(ReadIntent.ChangesFromLatest, state!.Intent);
+        Assert.Equal(ReadHold.Paused, state.Hold);
+    }
+
+    /// <summary>
+    /// Neither of these has a phase-74-style ambiguity to worry about — they were born with a mapping
+    /// name — but a request without one is refused the same way <c>set-watermark</c> refuses it, and
+    /// recovery has to cope with that shape existing in principle.
+    /// </summary>
+    [Fact]
+    public void A_read_intent_journalled_with_no_mapping_is_skipped_rather_than_guessed()
+    {
+        _state.UpsertTask(TaskName, enabled: true);
+
+        WriteJournal(Guid.NewGuid(), (JournalOperation.SetReadIntent,
+            new SetReadIntentRequest(TaskName, "dbo.Orders", ReadIntent.ChangesFromEarliest)));
+
+        _recovery.Recover(TaskName);
+
+        Assert.Null(new ChangeWatermarkStore(_database).GetReadState(TaskName, MappingName, "dbo.Orders"));
+        Assert.Contains(_logger.Entries, e => e.Message.Contains("names no mapping"));
     }
 
     private sealed class CapturingLogger : ILogger<JournalRecovery>

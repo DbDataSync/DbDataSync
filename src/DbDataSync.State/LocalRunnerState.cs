@@ -1,3 +1,5 @@
+using DbDataSync.Core.Config;
+
 namespace DbDataSync.State;
 
 /// <summary>
@@ -27,6 +29,9 @@ public sealed class LocalRunnerState(
 
     public string? GetWatermark(string taskName, string mappingName, string sourceTable) =>
         watermarks.GetWatermark(taskName, mappingName, sourceTable);
+
+    public MappingReadState? GetReadState(string taskName, string mappingName, string sourceTable) =>
+        watermarks.GetReadState(taskName, mappingName, sourceTable);
 
     public void BeginRun(Guid runId, int? pid) => taskRuns.BeginRun(runId, pid);
 
@@ -59,6 +64,12 @@ public sealed class LocalRunnerState(
         string watermark,
         DateTimeOffset? watermarkTimeUtc = null) =>
         watermarks.SetWatermark(taskName, mappingName, sourceTable, watermark, watermarkTimeUtc);
+
+    public void SetReadIntent(string taskName, string mappingName, string sourceTable, ReadIntent intent) =>
+        watermarks.SetReadIntent(taskName, mappingName, sourceTable, intent);
+
+    public void SetReadHold(string taskName, string mappingName, string sourceTable, ReadHold hold) =>
+        watermarks.SetReadHold(taskName, mappingName, sourceTable, hold);
 
     public void RecordVerificationResult(VerificationResultRecord result) => verificationResults.Record(result);
 

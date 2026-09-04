@@ -38,6 +38,15 @@ public enum JournalOperation
     /// <summary>Safe to replay for the same reason: the parquet is already on disk, and the index is
     /// keyed on (run, check) so applying it twice writes the same row once.</summary>
     RecordVerificationResult,
+
+    /// <summary>Idempotent by construction: the operation is "this mapping's intent is now X", not
+    /// "advance the intent", so replaying it twice leaves the same value the first replay did. Nothing
+    /// writes this until phase 101 consumes the intent, but the journal has to carry it from phase 100
+    /// on — see <c>JournalRecoveryTests</c>.</summary>
+    SetReadIntent,
+
+    /// <summary>Idempotent for the same reason <see cref="SetReadIntent"/> is.</summary>
+    SetReadHold,
 }
 
 /// <summary>

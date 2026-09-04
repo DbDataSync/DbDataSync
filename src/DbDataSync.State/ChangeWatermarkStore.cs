@@ -1,9 +1,16 @@
 using System.Data.Common;
+using DbDataSync.Core.Config;
 
 namespace DbDataSync.State;
 
 /// <summary>Where one mapping's last completed pass got to, and when the source says that position
 /// committed — see phase 87.</summary>
+/// <param name="Watermark">
+/// Null for a mapping that has an intent stored but has not yet completed a pass under it — phase 100's
+/// <c>ChangesFromEarliest</c>, say, before its first read. Every existing caller already treats "no
+/// applied position" as "nothing to measure from" (see <c>ReaderLagService</c>), which is exactly the
+/// right reading here too.
+/// </param>
 /// <param name="WatermarkTimeUtc">
 /// Null for three distinguishable-in-cause but identical-in-answer reasons: the row was written
 /// before phase 87 added the column and the mapping has not run since, its reader has no
@@ -11,7 +18,17 @@ namespace DbDataSync.State;
 /// stored it. All three mean the same thing to a report — no figure yet — which is why they are one
 /// null rather than a state code.
 /// </param>
-public sealed record AppliedPosition(string Watermark, DateTimeOffset? WatermarkTimeUtc);
+public sealed record AppliedPosition(string? Watermark, DateTimeOffset? WatermarkTimeUtc);
+
+/// <summary>
+/// A mapping's full stored row — what it should do next, whether it is allowed to, and where it got to —
+/// read together for the reason <see cref="AppliedPosition"/> already pairs a position with its time:
+/// three separate reads of the same row could straddle a pass that ran between them. See phase 100.
+/// </summary>
+/// <param name="Intent">This mapping's own stored intent. There is no fallback here — a mapping with no
+/// row at all (nothing in <see cref="ChangeWatermarkStore.GetReadState"/>) is the case
+/// <c>ReadIntentResolution.Default</c> answers instead; once a row exists, its own value always wins.</param>
+public sealed record MappingReadState(ReadIntent Intent, ReadHold Hold, string? Watermark, DateTimeOffset? WatermarkTimeUtc);
 
 /// <summary>
 /// Where each table mapping's incremental read got to — one current value per
@@ -92,7 +109,7 @@ public sealed class ChangeWatermarkStore(StateDatabase database)
             using var reader = cmd.ExecuteReader();
             return reader.Read()
                 ? new AppliedPosition(
-                    reader.GetString(0),
+                    reader.IsDBNull(0) ? null : reader.GetString(0),
                     reader.IsDBNull(1) ? null : DateTimeOffset.Parse(reader.GetString(1)))
                 : null;
         });
@@ -107,6 +124,112 @@ public sealed class ChangeWatermarkStore(StateDatabase database)
             cmd.Bind(database, "mapping", mappingName);
             cmd.Bind(database, "table", sourceTable);
             return cmd.ExecuteScalar() as string;
+        });
+
+    /// <summary>
+    /// This mapping's stored intent, hold and position, together — see <see cref="MappingReadState"/>
+    /// for why one read rather than three.
+    /// </summary>
+    /// <returns>Null when the mapping has no row at all: it has never completed a pass and nobody has
+    /// ever set an intent or a hold on it ahead of one. Resolving what that absence means is
+    /// <c>ReadIntentResolution.Default</c>'s job, not this store's — a store that invented a default
+    /// intent for a missing row would have nowhere to record "this default came from config" if a later
+    /// caller needed to know.</returns>
+    public MappingReadState? GetReadState(string taskName, string mappingName, string sourceTable) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection,
+                "SELECT ReadIntent, ReadHold, Watermark, WatermarkTimeUtc FROM ChangeWatermarks "
+                    + "WHERE TaskName = $task AND MappingName = $mapping AND SourceTable = $table;");
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "mapping", mappingName);
+            cmd.Bind(database, "table", sourceTable);
+
+            using var reader = cmd.ExecuteReader();
+            return reader.Read()
+                ? new MappingReadState(
+                    Enum.Parse<ReadIntent>(reader.GetString(0)),
+                    Enum.Parse<ReadHold>(reader.GetString(1)),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.IsDBNull(3) ? null : DateTimeOffset.Parse(reader.GetString(3)))
+                : null;
+        });
+
+    /// <summary>
+    /// What the next pass over this mapping is meant to do — set on its own, independent of
+    /// <see cref="SetReadHold"/> and of the watermark itself, so a caller that only knows one of these
+    /// facts never has to restate the other two to change it.
+    /// <para>
+    /// Upserts rather than requiring an existing row: an intent can be set ahead of a mapping's first
+    /// pass (<c>ChangesFromEarliest</c> on a brand-new mapping is exactly this), and the row that
+    /// creates leaves <c>Watermark</c> null and <c>ReadHold</c> at its schema default — neither of
+    /// which this call has any business deciding.
+    /// </para>
+    /// </summary>
+    public void SetReadIntent(string taskName, string mappingName, string sourceTable, ReadIntent intent) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, database.Dialect.Upsert(
+                "ChangeWatermarks",
+                "TaskName, MappingName, SourceTable, ReadIntent, UpdatedAtUtc",
+                "$task, $mapping, $table, $intent, $now",
+                "TaskName, MappingName, SourceTable",
+                "ReadIntent = EXCLUDED.ReadIntent, UpdatedAtUtc = EXCLUDED.UpdatedAtUtc"));
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "mapping", mappingName);
+            cmd.Bind(database, "table", sourceTable);
+            cmd.Bind(database, "intent", intent.ToString());
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.ExecuteNonQuery();
+        });
+
+    /// <summary>Why this mapping's next <c>Primary</c> pass is not going to run, set independently of
+    /// <see cref="SetReadIntent"/> for the reason <see cref="ReadHold"/>'s own doc gives: a hold must
+    /// preserve whatever intent sits underneath it. See that method for the upsert shape.</summary>
+    public void SetReadHold(string taskName, string mappingName, string sourceTable, ReadHold hold) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, database.Dialect.Upsert(
+                "ChangeWatermarks",
+                "TaskName, MappingName, SourceTable, ReadHold, UpdatedAtUtc",
+                "$task, $mapping, $table, $hold, $now",
+                "TaskName, MappingName, SourceTable",
+                "ReadHold = EXCLUDED.ReadHold, UpdatedAtUtc = EXCLUDED.UpdatedAtUtc"));
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "mapping", mappingName);
+            cmd.Bind(database, "table", sourceTable);
+            cmd.Bind(database, "hold", hold.ToString());
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.ExecuteNonQuery();
+        });
+
+    /// <summary>
+    /// Both in the one statement, for the operator recovering from a hold: setting a fresh intent and
+    /// clearing the hold are one act, and writing them as two separate calls would leave a window where
+    /// the hold has already cleared and the old intent is still what a pass would honour. See phase 100.
+    /// </summary>
+    public void SetReadIntentAndHold(
+        string taskName, string mappingName, string sourceTable, ReadIntent intent, ReadHold hold) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, database.Dialect.Upsert(
+                "ChangeWatermarks",
+                "TaskName, MappingName, SourceTable, ReadIntent, ReadHold, UpdatedAtUtc",
+                "$task, $mapping, $table, $intent, $hold, $now",
+                "TaskName, MappingName, SourceTable",
+                "ReadIntent = EXCLUDED.ReadIntent, ReadHold = EXCLUDED.ReadHold, "
+                    + "UpdatedAtUtc = EXCLUDED.UpdatedAtUtc"));
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "mapping", mappingName);
+            cmd.Bind(database, "table", sourceTable);
+            cmd.Bind(database, "intent", intent.ToString());
+            cmd.Bind(database, "hold", hold.ToString());
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.ExecuteNonQuery();
         });
 
     /// <summary>

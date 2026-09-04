@@ -3,6 +3,9 @@ using DbDataSync.Api.Services;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Api.Auth;
+using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Generic;
+using DbDataSync.State;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -14,7 +17,8 @@ namespace DbDataSync.Api.Controllers;
 public sealed class TableMappingsController(
     ConfigRepository configRepository, CurrentUser currentUser, IHubContext<RunHub> hub,
     ParameterCheck parameterCheck, ReaderLagService lag,
-    MappingMetadataService mappingMetadata, MappingColumnReader columnReader) : ControllerBase
+    MappingMetadataService mappingMetadata, MappingColumnReader columnReader,
+    ChangeWatermarkStore watermarks, RunLockStore runLocks, DriverRegistry driverRegistry) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
@@ -62,6 +66,132 @@ public sealed class TableMappingsController(
             return NotFound();
 
         return Ok(MappingLag.From(lag.Describe(task, mappingName)));
+    }
+
+    /// <summary>
+    /// This mapping's stored intent and hold, resolved the way a caller actually wants them: the
+    /// mapping's own stored row when it has one, and the configured default when it does not — a
+    /// mapping that has never run is not "unknown", it is going to do exactly what
+    /// <see cref="ReadIntentResolution"/> says on its first pass. See phase 100.
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("{mappingName}/read-state")]
+    public ActionResult<MappingReadStateDto> GetReadState(string replicationName, string mappingName)
+    {
+        ReplicationTaskConfig task;
+        TableMappingConfig mapping;
+        try
+        {
+            task = configRepository.LoadReplicationTask(replicationName);
+            mapping = configRepository.LoadTableMapping(replicationName, mappingName);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+
+        string sourceTable;
+        try
+        {
+            sourceTable = ResolveWatermarkKey(task, mapping);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+
+        var stored = watermarks.GetReadState(replicationName, mappingName, sourceTable);
+        return Ok(new MappingReadStateDto(
+            stored?.Intent ?? ReadIntentResolution.Default(task, mapping),
+            stored?.Hold ?? ReadHold.None,
+            stored?.Watermark,
+            stored?.WatermarkTimeUtc));
+    }
+
+    /// <summary>
+    /// Sets this mapping's intent and clears or sets its hold, in the one call — an operator recovering
+    /// from a hold is choosing both at once, and two separate requests would leave a window where the
+    /// hold has already cleared but the old intent is still what the next pass would honour.
+    /// <para>
+    /// **Refused while a run holds this mapping's lock.** An intent cannot move under a pass that is
+    /// already acting on it — the same pass would read the value it was dispatched with regardless, and
+    /// changing the stored row underneath it would only make the two disagree about what happened.
+    /// </para>
+    /// <para>
+    /// No validation against what the mapping's reader can actually honour — that needs the capability
+    /// interface phase 101 adds. This will happily store <c>ChangesFromEarliest</c> against a reader
+    /// that has no such thing; today nothing consumes it, and once phase 101 does, it is the one that
+    /// refuses to silently downgrade it.
+    /// </para>
+    /// </summary>
+    [HttpPost("{mappingName}/read-state")]
+    public ActionResult<MappingReadStateDto> SetReadState(
+        string replicationName, string mappingName, [FromBody] SetMappingReadStateRequest request)
+    {
+        ReplicationTaskConfig task;
+        TableMappingConfig mapping;
+        try
+        {
+            task = configRepository.LoadReplicationTask(replicationName);
+            mapping = configRepository.LoadTableMapping(replicationName, mappingName);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+
+        if (runLocks.IsLocked(replicationName, RunKind.Primary, mappingName)
+            || runLocks.IsLocked(replicationName, RunKind.Backfill, mappingName))
+        {
+            return Conflict(new
+            {
+                error = $"Table mapping '{mappingName}' has a run in progress; its read intent cannot " +
+                    "change until that pass finishes.",
+            });
+        }
+
+        string sourceTable;
+        try
+        {
+            sourceTable = ResolveWatermarkKey(task, mapping);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+
+        watermarks.SetReadIntentAndHold(replicationName, mappingName, sourceTable, request.Intent, request.Hold);
+
+        var stored = watermarks.GetReadState(replicationName, mappingName, sourceTable)!;
+        return Ok(new MappingReadStateDto(stored.Intent, stored.Hold, stored.Watermark, stored.WatermarkTimeUtc));
+    }
+
+    /// <summary>
+    /// The <c>ChangeWatermarks</c> key for a mapping's own source — the same resolution
+    /// <c>ResyncService</c> and <c>ChangeSourceResolver</c> each make on their own, restated here rather
+    /// than shared because neither of those fits this caller: <c>ResyncService</c> only runs once a run
+    /// has already failed, and <c>ChangeSourceResolver</c> answers null for a reader with no
+    /// database-wide counter to gate on, which is not "no key" — the Watermark reader has a perfectly
+    /// good key and simply is not gated.
+    /// </summary>
+    private SourceTableRef ResolveSourceTable(ReplicationTaskConfig task, TableMappingConfig mapping)
+    {
+        if (mapping.Sources.Count != 1)
+            throw new InvalidOperationException(
+                $"Table mapping '{mapping.Name}' has {mapping.Sources.Count} sources; read intent supports 1:1 mappings.");
+
+        return EndpointResolution.ResolveSource(task, mapping.Sources[0]);
+    }
+
+    private string ResolveWatermarkKey(ReplicationTaskConfig task, TableMappingConfig mapping)
+    {
+        var source = ResolveSourceTable(task, mapping);
+        var connection = configRepository.LoadConnection(source.ConnectionName);
+        var dialect = (driverRegistry.Get(connection.DriverType) as IDialectProvider)?.Dialect
+            ?? throw new InvalidOperationException(
+                $"The '{connection.DriverType}' driver does not name a SQL dialect.");
+
+        return WatermarkKey.Build(source, dialect);
     }
 
     [HttpPut("{mappingName}")]
@@ -409,3 +539,20 @@ public sealed record MappingLag(
         (long?)lag.EstimatedLag?.TotalMilliseconds,
         lag.AsOfUtc);
 }
+
+/// <summary>
+/// One mapping's read intent and hold, over the wire — see phase 100.
+/// <para>
+/// <paramref name="Intent"/> and <paramref name="Hold"/> are always resolved, never the raw absence of
+/// a stored row: a mapping that has never run reports <see cref="ReadIntentResolution.Default"/> and
+/// <see cref="ReadHold.None"/> rather than a null a client would have to resolve itself. Everything
+/// this design promises — that a full load always traces to somebody's choice — depends on the
+/// resolved value being visible before a first pass, not only after one.
+/// </para>
+/// </summary>
+public sealed record MappingReadStateDto(ReadIntent Intent, ReadHold Hold, string? Watermark, DateTimeOffset? WatermarkTimeUtc);
+
+/// <summary>Both fields required, deliberately: the one call this backs exists so an operator recovering
+/// from a hold states the intent and the hold together, rather than in two requests with a window
+/// between them where the hold is gone and the old intent is still what the next pass would honour.</summary>
+public sealed record SetMappingReadStateRequest(ReadIntent Intent, ReadHold Hold);

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using DbDataSync.Api.State;
+using DbDataSync.Core.Config;
 using DbDataSync.State;
 using DbDataSync.State.Remote;
 using Microsoft.AspNetCore.Http;
@@ -122,6 +123,15 @@ public sealed class RunnerStateEndpointTests : IClassFixture<TestApiFactory>
         remote.MarkRunning(claimed.Id);
         remote.Log(claimed.RunId, LogSeverity.Info, "hello from a runner");
         remote.SetWatermark(taskName, "orders", "dbo.Orders", "1234");
+
+        // Phase 100's own operations, over the same real socket — a remote runner setting an intent or
+        // a hold must not silently do nothing just because nothing consumes it yet.
+        remote.SetReadIntent(taskName, "orders", "dbo.Orders", ReadIntent.ChangesFromEarliest);
+        remote.SetReadHold(taskName, "orders", "dbo.Orders", ReadHold.PositionExpired);
+        Assert.Equal(
+            new MappingReadState(ReadIntent.ChangesFromEarliest, ReadHold.PositionExpired, "1234", null),
+            remote.GetReadState(taskName, "orders", "dbo.Orders"));
+
         remote.MarkDone(claimed.Id);
         remote.CompleteRun(claimed.RunId, RunStatus.Succeeded, 7, 7, null);
         remote.ReleaseLock(taskName, RunKind.Primary, "Orders");
@@ -129,6 +139,9 @@ public sealed class RunnerStateEndpointTests : IClassFixture<TestApiFactory>
 
         // Read back through the owner, which is the only thing that ever touched the file.
         Assert.Equal("1234", owner.GetWatermark(taskName, "orders", "dbo.Orders"));
+        Assert.Equal(
+            new MappingReadState(ReadIntent.ChangesFromEarliest, ReadHold.PositionExpired, "1234", null),
+            owner.GetReadState(taskName, "orders", "dbo.Orders"));
         Assert.False(remote.HasOutstandingWork(taskName));
 
         var run = _factory.Services.GetRequiredService<TaskRunStore>().GetRun(claimed.RunId);

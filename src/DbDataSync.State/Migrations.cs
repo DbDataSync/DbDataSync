@@ -687,5 +687,46 @@ internal static class Migrations
         -- to recover one from. The popup falls back to ErrorSummary for such a run.
         ALTER TABLE TaskRuns {{addcolumn}} ErrorDetail {{text}} NULL;
         """,
+
+        """
+        -- What a mapping's next pass is meant to do, and whether it is allowed to run at all — see
+        -- phase 100 and architecture/planning/done/reset-a-mappings-watermark-from-the-ui.md.
+        --
+        -- Both land on ChangeWatermarks rather than a table of their own. The key an intent needs —
+        -- (TaskName, MappingName, SourceTable) — is exactly the key this table already has, and a
+        -- second table would mean a second row lifecycle for the same mapping to keep in step: a
+        -- mapping created here and not there, or vice versa, on every code path that touches either.
+        -- The cost is a table that is no longer only about watermarks and whose name now undersells
+        -- it — accepted rather than renamed, because a rename is not worth a migration on its own and
+        -- this comment is cheaper.
+        --
+        -- ReadIntent NOT NULL DEFAULT 'Changes': every row that already exists belongs to a mapping
+        -- that has completed at least one pass, and a mapping that has run is doing ordinary
+        -- incremental reads. That is a true backfill of what already happened, not a guess standing in
+        -- for one.
+        ALTER TABLE ChangeWatermarks {{addcolumn}} ReadIntent {{text}} NOT NULL DEFAULT 'Changes';
+
+        -- ReadHold NOT NULL DEFAULT 'None': nothing already running is held back by this migration.
+        -- One column rather than a hold plus a separate reason, because today's two values
+        -- (PositionExpired, Paused) are themselves reasons and are mutually exclusive — revisit if a
+        -- mapping can ever need to be held for two reasons at once.
+        ALTER TABLE ChangeWatermarks {{addcolumn}} ReadHold {{text}} NOT NULL DEFAULT 'None';
+
+        -- Watermark becomes nullable. "ChangesFromEarliest, no position read yet" is a row that has to
+        -- be storable — an intent can now exist before it has a position, which the old NOT NULL made
+        -- a contradiction. None of the three engines has an ALTER COLUMN that relaxes a constraint in
+        -- place (see StateDialect.DropIndex's doc comment for SQLite's version of the same gap), so
+        -- the usual answer here is drop-and-re-add — what phase 73 did for StartedAtUtc/ClaimedAtUtc.
+        -- That discarded the column's old values outright, which was correct there because those
+        -- values were already wrong. It is not correct here: every existing Watermark is the real
+        -- position every reader depends on to avoid re-reading its whole table from the start, so this
+        -- copies it through a temporary column instead of dropping it.
+        ALTER TABLE ChangeWatermarks {{addcolumn}} WatermarkTemp {{text}} NULL;
+        UPDATE ChangeWatermarks SET WatermarkTemp = Watermark;
+        ALTER TABLE ChangeWatermarks DROP COLUMN Watermark;
+        ALTER TABLE ChangeWatermarks {{addcolumn}} Watermark {{text}} NULL;
+        UPDATE ChangeWatermarks SET Watermark = WatermarkTemp;
+        ALTER TABLE ChangeWatermarks DROP COLUMN WatermarkTemp;
+        """,
     ];
 }

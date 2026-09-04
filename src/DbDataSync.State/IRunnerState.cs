@@ -1,3 +1,5 @@
+using DbDataSync.Core.Config;
+
 namespace DbDataSync.State;
 
 /// <summary>
@@ -31,6 +33,12 @@ public interface IRunnerState
     bool TryAcquireLock(string taskName, RunKind runKind, string mappingName, Guid runId);
 
     string? GetWatermark(string taskName, string mappingName, string sourceTable);
+
+    /// <summary>The intent, hold and position stored for one mapping, together — see
+    /// <see cref="MappingReadState"/>. Null when the mapping has no row at all; nothing in this phase
+    /// resolves that absence to a default, the same as <see cref="GetWatermark"/> answers null rather
+    /// than inventing a full-load instruction.</summary>
+    MappingReadState? GetReadState(string taskName, string mappingName, string sourceTable);
 
     void BeginRun(Guid runId, int? pid);
 
@@ -76,6 +84,20 @@ public interface IRunnerState
         string sourceTable,
         string watermark,
         DateTimeOffset? watermarkTimeUtc = null);
+
+    /// <summary>
+    /// What the next pass over this mapping is meant to do, from here on — written wherever a pass
+    /// transitions its own intent (phase 101's <c>ChangesFromEarliest</c> → <c>Changes</c>, say).
+    /// **Nothing writes this yet**: phase 100 wires it the whole way through so the plumbing exists
+    /// before phase 101 has anything of its own to say with it.
+    /// </summary>
+    void SetReadIntent(string taskName, string mappingName, string sourceTable, ReadIntent intent);
+
+    /// <summary>Why this mapping's next <c>Primary</c> pass should not run — set independently of
+    /// <see cref="SetReadIntent"/> for the reason <see cref="ReadHold"/>'s own doc gives: a hold must
+    /// survive underneath whatever intent it was entered with. **Nothing writes this yet** — see
+    /// <see cref="SetReadIntent"/>.</summary>
+    void SetReadHold(string taskName, string mappingName, string sourceTable, ReadHold hold);
 
     /// <summary>
     /// Where a verification result was written. An outcome like any other — the work is already done
