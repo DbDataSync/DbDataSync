@@ -29,12 +29,21 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **100** — read intent and hold: storage, defaults, API | inert when it lands, by design — the seam phase 90 used |
-| 2 | **101** — the readers honour the intent | the behaviour change, and where an expired position stops retrying forever |
-| 3 | **102** — Monitoring tab manages intent and hold | |
-| 4 | **034** — PostgreSQL logical replication | |
-| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **103** — replication detail: Runs under Monitoring, Schedule on Overview, countdowns in their cards | must precede 102, which puts controls on the tab this moves |
+| 2 | **100** — read intent and hold: storage, defaults, API | inert when it lands, by design — the seam phase 90 used |
+| 3 | **101** — the readers honour the intent | the behaviour change, and where an expired position stops retrying forever |
+| 4 | **102** — Monitoring tab manages intent and hold | lands on 103's Current Status sub-tab |
+| 5 | **104** — run history filtering and paging | independent of 100–102; after 103 only for where the panel lives |
+| 6 | **034** — PostgreSQL logical replication | |
+| 7 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 8 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-04 (later): 103 goes above 100–102, and 104 below them. Not a judgement that the UX
+work matters more than the intent/hold chain — 103 is small and entirely presentational, and 102 puts
+new controls on the very tab 103 restructures. Building 102 first would mean designing those controls
+against a layout that then moves under them, and 100 and 101 have not started, so the ordering costs
+nothing. 104 is independent of all four and sits below them; it depends on 103 only for where the
+panel it changes happens to live.
 
 Updated 2026-09-04: 100–102 go to the top, in that order — they are one design split three ways and
 have to land in sequence. What earns the queue jump is 101's half: a mapping whose source position
