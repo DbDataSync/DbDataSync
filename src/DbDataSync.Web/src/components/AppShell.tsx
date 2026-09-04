@@ -1,6 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
-import { ShellActionsSlot } from './shellActionsSlot'
 import { NotificationBell } from './NotificationBell'
 import { SignedInAs } from './SignIn'
 import { useIsAdmin } from './useIsAdmin'
@@ -12,6 +11,12 @@ import { CodeIcon, DatabaseIcon, FlowIcon, GearIcon, GridIcon, LogoIcon } from '
  * The mockups also show an environment pill, an Activity tab and a health roll-up in this bar. None
  * of those have anything behind them, and a console that displays an invented reading is worse than
  * one that displays none — see phase-015's "what the design shows that the system cannot back".
+ *
+ * **No action-bar portal any more.** Phase 88 gave nested panels a `ShellActions` component that
+ * rendered into a slot up here, so a `RefreshCountdown` three components down could still show up in
+ * the header. Phase 103 moved every one of its three users into the header of the card or pane it
+ * describes instead, which was the more honest place for each of them all along — and deleted the
+ * portal along with them, rather than leaving it wired up with nothing using it.
  */
 export function AppShell({ crumbs, tabs, actions, children }: {
   crumbs: Crumb[]
@@ -23,12 +28,6 @@ export function AppShell({ crumbs, tabs, actions, children }: {
   // item is only about not offering a Viewer a destination that would 403 on arrival, the same
   // instinct useIsAdmin's own doc comment states for the Save buttons it gates.
   const isAdmin = useIsAdmin()
-
-  // State rather than a ref, deliberately: a portal needs its host element to exist before it can
-  // render into it, and a ref assignment does not re-render the subscribers. Holding the node in
-  // state means the first render publishes null — `ShellActions` renders nothing — and the second
-  // publishes the element, which is when the countdowns appear.
-  const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null)
 
   return (
     <>
@@ -100,9 +99,6 @@ export function AppShell({ crumbs, tabs, actions, children }: {
               authenticate. */}
           <div className="right">
             {actions}
-            {/* What the content below wants to say up here — see `ShellActions`. Left of the bell
-                and the identity, which stay the rightmost things on every screen. */}
-            <span className="shell-actions" ref={setActionSlot} />
             {/* Beside the signed-in identity, on every screen and for the same reason: a
                 notification is about the deployment, not about whichever page happens to be open. */}
             <NotificationBell />
@@ -113,7 +109,7 @@ export function AppShell({ crumbs, tabs, actions, children }: {
         {tabs && <div className="tabbar">{tabs}</div>}
 
         <div className="content">
-          <ShellActionsSlot.Provider value={actionSlot}>{children}</ShellActionsSlot.Provider>
+          {children}
         </div>
       </div>
     </>

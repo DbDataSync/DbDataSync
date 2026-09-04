@@ -29,13 +29,19 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **103** — replication detail: Runs under Monitoring, Schedule on Overview, countdowns in their cards | must precede 102, which puts controls on the tab this moves |
-| 2 | **102** — Monitoring tab manages intent and hold | lands on 103's Current Status sub-tab |
-| 3 | **104** — run history filtering and paging | independent of 100–102; after 103 only for where the panel lives |
-| 4 | **105** — one provisioning script for the whole replication | independent of everything above it |
-| 5 | **034** — PostgreSQL logical replication | |
-| 6 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 7 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **102** — Monitoring tab manages intent and hold | lands on 103's Current Status sub-tab |
+| 2 | **104** — run history filtering and paging | independent of 100–102; after 103 only for where the panel lives |
+| 3 | **105** — one provisioning script for the whole replication | independent of everything above it |
+| 4 | **034** — PostgreSQL logical replication | |
+| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-04 (yet later): 103 is done and removed — Runs is a Monitoring sub-tab now, Schedule
+is on Overview, and the three `RefreshCountdown`s live in the header of the card or pane each one
+describes rather than in the now-deleted `ShellActions` portal. 102 stays exactly where the queue jump
+above put it, still pointed at the Current Status sub-tab 103 built — but 102's own doc still describes
+the pre-103 tab layout, and correcting that description is 102's job when it lands, not something this
+update reached into its file to fix.
 
 Updated 2026-09-04 (even later): 101 is done and removed alongside 100, which had already landed but
 was left in this table — an oversight, corrected here rather than left for 102 to notice. 101's own

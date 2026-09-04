@@ -187,7 +187,7 @@ test.describe.serial('golden path: define, configure, and run a replication end-
       runSql(`UPDATE dbo.[${SOURCE_TABLE}] SET Name = Name;`, DB_NAME)
 
       await page.goto(`/replications/${REPLICATION_NAME}`)
-      await page.getByTestId('tab-runs').click()
+      await page.getByTestId('tab-monitoring').click()
       await page.getByTestId('trigger-run-button').click()
 
       await expect(page.getByTestId('live-run-panel')).toBeVisible()
@@ -264,7 +264,7 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     // Had the backfill disturbed the watermark, this pass would re-read the whole table instead — the
     // single most important consequence of Backfill runs never calling SetWatermark.
     await page.goto(`/replications/${REPLICATION_NAME}`)
-    await page.getByTestId('tab-runs').click()
+    await page.getByTestId('tab-monitoring').click()
     await page.getByTestId('trigger-run-button').click()
 
     await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
@@ -386,13 +386,29 @@ test.describe.serial('golden path: define, configure, and run a replication end-
 
     for (const [testId, path] of [
       ['tab-mappings', 'mappings'],
-      ['tab-runs', 'runs'],
+      ['tab-monitoring', 'monitoring'],
       ['tab-history', 'history'],
       ['tab-overview', 'overview'],
     ] as const) {
       await page.getByTestId(testId).click()
       await expect(page).toHaveURL(new RegExp(`${base}/${path}`))
     }
+
+    // Monitoring's own sub-tabs, routed the same way (phase 103) — Current Status is the index and
+    // Run History a segment, the same convention Overview's own tabs already follow.
+    await page.getByTestId('tab-monitoring').click()
+    await expect(page).toHaveURL(new RegExp(`${base}/monitoring$`))
+    await expect(page.getByTestId('monitoring-tab-current')).toHaveClass(/active/)
+    await page.getByTestId('monitoring-tab-history').click()
+    await expect(page).toHaveURL(new RegExp(`${base}/monitoring/history$`))
+    await expect(page.getByTestId('run-history-table')).toBeVisible()
+
+    // /runs is a bookmark from before phase 103 folded it under Monitoring, and it has to land
+    // somewhere real rather than 404. `replace`, so it leaves no entry of its own in this history —
+    // Back from here should skip over it entirely, which the next block relies on.
+    await page.goto(`${base}/runs`)
+    await expect(page).toHaveURL(new RegExp(`${base}/monitoring/history$`))
+    await expect(page.getByTestId('run-history-table')).toBeVisible()
 
     // Deep-linked straight in, with no navigation to get there.
     await page.goto(`${base}/history`)
@@ -408,17 +424,17 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     // /mappings with nothing chosen lands on the overview — which tables are mapped is what the
     // section is about, and "whichever mapping sorts first" was never an answer anyone asked for.
     // `replace`, so Back leaves the tab instead of bouncing off the redirect.
-    await page.goto(`${base}/runs`)
+    await page.goto(`${base}/monitoring/history`)
     await page.getByTestId('tab-mappings').click()
     await expect(page).toHaveURL(new RegExp(`${base}/mappings/overview$`))
     await page.goBack()
-    await expect(page).toHaveURL(new RegExp(`${base}/runs$`))
+    await expect(page).toHaveURL(new RegExp(`${base}/monitoring/history$`))
 
     // The browser's own history works across tabs, which is what it means for these to be pages.
     await page.goBack()
     await expect(page).toHaveURL(new RegExp(`${base}/mappings/${MAPPING_NAME}$`))
     await page.goForward()
-    await expect(page).toHaveURL(new RegExp(`${base}/runs$`))
+    await expect(page).toHaveURL(new RegExp(`${base}/monitoring/history$`))
 
     // A stale or mistyped URL lands somewhere real.
     await page.goto('/replications/does-not-exist-anywhere/nonsense')
@@ -731,7 +747,10 @@ public sealed class DropGadgets : IRowTransform
     // Asserted on this mapping's own runs, not the shared history — the replication is on a
     // continuous schedule, so a pass that ran before Apply and failed for the very reason this test
     // is about is expected, and a history row saying "succeeded" may be someone else's.
-    await page.getByTestId('tab-runs').click()
+    //
+    // Monitoring, not Runs — Run Now is chrome, reachable from any tab (phase 103 moved Runs under
+    // Monitoring as a sub-tab, and this proves the button still works from a tab that is not it).
+    await page.getByTestId('tab-monitoring').click()
     await page.getByTestId('trigger-run-button').click()
 
     await expect.poll(async () => {
@@ -1064,7 +1083,7 @@ public sealed class Shout : IValueColumnExpression
     await shot(page, '32-verification-within-threshold.png')
   })
 
-  test('25 - status and schedule are chrome, the draft survives the tabs, and Enabled saves itself', async ({ page }) => {
+  test('25 - status is chrome, schedule lives on Overview, the draft survives the tabs, and Enabled saves itself', async ({ page }) => {
     await page.goto(`/replications/${REPLICATION_NAME}/overview`)
 
     // Save moved out of the Pipeline card and into the toolbar, because it commits endpoints,
@@ -1072,13 +1091,17 @@ public sealed class Shout : IValueColumnExpression
     await expect(page.getByTestId('save-settings-button')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.pane').getByTestId('save-settings-button')).toHaveCount(0)
 
-    // Status and Schedule are the same cards on every tab, not four mounts of them on one.
-    for (const tab of ['tab-overview', 'tab-mappings', 'tab-runs', 'tab-history']) {
+    // Status is the same card on every tab, not four mounts of it on one.
+    for (const tab of ['tab-overview', 'tab-mappings', 'tab-monitoring', 'tab-history']) {
       await page.getByTestId(tab).click()
       await expect(page.getByTestId('replication-status-card')).toBeVisible()
-      await expect(page.getByTestId('replication-schedule-card')).toBeVisible()
       await expect(page.getByTestId('enabled-toggle')).toBeVisible()
     }
+
+    // Schedule moved to Overview (phase 103) and is no longer one of them — it reads from the same
+    // draft, but only Overview shows it now.
+    await page.getByTestId('tab-overview').click()
+    await expect(page.getByTestId('replication-schedule-card')).toBeVisible()
 
     // Enabled first, and here rather than at creation: since phase 69 a new replication starts
     // disabled, so the status card reads "Disabled" until somebody opts in. Everything up to this
@@ -1109,7 +1132,7 @@ public sealed class Shout : IValueColumnExpression
     await page.getByTestId('reader-options-snapshotIsolation').click()
     await expect(page.getByTestId('reader-options-snapshotIsolation')).toHaveAttribute('aria-pressed', 'true')
 
-    await page.getByTestId('tab-runs').click()
+    await page.getByTestId('tab-monitoring').click()
     await page.getByTestId('tab-overview').click()
     await page.getByTestId('overview-tab-pipeline').click()
     await page.getByTestId('stage-reader').click()
@@ -1124,8 +1147,10 @@ public sealed class Shout : IValueColumnExpression
 
     // Enabled commits on its own, from any tab, and carries nothing else with it. Toggled here with
     // that unsaved edit still pending — which is exactly the case its own endpoint exists for.
+    // Status is the card asserted here rather than Schedule, since Schedule is not on this tab any
+    // more — it is asserted on Overview below instead.
     await page.getByTestId('tab-history').click()
-    await expect(page.getByTestId('replication-schedule-card')).toHaveClass(/enabled/)
+    await expect(page.getByTestId('replication-status-card')).toHaveClass(/enabled/)
     await page.getByTestId('enabled-toggle').click()
 
     await expect.poll(async () => {
@@ -1133,10 +1158,14 @@ public sealed class Shout : IValueColumnExpression
       return { enabled: task.enabled, snapshot: task.changeProcessing.reader.options.snapshotIsolation }
     }, { timeout: 15_000 }).toEqual({ enabled: false, snapshot: 'false' })
 
-    // The accent follows, on both cards, without a Save.
-    await expect(page.getByTestId('replication-schedule-card')).toHaveClass(/disabled/)
+    // The accent follows, on the rail's Status card, without a Save.
     await expect(page.getByTestId('replication-status-card')).toHaveClass(/disabled/)
     await shot(page, '33-replication-chrome-disabled.png')
+
+    // And on the Schedule card too, from the same `enabled` the layout route already holds — proving
+    // it survived the move to Overview rather than assuming it did.
+    await page.getByTestId('tab-overview').click()
+    await expect(page.getByTestId('replication-schedule-card')).toHaveClass(/disabled/)
 
     // And it survives a reload, which is the only proof it reached the config repo — this is the
     // field that silently reverted before phase 46, because the serializer omitted `false`.
@@ -1598,15 +1627,23 @@ public sealed class Shout : IValueColumnExpression
   })
 
   test('35 - the rail lines up with the pane, and the mappings list is a nav bar beside it', async ({ page }) => {
-    // Two columns whose first cards started on different lines, because the rail had no top padding
+    // Two columns whose *content* started on different lines, because the rail had no top padding
     // and the pane did.
+    //
+    // Measured as the pane's and the rail's own padded content edge, not a first card's position:
+    // phase 103 gave Monitoring a sub-tab bar of its own, so on this route (redirected here from the
+    // old /runs) the first real card sits below that bar rather than at the pane's own top — the same
+    // thing was already true of Overview's endpoints card before this phase. What the original defect
+    // was actually about is the two containers' own top padding agreeing, which this asserts directly.
     await page.goto(`/replications/${REPLICATION_NAME}/runs`)
     await expect(page.getByTestId('run-history-table')).toBeVisible({ timeout: 20_000 })
 
-    const top = (locator: ReturnType<typeof page.locator>) =>
-      locator.first().evaluate((el) => Math.round(el.getBoundingClientRect().top))
-    expect(await top(page.locator('.pane > .card')))
-      .toBe(await top(page.locator('.detail-rail > .card')))
+    const contentTop = (locator: ReturnType<typeof page.locator>) => locator.first().evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      return Math.round(rect.top + parseFloat(getComputedStyle(el).paddingTop))
+    })
+    expect(await contentTop(page.locator('.detail-main > .pane')))
+      .toBe(await contentTop(page.locator('.detail-rail')))
 
     // The mappings list is a sidebar, so it belongs *beside* the pane and runs the full height. In a
     // block container it stacked above it instead, and stopped short of the bottom.

@@ -70,7 +70,12 @@ export default defineConfig({
       },
     },
     {
-      command: 'npm run dev -- --port 5173 --strictPort',
+      // `--host 127.0.0.1`, found while verifying phase 103: without it, vite's `--port` alone binds
+      // only `[::1]` (IPv6 loopback) on at least one Windows configuration, so the readiness probe
+      // above — an IPv4 `127.0.0.1` URL — never connects and this entry times out after 30s even
+      // though vite itself started and logged "ready" well within that window. Forcing the bind
+      // address to match the probe's own address fixed it outright in manual testing.
+      command: 'npm run dev -- --port 5173 --strictPort --host 127.0.0.1',
       cwd: path.join(repoRoot, 'src/DbDataSync.Web'),
       url: 'http://127.0.0.1:5173',
       reuseExistingServer: false,

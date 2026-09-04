@@ -1,12 +1,62 @@
+import { Outlet, useOutletContext } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { RefreshCountdown } from '../../components/RefreshCountdown'
-import { ShellActions } from '../../components/ShellActions'
+import { SubTabs, type SubTab } from '../../components/SubTabs'
 import { resolveSide } from '../../api/resolveEndpoint'
 import { useReplication, useReplicationLag, useTableMappingDetails, useTableMappings } from '../../api/hooks'
 import type { MappingLag, ReplicationTaskConfig, TableSpec } from '../../api/types'
 import { formatLag, lagStateOf } from './lag'
+import { RunsPanel, type RunsCommand } from './RunsPanel'
 
 const COLUMNS = '1fr 1fr 190px'
+
+const MONITORING_TABS: SubTab[] = [
+  { path: null, label: 'Current Status', testId: 'monitoring-tab-current' },
+  { path: 'history', label: 'Run History', testId: 'monitoring-tab-history' },
+]
+
+/**
+ * The Monitoring section's own layout route — see phase 103.
+ *
+ * Two sub-tabs, the `SubTabs` convention Overview and the mapping editor already use: **Current
+ * Status** is the index, so `/replications/{name}/monitoring` opens the lag table rather than
+ * requiring a segment, and **Run History** is what Runs used to be on its own top-level tab.
+ *
+ * Takes the command down to whichever sub-tab is open, the same way the layout route above passes it
+ * to this one — `RunsCommand` reaches the history panel two levels down the outlet now rather than one,
+ * and nothing about it needed to change to get there.
+ */
+export function MonitoringSection({ replicationName, command }: {
+  replicationName: string
+  command: RunsCommand | null
+}) {
+  const base = `/replications/${encodeURIComponent(replicationName)}/monitoring`
+
+  return (
+    <div className="pane">
+      <SubTabs base={base} tabs={MONITORING_TABS} testId="monitoring-subtabs" />
+      <div className="subtab-panel">
+        <Outlet context={{ replicationName, command } satisfies MonitoringOutletContext} />
+      </div>
+    </div>
+  )
+}
+
+/** What each of Monitoring's sub-tabs is handed. */
+export interface MonitoringOutletContext {
+  replicationName: string
+  command: RunsCommand | null
+}
+
+export function MonitoringCurrentStatusTab() {
+  const { replicationName } = useOutletContext<MonitoringOutletContext>()
+  return <MonitoringPanel replicationName={replicationName} />
+}
+
+export function MonitoringRunHistoryTab() {
+  const { replicationName, command } = useOutletContext<MonitoringOutletContext>()
+  return <RunsPanel replicationName={replicationName} command={command} />
+}
 
 /**
  * How far behind its source each of this replication's mappings is — see phase 86.
@@ -18,6 +68,11 @@ const COLUMNS = '1fr 1fr 190px'
  * **Nothing on this screen is measured against now.** Phase 85's figures are all differences
  * between a mapping's own position and the last position its source was observed at, which is why a
  * caught-up replication reads zero here and stays there rather than climbing overnight.
+ *
+ * No `.pane` of its own since phase 103 — `MonitoringSection` owns that, because this is now one of
+ * two sub-tabs sharing it. The header below is new as of that phase: the countdown used to live in
+ * the shared shell chrome, and moving it here needed somewhere pane-level to land, since it describes
+ * the whole tab (this range card *and* the mapping table beneath it) rather than either card alone.
  */
 export function MonitoringPanel({ replicationName }: { replicationName: string }) {
   const { data: task } = useReplication(replicationName)
@@ -29,10 +84,11 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
   const mappings = useTableMappingDetails(replicationName, names)
 
   return (
-    <div className="pane">
-      <ShellActions>
+    <>
+      <div className="pane-head" data-testid="monitoring-current-status-header">
+        <span className="card-title">Current status</span>
         <RefreshCountdown label="Lag" dataUpdatedAt={dataUpdatedAt} testId="lag-countdown" />
-      </ShellActions>
+      </div>
 
       <ErrorBanner error={error} />
 
@@ -77,7 +133,7 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
         {names?.length === 0 && <div className="empty">This replication has no table mappings yet.</div>}
         {!names && <div className="empty">Loading…</div>}
       </div>
-    </div>
+    </>
   )
 }
 

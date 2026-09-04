@@ -1,8 +1,17 @@
-import { Field } from '../../components/Field'
 import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
 
 /**
- * When this replication runs.
+ * When this replication runs — on Overview, between the endpoints and the sub-tabs, since phase 103.
+ *
+ * **A single line, not the full-height card this used to be.** It lived in the detail rail until
+ * then, where a whole card's worth of vertical room was free; on Overview it sits above tabbed
+ * content that wants that room back, so the fields that used to stack in a `card-body` sit in the
+ * `card-head` instead, beside the title, the way `MetricsCard`'s window selector already does.
+ *
+ * **What a complex schedule does here is a judgement call, not a rule.** A cron expression is
+ * typically short enough to sit on one line beside the mode picker; if a particular one ever is not,
+ * the input scrolls its own overflow rather than widening the row — nothing here truncates a value
+ * that was actually typed in.
  *
  * **The Enabled toggle is deliberately not here.** It lives in the replication's header and commits on
  * its own, while these fields belong to the batched Save. Leaving Enabled in this card — even in a
@@ -22,66 +31,75 @@ export function ScheduleCard({ draft, enabled, onChange }: {
   const setScheduling = (patch: Partial<ReplicationTaskConfig['scheduling']>) =>
     onChange({ ...draft, scheduling: { ...draft.scheduling, ...patch } })
 
+  const mode = draft.scheduling.mode
+
   return (
     <div className={`card ${enabled ? 'enabled' : 'disabled'}`} data-testid="replication-schedule-card">
-      <div className="card-head"><span className="card-title">Replication schedule</span></div>
-      <div className="card-body">
-        <Field label="Schedule mode">
-          <select
-            className="select"
-            value={draft.scheduling.mode}
-            onChange={(e) => setScheduling({ mode: e.target.value as ScheduleMode })}
-            data-testid="schedule-mode-select"
-          >
-            <option value="Continuous">Continuous</option>
-            <option value="Periodic">Periodic (cron)</option>
-          </select>
-        </Field>
+      <div className="card-head" style={{ flexWrap: 'wrap', rowGap: 8 }}>
+        <span className="card-title">Schedule</span>
 
-        {draft.scheduling.mode === 'Continuous' ? (
-          <>
-            <Field label="Frequency (seconds)">
-              <input
-                className="input"
-                type="number"
-                min={1}
-                value={draft.scheduling.frequencySeconds ?? 60}
-                onChange={(e) => setScheduling({ frequencySeconds: Number(e.target.value) })}
-                data-testid="schedule-frequency-input"
-              />
-            </Field>
-            <Field label="Idle timeout (seconds)">
-              <input
-                className="input"
-                type="number"
-                min={1}
-                // Blank rather than 60 when unset, because "nobody said" and "somebody chose 60" are
-                // different answers and only one of them gets written down.
-                placeholder="60"
-                value={draft.scheduling.idleTimeoutSeconds ?? ''}
-                onChange={(e) => setScheduling({
-                  idleTimeoutSeconds: e.target.value ? Number(e.target.value) : null,
-                })}
-                data-testid="schedule-idle-timeout-input"
-              />
-            </Field>
-          </>
-        ) : (
-          <Field label="Cron expression">
+        <select
+          className="select sm"
+          style={{ width: 'auto', flex: 'none' }}
+          value={mode}
+          onChange={(e) => setScheduling({ mode: e.target.value as ScheduleMode })}
+          data-testid="schedule-mode-select"
+        >
+          <option value="Continuous">Continuous</option>
+          <option value="Periodic">Periodic (cron)</option>
+        </select>
+
+        {mode === 'Continuous' ? (
+          <span className="row" style={{ gap: 6, flex: 'none' }}>
+            <span className="hint">every</span>
             <input
-              className="input"
-              value={draft.scheduling.cronExpression ?? ''}
-              onChange={(e) => setScheduling({ cronExpression: e.target.value })}
-              data-testid="schedule-cron-input"
+              className="input sm mono"
+              style={{ width: 56 }}
+              type="number"
+              min={1}
+              value={draft.scheduling.frequencySeconds ?? 60}
+              onChange={(e) => setScheduling({ frequencySeconds: Number(e.target.value) })}
+              data-testid="schedule-frequency-input"
             />
-          </Field>
+            <span className="hint">s · idle timeout</span>
+            <input
+              className="input sm mono"
+              style={{ width: 56 }}
+              type="number"
+              min={1}
+              // Blank rather than 60 when unset, because "nobody said" and "somebody chose 60" are
+              // different answers and only one of them gets written down.
+              placeholder="60"
+              value={draft.scheduling.idleTimeoutSeconds ?? ''}
+              onChange={(e) => setScheduling({
+                idleTimeoutSeconds: e.target.value ? Number(e.target.value) : null,
+              })}
+              data-testid="schedule-idle-timeout-input"
+            />
+            <span className="hint">s</span>
+          </span>
+        ) : (
+          <input
+            className="input sm mono"
+            style={{ width: 200, flex: 'none' }}
+            value={draft.scheduling.cronExpression ?? ''}
+            onChange={(e) => setScheduling({ cronExpression: e.target.value })}
+            placeholder="cron expression"
+            data-testid="schedule-cron-input"
+          />
         )}
 
-        <span className="hint">
-          {draft.scheduling.mode === 'Continuous'
-            ? 'Continuous mode re-reads changes on every interval. The worker stays running between ' +
-              'intervals and exits once it has gone the idle timeout without finding a single changed row.'
-            : 'Periodic mode runs on the cron expression above.'}
+        <span
+          className="hint spacer"
+          style={{ textAlign: 'right' }}
+          title={
+            mode === 'Continuous'
+              ? 'Continuous mode re-reads changes on every interval. The worker stays running between ' +
+                'intervals and exits once it has gone the idle timeout without finding a single changed row.'
+              : 'Periodic mode runs on the cron expression above.'
+          }
+        >
+          {mode === 'Continuous' ? 'worker exits idle, restarts on schedule' : 'runs on the cron expression'}
         </span>
       </div>
     </div>

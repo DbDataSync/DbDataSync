@@ -10,10 +10,11 @@ import { ScriptsPage } from './pages/ScriptsPage'
 import { AdminCertificatePage } from './pages/AdminCertificatePage'
 import { AdminConfigPage } from './pages/AdminConfigPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
-import { HistoryTab, MappingsTab, MonitoringTab, OverviewTab, RunsTab } from './pages/replication-detail/tabs'
+import { HistoryTab, MappingsTab, MonitoringTab, OverviewTab } from './pages/replication-detail/tabs'
 import {
   CustomTransformsTab, OverviewNotesTab, PipelineTab, SegmentingStrategiesTab, TargetProvisioningTab,
 } from './pages/replication-detail/OverviewPanel'
+import { MonitoringCurrentStatusTab, MonitoringRunHistoryTab } from './pages/replication-detail/MonitoringPanel'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
 import {
   ColumnMappingTab, MappingDiagnosticsTab, MappingNotesTab, MappingPipelineTab,
@@ -115,10 +116,20 @@ export default function App() {
               checks, not reading one. */}
           <Route path=":mappingName/verification/:resultId" element={<VerificationResultPage />} />
         </Route>
-        <Route path="runs" element={<RunsTab />} />
-        {/* How far behind each mapping is — see phase 86. Its own tab rather than a rail card:
-            it is a row per mapping, and the rail is where the replication-wide cards live. */}
-        <Route path="monitoring" element={<MonitoringTab />} />
+        {/* Runs lived here as its own tab until phase 103, which folded it under Monitoring as
+            **Run History**. `/runs` is a real bookmark somebody may still have — phase 21 made
+            routes for every screen a deliberate feature — so it redirects rather than 404ing.
+            `replace`, so it does not leave an extra entry of its own in the browser's history. */}
+        <Route path="runs" element={<Navigate to="../monitoring/history" replace />} />
+        {/* How far behind each mapping is — see phase 86 — plus its run history, as of phase 103.
+            Its own tab rather than a rail card: it is a row per mapping, and the rail is where the
+            replication-wide cards live. Current Status is the index, so `/monitoring` opens the
+            lag table rather than requiring a segment; Run History is what Runs used to be on its
+            own. */}
+        <Route path="monitoring" element={<MonitoringTab />}>
+          <Route index element={<MonitoringCurrentStatusTab />} />
+          <Route path="history" element={<MonitoringRunHistoryTab />} />
+        </Route>
         <Route path="history" element={<HistoryTab />} />
       </Route>
 

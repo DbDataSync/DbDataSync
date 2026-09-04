@@ -5,7 +5,6 @@ import { useIsAdmin } from '../components/useIsAdmin'
 import { tabClass } from '../components/tabClass'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { MetricsCard } from './replication-detail/MetricsCard'
-import { ScheduleCard } from './replication-detail/ScheduleCard'
 import { StatusCard } from './replication-detail/StatusCard'
 import {
   useDeleteReplication, useReplication, useReplicationStatus, useSetReplicationEnabled,
@@ -20,25 +19,30 @@ import type { RunsCommand } from './replication-detail/RunsPanel'
 const TABS: { path: string; label: string; testId: string }[] = [
   { path: 'overview', label: 'Overview', testId: 'tab-overview' },
   { path: 'mappings', label: 'Table Mappings', testId: 'tab-mappings' },
-  { path: 'runs', label: 'Runs', testId: 'tab-runs' },
   { path: 'monitoring', label: 'Monitoring', testId: 'tab-monitoring' },
   { path: 'history', label: 'Version Control', testId: 'tab-history' },
 ]
 
 /**
- * A layout route: the five tabs are five routes sharing this chrome, rendered through the `Outlet`.
+ * A layout route: the four tabs are four routes sharing this chrome, rendered through the `Outlet`.
+ * Five until phase 103 folded Runs under Monitoring as a sub-tab.
  *
  * The chrome does not unmount when the tab changes, which is what lets the Backfill…/Run Now buttons
- * live up here and still reach the Runs panel — see `RunsCommand`.
+ * live up here and still reach the run history — see `RunsCommand`. That still holds after phase 103:
+ * the panel they reach is two levels down a routed outlet now (Monitoring's Run History sub-tab)
+ * rather than one, and nothing about the plumbing needed to change to get there.
  *
  * It owns the **draft** too, since phase 46. That is not tidying: the draft used to live in
- * `OverviewPanel`, which unmounts the moment somebody clicks Runs, so a half-finished pipeline edit
- * was lost by looking at something else. Held here it survives, because this component does not
- * unmount until the replication does.
+ * `OverviewPanel`, which unmounts the moment somebody clicks away from Overview, so a half-finished
+ * pipeline edit was lost by looking at something else. Held here it survives, because this component
+ * does not unmount until the replication does.
  *
- * Status and Schedule live here for the same reason — a rail beside the `Outlet` rather than inside
- * it, so they are the same cards showing the same thing on every tab rather than one mount of
- * them per tab.
+ * **Status lives here for that reason** — a rail beside the `Outlet` rather than inside it, so it is
+ * the same card showing the same thing on every tab rather than one mount of it per tab. Schedule used
+ * to be here too, on the same reasoning, but that reasoning was already stale by the time it was
+ * written down: the draft it would have unmounted with has been the page's own since phase 46, not the
+ * card's, so nothing was actually at risk. Phase 103 moved it to Overview, between the endpoints and
+ * the sub-tabs, on the strength of that correction rather than in spite of the old comment.
  */
 export function ReplicationDetailPage() {
   const { name } = useParams<{ name: string }>()
@@ -75,7 +79,9 @@ export function ReplicationDetailPage() {
   }, [task, draft])
 
   const send = (kind: RunsCommand['kind']) => {
-    navigate(`/replications/${encodeURIComponent(name!)}/runs`)
+    // Run History, not the old `/runs` — phase 103 moved the panel this command reaches two levels
+    // down, under Monitoring, and this is where the result is now visible.
+    navigate(`/replications/${encodeURIComponent(name!)}/monitoring/history`)
     setCommand({ kind, nonce: Date.now() })
   }
 
@@ -204,7 +210,7 @@ export function ReplicationDetailPage() {
               route. */}
           <Outlet
             context={{
-              replicationName: name, command, draft, setDraft, saving: upsert.isPending, save,
+              replicationName: name, command, draft, setDraft, saving: upsert.isPending, save, enabled,
             } satisfies ReplicationOutletContext}
           />
         </div>
@@ -212,7 +218,6 @@ export function ReplicationDetailPage() {
         <div className="detail-rail">
           <ErrorBanner error={error ?? upsert.error ?? setEnabled.error} />
           <StatusCard replicationName={name} enabled={enabled} />
-          {draft && <ScheduleCard draft={draft} enabled={enabled} onChange={setDraft} />}
           <MetricsCard replicationName={name} enabled={enabled} />
         </div>
       </div>
@@ -246,4 +251,6 @@ export interface ReplicationOutletContext {
   setDraft: (next: ReplicationTaskConfig) => void
   saving: boolean
   save: () => Promise<void>
+  /** The **saved** enabled state — see `ScheduleCard`, which reads it through `OverviewTab`. */
+  enabled: boolean
 }

@@ -136,13 +136,10 @@ button { font-family: inherit; }
 .topbar .crumb.here { color: var(--ink); }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
 
-/* Where a panel beneath the shell renders its own chrome — see ShellActions. Contributes no gap of
-   its own when nothing is mounted into it, so a screen with no countdown is unchanged. */
-.shell-actions { display: contents; }
-
-/* A panel's countdown to its own next refresh (phase 88). Quiet by construction: this sits in the
-   chrome of every monitoring screen and is read at a glance or not at all, so it carries the
-   secondary ink weight rather than competing with the buttons beside it. */
+/* A panel's countdown to its own next refresh (phase 88). Quiet by construction: it sits in the
+   header of the card or pane it describes (phase 103 moved it out of the shared shell chrome) and is
+   read at a glance or not at all, so it carries the secondary ink weight rather than competing with
+   the buttons beside it. */
 .refresh-countdown {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 0 7px; height: 22px;
@@ -655,6 +652,11 @@ select.select {
   font: 600 10px var(--ui);
 }
 .subtab-panel { display: flex; flex-direction: column; gap: 14px; }
+
+/* A sub-tab's own header, for something that describes the whole tab rather than one card in it —
+   Monitoring's Current Status uses this for its lag countdown (phase 103), which used to live in the
+   shared shell chrome and needed a pane-level home once that portal was retired. */
+.pane-head { display: flex; align-items: center; justify-content: space-between; }
 
 /* ── Markdown (see Markdown.tsx) ────────────────────────────────────────────── */
 /* Notes are prose in a product that is otherwise dense controls, so this deliberately reads like a

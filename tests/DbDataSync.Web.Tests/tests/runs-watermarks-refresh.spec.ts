@@ -202,10 +202,11 @@ test.describe('runs page watermarks and the shared refresh', () => {
     await expect(asOf).toHaveAttribute('title', /Not the current time/)
 
     // Four seconds later, the run list mounts and fetches for the first time. Navigated by clicking
-    // the tab rather than by `page.goto`, which would reload the document and reset all three:
-    // what is under test is three live queries on one page, not three fresh ones.
+    // the sub-tab rather than by `page.goto`, which would reload the document and reset all three:
+    // what is under test is three live queries on one page, not three fresh ones. Run History is a
+    // sub-tab of Monitoring since phase 103, not its own top-level tab.
     await page.waitForTimeout(4000)
-    await page.getByTestId('tab-runs').click()
+    await page.getByTestId('monitoring-tab-history').click()
     await expect(page.getByTestId('runs-countdown')).toBeVisible()
 
     const runs = await seconds(page, 'runs-countdown')

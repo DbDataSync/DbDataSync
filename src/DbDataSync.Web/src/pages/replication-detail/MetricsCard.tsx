@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useRunMetrics } from '../../api/hooks'
 import { RefreshCountdown } from '../../components/RefreshCountdown'
-import { ShellActions } from '../../components/ShellActions'
 import type { MetricsWindow, RunMetricsBucket } from '../../api/types'
 
 const WINDOWS: { id: MetricsWindow; label: string }[] = [
@@ -28,12 +27,6 @@ export function MetricsCard({ replicationName, enabled }: { replicationName: str
 
   return (
     <div className={`card ${enabled ? 'enabled' : 'disabled'}`} data-testid="metrics-card">
-      {/* This card sits in the detail rail on every tab, so its countdown is the one constant of
-          the three — the other two come and go with whichever tab is open. */}
-      <ShellActions>
-        <RefreshCountdown label="Metrics" dataUpdatedAt={dataUpdatedAt} testId="metrics-countdown" />
-      </ShellActions>
-
       <div className="card-head">
         <span className="card-title">Last {window}</span>
         <span className="spacer row" style={{ gap: 4 }}>
@@ -49,6 +42,11 @@ export function MetricsCard({ replicationName, enabled }: { replicationName: str
             </button>
           ))}
         </span>
+        {/* This card sits in the detail rail on every tab, so its countdown used to be the one
+            constant of the three shown in the shared shell chrome. Phase 103 moved every countdown
+            into the header of what it describes, and deleted that chrome entirely — this one was
+            already home, and just moved from the portal into this card-head directly. */}
+        <RefreshCountdown label="Metrics" dataUpdatedAt={dataUpdatedAt} testId="metrics-countdown" />
       </div>
 
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

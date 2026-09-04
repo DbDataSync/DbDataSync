@@ -6,6 +6,7 @@ import { KeyValueTable } from '../../components/KeyValueTable'
 import { ParameterForm } from '../../components/ParameterForm'
 import { EndpointsCard } from './EndpointsCard'
 import { InheritableToggle } from '../../components/InheritableToggle'
+import { ScheduleCard } from './ScheduleCard'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { SegmentingStrategiesCard } from './SegmentingStrategiesCard'
 import { NotesPanel } from '../../components/NotesPanel'
@@ -43,11 +44,13 @@ const TABS: SubTab[] = [
  * The draft is still the layout route's (phase 46), and the sub-routes read and write the same object,
  * so moving between tabs keeps an unfinished edit exactly as switching top-level tabs already did.
  */
-export function OverviewPanel({ replicationName, draft, setDraft }: {
+export function OverviewPanel({ replicationName, draft, setDraft, enabled }: {
   replicationName: string
   /** Owned by the layout route since phase 46, so an edit survives a look at another tab. */
   draft: ReplicationTaskConfig
   setDraft: (next: ReplicationTaskConfig) => void
+  /** The **saved** state, not the draft's — see `ScheduleCard`. */
+  enabled: boolean
 }) {
   const { data: mappings } = useTableMappings(replicationName)
   const { error } = useReplication(replicationName)
@@ -63,6 +66,10 @@ export function OverviewPanel({ replicationName, draft, setDraft }: {
           mappingCount={mappings?.length}
           onChange={(endpoints) => setDraft({ ...draft, endpoints })}
         />
+
+        {/* Between the endpoints and the sub-tabs since phase 103 — it left the detail rail, where
+            it used to be one of three cards shown on every tab regardless of which one was open. */}
+        <ScheduleCard draft={draft} enabled={enabled} onChange={setDraft} />
 
         <SubTabs base={base} tabs={TABS} testId="overview-subtabs" />
 

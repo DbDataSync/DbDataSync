@@ -8,7 +8,6 @@ import {
   useRunWatermarkTimes, useTriggerRun, useResyncRun,
 } from '../../api/hooks'
 import { RefreshCountdown } from '../../components/RefreshCountdown'
-import { ShellActions } from '../../components/ShellActions'
 import { useRunHub } from '../../api/useRunHub'
 import { TimingDetail, WatermarkCell } from '../../components/RunFigures'
 import { processingTime, queueTime } from '../../components/runTimes'
@@ -35,6 +34,12 @@ const LIVE_WATCH_MS = 1500
 
 const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : '—')
 
+/**
+ * The run history — Monitoring's **Run History** sub-tab since phase 103, formerly its own top-level
+ * Runs tab. No `.pane` of its own: `MonitoringSection` owns that now, the same way it owns the pane
+ * for Current Status beside it. The countdown that used to sit in the shared shell chrome lives in
+ * this panel's own "Run history" card-head instead, beside the filter chips.
+ */
 export function RunsPanel({ replicationName, command }: { replicationName: string; command: RunsCommand | null }) {
   const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined)
   // Which traced run has its timing open. One at a time: this is read to answer a question about one
@@ -107,19 +112,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
     : true)
 
   return (
-    <div className="pane">
-      <ShellActions>
-        <RefreshCountdown
-          label="Runs"
-          dataUpdatedAt={dataUpdatedAt}
-          // The interval actually in force, not the constant: while a run is being watched the list
-          // refreshes every 1.5 seconds, and a countdown ticking down from ten beside it would be
-          // describing a schedule the panel is not on.
-          intervalMs={interval}
-          testId="runs-countdown"
-        />
-      </ShellActions>
-
+    <>
       <ErrorBanner error={historyError ?? trigger.error ?? cancel.error ?? resync.error} />
 
       {(isWatching || showBackfill) && (
@@ -182,6 +175,15 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
               </button>
             ))}
           </span>
+          <RefreshCountdown
+            label="Runs"
+            dataUpdatedAt={dataUpdatedAt}
+            // The interval actually in force, not the constant: while a run is being watched the list
+            // refreshes every 1.5 seconds, and a countdown ticking down from ten beside it would be
+            // describing a schedule the panel is not on.
+            intervalMs={interval}
+            testId="runs-countdown"
+          />
         </div>
 
         <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 12 }}>
@@ -295,6 +297,6 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
           onClose={() => setDetailsRun(null)}
         />
       )}
-    </div>
+    </>
   )
 }
