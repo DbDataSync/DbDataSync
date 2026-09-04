@@ -34,9 +34,15 @@ So the order lives here, and is the one to work through:
 | 3 | **101** — the readers honour the intent | the behaviour change, and where an expired position stops retrying forever |
 | 4 | **102** — Monitoring tab manages intent and hold | lands on 103's Current Status sub-tab |
 | 5 | **104** — run history filtering and paging | independent of 100–102; after 103 only for where the panel lives |
-| 6 | **034** — PostgreSQL logical replication | |
-| 7 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 8 | **038** — Postgres COPY staging, and the columnar decision | |
+| 6 | **105** — one provisioning script for the whole replication | independent of everything above it |
+| 7 | **034** — PostgreSQL logical replication | |
+| 8 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 9 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-04 (later still): 105 joins the list below 104. It depends on nothing above it and
+nothing above it depends on it — placed here rather than higher because it eases a setup-time burden
+rather than fixing anything broken, and 100–102 are still what an operator hits when a position
+expires.
 
 Updated 2026-09-04 (later): 103 goes above 100–102, and 104 below them. Not a judgement that the UX
 work matters more than the intent/hold chain — 103 is small and entirely presentational, and 102 puts
