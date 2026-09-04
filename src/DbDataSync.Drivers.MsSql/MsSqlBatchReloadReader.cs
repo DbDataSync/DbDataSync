@@ -24,13 +24,16 @@ namespace DbDataSync.Drivers.MsSql;
 /// fallback for tables without Change Tracking metadata.
 /// </para>
 /// </summary>
-public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingReader, IStatementPreview, IReadIntentDeclaring
+public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingReader, IStatementPreview
 {
     public string Kind => MsSqlDriverKinds.BatchReload;
 
-    /// <summary>No incremental mode exists at all — every pass reloads, whatever intent it is asked
-    /// for. See <see cref="BatchReloadReader"/>'s twin declaration.</summary>
-    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent> { ReadIntent.InitialLoad };
+    // No IReadIntentDeclaring: this reader has no incremental mode at all — every pass reloads,
+    // whatever intent it is asked for — and nothing honest is left to declare once InitialLoad stops
+    // being a per-reader question (phase 101's retargeted §1). A reader with nothing to say about
+    // Changes/ChangesFromEarliest/ChangesFromLatest does not implement the interface, the same
+    // convention ISegmentExpandingReader already follows for a reader that cannot expand a segment. See
+    // BatchReloadReader's twin note.
 
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,

@@ -539,7 +539,15 @@ public sealed class RunExecutor(
         // set, after the mapping was last saved — so the run-time outcome is a loud failure here,
         // before this reader's ReadChangesAsync is ever called: nothing is read, let alone the whole
         // table. Same posture phase 91 took refusing to fall back to a live catalog query.
+        //
+        // InitialLoad itself is exempt, and always will be: the bulk-load retarget
+        // (architecture/planning/done/bulk-load-pipeline-and-the-initial-load-rule.md) made it
+        // universally available regardless of reader — no reader declares it any more (see
+        // IReadIntentDeclaring), so without this exemption every mapping resolving to InitialLoad would
+        // be refused here, which is exactly backwards. The rule below still applies in full to
+        // Changes/ChangesFromEarliest/ChangesFromLatest, which remain genuinely per-reader.
         if (item.RunKind == RunKind.Primary
+            && intent != ReadIntent.InitialLoad
             && reader is IReadIntentDeclaring declaring
             && !declaring.SupportedIntents.Contains(intent))
         {

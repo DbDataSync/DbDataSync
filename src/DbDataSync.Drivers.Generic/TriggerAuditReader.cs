@@ -31,7 +31,7 @@ namespace DbDataSync.Drivers.Generic;
 /// </para>
 /// </summary>
 public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog)
-    : IChangeReader, IStatementPreview, IPositionAcknowledging, IReadIntentDeclaring
+    : IChangeReader, IStatementPreview, IPositionAcknowledging, IReadIntentDeclaring, IPositionCapturing
 {
     /// <summary>
     /// Deletes shadow rows at or below an acknowledged position, once the pass that read them has
@@ -47,14 +47,31 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
     public bool DetectsDeletes => true;
 
     /// <summary>
-    /// All four. The floor for <see cref="ReadIntent.ChangesFromEarliest"/> is genuinely read — the
-    /// surviving <c>MIN(DS_Seq)</c> — rather than assumed, because pruning (<see cref="AcknowledgeAsync"/>)
-    /// can have moved it since the shadow table was created.
+    /// All three that remain declarable per phase 101's retarget (<c>InitialLoad</c> is no longer a
+    /// per-reader question — see <see cref="IReadIntentDeclaring"/>). The floor for
+    /// <see cref="ReadIntent.ChangesFromEarliest"/> is genuinely read — the surviving <c>MIN(DS_Seq)</c>
+    /// — rather than assumed, because pruning (<see cref="AcknowledgeAsync"/>) can have moved it since
+    /// the shadow table was created.
     /// </summary>
     public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent>
     {
-        ReadIntent.InitialLoad, ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
+        ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
     };
+
+    /// <summary>
+    /// The shadow table's current maximum sequence — exactly what
+    /// <see cref="ReadIntent.ChangesFromLatest"/> above adopts — read as an aggregate rather than a row.
+    /// No engine mapping from a sequence to a time exists for this mechanism, unlike Change Tracking's
+    /// or CDC's, so <see cref="CapturedPosition.PositionTimeUtc"/> is always null here.
+    /// </summary>
+    public async Task<CapturedPosition> CapturePositionAsync(
+        DbConnection sourceConnection, SourceTableRef source, IReadOnlyDictionary<string, string> options,
+        CancellationToken cancellationToken)
+    {
+        await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
+        var target = await GetMaxSequenceAsync(sourceConnection, source, cancellationToken);
+        return new CapturedPosition(target.ToString(), PositionTimeUtc: null);
+    }
 
     public IReadOnlyList<ParameterDescriptor> Parameters { get; } =
     [

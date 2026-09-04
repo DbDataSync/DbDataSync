@@ -66,7 +66,8 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
 
     private Task<ReadResult> ReadAsync(string? watermark, IReadOnlyDictionary<string, string>? options = null) =>
         _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], MappingName, Columns(), options ?? new Dictionary<string, string>(),
+            _connection, Source(), watermark, watermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
+            [], MappingName, Columns(), options ?? new Dictionary<string, string>(),
             CancellationToken.None);
 
     private static async Task<List<ChangeRow>> CollectAsync(IAsyncEnumerable<ChangeRow> rows)
@@ -205,6 +206,92 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         Assert.Single(await CollectAsync((await ReadAsync(start, options)).Rows));
     }
 
+    /// <summary>
+    /// <see cref="ReadIntent.ChangesFromEarliest"/> reads from the surviving floor — <c>MIN(DS_Seq)</c>
+    /// — never assumed, because <see cref="TriggerAuditReader.AcknowledgeAsync"/>'s pruning moves it.
+    /// The row sitting exactly at that floor must come back, the same guarantee CDC's inclusive read
+    /// gives for its own floor.
+    /// <para>
+    /// The contrast is the point: the rejected design — storing the surviving floor as an ordinary
+    /// watermark and reading <see cref="ReadIntent.Changes"/> from it — silently drops the row at the
+    /// floor, because the ordinary incremental predicate is <c>DS_Seq &gt; previous</c>.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ChangesFromEarliest_ReturnsTheRowAtTheSurvivingFloor_InclusiveOfPruning()
+    {
+        var options = new Dictionary<string, string> { [TriggerAuditReader.PruneOption] = "true" };
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+        var afterFirst = (await ReadAsync(null, options)).NewWatermark;
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
+        var secondPass = await ReadAsync(afterFirst, options);
+        await CollectAsync(secondPass.Rows);
+        var afterSecond = secondPass.NewWatermark;
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (3, 'Carol');");
+
+        // Prunes only the first row's own sequence (DS_Seq <= afterFirst) — the surviving floor becomes
+        // the second row's own sequence, afterSecond.
+        await _reader.AcknowledgeAsync(_connection, Source(), afterFirst, options, CancellationToken.None);
+
+        var earliest = await _reader.ReadChangesAsync(
+            _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromEarliest,
+            [], MappingName, Columns(), options, CancellationToken.None);
+        var earliestRows = await CollectAsync(earliest.Rows);
+
+        Assert.Equal(2, earliestRows.Count);
+        Assert.Contains(earliestRows, r => (int)r["Id"]! == 2);
+        Assert.Contains(earliestRows, r => (int)r["Id"]! == 3);
+
+        // The rejected design, reproduced directly: the surviving floor stored and read as an ordinary
+        // watermark. DS_Seq > afterSecond skips the row that sits at afterSecond.
+        var rejectedRows = await CollectAsync((await ReadAsync(afterSecond, options)).Rows);
+        Assert.DoesNotContain(rejectedRows, r => (int)r["Id"]! == 2);
+        Assert.Contains(rejectedRows, r => (int)r["Id"]! == 3);
+    }
+
+    /// <summary>
+    /// <see cref="ReadIntent.ChangesFromLatest"/> adopts the shadow table's current maximum sequence as
+    /// the new position without querying it at all — the same "already synced" shortcut every log-based
+    /// reader offers.
+    /// </summary>
+    [Fact]
+    public async Task ChangesFromLatest_AdoptsTheCurrentMaxSequence_WithoutReadingAnyRow()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+
+        var result = await _reader.ReadChangesAsync(
+            _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromLatest,
+            [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Empty(await CollectAsync(result.Rows));
+
+        // A pass reading from the adopted position afterwards finds nothing behind it.
+        Assert.Empty(await CollectAsync((await ReadAsync(result.NewWatermark)).Rows));
+    }
+
+    /// <summary>
+    /// <see cref="IPositionCapturing.CapturePositionAsync"/> is exactly what
+    /// <see cref="ReadIntent.ChangesFromLatest"/> above adopts — the shadow table's current maximum
+    /// sequence, read as an aggregate — so a pass reading from the captured position afterwards finds
+    /// nothing behind it.
+    /// </summary>
+    [Fact]
+    public async Task CapturePositionAsync_ReturnsTheCurrentMaxSequence_WithoutReadingAnyRow()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var captured = await capturing.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None);
+
+        Assert.False(string.IsNullOrEmpty(captured.Position));
+        Assert.Null(captured.PositionTimeUtc);
+
+        Assert.Empty(await CollectAsync((await ReadAsync(captured.Position)).Rows));
+    }
+
     /// <summary>Without a key there is nothing to collapse changes by and nothing to identify a
     /// deleted row with, so it is refused where it can be explained.</summary>
     [Fact]
@@ -234,7 +321,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             var result = await _reader.ReadChangesAsync(
-                _connection, source, "0", [], MappingName, keylessColumns, new Dictionary<string, string>(),
+                _connection, source, "0", ReadIntent.Changes, [], MappingName, keylessColumns, new Dictionary<string, string>(),
                 CancellationToken.None);
             await CollectAsync(result.Rows);
         });
@@ -256,7 +343,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         };
 
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => _reader.ReadChangesAsync(
-            _connection, source, null, [], MappingName, [], new Dictionary<string, string>(), CancellationToken.None));
+            _connection, source, null, ReadIntent.InitialLoad, [], MappingName, [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains("Setup card", problem.Message);
     }
@@ -276,11 +363,11 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         var reader = new TriggerAuditReader(MsSqlDialect.Instance, new ThrowingTableCatalog());
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
         var start = (await reader.ReadChangesAsync(
-            _connection, Source(), null, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None)).NewWatermark;
+            _connection, Source(), null, ReadIntent.InitialLoad, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None)).NewWatermark;
 
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
         var result = await reader.ReadChangesAsync(
-            _connection, Source(), start, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), start, ReadIntent.Changes, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None);
 
         // The key/non-key split is read lazily, as part of enumerating the row stream — so reaching a
         // row at all is the proof that it came from Columns() rather than ThrowingTableCatalog.
@@ -294,11 +381,11 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         var reader = new TriggerAuditReader(MsSqlDialect.Instance, new ThrowingTableCatalog());
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
         var start = (await reader.ReadChangesAsync(
-            _connection, Source(), null, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None)).NewWatermark;
+            _connection, Source(), null, ReadIntent.InitialLoad, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None)).NewWatermark;
 
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
         var result = await reader.ReadChangesAsync(
-            _connection, Source(), start, [], MappingName, [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), start, ReadIntent.Changes, [], MappingName, [], new Dictionary<string, string>(), CancellationToken.None);
 
         // MetadataNotCachedException, not ThrowingTableCatalog's InvalidOperationException — the empty
         // cache fails loudly on its own, before any live query, exactly as it does with a populated one.

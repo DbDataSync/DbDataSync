@@ -25,7 +25,7 @@ namespace DbDataSync.Drivers.Generic;
 /// </para>
 /// </summary>
 public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
-    : IChangeReader, IStatementPreview, IReadIntentDeclaring
+    : IChangeReader, IStatementPreview, IReadIntentDeclaring, IPositionCapturing
 {
     public string Kind => GenericDriverKinds.Watermark;
 
@@ -34,9 +34,30 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
     /// so "read from the floor" is a full load under another name and offering it would be a button
     /// that lies. <see cref="ReadIntent.ChangesFromLatest"/> is the genuinely useful, asymmetric case —
     /// adopt a table as already-synced by storing <c>max(col)</c> without reading a row.
+    /// <c>InitialLoad</c> is no longer a per-reader question at all — see
+    /// <see cref="IReadIntentDeclaring"/> — so it is not declared here either, identically to every
+    /// other reader.
     /// </summary>
     public IReadOnlySet<ReadIntent> SupportedIntents { get; } =
-        new HashSet<ReadIntent> { ReadIntent.InitialLoad, ReadIntent.Changes, ReadIntent.ChangesFromLatest };
+        new HashSet<ReadIntent> { ReadIntent.Changes, ReadIntent.ChangesFromLatest };
+
+    /// <summary>
+    /// Exactly what <see cref="ReadIntent.ChangesFromLatest"/> above adopts — <c>MAX(watermarkColumn)</c>,
+    /// the same aggregate <see cref="WatermarkStatement.BuildMaxWatermark"/> already builds for a preview
+    /// and for that intent, now exposed through <see cref="IPositionCapturing"/> rather than duplicated.
+    /// Requires the same <c>watermarkColumn</c> option every other call on this reader does.
+    /// </summary>
+    public async Task<CapturedPosition> CapturePositionAsync(
+        DbConnection sourceConnection, SourceTableRef source, IReadOnlyDictionary<string, string> options,
+        CancellationToken cancellationToken)
+    {
+        if (!options.TryGetValue("watermarkColumn", out var watermarkColumn) || string.IsNullOrWhiteSpace(watermarkColumn))
+            throw new InvalidOperationException("The 'watermarkColumn' option is required for the Watermark reader.");
+
+        await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
+        var latest = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken) ?? "0";
+        return new CapturedPosition(latest, PositionTimeUtc: null);
+    }
 
     /// <summary>Required, and it is: without it this reader cannot run at all, which an operator
     /// previously found out on the first pass rather than while choosing the Kind.</summary>

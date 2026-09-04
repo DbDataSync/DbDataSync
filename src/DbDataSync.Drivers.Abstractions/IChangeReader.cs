@@ -75,15 +75,21 @@ public interface IChangeReader
     /// </param>
     /// <param name="intent">
     /// What this pass is asked to do — see <see cref="ReadIntent"/> and
-    /// architecture/implementation/todo/phase-101-readers-honour-the-read-intent.md. This, not the
+    /// architecture/implementation/done/phase-101-readers-honour-the-read-intent.md. This, not the
     /// nullness of <paramref name="previousWatermark"/>, is what a reader branches on:
     /// <see cref="ReadIntent.InitialLoad"/> reads the source table itself (today's behaviour, now
     /// stated rather than inferred from a missing watermark); <see cref="ReadIntent.Changes"/> is the
     /// ordinary incremental read; <see cref="ReadIntent.ChangesFromEarliest"/> reads from the feed's
     /// surviving floor; <see cref="ReadIntent.ChangesFromLatest"/> adopts the current position without
-    /// reading anything that came before it. A reader declares which of these it can honour via
-    /// <see cref="IReadIntentDeclaring"/>; the caller never hands it one it did not declare.
-    /// <br/>
+    /// reading anything that came before it.
+    /// <para>
+    /// A reader declares which of <c>Changes</c>/<c>ChangesFromEarliest</c>/<c>ChangesFromLatest</c> it
+    /// can honour via <see cref="IReadIntentDeclaring"/>; the caller never hands it one of those three it
+    /// did not declare. <c>InitialLoad</c> is the one exception, per
+    /// architecture/planning/done/bulk-load-pipeline-and-the-initial-load-rule.md: it is not declared by
+    /// any reader and is never refused — every mapping can request it regardless of reader, which is
+    /// what makes it universally available rather than a per-reader capability.
+    /// </para>
     /// See <c>architecture/detailed-design.md</c> §4.1 for the rule and the per-reader table.
     /// <c>ChangeReaderFirstPassContractTests</c> fails until a new reader's supported intents are
     /// declared, or it is named as exempt from declaring them and why.

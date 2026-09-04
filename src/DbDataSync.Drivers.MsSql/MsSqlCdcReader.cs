@@ -38,7 +38,7 @@ namespace DbDataSync.Drivers.MsSql;
 /// operator's decision.
 /// </para>
 /// </summary>
-public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadIntentDeclaring
+public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadIntentDeclaring, IPositionCapturing
 {
     public string Kind => MsSqlDriverKinds.Cdc;
 
@@ -54,16 +54,37 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
     public bool DetectsDeletes => true;
 
     /// <summary>
-    /// All four. <see cref="ReadIntent.ChangesFromEarliest"/> is the one this design exists for: it
-    /// reads from <c>min_lsn</c> **inclusively**, via a distinct statement shape
+    /// All three that remain declarable per phase 101's retarget (<c>InitialLoad</c> is no longer a
+    /// per-reader question — see <see cref="IReadIntentDeclaring"/>).
+    /// <see cref="ReadIntent.ChangesFromEarliest"/> is the one this design exists for: it reads from
+    /// <c>min_lsn</c> **inclusively**, via a distinct statement shape
     /// (<see cref="MsSqlCdcStatement.BuildRead"/>'s <c>inclusiveFloor</c>) rather than a decremented
     /// bound, so the change at the floor is never silently dropped and the reader's own
     /// <c>Compare(storedLsn, minLsn) &lt; 0</c> guard stays untouched.
     /// </summary>
     public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent>
     {
-        ReadIntent.InitialLoad, ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
+        ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
     };
+
+    /// <summary>
+    /// The current max LSN, exposed without an intent attached — exactly what
+    /// <see cref="ReadIntent.ChangesFromLatest"/> above adopts, and genuinely readable without touching
+    /// the change table: <c>sys.fn_cdc_get_max_lsn()</c> is a scalar function, not a row read.
+    /// </summary>
+    public async Task<CapturedPosition> CapturePositionAsync(
+        DbConnection sourceConnection, SourceTableRef source, IReadOnlyDictionary<string, string> options,
+        CancellationToken cancellationToken)
+    {
+        sourceConnection.ChangeDatabase(source.Database);
+        var maxLsn = await MsSqlCdcCatalog.GetMaxLsnAsync(sourceConnection, cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"Change Data Capture reports no maximum LSN in database '{source.Database}', which " +
+                "means the capture job has not run. Start the SQL Server Agent job " +
+                "'cdc.<database>_capture' before this mapping's position can be captured.");
+        return new CapturedPosition(
+            MsSqlCdcCatalog.ToWatermark(maxLsn), await MapTimeAsync(sourceConnection, maxLsn, cancellationToken));
+    }
 
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,

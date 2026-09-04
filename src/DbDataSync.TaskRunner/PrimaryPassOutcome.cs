@@ -8,7 +8,7 @@ namespace DbDataSync.TaskRunner;
 /// <see cref="RunExecutor"/> so the rule ("every intent transitions to <see cref="ReadIntent.Changes"/>
 /// once a pass applies its changes, written in the same place and under the same conditions the
 /// watermark already is") can be pinned directly against the state store, without a real source or
-/// target connection. See architecture/implementation/todo/phase-101-readers-honour-the-read-intent.md.
+/// target connection. See architecture/implementation/done/phase-101-readers-honour-the-read-intent.md.
 /// </summary>
 public static class PrimaryPassOutcome
 {

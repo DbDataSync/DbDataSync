@@ -32,7 +32,7 @@ namespace DbDataSync.Drivers.DuckDb;
 /// never reaches a runtime reader in any case.
 /// </para>
 /// </summary>
-public sealed class DuckDbQueryReader : IChangeReader, IStatementPreview, IReadIntentDeclaring
+public sealed class DuckDbQueryReader : IChangeReader, IStatementPreview
 {
     public const string ReaderKind = "DuckDbQuery";
 
@@ -48,11 +48,9 @@ public sealed class DuckDbQueryReader : IChangeReader, IStatementPreview, IReadI
     /// </summary>
     public bool DetectsDeletes => false;
 
-    /// <summary>
-    /// No incremental mode exists — the query is static and <c>previousWatermark</c> is always ignored
-    /// (see the type doc), the same contract <c>BatchReloadReader</c> declares.
-    /// </summary>
-    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent> { ReadIntent.InitialLoad };
+    // No IReadIntentDeclaring: the query is static and previousWatermark is always ignored (see the
+    // type doc) — the same reasoning ScriptedQueryReader and BatchReloadReader restate, and per phase
+    // 101's retarget there is no longer an InitialLoad checkmark to declare either.
 
     /// <summary>
     /// Declared with <see cref="ParameterType.Sql"/>, which is what puts a real editor on the

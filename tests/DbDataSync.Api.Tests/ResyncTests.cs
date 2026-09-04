@@ -11,9 +11,11 @@ using Xunit;
 namespace DbDataSync.Api.Tests;
 
 /// <summary>
-/// The recovery for a source that discarded the history a pass needed. Offered rather than performed:
-/// a full reload of a table that fell behind can be hours of work, and nobody asked for it just
-/// because a pass failed.
+/// The operator's way to ask for a full reload of a mapping. Offered rather than performed: a full
+/// reload of a table that fell behind can be hours of work, and nobody asked for it just because a
+/// pass failed. Per phase 101's retarget of <c>ResyncService</c>, it now sets
+/// <see cref="ReadIntent.InitialLoad"/> and clears the hold rather than clearing the stored watermark
+/// and forcing a <c>BatchReload</c> — and it is no longer gated to only a <c>PositionExpired</c> failure.
 /// </summary>
 public sealed class ResyncTests(TestApiFactory factory) : IClassFixture<TestApiFactory>
 {
@@ -96,39 +98,43 @@ public sealed class ResyncTests(TestApiFactory factory) : IClassFixture<TestApiF
     }
 
     /// <summary>
-    /// Clearing the watermark is the half an operator constructing this by hand would forget, and
-    /// without it the next incremental pass fails exactly as before — so it is the half worth pinning.
+    /// Setting the intent and clearing the hold is the pair an operator constructing this by hand would
+    /// get half of — the same reasoning that used to apply to clearing the watermark, restated for what
+    /// this method does now (phase 101's retarget). The next <c>Primary</c> pass resolves
+    /// <see cref="ReadIntent.InitialLoad"/> itself, so there is no watermark to clear any more.
     /// </summary>
     [Fact]
-    public async Task Resync_ClearsTheStoredPositionSoTheNextPassCanStart()
+    public async Task Resync_SetsInitialLoadAndClearsTheHold()
     {
         var (replication, mapping) = await SetUpAsync();
         var watermarks = factory.Services.GetRequiredService<ChangeWatermarkStore>();
         var key = WatermarkKey.Build(
             new SourceTableRef { ConnectionName = "src", Database = "App", Schema = "dbo", Table = "Orders" },
             MsSqlDialect.Instance);
-        watermarks.SetWatermark(replication, mapping, key, "41");
+        watermarks.SetReadIntentAndHold(replication, mapping, key, ReadIntent.Changes, ReadHold.PositionExpired);
 
         var runId = RecordFailedRun(replication, mapping, RunFailureKinds.PositionExpired);
         (await _client.PostAsync($"/api/runs/{runId}/resync", null)).EnsureSuccessStatusCode();
 
-        Assert.Null(watermarks.GetWatermark(replication, mapping, key));
+        var state = watermarks.GetReadState(replication, mapping, key);
+        Assert.Equal(ReadIntent.InitialLoad, state!.Intent);
+        Assert.Equal(ReadHold.None, state.Hold);
     }
 
     /// <summary>
-    /// Any other failure is not this button's business. Offering it everywhere would make a full
-    /// reload the general-purpose retry, which is exactly what "offered, not performed" is avoiding.
+    /// The gate is wider than "recovering from a PositionExpired hold" — an operator can ask for a full
+    /// reload of a mapping at any time, so an ordinary failure (or no failure at all) does not refuse
+    /// this the way it used to.
     /// </summary>
     [Fact]
-    public async Task AnOrdinaryFailure_IsNotResyncable()
+    public async Task AnOrdinaryFailure_IsStillResyncable()
     {
         var (replication, mapping) = await SetUpAsync();
         var runId = RecordFailedRun(replication, mapping, failureKind: null);
 
         var response = await _client.PostAsync($"/api/runs/{runId}/resync", null);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("did not fail because its source position expired", await response.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
     }
 
     [Fact]

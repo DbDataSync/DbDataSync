@@ -17,7 +17,7 @@ namespace DbDataSync.Drivers.MsSql;
 /// ever queries it, never enables it (keeps the app's own DB permissions to read-only + VIEW CHANGE
 /// TRACKING, per §6's least-privilege guidance).
 /// </summary>
-public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview, IReadIntentDeclaring
+public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview, IReadIntentDeclaring, IPositionCapturing
 {
     /// <summary>
     /// Opt-in: read CHANGETABLE and the source table inside one snapshot transaction, which is the
@@ -56,15 +56,30 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     public bool DetectsDeletes => true;
 
     /// <summary>
-    /// All four. <c>CHANGE_TRACKING_MIN_VALID_VERSION</c> is itself a valid <c>@previousVersion</c> to
-    /// read from — it is defined as the smallest version a caller may present without risking a gap —
-    /// so <see cref="ReadIntent.ChangesFromEarliest"/> needs no separate inclusive statement shape the
-    /// way CDC's LSN window does.
+    /// All three that remain declarable per phase 101's retarget (<c>InitialLoad</c> is no longer a
+    /// per-reader question — see <see cref="IReadIntentDeclaring"/>).
+    /// <c>CHANGE_TRACKING_MIN_VALID_VERSION</c> is itself a valid <c>@previousVersion</c> to read from —
+    /// it is defined as the smallest version a caller may present without risking a gap — so
+    /// <see cref="ReadIntent.ChangesFromEarliest"/> needs no separate inclusive statement shape the way
+    /// CDC's LSN window does.
     /// </summary>
     public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent>
     {
-        ReadIntent.InitialLoad, ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
+        ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
     };
+
+    /// <summary>Exactly what <see cref="ReadIntent.ChangesFromLatest"/> above adopts as the new
+    /// watermark, exposed without an intent attached — <see cref="GetCurrentVersionAsync"/> is already
+    /// public and already reused by the change-polling gate's counter source, so this is that same call
+    /// through <see cref="IPositionCapturing"/> rather than a second one.</summary>
+    public async Task<CapturedPosition> CapturePositionAsync(
+        DbConnection sourceConnection, SourceTableRef source, IReadOnlyDictionary<string, string> options,
+        CancellationToken cancellationToken)
+    {
+        sourceConnection.ChangeDatabase(source.Database);
+        var version = await GetCurrentVersionAsync(sourceConnection, cancellationToken);
+        return new CapturedPosition(version.ToString(), await MapTimeAsync(sourceConnection, version, cancellationToken));
+    }
 
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,

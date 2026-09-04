@@ -161,8 +161,10 @@ public sealed class RunsController(
         Ok(logWriter.GetLogs(runId, sinceId));
 
     /// <summary>
-    /// The recovery for a run whose source position expired: reload the table, and clear the stored
-    /// watermark so the incremental pass can start again.
+    /// Asks for a full reload of this run's mapping: sets <see cref="ReadIntent.InitialLoad"/> and
+    /// clears any <see cref="ReadHold"/>, so the next <c>Primary</c> pass reloads the table itself and
+    /// the incremental pass after it can start again. See <see cref="ResyncService"/> — no longer only
+    /// for a run whose source position expired; an operator can ask for this at any time.
     /// <para>
     /// Offered rather than performed, which is why it is an endpoint and not something the runner does
     /// on its own — a full reload of a table that fell behind can be hours of work, and nobody asked

@@ -79,7 +79,9 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
         string? previousWatermark, IReadOnlyDictionary<string, string>? writerOptions = null)
     {
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(), previousWatermark, Mappings, MappingName, [], new Dictionary<string, string>(),
+            _sourceConnection, Source(), previousWatermark,
+            previousWatermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
+            Mappings, MappingName, [], new Dictionary<string, string>(),
             CancellationToken.None);
         var staged = await _staging.StageAsync(
             _targetConnection, Target(), read.Rows, Mappings, MappingName, [], new Dictionary<string, string>(),

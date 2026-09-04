@@ -228,15 +228,17 @@ public sealed class RunExecutorTests : IDisposable
     }
 
     /// <summary>
-    /// Phase 100's own seam test, in the shape phase 90 used for the metadata cache: storage exists,
-    /// nothing consumes it yet, and that is worth pinning on its own rather than trusting by inspection.
-    /// A mapping with a read intent stored ahead of its first pass must behave identically to one with
-    /// nothing stored at all — <c>RunExecutor</c> still infers a full load from a null watermark exactly
-    /// as it always has, because nothing in it looks at <c>ReadIntent</c> yet. Phase 101 is the change
-    /// that makes this test's premise stop being true, on purpose and under its own review.
+    /// Originally phase 100's own seam test (storage exists, nothing consumes it yet); phase 101 is the
+    /// change that made its old premise stop being true on purpose, so this is retargeted to what
+    /// remains true after that change: a **supported, declared** intent stored ahead of a mapping's
+    /// first pass does not make <c>RunExecutor</c> behave any differently from a mapping with nothing
+    /// stored at all — both reach the same reader, are refused by neither (Change Tracking declares
+    /// <c>ChangesFromEarliest</c>; <c>InitialLoad</c> is never refused), and fail identically once they
+    /// both reach the same unreachable connection. Refusal of an *undeclared* intent, and the
+    /// <c>InitialLoad</c> exemption specifically, are their own tests below.
     /// </summary>
     [Fact]
-    public async Task ExecuteWorkerAsync_AStoredReadIntent_ChangesNothingAboutThisPass()
+    public async Task ExecuteWorkerAsync_AStoredSupportedReadIntent_FailsIdenticallyToNoStoredIntent()
     {
         SaveTask("crm-sync");
         foreach (var name in new[] { "with-intent", "without-intent" })
@@ -284,6 +286,11 @@ public sealed class RunExecutorTests : IDisposable
         Assert.NotNull(withIntentRun.ErrorSummary);
         Assert.NotNull(withoutIntentRun.ErrorSummary);
 
+        // Both failures are the connection failing, not a refusal — proof the stored intent was
+        // accepted rather than silently downgraded or bounced before RunExecutor even tried the source.
+        Assert.Contains("Failed to open connection", withIntentRun.ErrorSummary);
+        Assert.Contains("Failed to open connection", withoutIntentRun.ErrorSummary);
+
         // Neither pass ever opened the connection, so neither wrote a watermark — the stored intent did
         // not make this pass behave as though it had read something.
         Assert.Null(watermarks.GetWatermark("crm-sync", "with-intent", watermarkKey));
@@ -295,6 +302,96 @@ public sealed class RunExecutorTests : IDisposable
         Assert.Equal(
             ReadIntent.ChangesFromEarliest,
             watermarks.GetReadState("crm-sync", "with-intent", watermarkKey)!.Intent);
+    }
+
+    /// <summary>
+    /// The guarantee phase 101 exists to give: an intent the reader has not declared is refused loudly
+    /// and **before any connection is opened** — never silently downgraded, and never discovered only
+    /// once the source has already been asked something it cannot answer. The Watermark reader
+    /// deliberately does not declare <see cref="ReadIntent.ChangesFromEarliest"/> (for it the feed *is*
+    /// the table, so offering one would be a button that lies) — exactly the undeclared case this test
+    /// needs.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteWorkerAsync_AnUndeclaredIntent_IsRefused_BeforeAnyConnectionIsOpened()
+    {
+        SaveTask("crm-sync", readerKind: "Watermark");
+        _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+        }, Author);
+
+        // Unreachable — if the refusal did not happen first, this connection attempt is what would
+        // fail instead, and the two failures read very differently (see the assertions below).
+        _configRepository.SaveConnection(new ConnectionInput
+        {
+            Name = "src",
+            DriverType = ConnectionDriverType.MsSql,
+            Host = "127.0.0.1",
+            Port = 1,
+            Database = "App",
+            AuthMode = AuthMode.IntegratedAuth,
+            Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
+        }, Author);
+
+        var watermarks = new ChangeWatermarkStore(_stateDatabase);
+        var watermarkKey = WatermarkKey.Build(
+            new SourceTableRef { ConnectionName = "src", Database = "App", Schema = "dbo", Table = "Orders" },
+            MsSqlDialect.Instance);
+        watermarks.SetReadIntent("crm-sync", "orders", watermarkKey, ReadIntent.ChangesFromEarliest);
+
+        var runId = await EnqueueAndDrainAsync("crm-sync", "orders");
+
+        var run = _taskRunStore.GetRun(runId)!;
+        Assert.Equal(RunStatus.Failed, run.Status);
+        Assert.Contains("does not support", run.ErrorSummary);
+        Assert.Contains("ChangesFromEarliest", run.ErrorSummary);
+        // Not a connectivity failure — the whole point is that this never got as far as trying.
+        Assert.DoesNotContain("Failed to open connection", run.ErrorSummary);
+    }
+
+    /// <summary>
+    /// The retarget's own guarantee: <see cref="ReadIntent.InitialLoad"/> is never refused, regardless
+    /// of what a reader declares — the Watermark reader here declares only <c>Changes</c> and
+    /// <c>ChangesFromLatest</c> (see <see cref="DbDataSync.Drivers.Generic.WatermarkReader.SupportedIntents"/>),
+    /// so a refusal check that did not exempt <c>InitialLoad</c> would refuse it too. Instead this run
+    /// gets past the check and fails on the unreachable connection — proof the exemption is real,
+    /// not merely that this reader happens to support it.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteWorkerAsync_InitialLoad_IsNeverRefused_EvenWhenUndeclared()
+    {
+        SaveTask("crm-sync", readerKind: "Watermark");
+        _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+        }, Author);
+
+        _configRepository.SaveConnection(new ConnectionInput
+        {
+            Name = "src",
+            DriverType = ConnectionDriverType.MsSql,
+            Host = "127.0.0.1",
+            Port = 1,
+            Database = "App",
+            AuthMode = AuthMode.IntegratedAuth,
+            Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
+        }, Author);
+
+        // No stored read state at all: resolves to ReadIntentResolution.Default, which is InitialLoad
+        // for a mapping and replication that set no override.
+
+        var runId = await EnqueueAndDrainAsync("crm-sync", "orders");
+
+        var run = _taskRunStore.GetRun(runId)!;
+        Assert.Equal(RunStatus.Failed, run.Status);
+        // Reached the connection attempt rather than being bounced by the refusal check.
+        Assert.Contains("Failed to open connection", run.ErrorSummary);
+        Assert.DoesNotContain("does not support", run.ErrorSummary);
     }
 
     #region The continuous worker's idle timeout

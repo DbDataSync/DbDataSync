@@ -20,7 +20,7 @@ namespace DbDataSync.Drivers.Generic;
 /// </para>
 /// </summary>
 public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
-    : IChangeReader, ISegmentExpandingReader, IStatementPreview, IReadIntentDeclaring
+    : IChangeReader, ISegmentExpandingReader, IStatementPreview
 {
     public string Kind => GenericDriverKinds.BatchReload;
 
@@ -28,9 +28,13 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
     /// rest. Stated so the UI can say so rather than infer it.</summary>
     public bool DetectsDeletes => false;
 
-    /// <summary>No incremental mode exists at all — every pass reloads, whatever intent it is asked
-    /// for.</summary>
-    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent> { ReadIntent.InitialLoad };
+    // No IReadIntentDeclaring: this reader has no incremental mode at all — every pass reloads,
+    // whatever intent it is asked for. Its only checkmark in phase 101's original §1 table was
+    // InitialLoad, which stopped being a per-reader question when the bulk-load retarget made it
+    // universally available — so there is nothing left here to honestly declare, and
+    // IReadIntentDeclaring's own doc says a reader in that position should not implement the interface
+    // at all, the same convention ISegmentExpandingReader already follows for a reader that cannot
+    // expand a segment.
 
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,

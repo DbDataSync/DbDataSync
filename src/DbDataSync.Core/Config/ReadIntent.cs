@@ -7,16 +7,22 @@ namespace DbDataSync.Core.Config;
 /// operator can only ever ask for a pass, never assert that one already happened.
 /// <para>
 /// See architecture/planning/done/reset-a-mappings-watermark-from-the-ui.md for the design this
-/// implements, and architecture/implementation/done/phase-100-read-intent-storage-and-defaults.md for
-/// what phase 100 built from it. **Nothing reads this yet** — every reader and <c>RunExecutor</c> still
-/// infer a full load from a null watermark exactly as before phase 100; that inference is retired in
-/// phase 101, once every reader has declared which of these it can honour.
+/// implements, architecture/implementation/done/phase-100-read-intent-storage-and-defaults.md for what
+/// phase 100 built from it, and
+/// architecture/implementation/done/phase-101-readers-honour-the-read-intent.md for what reads it:
+/// <c>RunExecutor</c> resolves this (stored value, else <see cref="ReadIntentResolution.Default"/>) and
+/// hands it to the reader instead of inferring a full load from a null watermark.
 /// </para>
 /// </summary>
 public enum ReadIntent
 {
     /// <summary>Read the source table itself. Today's null-watermark behaviour, now stated rather than
-    /// inferred.</summary>
+    /// inferred. Per
+    /// architecture/planning/done/bulk-load-pipeline-and-the-initial-load-rule.md, once a Bulk Load
+    /// pipeline exists (future, unscheduled work) this stops meaning "the reader will full-load" and
+    /// starts meaning "run the Bulk Load pipeline" — the same intent, performed somewhere else. Until
+    /// then, every reader's own <c>previousWatermark is null</c> full-load branch is what this still
+    /// triggers.</summary>
     InitialLoad,
 
     /// <summary>Ordinary incremental read from the stored position. The steady state every mapping that

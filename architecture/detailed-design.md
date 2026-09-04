@@ -291,7 +291,11 @@ per-task files:
 7. On failure, `TaskRuns.Status = Failed` with an error summary; the watermark is *not* advanced past
    the last successfully-applied point, so the next run retries from a consistent position.
 
-### 4.1 How a pass decides between an initial load and an incremental read
+### 4.1 How a pass decides what to read
+
+*Rewritten by phase 101 — see that phase's doc for the full design. Superseded text: "no stored
+watermark means read the whole source table" — that is now `ReadIntent.InitialLoad`'s own definition,
+one of four things a pass can be asked to do, rather than something inferred from a missing watermark.*
 
 Two separate questions, answered in two different places. Nothing in the system inspects the source or
 the target to guess at either.
@@ -301,57 +305,95 @@ the work item's transient Kind (a Backfill's), then `TableMappingConfig.ReaderOv
 `ChangeProcessingConfig.Reader`. A mapping is *configured* for Change Tracking or CDC or Watermark; it
 never decides for itself, and there is no auto-detection anywhere.
 
-**Whether that reader does a full load turns on one fact: is there a stored watermark.**
-`RunExecutor` looks it up once per pass and passes it down:
+**What that reader is asked to do is a stored intent, not an inference.** `RunExecutor` resolves it once
+per pass — the mapping's own stored `ReadIntent` (phase 100's `ChangeWatermarkStore.GetReadState`) if
+one exists, else `ReadIntentResolution.Default(task, mapping)` — and passes it down alongside whatever
+watermark is stored:
 
 ```csharp
-var watermarkKey = WatermarkKey.Build(source, ResolveDialect(sourceDriver));
-var previousWatermark = item.RunKind == RunKind.Primary
-    ? state.GetWatermark(task.Name, mapping.Name, watermarkKey)
+var readState = item.RunKind == RunKind.Primary
+    ? state.GetReadState(task.Name, mapping.Name, watermarkKey)
     : null;
+var previousWatermark = readState?.Watermark;
+var intent = item.RunKind == RunKind.Primary
+    ? readState?.Intent ?? ReadIntentResolution.Default(task, mapping)
+    : ReadIntent.InitialLoad;
 ```
 
-Two consequences are in those three lines. The key is `(task, mapping, connection/database/schema.table)`
-— see §3.7's `ChangeWatermarks` row for why each part is in it and how it is spelled. And **a Backfill
-is handed `null` unconditionally**, so it can never disturb the cursor an incremental sync depends on,
-whatever reader Kind it happens to use internally.
+The key is still `(task, mapping, connection/database/schema.table)` — see §3.7's `ChangeWatermarks` row
+for why each part is in it and how it is spelled. And **a Backfill is handed `InitialLoad` and no
+watermark unconditionally**, so it can never disturb the cursor an incremental sync depends on, whatever
+reader Kind it happens to use internally — it is not a live `ReadIntent` so much as the closest
+description of what a reload pass does.
 
-Every reader then branches on `previousWatermark is null`:
+Every reader then branches on the intent it was handed — see
+`architecture/implementation/done/phase-101-readers-honour-the-read-intent.md` §2/§3 for `ChangeReaders`'
+`ChangesFromEarliest`/`ChangesFromLatest` behaviour in full. `InitialLoad`'s own behaviour, per reader, is
+unchanged from what a null watermark used to trigger:
 
-| Reader | no stored watermark | with one |
-| --- | --- | --- |
-| `MsSqlChangeTrackingReader` | reads the source table itself | `CHANGETABLE(CHANGES …)` between versions |
-| `MsSqlCdcReader` | reads the source table, after waiting for the capture floor to be published | `fn_cdc_get_all_changes_*` between LSNs |
-| `TriggerAuditReader` | reads the source table | the shadow table between sequence numbers |
-| `WatermarkReader` | the same `SELECT`, with no predicate | `WHERE <col> > @previous` |
-| `BatchReloadReader`, `MsSqlBatchReloadReader` | every row — **always**, by design | every row; the argument is ignored |
-| `ScriptedQueryReader`, `DuckDbQueryReader` | whatever the script or query returns | the script is given the watermark and decides |
+| Reader | `InitialLoad` |
+| --- | --- |
+| `MsSqlChangeTrackingReader` | reads the source table itself |
+| `MsSqlCdcReader` | reads the source table, after waiting for the capture floor to be published |
+| `TriggerAuditReader` | reads the source table |
+| `WatermarkReader` | the same `SELECT`, with no predicate |
+| `BatchReloadReader`, `MsSqlBatchReloadReader` | every row — **always**, whatever intent it is handed |
+| `ScriptedQueryReader`, `DuckDbQueryReader` | whatever the script or query returns |
 
 The first four share one reason, and it is the reason the rule exists at all: **a change feed only knows
 about changes since it was switched on.** `CHANGETABLE`, CDC's change table and a trigger's shadow table
 all start empty against a source table that may already hold millions of rows, so a mapping that began
-incrementally would be permanently, silently half-replicated. The first pass reads the table; every pass
-after it reads the feed.
+incrementally would be permanently, silently half-replicated. An `InitialLoad` pass reads the table;
+`Changes`, `ChangesFromEarliest` and `ChangesFromLatest` all read the feed instead.
 
-Two behaviours follow from the same branch and are worth knowing:
+**Declaring which intents a reader can honour is a separate, per-reader question** (`IReadIntentDeclaring`)
+— but not for `InitialLoad`. `architecture/planning/done/bulk-load-pipeline-and-the-initial-load-rule.md`
+retargeted phase 101's §1 mid-implementation: once a Bulk Load pipeline performs an initial load rather
+than the reader itself (future, unscheduled work — that doc's Phase B), every mapping can request
+`InitialLoad` regardless of its reader, so no reader declares it any more. What each reader *does*
+declare is `Changes`/`ChangesFromEarliest`/`ChangesFromLatest`, which remain genuinely per-reader — the
+Watermark reader, for instance, has no honest `ChangesFromEarliest`, because for it the feed *is* the
+table and offering one would be a button that lies. `RunExecutor` refuses an undeclared intent loudly
+before opening a connection, but never refuses `InitialLoad` itself, which is what the retarget's
+"universally available" actually means at the call site.
 
-- **A first pass is unbounded even when a row cap is configured.** A capped full load has no resumable
-  position to record — the cap only starts applying once there is a change window to take a slice of.
+**A second, narrower capability accompanies the first: can a reader report its current position without
+reading any row?** (`IPositionCapturing`.) This is what the retarget above turned `InitialLoad`'s old
+per-reader column *into* — the capability a Bulk Load handover will depend on, so that the source's
+position is captured before the table is read rather than after, and a change made mid-load is not lost.
+Declared and implemented now; nothing calls it yet, because the pipeline that will is not built yet.
+
+Two behaviours follow from a reader's own `InitialLoad` branch and are worth knowing, unchanged from
+before this phase:
+
+- **An `InitialLoad` pass is unbounded even when a row cap is configured.** It has no resumable position
+  to record — the cap only starts applying once there is a change window to take a slice of.
 - **Re-pointing a mapping at a different source table starts it over.** The table is part of the
-  watermark key, so the old cursor is simply not found and the next pass is a full load. That is
-  correct — the new table's history was never read — but nothing announces it.
+  watermark key, so the old cursor is simply not found and the mapping resolves to its configured default
+  intent — `InitialLoad` unless set otherwise. That is correct — the new table's history was never read
+  — but nothing announces it.
 
 **What writes and clears the cursor.** Only a `Primary` pass advances `ChangeWatermarks`, only after the
-target write has committed, and the source is acknowledged (`IPositionAcknowledging`) only after *that* —
-acknowledging early would tell the source it may discard history a failed run still needs. Resync
-(`ResyncService`) is the deliberate way back to an initial load: it clears the watermark and queues a
-`BatchReload` over a full segment, which is also what a `PositionExpiredException` offers when the source
-has already discarded history the stored position needed.
+target write has committed, and the source is acknowledged (`IPositionAcknowledging`) only after *that*
+— acknowledging early would tell the source it may discard history a failed run still needs. Every
+intent transitions to `Changes` in the same write (`PrimaryPassOutcome`). Resync (`ResyncService`) is the
+deliberate way back to an initial load: it sets `ReadIntent.InitialLoad` and clears the mapping's
+`ReadHold` together, which the *next* `Primary` pass turns into an actual reload — rather than clearing
+the watermark and forcing a `BatchReload` run, which is what it did before phase 101. The same intent is
+also where a `PositionExpiredException` recovery lands once an operator chooses it, alongside
+`ChangesFromEarliest`.
 
-**Keeping this true.** The rule is implemented independently in each reader, so
+**An expired position holds the mapping rather than retrying forever.** `PositionExpiredException` sets
+`ReadHold.PositionExpired` in the same catch that fails the run; a held mapping is filtered out of the
+scheduler's own enqueue (`SchedulerService.FilterHeld`) so it is not dispatched again — and therefore
+notified about again — every tick until an operator resolves it. A `Backfill` is unaffected: it does not
+use the cursor a hold protects, so it remains a legitimate way to recover a held mapping.
+
+**Keeping this true.** The declaration rule is implemented independently in each reader, so
 `ChangeReaderFirstPassContractTests` enumerates every `IChangeReader` in the solution and fails until a
-new one is declared as either following the rule or exempt from it, naming the test that proves its
-behaviour. A sixth reader cannot quietly get this wrong; it has to be classified first.
+new one is declared as either implementing `IReadIntentDeclaring` with a non-empty, `InitialLoad`-free
+set, or exempt from declaring anything at all, naming the test that proves its declared set. A sixth
+reader cannot quietly get this wrong; it has to be classified first.
 
 ## 5. Extensibility Model
 

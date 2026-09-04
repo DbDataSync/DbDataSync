@@ -103,7 +103,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         var columnMappings = mappings ?? Mappings;
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(sourceTable), previousWatermark: null, [], MappingName, [], options, CancellationToken.None);
+            _sourceConnection, Source(sourceTable), previousWatermark: null, ReadIntent.InitialLoad, [], MappingName, [], options, CancellationToken.None);
         var staged = await _staging.StageAsync(
             _targetConnection, Target(targetTable), read.Rows, columnMappings, MappingName, [], new Dictionary<string, string>(),
             CancellationToken.None);
@@ -341,7 +341,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
             """);
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(), previousWatermark: "999", [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _sourceConnection, Source(), previousWatermark: "999", ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
 
         var rows = new List<ChangeRow>();
         await foreach (var row in read.Rows)
@@ -366,7 +366,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         source.Filter = "Name = 'keep'";
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, source, null, [], "mapping", [], SegmentOptions(new ListSegment("Region", ["EU"])), CancellationToken.None);
+            _sourceConnection, source, null, ReadIntent.InitialLoad, [], "mapping", [], SegmentOptions(new ListSegment("Region", ["EU"])), CancellationToken.None);
 
         var ids = new List<object?>();
         await foreach (var row in read.Rows)

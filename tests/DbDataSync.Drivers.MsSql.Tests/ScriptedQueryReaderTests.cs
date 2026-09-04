@@ -136,7 +136,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
     };
 
     private Task<ReadResult> ReadAsync(string? watermark) =>
-        _reader.ReadChangesAsync(_connection, Source(), watermark, [], "mapping", [], Options(), CancellationToken.None);
+        _reader.ReadChangesAsync(_connection, Source(), watermark, ReadIntent.InitialLoad, [], "mapping", [], Options(), CancellationToken.None);
 
     [Fact]
     public async Task ReadsInsertsUpdatesAndDeletesFromAnAuditTable()
@@ -218,7 +218,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
     {
         var ex = await Assert.ThrowsAsync<ScriptExecutionException>(() =>
             _reader.ReadChangesAsync(
-                _connection, Source(), null, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
+                _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains(ScriptedQueryReader.ScriptOption, ex.Message);
     }
@@ -245,7 +245,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
 
         var options = new Dictionary<string, string> { [ScriptedQueryReader.ScriptOption] = "wrong-op" };
         var read = await _reader.ReadChangesAsync(
-            _connection, Source(), null, [], "mapping", [], options, CancellationToken.None);
+            _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], options, CancellationToken.None);
 
         var ex = await Assert.ThrowsAsync<ScriptExecutionException>(() => CollectAsync(read.Rows));
         Assert.Contains("NotThere", ex.Message);
@@ -277,7 +277,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
         await ExecuteAsync($"INSERT INTO dbo.[{_audit}] (Op, Id, Name) VALUES ('I', 1, 'Alice');");
 
         var read = await reader.ReadChangesAsync(
-            _connection, Source(), null, [], "mapping",
+            _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping",
             [new CachedColumn("Id", "int", false, true, false)], Options(), CancellationToken.None);
         var rows = await CollectAsync(read.Rows);
 

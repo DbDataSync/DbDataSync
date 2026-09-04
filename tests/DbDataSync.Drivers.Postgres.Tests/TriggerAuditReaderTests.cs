@@ -72,7 +72,8 @@ public sealed class TriggerAuditReaderTests(PostgresTestDatabase db) : IClassFix
 
     private Task<ReadResult> ReadAsync(string? watermark, IReadOnlyDictionary<string, string>? options = null) =>
         _reader.ReadChangesAsync(
-            _connection, Source(), watermark, [], MappingName, Columns(), options ?? new Dictionary<string, string>(),
+            _connection, Source(), watermark, watermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
+            [], MappingName, Columns(), options ?? new Dictionary<string, string>(),
             CancellationToken.None);
 
     private static async Task<List<ChangeRow>> CollectAsync(IAsyncEnumerable<ChangeRow> rows)
@@ -194,7 +195,8 @@ public sealed class TriggerAuditReaderTests(PostgresTestDatabase db) : IClassFix
             new("Name", "varchar(50)", false, false, false),
         ];
         Task<ReadResult> Read(string? watermark) => _reader.ReadChangesAsync(
-            _connection, source, watermark, [], MappingName, compositeColumns, new Dictionary<string, string>(),
+            _connection, source, watermark, watermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
+            [], MappingName, compositeColumns, new Dictionary<string, string>(),
             CancellationToken.None);
 
         await ExecuteAsync(

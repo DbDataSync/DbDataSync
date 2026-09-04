@@ -107,6 +107,7 @@ public sealed class DriverCapabilityOptInTests
             DbConnection sourceConnection,
             SourceTableRef source,
             string? previousWatermark,
+            ReadIntent intent,
             IReadOnlyList<ColumnMapping> columnMappings,
             string mappingName,
             IReadOnlyList<CachedColumn> sourceColumns,

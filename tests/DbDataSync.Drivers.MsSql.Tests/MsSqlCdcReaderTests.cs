@@ -126,7 +126,9 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
 
     private Task<ReadResult> ReadAsync(string? watermark, SourceTableRef? source = null) =>
         _reader.ReadChangesAsync(
-            _connection, source ?? Source(), watermark, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, source ?? Source(), watermark,
+            watermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
+            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
 
     private static async Task<List<ChangeRow>> CollectAsync(IAsyncEnumerable<ChangeRow> rows)
     {
@@ -291,6 +293,29 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         Assert.Contains("has to be reloaded", problem.Message);
     }
 
+    /// <summary>
+    /// <see cref="IPositionCapturing.CapturePositionAsync"/> is exactly what
+    /// <see cref="ReadIntent.ChangesFromLatest"/> above adopts — the current max LSN, read via a scalar
+    /// function rather than a row read — so a pass reading from the captured position afterwards finds
+    /// nothing behind it.
+    /// </summary>
+    [Fact]
+    public async Task CapturePositionAsync_ReturnsTheCurrentMaxLsn_WithoutReadingAnyRow()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+        await WaitForCaptureAsync(MsSqlCdcCatalog.ToWatermark(new byte[10]));
+
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var captured = await capturing.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None);
+
+        Assert.False(string.IsNullOrEmpty(captured.Position));
+
+        var next = await _reader.ReadChangesAsync(
+            _connection, Source(), captured.Position, ReadIntent.Changes, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Empty(await CollectAsync(next.Rows));
+    }
+
     /// <summary>A table nobody captured is a configuration answer, not a crash.</summary>
     [Fact]
     public async Task ATableWithNoCaptureInstance_SaysSo()
@@ -304,9 +329,95 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         };
 
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => _reader.ReadChangesAsync(
-            _connection, source, null, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
+            _connection, source, null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains("Change Data Capture is not enabled", problem.Message);
+    }
+
+    /// <summary>
+    /// The single most important assertion in phase 101: <see cref="ReadIntent.ChangesFromEarliest"/>
+    /// reads <c>min_lsn</c> **inclusively**, so the change sitting exactly at the feed's surviving floor
+    /// is returned rather than silently skipped.
+    /// <para>
+    /// Two rows, then the second's own LSN is pushed forward as the capture instance's floor by
+    /// pruning everything before it — <c>sys.sp_cdc_cleanup_change_table</c> is the real mechanism CDC's
+    /// own retention cleanup uses, so this is not simulating a scenario, it is producing the one
+    /// retention produces naturally after enough time passes. The first row is now gone from the change
+    /// table; the second row's LSN <em>is</em> <c>min_lsn</c>.
+    /// </para>
+    /// <para>
+    /// The contrast is the point: reading from that same LSN via the *ordinary* incremental path
+    /// (<c>ChangesFromEarliest</c>'s rejected predecessor — storing <c>min_lsn</c> as a watermark and
+    /// reading <see cref="ReadIntent.Changes"/> from it) increments past it first and returns nothing —
+    /// the second row would be silently lost forever, which is the exact defect this design exists to
+    /// close.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ChangesFromEarliest_ReturnsTheChangeAtTheFloor_InclusiveOfMinLsn()
+    {
+        var captureInstance = $"dbo_{_tableName}";
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+        var afterFirst = await WaitForCaptureAsync(MsSqlCdcCatalog.ToWatermark(new byte[10]));
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
+        var afterSecond = await WaitForCaptureAsync(afterFirst);
+
+        // Prunes everything strictly before the second row's own LSN, and — this is the load-bearing
+        // part — sets the capture instance's start_lsn (what fn_cdc_get_min_lsn reports) to exactly
+        // that value. The second row's own change is retained; the first row's is gone.
+        await ExecuteAsync(
+            $"EXEC sys.sp_cdc_cleanup_change_table @capture_instance = N'{captureInstance}', " +
+            $"@low_water_mark = 0x{Convert.ToHexString(MsSqlCdcCatalog.FromWatermark(afterSecond))}, @threshold = 1;");
+
+        var minLsn = await MsSqlCdcCatalog.GetMinLsnAsync(_connection, captureInstance, CancellationToken.None);
+        Assert.Equal(afterSecond, MsSqlCdcCatalog.ToWatermark(minLsn!));
+
+        var earliest = await _reader.ReadChangesAsync(
+            _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromEarliest,
+            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+        var earliestRows = await CollectAsync(earliest.Rows);
+
+        var row = Assert.Single(earliestRows);
+        Assert.Equal(2, (int)row["Id"]!);
+        Assert.Equal("Bob", (string)row["Name"]!);
+
+        // The rejected design, reproduced directly: the same LSN, read via the ordinary incremental
+        // path instead of the inclusive one. sys.fn_cdc_increment_lsn moves past it, and the row this
+        // design exists to stop losing comes back as nothing.
+        var rejected = await _reader.ReadChangesAsync(
+            _connection, Source(), previousWatermark: afterSecond, ReadIntent.Changes,
+            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Empty(await CollectAsync(rejected.Rows));
+    }
+
+    /// <summary>
+    /// <see cref="ReadIntent.ChangesFromLatest"/> adopts the current maximum LSN as the new position
+    /// without querying the change table at all — a table can be marked already-synced, and this is the
+    /// intent that does it.
+    /// </summary>
+    [Fact]
+    public async Task ChangesFromLatest_AdoptsTheCurrentMaxLsn_WithoutReadingAnyRow()
+    {
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
+        await WaitForCaptureAsync(MsSqlCdcCatalog.ToWatermark(new byte[10]));
+
+        var maxLsn = await MsSqlCdcCatalog.GetMaxLsnAsync(_connection, CancellationToken.None);
+
+        var result = await _reader.ReadChangesAsync(
+            _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromLatest,
+            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+
+        Assert.Empty(await CollectAsync(result.Rows));
+        Assert.Equal(MsSqlCdcCatalog.ToWatermark(maxLsn!), result.NewWatermark);
+
+        // Adopted, not merely equal by coincidence: a pass reading from this position afterwards finds
+        // nothing behind it, because nothing before it was ever asked to be read.
+        var next = await _reader.ReadChangesAsync(
+            _connection, Source(), result.NewWatermark, ReadIntent.Changes,
+            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Empty(await CollectAsync(next.Rows));
     }
 
     /// <summary>
@@ -333,7 +444,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             var result = await _reader.ReadChangesAsync(
-                _connection, Source(), start, mappings, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+                _connection, Source(), start, ReadIntent.Changes, mappings, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
             await CollectAsync(result.Rows);
         });
 
@@ -421,7 +532,9 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
     private Task<ReadResult> ReadAsync(
         string? watermark, IReadOnlyDictionary<string, string> options, SourceTableRef? source = null) =>
         _reader.ReadChangesAsync(
-            _connection, source ?? Source(), watermark, [], "mapping", [], options, CancellationToken.None);
+            _connection, source ?? Source(), watermark,
+            watermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
+            [], "mapping", [], options, CancellationToken.None);
 
     /// <summary>
     /// Waits until the capture job has caught up to a known number of pending changes, by reading the

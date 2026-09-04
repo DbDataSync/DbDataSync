@@ -30,14 +30,19 @@ So the order lives here, and is the one to work through:
 | | phase | why here |
 | --- | --- | --- |
 | 1 | **103** — replication detail: Runs under Monitoring, Schedule on Overview, countdowns in their cards | must precede 102, which puts controls on the tab this moves |
-| 2 | **100** — read intent and hold: storage, defaults, API | inert when it lands, by design — the seam phase 90 used |
-| 3 | **101** — the readers honour the intent | the behaviour change, and where an expired position stops retrying forever |
-| 4 | **102** — Monitoring tab manages intent and hold | lands on 103's Current Status sub-tab |
-| 5 | **104** — run history filtering and paging | independent of 100–102; after 103 only for where the panel lives |
-| 6 | **105** — one provisioning script for the whole replication | independent of everything above it |
-| 7 | **034** — PostgreSQL logical replication | |
-| 8 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 9 | **038** — Postgres COPY staging, and the columnar decision | |
+| 2 | **102** — Monitoring tab manages intent and hold | lands on 103's Current Status sub-tab |
+| 3 | **104** — run history filtering and paging | independent of 100–102; after 103 only for where the panel lives |
+| 4 | **105** — one provisioning script for the whole replication | independent of everything above it |
+| 5 | **034** — PostgreSQL logical replication | |
+| 6 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 7 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-04 (even later): 101 is done and removed alongside 100, which had already landed but
+was left in this table — an oversight, corrected here rather than left for 102 to notice. 101's own
+scope shifted mid-implementation: `planning/done/bulk-load-pipeline-and-the-initial-load-rule.md`
+retargeted its §1 partway through (see phase 101's own doc for the amendment), which is why its
+implementation doesn't match its original design verbatim. 102 stays exactly where 100–101's queue jump
+put it — a hold can currently only be set and cleared over the API, which 102 is what makes visible.
 
 Updated 2026-09-04 (later still): 105 joins the list below 104. It depends on nothing above it and
 nothing above it depends on it — placed here rather than higher because it eases a setup-time burden
