@@ -91,11 +91,21 @@ public static class MsSqlCdcStatement
     /// questions: where may this pass stop, and in what order did these changes happen.
     /// </para>
     /// </param>
+    /// <param name="inclusiveFloor">
+    /// <c>ChangesFromEarliest</c>'s one difference from the ordinary incremental read: <c>@storedLsn</c>
+    /// is the feed's surviving floor (<c>min_lsn</c>) itself, read inclusively, rather than a stored
+    /// position to resume strictly after. A genuinely different statement — no
+    /// <c>fn_cdc_increment_lsn</c> at all — not a decremented bound, which would put back the exact
+    /// problem this design exists to solve: there is no LSN below <c>min_lsn</c> to decrement to, and
+    /// this reader's own <c>Compare(storedLsn, minLsn) &lt; 0</c> guard exists precisely to refuse one
+    /// that claims there is.
+    /// </param>
     public static string BuildRead(
         string captureInstance, CdcFunction function, IReadOnlyList<string> columns,
-        Func<string, string>? renderColumn = null, bool bounded = false)
+        Func<string, string>? renderColumn = null, bool bounded = false, bool inclusiveFloor = false)
     {
         renderColumn ??= c => SqlIdentifier.Quote(c);
+        var from = inclusiveFloor ? "@storedLsn" : "sys.fn_cdc_increment_lsn(@storedLsn)";
 
         var name = function == CdcFunction.NetChanges
             ? $"cdc.fn_cdc_get_net_changes_{captureInstance}"
@@ -116,7 +126,7 @@ public static class MsSqlCdcStatement
         if (!bounded)
         {
             return $"""
-                DECLARE @from binary(10) = sys.fn_cdc_increment_lsn(@storedLsn);
+                DECLARE @from binary(10) = {from};
                 SELECT {string.Join(", ", selected)}
                 FROM {name}(@from, @toLsn, N'all')
                 ORDER BY {(hasSeqval ? $"{StartLsnColumn}, {SeqvalColumn}" : StartLsnColumn)};
@@ -139,7 +149,7 @@ public static class MsSqlCdcStatement
         outer.Add(position);
 
         return $"""
-            DECLARE @from binary(10) = sys.fn_cdc_increment_lsn(@storedLsn);
+            DECLARE @from binary(10) = {from};
             SELECT {string.Join(", ", outer)}
             FROM (
                 SELECT {limit}{string.Join(", ", inner)}

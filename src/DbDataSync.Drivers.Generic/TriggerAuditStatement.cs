@@ -45,6 +45,16 @@ public static class TriggerAuditStatement
         $"FROM {dialect.QualifyTable(schema, ShadowTableName(table))};";
 
     /// <summary>
+    /// The oldest surviving sequence — what pruning left, not what the table once held. The reader's
+    /// acknowledgement deletes <c>WHERE DS_Seq &lt;= @throughSequence</c>, so this floor has to be read
+    /// from the shadow table on every <c>ChangesFromEarliest</c> pass rather than assumed to be 1 or the
+    /// first row ever written — either guess is wrong the moment pruning has run once.
+    /// </summary>
+    public static string BuildMinSequence(SqlDialect dialect, string schema, string table) =>
+        $"SELECT MIN({dialect.QuoteIdentifier(SequenceColumn)}) " +
+        $"FROM {dialect.QualifyTable(schema, ShadowTableName(table))};";
+
+    /// <summary>
     /// The incremental read.
     ///
     /// <para>

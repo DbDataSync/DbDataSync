@@ -69,25 +69,30 @@ public interface IChangeReader
     /// </param>
     /// <param name="previousWatermark">
     /// Where the last successful <c>Primary</c> pass got to, or null when there is none — a mapping
-    /// that has never run, one whose source table changed, or one a resync cleared. A Backfill is
-    /// always handed null.
-    /// <para>
-    /// **Null means read the whole source table, not read nothing.** A reader over a change feed —
-    /// Change Tracking, CDC, a trigger's shadow table — only knows about changes since that feed was
-    /// switched on, so a source table that already held rows would start permanently and silently
-    /// half-replicated if the first pass read the feed. The failure is invisible: the pass succeeds
-    /// and the counts look plausible. Readers with nothing to be behind (a reload, a query source)
-    /// are exempt and say so.
+    /// that has never run, one whose source table changed, one a resync cleared, or one whose
+    /// <paramref name="intent"/> asks for a floor or a latest position this pass has not yet resolved.
+    /// A Backfill is always handed null.
+    /// </param>
+    /// <param name="intent">
+    /// What this pass is asked to do — see <see cref="ReadIntent"/> and
+    /// architecture/implementation/todo/phase-101-readers-honour-the-read-intent.md. This, not the
+    /// nullness of <paramref name="previousWatermark"/>, is what a reader branches on:
+    /// <see cref="ReadIntent.InitialLoad"/> reads the source table itself (today's behaviour, now
+    /// stated rather than inferred from a missing watermark); <see cref="ReadIntent.Changes"/> is the
+    /// ordinary incremental read; <see cref="ReadIntent.ChangesFromEarliest"/> reads from the feed's
+    /// surviving floor; <see cref="ReadIntent.ChangesFromLatest"/> adopts the current position without
+    /// reading anything that came before it. A reader declares which of these it can honour via
+    /// <see cref="IReadIntentDeclaring"/>; the caller never hands it one it did not declare.
     /// <br/>
     /// See <c>architecture/detailed-design.md</c> §4.1 for the rule and the per-reader table.
-    /// <c>ChangeReaderFirstPassContractTests</c> fails until a new reader is declared as either
-    /// following it or exempt from it.
-    /// </para>
+    /// <c>ChangeReaderFirstPassContractTests</c> fails until a new reader's supported intents are
+    /// declared, or it is named as exempt from declaring them and why.
     /// </param>
     Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        ReadIntent intent,
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,

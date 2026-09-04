@@ -25,9 +25,18 @@ namespace DbDataSync.Drivers.Generic;
 /// </para>
 /// </summary>
 public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
-    : IChangeReader, IStatementPreview
+    : IChangeReader, IStatementPreview, IReadIntentDeclaring
 {
     public string Kind => GenericDriverKinds.Watermark;
+
+    /// <summary>
+    /// Not <see cref="ReadIntent.ChangesFromEarliest"/>: for this reader the feed <em>is</em> the table,
+    /// so "read from the floor" is a full load under another name and offering it would be a button
+    /// that lies. <see cref="ReadIntent.ChangesFromLatest"/> is the genuinely useful, asymmetric case —
+    /// adopt a table as already-synced by storing <c>max(col)</c> without reading a row.
+    /// </summary>
+    public IReadOnlySet<ReadIntent> SupportedIntents { get; } =
+        new HashSet<ReadIntent> { ReadIntent.InitialLoad, ReadIntent.Changes, ReadIntent.ChangesFromLatest };
 
     /// <summary>Required, and it is: without it this reader cannot run at all, which an operator
     /// previously found out on the first pass rather than while choosing the Kind.</summary>
@@ -50,6 +59,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        ReadIntent intent,
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
@@ -61,6 +71,19 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
 
+        // Adopts the table as already-synced: the highest value becomes the new watermark and nothing
+        // is read at all — not even a bounded pass that happens to find nothing new, which still issues
+        // the row read. See SupportedIntents.
+        if (intent == ReadIntent.ChangesFromLatest)
+        {
+            var latest = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken)
+                ?? previousWatermark ?? "0";
+            return new ReadResult(EmptyRows(), latest, Diagnostics: null);
+        }
+
+        // InitialLoad reads the table itself, with no predicate — the same statement a first pass has
+        // always issued, now driven by the intent rather than by previousWatermark being null.
+        var incremental = intent == ReadIntent.Changes;
         var maxRows = BoundedRead.Read(options);
 
         // A bounded read does not ask for the source's current maximum, and must not: recording a
@@ -73,20 +96,27 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
               ?? previousWatermark
               ?? "0";
 
-        // Resolved only when there is a bound to bind — a first pass has no predicate, so it needs no
+        // Resolved only when there is a bound to bind — an initial load has no predicate, so it needs no
         // column type and should not pay for a cache lookup to learn one. Cache-only as of phase 91: no
         // live catalog call left in this path at all, so an unrefreshed mapping fails loudly here rather
         // than querying the source.
-        var column = previousWatermark is null
-            ? null
-            : sourceColumns.RequireColumn(mappingName, "source", watermarkColumn);
+        var column = incremental
+            ? sourceColumns.RequireColumn(mappingName, "source", watermarkColumn)
+            : null;
 
+        var effectivePreviousWatermark = incremental ? previousWatermark : null;
         var projection = SourceProjection.Render(dialect, columnMappings);
         var bounded = maxRows is null ? null : new BoundedReadPosition();
         var rows = ReadRowsAsync(
-            sourceConnection, source, watermarkColumn, previousWatermark, column, projection, maxRows, bounded,
-            cancellationToken);
+            sourceConnection, source, watermarkColumn, effectivePreviousWatermark, column, projection, maxRows,
+            bounded, cancellationToken);
         return new ReadResult(rows, newWatermark, Diagnostics: null, Bounded: bounded);
+    }
+
+    private static async IAsyncEnumerable<ChangeRow> EmptyRows()
+    {
+        await Task.CompletedTask;
+        yield break;
     }
 
     /// <summary>

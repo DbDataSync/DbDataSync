@@ -492,32 +492,72 @@ public sealed class RunExecutor(
         var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
         var target = EndpointResolution.ResolveTarget(task, mapping.Targets[0]);
 
+        // Two levels of override, resolved in order. First the mapping's own stage config, if it
+        // has one — Kind *and* Options together, since reading one stage's Kind from the mapping
+        // and its options from the replication is how an option set for a Kind nobody selected
+        // ends up being passed to the one they did (phase 68).
+        var effectiveReader = PipelineResolution.Reader(task, mapping);
+        var effectiveCache = PipelineResolution.Cache(task, mapping);
+        var effectiveWriter = PipelineResolution.Writer(task, mapping);
+
+        // Then the unit of work's own, which is the most specific. It's how a Backfill of an
+        // incrementally-synced replication reloads a segment at all: the configured reader reports
+        // changes since a watermark, which is not what reloading a segment means.
+        var readerKind = item.Kinds.ReaderKind ?? effectiveReader.Kind;
+        var cacheKind = item.Kinds.CacheKind ?? effectiveCache.Kind;
+        var writerKind = item.Kinds.WriterKind ?? effectiveWriter.Kind;
+
+        // Resolved from config alone, before any connection is opened — the driver registry lookup and
+        // WatermarkKey.Build need only the source's *configuration*, never a live connection. That is
+        // what lets an unsupported read intent (below) fail before a network connection is even spent
+        // on a pass that was never going to run.
+        var sourceConnectionConfig = configRepository.LoadConnection(source.ConnectionName);
+        var sourceDriverForResolution = driverRegistry.Get(sourceConnectionConfig.DriverType);
+
+        // Through the registry rather than the driver, so a host-supplied reader (phase 30's
+        // ScriptedQuery) is as visible to the pipeline as it is to the capability endpoint.
+        var reader = driverRegistry.FindReader(sourceDriverForResolution.DriverType, readerKind)
+            ?? throw new InvalidOperationException($"Source driver does not support reader kind '{readerKind}'.");
+
+        // Only a Primary pass ever reads or advances the incremental cursor — a Backfill must never be
+        // able to disturb the watermark or the intent a replication's ongoing incremental sync depends
+        // on, regardless of which reader/writer Kind it happens to use internally. A Backfill's reader
+        // is asked for an InitialLoad — a reload's own definition — since it never consults the cursor
+        // either way; it is not a live ReadIntent so much as the closest description of what a reload
+        // pass does.
+        var watermarkKey = WatermarkKey.Build(source, ResolveDialect(sourceDriverForResolution));
+        var readState = item.RunKind == RunKind.Primary
+            ? state.GetReadState(task.Name, mapping.Name, watermarkKey)
+            : null;
+        var previousWatermark = readState?.Watermark;
+        var intent = item.RunKind == RunKind.Primary
+            ? readState?.Intent ?? ReadIntentResolution.Default(task, mapping)
+            : ReadIntent.InitialLoad;
+
+        // An intent the reader cannot honour is never quietly downgraded to InitialLoad. Save-time
+        // validation cannot close this — the reader can change, or a replication-level default can be
+        // set, after the mapping was last saved — so the run-time outcome is a loud failure here,
+        // before this reader's ReadChangesAsync is ever called: nothing is read, let alone the whole
+        // table. Same posture phase 91 took refusing to fall back to a live catalog query.
+        if (item.RunKind == RunKind.Primary
+            && reader is IReadIntentDeclaring declaring
+            && !declaring.SupportedIntents.Contains(intent))
+        {
+            throw new InvalidOperationException(
+                $"Table mapping '{mapping.Name}' has read intent '{intent}', but its reader " +
+                $"('{reader.Kind}') does not support it. Supported: " +
+                $"{string.Join(", ", declaring.SupportedIntents.OrderBy(i => i))}. Set a different read " +
+                "intent on the mapping, or change its reader.");
+        }
+
         DbConnection? sourceConnection = null;
         DbConnection? targetConnection = null;
         try
         {
-            (sourceConnection, var sourceDriver) = await OpenConnectionAsync(source.ConnectionName, cancellationToken);
+            sourceConnection = await OpenAsync(sourceConnectionConfig, sourceDriverForResolution, cancellationToken);
+            var sourceDriver = sourceDriverForResolution;
             (targetConnection, var targetDriver) = await OpenConnectionAsync(target.ConnectionName, cancellationToken);
 
-            // Two levels of override, resolved in order. First the mapping's own stage config, if it
-            // has one — Kind *and* Options together, since reading one stage's Kind from the mapping
-            // and its options from the replication is how an option set for a Kind nobody selected
-            // ends up being passed to the one they did (phase 68).
-            var effectiveReader = PipelineResolution.Reader(task, mapping);
-            var effectiveCache = PipelineResolution.Cache(task, mapping);
-            var effectiveWriter = PipelineResolution.Writer(task, mapping);
-
-            // Then the unit of work's own, which is the most specific. It's how a Backfill of an
-            // incrementally-synced replication reloads a segment at all: the configured reader reports
-            // changes since a watermark, which is not what reloading a segment means.
-            var readerKind = item.Kinds.ReaderKind ?? effectiveReader.Kind;
-            var cacheKind = item.Kinds.CacheKind ?? effectiveCache.Kind;
-            var writerKind = item.Kinds.WriterKind ?? effectiveWriter.Kind;
-
-            // Through the registry rather than the driver, so a host-supplied reader (phase 30's
-            // ScriptedQuery) is as visible to the pipeline as it is to the capability endpoint.
-            var reader = driverRegistry.FindReader(sourceDriver.DriverType, readerKind)
-                ?? throw new InvalidOperationException($"Source driver does not support reader kind '{readerKind}'.");
             var stagingProvider = targetDriver.StagingProviders.FirstOrDefault(p => p.Kind == cacheKind)
                 ?? throw new InvalidOperationException($"Target driver does not support staging kind '{cacheKind}'.");
             var writer = targetDriver.Writers.FirstOrDefault(w => w.Kind == writerKind)
@@ -528,20 +568,11 @@ public sealed class RunExecutor(
                     $"Using reader '{readerKind}', cache '{cacheKind}', writer '{writerKind}' for this {item.RunKind} " +
                     $"(this mapping is configured for '{effectiveReader.Kind}'/'{effectiveCache.Kind}'/'{effectiveWriter.Kind}').");
 
-            // Only a Primary pass ever advances the incremental watermark — a Backfill must never be
-            // able to disturb the cursor a replication's ongoing incremental sync depends on,
-            // regardless of which reader/writer Kind it happens to use internally.
-            var watermarkKey = WatermarkKey.Build(source, ResolveDialect(sourceDriver));
-            var previousWatermark = item.RunKind == RunKind.Primary
-                ? state.GetWatermark(task.Name, mapping.Name, watermarkKey)
-                : null;
-
             // Resolved once per pass, not per statement: the script generates an expression in exactly
             // the form a hand-written transform takes, and phase 22's projection does the rest —
             // including the {{column}} substitution that makes it correct in a reader whose statement
             // aliases the source table.
             var sourceScriptDialect = ScriptDialectFor(sourceDriver);
-            var sourceConnectionConfig = configRepository.LoadConnection(source.ConnectionName);
             var columnMappings = ApplyScriptedTransforms(
                 task, mapping, sourceConnectionConfig, sourceScriptDialect, item.RunId);
 
@@ -649,16 +680,32 @@ public sealed class RunExecutor(
 
                 var scope = segment?.Describe() ?? "whole table";
                 Log(item.RunId, LogSeverity.Info,
-                    $"Reading changes for '{mapping.Name}' ({scope}, watermark: {previousWatermark ?? "<none>"}).");
+                    $"Reading changes for '{mapping.Name}' ({scope}, intent: {intent}, " +
+                    $"watermark: {previousWatermark ?? "<none>"}).");
 
                 // Started before the call, not after: how long the source takes to *begin* answering
                 // is part of what the reader cost, and a stopwatch started once it returned would
                 // silently exclude it.
                 var passTiming = trace ? new ReaderTimingRecorder() : null;
 
-                var read = await reader.ReadChangesAsync(
-                    sourceConnection, source, previousWatermark, columnMappings, mapping.Name, mapping.SourceColumns,
-                    readerOptions, cancellationToken);
+                ReadResult read;
+                try
+                {
+                    read = await reader.ReadChangesAsync(
+                        sourceConnection, source, previousWatermark, intent, columnMappings, mapping.Name,
+                        mapping.SourceColumns, readerOptions, cancellationToken);
+                }
+                catch (PositionExpiredException)
+                {
+                    // Caught and re-thrown rather than handled at ProcessWorkItemAsync's own catch site:
+                    // this is where task.Name/mapping.Name/watermarkKey are in scope, and setting the
+                    // hold is the one extra thing phase 101 adds to what was already a Failed run with
+                    // RunFailureKinds.PositionExpired. The hold, not the run's own outcome, is what stops
+                    // the next scheduling tick from dispatching this mapping again — see SchedulerService.
+                    if (item.RunKind == RunKind.Primary)
+                        state.SetReadHold(task.Name, mapping.Name, watermarkKey, ReadHold.PositionExpired);
+                    throw;
+                }
                 var readRows = passTiming is null ? read.Rows : read.Rows.WithTiming(passTiming, cancellationToken);
                 var rows = transforms.IsEmpty
                     ? readRows
@@ -755,21 +802,24 @@ public sealed class RunExecutor(
             // Segmented passes only ever happen with a reload reader, which has no watermark of its
             // own and echoes back whatever it was given — so taking the last segment's value is the
             // same as taking any of them. An ordinary incremental pass has exactly one segment (none).
-            if (item.RunKind == RunKind.Primary && newWatermark is not null)
+            if (item.RunKind == RunKind.Primary)
             {
-                state.SetWatermark(task.Name, mapping.Name, watermarkKey, newWatermark, newWatermarkTime);
+                // Records the watermark and, in the same write, transitions the intent to Changes —
+                // whatever it was before, this pass just applied its changes under it. See
+                // PrimaryPassOutcome.
+                watermarkChange = PrimaryPassOutcome.Apply(
+                    state, task.Name, mapping.Name, watermarkKey, previousWatermark, newWatermark, newWatermarkTime);
 
-                // Recorded from inside the same gate that writes the current value, not beside it, so
-                // the history on TaskRuns cannot claim an advance ChangeWatermarks did not take.
-                watermarkChange = new WatermarkChange(previousWatermark, newWatermark);
-
-                // After the write committed and after the watermark is durable, never before. A
-                // reader that acknowledges is telling its source it may discard the history behind
-                // this position — do that early and a failed run stops being retryable, which turns
-                // a bad pass into permanent data loss. See IPositionAcknowledging.
-                await AcknowledgeAsync(
-                    reader, sourceConnection!, source, newWatermark, effectiveReader.Options,
-                    item.RunId, cancellationToken);
+                if (watermarkChange is not null)
+                {
+                    // After the write committed and after the watermark is durable, never before. A
+                    // reader that acknowledges is telling its source it may discard the history behind
+                    // this position — do that early and a failed run stops being retryable, which turns
+                    // a bad pass into permanent data loss. See IPositionAcknowledging.
+                    await AcknowledgeAsync(
+                        reader, sourceConnection!, source, newWatermark!, effectiveReader.Options,
+                        item.RunId, cancellationToken);
+                }
             }
 
             // Summed across segments, because a pass over several segments is one run and one row in
@@ -1306,6 +1356,19 @@ public sealed class RunExecutor(
     {
         var config = configRepository.LoadConnection(connectionName);
         var driver = driverRegistry.Get(config.DriverType);
+        var connection = await OpenAsync(config, driver, cancellationToken);
+        return (connection, driver);
+    }
+
+    /// <summary>
+    /// The second half of <see cref="OpenConnectionAsync"/>, split out for the one caller that has
+    /// already had to resolve <paramref name="driver"/> from <paramref name="config"/> itself — to
+    /// decide a reader and a read intent before spending a connection on a pass that turns out not to
+    /// be allowed to run (phase 101).
+    /// </summary>
+    private async Task<DbConnection> OpenAsync(
+        ConnectionConfig config, IDriver driver, CancellationToken cancellationToken)
+    {
         var credential = config.AuthMode == AuthMode.SqlAuth
             ? secretStore.Resolve(config.CredentialSecretRef!)
             : null;
@@ -1318,10 +1381,10 @@ public sealed class RunExecutor(
         catch (DbException ex)
         {
             connection.Dispose();
-            throw new ConnectivityException(connectionName, ex);
+            throw new ConnectivityException(config.Name, ex);
         }
 
-        return (connection, driver);
+        return connection;
     }
 
     private void Log(Guid runId, LogSeverity level, string message) => state.Log(runId, level, message);
@@ -1338,17 +1401,5 @@ public sealed class RunExecutor(
 
     private sealed class ConnectivityException(string connectionName, Exception inner)
         : Exception($"Failed to open connection '{connectionName}': {inner.Message}", inner);
-
-    /// <summary>
-    /// A watermark advance this pass actually made durable, for the history on <c>TaskRuns</c>
-    /// (phase 71).
-    /// <para>
-    /// One nullable value rather than two, so "this run moved the watermark" is a single question with
-    /// a single answer. Two loose strings threaded up from the pass would have made the null cases —
-    /// a Verification, a Backfill, a pass that read nothing new — four states to reason about where
-    /// there is only one that matters.
-    /// </para>
-    /// </summary>
-    private sealed record WatermarkChange(string? Previous, string New);
 }
 

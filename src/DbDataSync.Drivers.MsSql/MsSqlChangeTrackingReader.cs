@@ -17,7 +17,7 @@ namespace DbDataSync.Drivers.MsSql;
 /// ever queries it, never enables it (keeps the app's own DB permissions to read-only + VIEW CHANGE
 /// TRACKING, per §6's least-privilege guidance).
 /// </summary>
-public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
+public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview, IReadIntentDeclaring
 {
     /// <summary>
     /// Opt-in: read CHANGETABLE and the source table inside one snapshot transaction, which is the
@@ -55,10 +55,22 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     /// reaches the writer as one — the whole reason to prefer this reader over a watermark scan.</summary>
     public bool DetectsDeletes => true;
 
+    /// <summary>
+    /// All four. <c>CHANGE_TRACKING_MIN_VALID_VERSION</c> is itself a valid <c>@previousVersion</c> to
+    /// read from — it is defined as the smallest version a caller may present without risking a gap —
+    /// so <see cref="ReadIntent.ChangesFromEarliest"/> needs no separate inclusive statement shape the
+    /// way CDC's LSN window does.
+    /// </summary>
+    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent>
+    {
+        ReadIntent.InitialLoad, ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
+    };
+
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        ReadIntent intent,
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
@@ -67,43 +79,63 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     {
         sourceConnection.ChangeDatabase(source.Database);
 
+        if (intent == ReadIntent.InitialLoad)
+        {
+            var version = await GetCurrentVersionAsync(sourceConnection, cancellationToken);
+            var fullLoadRows = ReadFullLoadAsync(
+                sourceConnection, source, SourceProjection.Render(MsSqlDialect.Instance, columnMappings), cancellationToken);
+            return new ReadResult(
+                fullLoadRows, version.ToString(), new ReadDiagnostics(), Bounded: null,
+                await MapTimeAsync(sourceConnection, version, cancellationToken));
+        }
+
         var targetVersion = await GetCurrentVersionAsync(sourceConnection, cancellationToken);
 
-        if (previousWatermark is not null)
+        if (intent == ReadIntent.ChangesFromLatest)
         {
+            // Adopts the table as already-synced: the current version becomes the new watermark and
+            // CHANGETABLE is never queried — not even for the empty window a caught-up ordinary pass
+            // would still ask for.
+            return new ReadResult(
+                Empty(), targetVersion.ToString(), new ReadDiagnostics(), Bounded: null,
+                await MapTimeAsync(sourceConnection, targetVersion, cancellationToken));
+        }
+
+        long previousVersion;
+        if (intent == ReadIntent.ChangesFromEarliest)
+        {
+            // The floor itself, not one below it: CHANGE_TRACKING_MIN_VALID_VERSION is already the
+            // smallest version CHANGETABLE(CHANGES …, @previousVersion) may be given, so passing it
+            // straight through is what reads everything the feed still holds.
+            previousVersion = await GetMinValidVersionAsync(sourceConnection, source, cancellationToken);
+        }
+        else
+        {
+            previousVersion = long.Parse(previousWatermark!);
             var minValidVersion = await GetMinValidVersionAsync(sourceConnection, source, cancellationToken);
-            if (long.Parse(previousWatermark) < minValidVersion)
+            if (previousVersion < minValidVersion)
             {
                 // Shared with every other log-based reader, rather than this reader's own wording.
                 // One situation, one message, one thing for the runner to recognise and offer a fix
                 // for — see PositionExpiredException.
                 throw new PositionExpiredException(
-                    $"{source.Schema}.{source.Table}", previousWatermark, minValidVersion.ToString(),
+                    $"{source.Schema}.{source.Table}", previousWatermark!, minValidVersion.ToString(),
                     "Change Tracking");
             }
         }
 
         var diagnostics = new ReadDiagnostics();
 
-        // The first pass has no version window to bound — it reads the table itself, not CHANGETABLE,
-        // and a row cap there would be a partial full load with no resumable position to record it.
-        // Bounding starts once there is a change window to take a slice of.
-        //
         // Capped by default, not on request: CHANGETABLE is ordered by the version column already, so
         // there is none of the watermark scan's doubt about whether ordering the window is affordable,
         // and the mapping nobody configured is exactly the one that arrives with an unbounded backlog.
         // Set the option to 0 to read the whole window in one pass.
-        var maxRows = previousWatermark is null
-            ? null
-            : BoundedRead.Read(options, BoundedRead.DefaultMaxRows);
+        var maxRows = BoundedRead.Read(options, BoundedRead.DefaultMaxRows);
         var bounded = maxRows is null ? null : new BoundedReadPosition();
 
-        var rows = previousWatermark is null
-            ? ReadFullLoadAsync(
-                sourceConnection, source, SourceProjection.Render(MsSqlDialect.Instance, columnMappings), cancellationToken)
-            : ReadIncrementalAsync(
-                sourceConnection, source, long.Parse(previousWatermark), targetVersion,
-                UseSnapshotIsolation(options), columnMappings, diagnostics, maxRows, bounded, cancellationToken);
+        var rows = ReadIncrementalAsync(
+            sourceConnection, source, previousVersion, targetVersion,
+            UseSnapshotIsolation(options), columnMappings, diagnostics, maxRows, bounded, cancellationToken);
 
         return new ReadResult(
             rows, targetVersion.ToString(), diagnostics, bounded,
@@ -111,6 +143,12 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
             // which store targetVersion. A pass the cap cuts short overrides this with the time of
             // the version it actually reached, in the same place it overrides the version itself.
             await MapTimeAsync(sourceConnection, targetVersion, cancellationToken));
+    }
+
+    private static async IAsyncEnumerable<ChangeRow> Empty()
+    {
+        await Task.CompletedTask;
+        yield break;
     }
 
     /// <summary>

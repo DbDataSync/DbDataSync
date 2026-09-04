@@ -38,7 +38,7 @@ namespace DbDataSync.Drivers.MsSql;
 /// operator's decision.
 /// </para>
 /// </summary>
-public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
+public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadIntentDeclaring
 {
     public string Kind => MsSqlDriverKinds.Cdc;
 
@@ -53,10 +53,23 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
     /// source reaches the writer as one.</summary>
     public bool DetectsDeletes => true;
 
+    /// <summary>
+    /// All four. <see cref="ReadIntent.ChangesFromEarliest"/> is the one this design exists for: it
+    /// reads from <c>min_lsn</c> **inclusively**, via a distinct statement shape
+    /// (<see cref="MsSqlCdcStatement.BuildRead"/>'s <c>inclusiveFloor</c>) rather than a decremented
+    /// bound, so the change at the floor is never silently dropped and the reader's own
+    /// <c>Compare(storedLsn, minLsn) &lt; 0</c> guard stays untouched.
+    /// </summary>
+    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent>
+    {
+        ReadIntent.InitialLoad, ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
+    };
+
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        ReadIntent intent,
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
@@ -80,7 +93,7 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
 
         var diagnostics = new ReadDiagnostics();
 
-        if (previousWatermark is null)
+        if (intent == ReadIntent.InitialLoad)
         {
             // The floor has to be known before a first pass can store a position, and it is not known
             // the instant a table is enabled — the capture job records it when it processes the
@@ -109,24 +122,51 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
                 NewWatermarkTimeUtc: await MapTimeAsync(sourceConnection, start, cancellationToken));
         }
 
-        var minLsn = await MsSqlCdcCatalog.GetMinLsnAsync(sourceConnection, instance.CaptureInstance, cancellationToken);
-        var storedLsn = MsSqlCdcCatalog.FromWatermark(previousWatermark);
-        if (minLsn is not null && MsSqlCdcCatalog.Compare(storedLsn, minLsn) < 0)
+        if (intent == ReadIntent.ChangesFromLatest)
         {
-            throw new PositionExpiredException(
-                $"{source.Schema}.{source.Table}", previousWatermark,
-                MsSqlCdcCatalog.ToWatermark(minLsn), "Change Data Capture");
+            // Adopts the table as already-synced: the current max LSN becomes the new watermark and the
+            // change table is never queried — not even for the empty window a caught-up ordinary pass
+            // would still ask for.
+            return new ReadResult(
+                Empty(), MsSqlCdcCatalog.ToWatermark(maxLsn), diagnostics,
+                NewWatermarkTimeUtc: await MapTimeAsync(sourceConnection, maxLsn, cancellationToken));
         }
 
-        // Nothing new. Returning the stored position rather than the max keeps the next pass's window
-        // starting exactly where this one would have.
-        // Mapped even though the position has not moved: this is the pass that keeps a caught-up
-        // mapping's cached time populated, including for a row written before phase 87 added the
-        // column. A quiet mapping that only ever takes this branch would otherwise never acquire one.
-        if (MsSqlCdcCatalog.Compare(storedLsn, maxLsn) >= 0)
-            return new ReadResult(
-                Empty(), previousWatermark, diagnostics,
-                NewWatermarkTimeUtc: await MapTimeAsync(sourceConnection, storedLsn, cancellationToken));
+        byte[] fromLsn;
+        var inclusiveFloor = intent == ReadIntent.ChangesFromEarliest;
+        if (inclusiveFloor)
+        {
+            // The floor itself, read inclusively — see SupportedIntents and BuildRead's inclusiveFloor.
+            // Waited for on the same terms InitialLoad waits for it: not knowing the floor yet is not
+            // the same as there being no changes.
+            fromLsn = await WaitForCaptureFloorAsync(sourceConnection, instance, cancellationToken)
+                ?? throw new InvalidOperationException(
+                    $"Change Data Capture has not started capturing '{source.Schema}.{source.Table}' yet " +
+                    $"(capture instance '{instance.CaptureInstance}' has no start position). This pass " +
+                    "will succeed once the capture job has processed the enable — check that SQL Server " +
+                    "Agent is running if it does not.");
+        }
+        else
+        {
+            var minLsn = await MsSqlCdcCatalog.GetMinLsnAsync(sourceConnection, instance.CaptureInstance, cancellationToken);
+            fromLsn = MsSqlCdcCatalog.FromWatermark(previousWatermark!);
+            if (minLsn is not null && MsSqlCdcCatalog.Compare(fromLsn, minLsn) < 0)
+            {
+                throw new PositionExpiredException(
+                    $"{source.Schema}.{source.Table}", previousWatermark!,
+                    MsSqlCdcCatalog.ToWatermark(minLsn), "Change Data Capture");
+            }
+
+            // Nothing new. Returning the stored position rather than the max keeps the next pass's
+            // window starting exactly where this one would have.
+            // Mapped even though the position has not moved: this is the pass that keeps a caught-up
+            // mapping's cached time populated, including for a row written before phase 87 added the
+            // column. A quiet mapping that only ever takes this branch would otherwise never acquire one.
+            if (MsSqlCdcCatalog.Compare(fromLsn, maxLsn) >= 0)
+                return new ReadResult(
+                    Empty(), previousWatermark!, diagnostics,
+                    NewWatermarkTimeUtc: await MapTimeAsync(sourceConnection, fromLsn, cancellationToken));
+        }
 
         // Capped by default, unlike the watermark scan's opt-in: the ordering column here is the change
         // table's own clustered key, so bounding costs nothing to order by, and an uncapped pass over a
@@ -142,7 +182,7 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
 
         return new ReadResult(
             ReadIncrementalAsync(
-                sourceConnection, instance, storedLsn, maxLsn, columnMappings, maxRows, bounded,
+                sourceConnection, instance, fromLsn, maxLsn, columnMappings, maxRows, bounded, inclusiveFloor,
                 cancellationToken),
             MsSqlCdcCatalog.ToWatermark(maxLsn),
             diagnostics,
@@ -386,6 +426,7 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         IReadOnlyList<ColumnMapping> columnMappings,
         int? maxRows,
         BoundedReadPosition? bounded,
+        bool inclusiveFloor,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var columns = ColumnsFor(instance, columnMappings);
@@ -394,7 +435,8 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = MsSqlCdcStatement.BuildRead(
             instance.CaptureInstance, FunctionFor(instance), columns,
-            column => RenderColumn(column, columnMappings), bounded: maxRows is not null);
+            column => RenderColumn(column, columnMappings), bounded: maxRows is not null,
+            inclusiveFloor: inclusiveFloor);
         cmd.AddParameter("@storedLsn", storedLsn);
         cmd.AddParameter("@toLsn", maxLsn);
         if (maxRows is { } limit)

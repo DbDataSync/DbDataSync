@@ -24,14 +24,19 @@ namespace DbDataSync.Drivers.MsSql;
 /// fallback for tables without Change Tracking metadata.
 /// </para>
 /// </summary>
-public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingReader, IStatementPreview
+public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingReader, IStatementPreview, IReadIntentDeclaring
 {
     public string Kind => MsSqlDriverKinds.BatchReload;
+
+    /// <summary>No incremental mode exists at all — every pass reloads, whatever intent it is asked
+    /// for. See <see cref="BatchReloadReader"/>'s twin declaration.</summary>
+    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent> { ReadIntent.InitialLoad };
 
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        ReadIntent intent,
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,

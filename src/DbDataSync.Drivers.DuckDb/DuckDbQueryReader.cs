@@ -32,7 +32,7 @@ namespace DbDataSync.Drivers.DuckDb;
 /// never reaches a runtime reader in any case.
 /// </para>
 /// </summary>
-public sealed class DuckDbQueryReader : IChangeReader, IStatementPreview
+public sealed class DuckDbQueryReader : IChangeReader, IStatementPreview, IReadIntentDeclaring
 {
     public const string ReaderKind = "DuckDbQuery";
 
@@ -47,6 +47,12 @@ public sealed class DuckDbQueryReader : IChangeReader, IStatementPreview
     /// this reader is given. Deletion is the reconciling writer's job on a reload.
     /// </summary>
     public bool DetectsDeletes => false;
+
+    /// <summary>
+    /// No incremental mode exists — the query is static and <c>previousWatermark</c> is always ignored
+    /// (see the type doc), the same contract <c>BatchReloadReader</c> declares.
+    /// </summary>
+    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent> { ReadIntent.InitialLoad };
 
     /// <summary>
     /// Declared with <see cref="ParameterType.Sql"/>, which is what puts a real editor on the
@@ -74,6 +80,7 @@ public sealed class DuckDbQueryReader : IChangeReader, IStatementPreview
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        ReadIntent intent,
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,

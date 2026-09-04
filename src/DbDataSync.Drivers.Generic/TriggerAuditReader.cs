@@ -31,7 +31,7 @@ namespace DbDataSync.Drivers.Generic;
 /// </para>
 /// </summary>
 public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog)
-    : IChangeReader, IStatementPreview, IPositionAcknowledging
+    : IChangeReader, IStatementPreview, IPositionAcknowledging, IReadIntentDeclaring
 {
     /// <summary>
     /// Deletes shadow rows at or below an acknowledged position, once the pass that read them has
@@ -45,6 +45,16 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
     /// <summary>The shadow row records a delete with its key, which is the whole reason to take on a
     /// trigger's cost rather than scanning a watermark column.</summary>
     public bool DetectsDeletes => true;
+
+    /// <summary>
+    /// All four. The floor for <see cref="ReadIntent.ChangesFromEarliest"/> is genuinely read — the
+    /// surviving <c>MIN(DS_Seq)</c> — rather than assumed, because pruning (<see cref="AcknowledgeAsync"/>)
+    /// can have moved it since the shadow table was created.
+    /// </summary>
+    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent>
+    {
+        ReadIntent.InitialLoad, ReadIntent.Changes, ReadIntent.ChangesFromEarliest, ReadIntent.ChangesFromLatest,
+    };
 
     public IReadOnlyList<ParameterDescriptor> Parameters { get; } =
     [
@@ -64,6 +74,7 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        ReadIntent intent,
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
@@ -75,7 +86,7 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
         var target = await GetMaxSequenceAsync(sourceConnection, source, cancellationToken);
         var diagnostics = new ReadDiagnostics();
 
-        if (previousWatermark is null)
+        if (intent == ReadIntent.InitialLoad)
         {
             // The shadow table only holds what has happened since the trigger was created, so a table
             // that already had rows would otherwise start half-replicated with nothing to say so —
@@ -85,9 +96,41 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
             return new ReadResult(rows, target.ToString(), diagnostics);
         }
 
-        var previous = long.Parse(previousWatermark);
+        if (intent == ReadIntent.ChangesFromLatest)
+        {
+            // Adopts the table as already-synced: the shadow table's current maximum becomes the new
+            // position and nothing is read, not even the (empty) window a caught-up ordinary pass would
+            // still query for.
+            return new ReadResult(Empty(), target.ToString(), diagnostics);
+        }
+
+        // ChangesFromEarliest reads from the surviving floor — what pruning left, never assumed — and
+        // Changes reads from the stored position. Both are the same statement shape from here: only
+        // where "previous" comes from differs.
+        long previous;
+        if (intent == ReadIntent.ChangesFromEarliest)
+        {
+            var floor = await GetMinSequenceAsync(sourceConnection, source, cancellationToken);
+            // No surviving row at all — an empty shadow table reads the same as ChangesFromLatest: there
+            // is nothing behind "now" to catch up on.
+            if (floor is null)
+                return new ReadResult(Empty(), target.ToString(), diagnostics);
+
+            // One below the floor, not the floor itself: the read below is `DS_Seq > previous`, so this
+            // is what makes the row *at* the floor come back — the row the rejected watermark-surgery
+            // design would have silently dropped.
+            previous = floor.Value - 1;
+        }
+        else
+        {
+            previous = long.Parse(previousWatermark!);
+        }
+
+        // Already caught up to the target this pass fixed for itself — reported as the target reached,
+        // not as the floor-derived "previous" ChangesFromEarliest may have synthesised above, which is
+        // not a position anything actually read.
         if (previous >= target)
-            return new ReadResult(Empty(), previousWatermark, diagnostics);
+            return new ReadResult(Empty(), target.ToString(), diagnostics);
 
         return new ReadResult(
             ReadIncrementalAsync(
@@ -212,6 +255,31 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
             // Null is an empty shadow table, which is a perfectly ordinary state — nothing has changed
             // since the trigger was created.
             return result is null or DBNull ? 0 : Convert.ToInt64(result);
+        }
+        catch (DbException ex)
+        {
+            throw new InvalidOperationException(
+                $"Could not read the shadow table for '{source.Schema}.{source.Table}'. Change capture " +
+                "has to be enabled for this table first — the Setup card generates the trigger and the " +
+                $"shadow table for this engine. ({ex.Message})", ex);
+        }
+    }
+
+    /// <summary>
+    /// The surviving floor — <c>MIN(DS_Seq)</c> — or null for an empty shadow table. Read fresh on
+    /// every <see cref="ReadIntent.ChangesFromEarliest"/> pass rather than assumed, because
+    /// <see cref="AcknowledgeAsync"/>'s pruning moves it.
+    /// </summary>
+    private async Task<long?> GetMinSequenceAsync(
+        DbConnection connection, SourceTableRef source, CancellationToken cancellationToken)
+    {
+        using var cmd = connection.CreateTimedCommand();
+        cmd.CommandText = TriggerAuditStatement.BuildMinSequence(dialect, source.Schema, source.Table);
+
+        try
+        {
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            return result is null or DBNull ? null : Convert.ToInt64(result);
         }
         catch (DbException ex)
         {

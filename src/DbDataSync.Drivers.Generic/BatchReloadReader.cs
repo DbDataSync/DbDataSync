@@ -20,7 +20,7 @@ namespace DbDataSync.Drivers.Generic;
 /// </para>
 /// </summary>
 public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
-    : IChangeReader, ISegmentExpandingReader, IStatementPreview
+    : IChangeReader, ISegmentExpandingReader, IStatementPreview, IReadIntentDeclaring
 {
     public string Kind => GenericDriverKinds.BatchReload;
 
@@ -28,10 +28,15 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
     /// rest. Stated so the UI can say so rather than infer it.</summary>
     public bool DetectsDeletes => false;
 
+    /// <summary>No incremental mode exists at all — every pass reloads, whatever intent it is asked
+    /// for.</summary>
+    public IReadOnlySet<ReadIntent> SupportedIntents { get; } = new HashSet<ReadIntent> { ReadIntent.InitialLoad };
+
     public async Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         string? previousWatermark,
+        ReadIntent intent,
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
