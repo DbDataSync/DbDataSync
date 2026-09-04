@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <!-- The same glyph the app shows in its rail (see LogoIcon in src/components/icons.tsx), on the
-       same accent square (.rail-mark, --accent #0f7a55). Kept in step by hand: this file changes when
+       same accent square (.rail-mark, -accent #0f7a55). Kept in step by hand: this file changes when
        that component does, and there are only two of them.
 
        Drawn a little heavier than the rail's version — stroke 2.6 rather than 2 — because a favicon is
