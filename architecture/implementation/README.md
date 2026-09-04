@@ -29,9 +29,19 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **034** — PostgreSQL logical replication | |
-| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 3 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **100** — read intent and hold: storage, defaults, API | inert when it lands, by design — the seam phase 90 used |
+| 2 | **101** — the readers honour the intent | the behaviour change, and where an expired position stops retrying forever |
+| 3 | **102** — Monitoring tab manages intent and hold | |
+| 4 | **034** — PostgreSQL logical replication | |
+| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-04: 100–102 go to the top, in that order — they are one design split three ways and
+have to land in sequence. What earns the queue jump is 101's half: a mapping whose source position
+expires today fails on *every* scheduled tick, indefinitely, because there is no backoff or quarantine
+anywhere in the codebase — another failed run and another notification each interval, burying every
+other failure in that replication's history. The only remedy offered is a full reload, which on a large
+table is hours to recover from a source that usually still holds most of what was missed.
 
 Updated 2026-09-03: 096 is done and removed — the three daily-use defects are fixed, and both layout
 ones now have assertions that were seen to fail against the broken code. It found a fourth defect on
