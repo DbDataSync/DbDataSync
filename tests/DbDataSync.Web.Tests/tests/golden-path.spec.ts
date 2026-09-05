@@ -1772,8 +1772,11 @@ public sealed class Shout : IValueColumnExpression
     await page.goto(`/replications/${REPLICATION_NAME}/runs`)
     await expect(page.getByTestId('run-history-table')).toBeVisible({ timeout: 20_000 })
 
-    const history = await (await page.request.get(`/api/replications/${REPLICATION_NAME}/runs`)).json()
-    const expired = history.find((r: { failureKind: string | null }) => r.failureKind === 'PositionExpired')
+    // { runs, nextCursor } since phase 104 added server-side filtering and paging — a bare array of
+    // runs before that.
+    const history: { runs: { runId: string; failureKind: string | null }[] } =
+      await (await page.request.get(`/api/replications/${REPLICATION_NAME}/runs`)).json()
+    const expired = history.runs.find((r) => r.failureKind === 'PositionExpired')
 
     // Nothing in this suite has expired a position, so the affordance must be absent — a Resync button
     // on every failed run would make a full reload the general-purpose retry.
@@ -1781,7 +1784,7 @@ public sealed class Shout : IValueColumnExpression
     await expect(page.locator('[data-testid^="resync-run-"]')).toHaveCount(0)
 
     // And an ordinary failure is refused by the endpoint, with a reason rather than a 500.
-    const anyRun = history[0]
+    const anyRun = history.runs[0]
     const refused = await page.request.post(`/api/runs/${anyRun.runId}/resync`)
     expect(refused.status()).toBe(400)
     expect(await refused.text()).toContain('did not fail because its source position expired')
@@ -2067,10 +2070,12 @@ public sealed class Shout : IValueColumnExpression
     // The traced run — found by asking the API which one carries timing, rather than assuming the
     // newest row is it: this replication runs continuously, and other mappings' passes land here too.
     const findTraced = async (): Promise<{ runId: string; timing: TimingFields } | undefined> => {
-      const runs = await (await page.request.get(
+      // { runs, nextCursor } since phase 104 added server-side filtering and paging — a bare array of
+      // runs before that.
+      const body: { runs: { mappingName: string; timing: unknown }[] } = await (await page.request.get(
         `/api/replications/${REPLICATION_NAME}/runs?limit=50`)).json()
-      return runs.find((r: { mappingName: string; timing: unknown }) =>
-        r.mappingName === MAPPING_NAME && r.timing)
+      return body.runs.find((r) => r.mappingName === MAPPING_NAME && r.timing) as
+        { runId: string; timing: TimingFields } | undefined
     }
 
     await expect.poll(async () => (await findTraced()) !== undefined, { timeout: 30_000 }).toBe(true)
