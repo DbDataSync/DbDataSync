@@ -29,12 +29,16 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **102** — Monitoring tab manages intent and hold | lands on 103's Current Status sub-tab |
-| 2 | **104** — run history filtering and paging | independent of 100–102; after 103 only for where the panel lives |
-| 3 | **105** — one provisioning script for the whole replication | independent of everything above it |
-| 4 | **034** — PostgreSQL logical replication | |
-| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **104** — run history filtering and paging | independent of 100–103; after 103 only for where the panel lives |
+| 2 | **105** — one provisioning script for the whole replication | independent of everything above it |
+| 3 | **034** — PostgreSQL logical replication | |
+| 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-04 (latest): 102 is done and removed — the Monitoring tab's rows now show and manage
+every mapping's intent and hold, over phase 100's endpoints and phase 101's capability declarations.
+104 moves up to take 102's old spot; nothing else in the ordering rationale below it changes, since 104
+was already independent of 100–102 and only ever depended on 103 for where the panel lives.
 
 Updated 2026-09-04 (yet later): 103 is done and removed — Runs is a Monitoring sub-tab now, Schedule
 is on Overview, and the three `RefreshCountdown`s live in the header of the card or pane each one

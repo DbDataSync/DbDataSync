@@ -234,9 +234,16 @@ function DataLossConfirm({
   return (
     <>
       <div className="banner error" role="alert" data-testid="read-state-data-loss-warning">
-        <strong>This skips data.</strong> Every change to <span className="mono">{sourceLabel}</span>{' '}
-        made before this mapping's next pass runs will never be replicated — this adopts the source's
-        current position without reading anything that came before it.
+        {/* One child, deliberately: `.banner` is `display: flex`, so several inline nodes directly
+            inside it — text runs, `<strong>`, the `<span className="mono">` — each become their own
+            flex item and lay out as narrow side-by-side columns, each wrapping independently, rather
+            than as one paragraph. Wrapping the whole sentence in a single span keeps it the one flex
+            item the layout expects, matching `ErrorBanner`'s icon-plus-one-content-span shape. */}
+        <span>
+          <strong>This skips data.</strong> Every change to <span className="mono">{sourceLabel}</span>{' '}
+          made before this mapping's next pass runs will never be replicated — this adopts the
+          source's current position without reading anything that came before it.
+        </span>
       </div>
 
       {hasVerificationChecks ? (

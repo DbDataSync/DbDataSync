@@ -704,6 +704,13 @@ select.select {
   background: rgba(28, 26, 23, .32);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
+  /* `position: fixed` takes the backdrop out of layout, but not out of the CSS *inheritance* chain
+     — a dialog opened from inside a `.grid-row` cell (phase 102's own Monitoring row, which sets
+     `white-space: nowrap` on its direct children so a cell truncates instead of wrapping) inherits
+     that nowrap all the way down into the modal's own text, which then overflows the dialog instead
+     of wrapping. Reset here, once, for every current and future modal, rather than requiring each
+     dialog's own text to fight its mount point's ancestors. */
+  white-space: normal;
 }
 .modal {
   width: min(460px, 100%);
