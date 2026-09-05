@@ -218,7 +218,16 @@ jobs:
           docker logs dbdatasync-ci
           exit 1
       - name: Upload the tool package
+        # ~150MB every time: it's a framework-dependent, RID-agnostic package (see the csproj comment)
+        # that bundles DuckDB/LibGit2Sharp/SQLite/SqlClient's native binaries for every platform in one
+        # nupkg, so one build serves any OS. This job already proves the package works by installing and
+        # running it a few steps up — the upload is only so a human can grab this exact build, not a
+        # required output — so it does not need the long default retention. Without retention-days this
+        # inherits the account's default (commonly 90 days), and this job runs on every push to main and
+        # every PR: that is what actually let 96 of these pile up into 14.7GB and hit the storage quota,
+        # not the individual size.
         uses: actions/upload-artifact@v4
         with:
           name: dbdatasync-tool
           path: artifacts/*.nupkg
+          retention-days: 3
