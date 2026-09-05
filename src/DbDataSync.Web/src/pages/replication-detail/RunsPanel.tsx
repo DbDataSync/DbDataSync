@@ -212,9 +212,15 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
                 sharing that evenly shrinks every one past its content, and the longest option
                 ("All mappings") is what actually clipped. flex: none plus an explicit width sized to
                 each select's own longest option (not a shared guess) fixes both: none of the three
-                compete with each other for space, and none is tighter than it needs to be. */}
+                compete with each other for space, and none is tighter than it needs to be.
+
+                And .select's default height (30px) all but fills this tight card-head (34px) top to
+                bottom, unlike the btn-sm buttons beside it, which are shorter and sit with visible
+                margin above and below. The `sm` select variant matches that height so the two read as
+                the same kind of control living in the same space, not one of them crowding its
+                border against the header's own edge. */}
             <select
-              className="select"
+              className="select sm"
               style={{ flex: 'none', width: 118 }}
               value={kindFilter}
               onChange={(e) => changeKind(e.target.value)}
@@ -225,7 +231,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
               {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
             <select
-              className="select"
+              className="select sm"
               style={{ flex: 'none', width: 170 }}
               value={mappingFilter}
               onChange={(e) => changeMapping(e.target.value)}
@@ -236,7 +242,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
               {(mappingNames ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
             <select
-              className="select"
+              className="select sm"
               style={{ flex: 'none', width: 138 }}
               value={statusFilter}
               onChange={(e) => changeStatus(e.target.value)}
