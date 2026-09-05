@@ -138,9 +138,10 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
 
         AssertAllSucceeded([await PollUntilTerminalAsync(first.Single())]);
 
+        // Phase 104: this endpoint returns a page ({ runs, nextCursor }), not a bare array.
         var history = await _client.GetFromJsonAsync<JsonElement>(
             $"/api/replications/{_replicationName}/runs?kind=Backfill&limit=50", JsonOptions);
-        Assert.Single(history.EnumerateArray());
+        Assert.Single(history.GetProperty("runs").EnumerateArray());
 
         // Half-open [1, 5) — reloaded exactly once, and nothing outside it was touched.
         Assert.Equal(4, await CountAsync("Tgt_2"));

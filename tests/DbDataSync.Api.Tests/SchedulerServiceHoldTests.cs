@@ -74,7 +74,14 @@ public sealed class SchedulerServiceHoldTests(TestApiFactory factory) : IClassFi
             Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
             ChangeProcessing = new ChangeProcessingConfig
             {
-                Reader = new ReaderConfig { Kind = GenericDriverKinds.Watermark },
+                // watermarkColumn is a required parameter on this reader (WatermarkReader.Parameters);
+                // ParameterCheck enforces that on save even at replication level, so the reader config
+                // needs one, not just a Kind.
+                Reader = new ReaderConfig
+                {
+                    Kind = GenericDriverKinds.Watermark,
+                    Options = new Dictionary<string, string> { ["watermarkColumn"] = "UpdatedAt" },
+                },
                 Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
                 Writer = new WriterConfig { Kind = "MsSqlMerge" },
             },

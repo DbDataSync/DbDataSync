@@ -34,6 +34,15 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
 
     private readonly HttpClient _client = factory.CreateClient();
 
+    // Unique per test instance (xUnit constructs a fresh one per [Fact]), so that this class's shared
+    // TestApiFactory — one state database for every test in the class — never lets one test's audit
+    // rows and watermarks answer another's assertions. Every test used to share the literal "gate-src"
+    // connection name, which made ChangeCheckStore's deliberately append-only history table (see its
+    // own doc comment) accumulate rows across tests within the class; a test asserting Assert.Single
+    // against it was really asserting "nothing else in this class run has recorded a check yet",
+    // which held only by accident of execution order.
+    private readonly string _connectionName = $"gate-src-{Guid.NewGuid():N}";
+
     /// <summary>An LSN as CDC's own encoding spells it — hex, which is what ChangeWatermarks holds
     /// and therefore what the gate compares.</summary>
     private static string Lsn(params byte[] bytes) => MsSqlCdcCatalog.ToWatermark(bytes);
@@ -60,9 +69,9 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
     {
         var replicationName = $"gate-{Guid.NewGuid():N}";
 
-        (await _client.PutAsJsonAsync("/api/connections/gate-src", new ConnectionInput
+        (await _client.PutAsJsonAsync($"/api/connections/{_connectionName}", new ConnectionInput
         {
-            Name = "gate-src",
+            Name = _connectionName,
             DriverType = ConnectionDriverType.MsSql,
             Host = "localhost",
             Database = "App",
@@ -76,8 +85,8 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
             Name = replicationName,
             Endpoints = new TaskEndpoints
             {
-                Source = new EndpointRef { ConnectionName = "gate-src", Database = "App" },
-                Target = new EndpointRef { ConnectionName = "gate-src", Database = "DW" },
+                Source = new EndpointRef { ConnectionName = _connectionName, Database = "App" },
+                Target = new EndpointRef { ConnectionName = _connectionName, Database = "DW" },
             },
             Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
             ChangeProcessing = new ChangeProcessingConfig
@@ -122,7 +131,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
             ("shipments", MsSqlDriverKinds.ChangeTracking));
 
         var (gate, source) = BuildGate();
-        source.Set("gate-src", "App", MsSqlDriverKinds.ChangeTracking, "100");
+        source.Set(_connectionName, "App", MsSqlDriverKinds.ChangeTracking, "100");
 
         var admitted = await gate.AdmitAsync(task, ["orders", "shipments"], CancellationToken.None);
 
@@ -140,8 +149,8 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
             ("cdcorders", MsSqlDriverKinds.Cdc));
 
         var (gate, source) = BuildGate();
-        source.Set("gate-src", "App", MsSqlDriverKinds.ChangeTracking, "100");
-        source.Set("gate-src", "App", MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 171, 0, 3));
+        source.Set(_connectionName, "App", MsSqlDriverKinds.ChangeTracking, "100");
+        source.Set(_connectionName, "App", MsSqlDriverKinds.Cdc, Lsn(0, 0, 0, 42, 0, 0, 0, 171, 0, 3));
 
         await gate.AdmitAsync(task, ["ctorders", "cdcorders"], CancellationToken.None);
 
@@ -149,11 +158,11 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         // version are not the same quantity and a shared row would hold whichever polled last in a
         // format the other cannot read.
         Assert.Equal(2, source.Fetches.Count);
-        Assert.Contains(("gate-src", "App", MsSqlDriverKinds.ChangeTracking), source.Fetches);
-        Assert.Contains(("gate-src", "App", MsSqlDriverKinds.Cdc), source.Fetches);
+        Assert.Contains((_connectionName, "App", MsSqlDriverKinds.ChangeTracking), source.Fetches);
+        Assert.Contains((_connectionName, "App", MsSqlDriverKinds.Cdc), source.Fetches);
 
         var checks = factory.Services.GetRequiredService<ChangeCheckStore>().ListChecks()
-            .Where(c => c.ConnectionName == "gate-src" && c.SourceDatabase == "App")
+            .Where(c => c.ConnectionName == _connectionName && c.SourceDatabase == "App")
             .ToList();
 
         Assert.Equal("100", Assert.Single(checks, c => c.SourceKind == MsSqlDriverKinds.ChangeTracking).Value);
@@ -178,7 +187,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         SetWatermark(task, "caughtup", "100");
 
         var (gate, source) = BuildGate();
-        source.Set("gate-src", "App", MsSqlDriverKinds.ChangeTracking, "100");
+        source.Set(_connectionName, "App", MsSqlDriverKinds.ChangeTracking, "100");
 
         var admitted = await gate.AdmitAsync(task, ["draining", "caughtup"], CancellationToken.None);
 
@@ -196,7 +205,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         SetWatermark(task, "settled", "100");
 
         var (gate, source) = BuildGate();
-        source.Set("gate-src", "App", MsSqlDriverKinds.ChangeTracking, "100");
+        source.Set(_connectionName, "App", MsSqlDriverKinds.ChangeTracking, "100");
 
         var admitted = await gate.AdmitAsync(task, ["firstpass", "settled"], CancellationToken.None);
 
@@ -215,7 +224,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         SetWatermark(task, "cdconly", max);
 
         var (gate, source) = BuildGate();
-        source.Set("gate-src", "App", MsSqlDriverKinds.Cdc, max);
+        source.Set(_connectionName, "App", MsSqlDriverKinds.Cdc, max);
 
         Assert.Empty(await gate.AdmitAsync(task, ["cdconly"], CancellationToken.None));
 
@@ -238,7 +247,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
 
         Assert.Equal(["nocapture"], admitted);
         var recorded = factory.Services.GetRequiredService<ChangeCheckStore>().ListChecks()
-            .First(c => c.SourceKind == MsSqlDriverKinds.Cdc && c.ConnectionName == "gate-src");
+            .First(c => c.SourceKind == MsSqlDriverKinds.Cdc && c.ConnectionName == _connectionName);
         Assert.Null(recorded.Value);
     }
 
@@ -258,8 +267,8 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         SetWatermark(task, "cdcup", max);
 
         var (gate, source) = BuildGate();
-        source.Unreachable.Add(("gate-src", "App", MsSqlDriverKinds.ChangeTracking));
-        source.Set("gate-src", "App", MsSqlDriverKinds.Cdc, max);
+        source.Unreachable.Add((_connectionName, "App", MsSqlDriverKinds.ChangeTracking));
+        source.Set(_connectionName, "App", MsSqlDriverKinds.Cdc, max);
 
         var admitted = await gate.AdmitAsync(
             task, ["ctdown", "ctdown2", "cdcup"], CancellationToken.None);
@@ -310,7 +319,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         SetWatermark(task, "draining", Lsn(0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
 
         var (gate, source) = BuildGate();
-        source.Set("gate-src", "App", MsSqlDriverKinds.Cdc, max);
+        source.Set(_connectionName, "App", MsSqlDriverKinds.Cdc, max);
 
         // Five ticks, five capped passes, each advancing the mapping's own watermark by two LSNs —
         // which is what a bounded read's WatermarkAfterRead does — and never touching the counter.

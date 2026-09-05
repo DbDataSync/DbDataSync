@@ -39,6 +39,14 @@ public sealed class ReadIntentYamlRoundTripTests : IDisposable
             Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
             Writer = new WriterConfig { Kind = "MsSqlMerge" },
         },
+        // A table mapping's endpoints are only resolvable when the replication actually names one
+        // (EndpointResolution.Validate, run on every SaveTableMapping) — needed here because two of
+        // these tests save a mapping, not just the replication.
+        Endpoints = new TaskEndpoints
+        {
+            Source = new EndpointRef { ConnectionName = "sales-src", Database = "App" },
+            Target = new EndpointRef { ConnectionName = "sales-tgt", Database = "Dw" },
+        },
         DefaultReadIntent = defaultReadIntent,
     };
 
