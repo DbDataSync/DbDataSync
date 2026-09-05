@@ -147,8 +147,7 @@ button { font-family: inherit; }
   font: 500 11px var(--ui); color: var(--ink-4);
   white-space: nowrap;
 }
-.refresh-countdown-label { color: var(--ink-4); }
-/* Tabular figures so the number does not shuffle the label sideways as it counts down. */
+/* Tabular figures so the number does not shift width as it counts down. */
 .refresh-countdown-value { color: var(--ink); font-variant-numeric: tabular-nums; }
 
 /* A numeric setting's unit (the admin config screen) — fully rounded, unlike .badge's square corners,
@@ -652,11 +651,6 @@ select.select {
   font: 600 10px var(--ui);
 }
 .subtab-panel { display: flex; flex-direction: column; gap: 14px; }
-
-/* A sub-tab's own header, for something that describes the whole tab rather than one card in it —
-   Monitoring's Current Status uses this for its lag countdown (phase 103), which used to live in the
-   shared shell chrome and needed a pane-level home once that portal was retired. */
-.pane-head { display: flex; align-items: center; justify-content: space-between; }
 
 /* ── Markdown (see Markdown.tsx) ────────────────────────────────────────────── */
 /* Notes are prose in a product that is otherwise dense controls, so this deliberately reads like a

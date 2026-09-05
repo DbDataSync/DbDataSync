@@ -175,10 +175,11 @@ test.describe('replication detail: Monitoring restructure (phase 103)', () => {
     await stub(page)
     await page.goto(`/replications/${REPLICATION_NAME}/monitoring`)
 
-    // Metrics is in the rail on every tab; Lag is Current Status's own pane header, new as of this
-    // phase (there was nowhere pane-level to put it before Monitoring had sub-tabs at all).
+    // Metrics is in the rail on every tab; Lag lives in the Reader lag card's own head — there is no
+    // pane-level heading on Current Status at all, since a bare heading whose only content was the
+    // countdown said nothing the tab title above it did not already say.
     await expect(page.getByTestId('metrics-card').getByTestId('metrics-countdown')).toBeVisible()
-    await expect(page.getByTestId('monitoring-current-status-header').getByTestId('lag-countdown')).toBeVisible()
+    await expect(page.getByTestId('monitoring-range').getByTestId('lag-countdown')).toBeVisible()
 
     await page.getByTestId('monitoring-tab-history').click()
     await expect(page.getByTestId('run-history-table').getByTestId('runs-countdown')).toBeVisible()

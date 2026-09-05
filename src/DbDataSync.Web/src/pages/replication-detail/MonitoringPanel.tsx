@@ -80,9 +80,10 @@ export function MonitoringRunHistoryTab() {
  * caught-up replication reads zero here and stays there rather than climbing overnight.
  *
  * No `.pane` of its own since phase 103 — `MonitoringSection` owns that, because this is now one of
- * two sub-tabs sharing it. The header below is new as of that phase: the countdown used to live in
- * the shared shell chrome, and moving it here needed somewhere pane-level to land, since it describes
- * the whole tab (this range card *and* the mapping table beneath it) rather than either card alone.
+ * two sub-tabs sharing it. The countdown lives in the Reader lag card's own head rather than a
+ * pane-level heading: a bare "Current status" heading whose only content was the countdown said
+ * nothing the tab title above it did not already say, so it is gone and the countdown moved to the
+ * card that actually describes what it is refreshing.
  */
 export function MonitoringPanel({ replicationName }: { replicationName: string }) {
   const { data: task } = useReplication(replicationName)
@@ -98,11 +99,6 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
 
   return (
     <>
-      <div className="pane-head" data-testid="monitoring-current-status-header">
-        <span className="card-title">Current status</span>
-        <RefreshCountdown label="Lag" dataUpdatedAt={dataUpdatedAt} testId="lag-countdown" />
-      </div>
-
       <ErrorBanner error={error} />
 
       <div className="card" data-testid="monitoring-range">
@@ -110,6 +106,9 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
           <span className="card-title sm">Reader lag</span>
           <span className="card-note">
             measured against each source's own last-known position, never against the clock
+          </span>
+          <span className="spacer">
+            <RefreshCountdown label="Lag" dataUpdatedAt={dataUpdatedAt} testId="lag-countdown" />
           </span>
         </div>
         <div className="card-body">

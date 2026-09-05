@@ -41,10 +41,10 @@ function useRefreshCountdown(
 /**
  * When the panel beside this refreshes itself, in the shell's action bar.
  *
- * **Labelled, because there are up to three of them at once.** The Runs tab shows its own and the
- * metrics card's; the Monitoring tab shows its own and the metrics card's. Two bare numbers counting
- * down at different rates would be a puzzle rather than an answer, so each says what it is counting
- * for.
+ * **No visible label.** Each of these lives in the header of the very card or pane it describes —
+ * "Reader lag", "Last 24h", "Run history" — so a word repeating that beside the number would be
+ * saying it twice. `label` still names what it is for the tooltip and the "not loaded yet" text,
+ * which are read away from that heading and need the reminder a glance at the card does not.
  *
  * The ring is the same figure as the number and exists for the reading nobody stops for: a glance at
  * the chrome says roughly how fresh the screen is without anybody parsing a digit.
@@ -72,7 +72,6 @@ export function RefreshCountdown({ label, dataUpdatedAt, intervalMs = MONITORING
       }
     >
       <Ring remaining={seconds} total={total} />
-      <span className="refresh-countdown-label">{label}</span>
       <span className="refresh-countdown-value mono">{seconds === null ? '—' : `${seconds}s`}</span>
     </span>
   )
