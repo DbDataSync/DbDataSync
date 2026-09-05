@@ -194,12 +194,58 @@ public sealed class RunWatermarkTimeTests(TestApiFactory factory) : IClassFixtur
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    /// <summary>
+    /// Phase 104's own reason for touching this endpoint: it has to take the *same* filters as
+    /// history and resolve the *same* page, not a superset or a subset of it.
+    /// <para>
+    /// Two runs a <c>mappingName=orders&amp;status=Succeeded</c> filter keeps, and one it excludes —
+    /// deliberately given a watermark just as resolvable as the kept two's, so a bug that had this
+    /// endpoint ignore the filters entirely would still pass a test whose excluded run had nothing to
+    /// date.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task WatermarkTimes_TakesTheSameFiltersAsHistory_AndAnswersExactlyThatSet()
+    {
+        var (task, database) = await SetUpAsync();
+
+        RecordCheck(database, "10", Origin);
+        RecordCheck(database, "50", Origin.AddMinutes(10));
+        RecordCheck(database, "100", Origin.AddMinutes(20));
+
+        var kept1 = CompleteRun(task.Name, "10", "50");
+        var kept2 = CompleteRun(task.Name, "50", "100");
+        // Same mapping, same resolvable watermarks, wrong status — history's filter has to drop this
+        // one, and watermark-times has to agree rather than dating it anyway.
+        var excludedByStatus = CompleteRun(task.Name, "10", "50", RunStatus.Failed);
+
+        const string filter = "mappingName=orders&status=Succeeded";
+
+        var historyResponse = await _client.GetAsync($"/api/replications/{task.Name}/runs?{filter}");
+        historyResponse.EnsureSuccessStatusCode();
+        var history = await historyResponse.Content.ReadFromJsonAsync<RunHistoryResponseDto>(JsonOptions);
+        var expectedIds = history!.Runs.Select(r => r.RunId).ToHashSet();
+        Assert.Equal(new HashSet<Guid> { kept1, kept2 }, expectedIds);
+
+        var times = await GetAsync(task.Name, filter);
+
+        // Exactly the filtered set: not a superset (the excluded run's watermark leaking in because
+        // this endpoint applied no filter of its own) and not a subset (one of the kept two silently
+        // missing because the two endpoints resolved different pages).
+        Assert.Equal(expectedIds, times.Keys.ToHashSet());
+        Assert.DoesNotContain(excludedByStatus, times.Keys);
+    }
+
+    /// <summary>Deserialization target for the history endpoint's page shape since phase 104 — mirrors
+    /// <c>DbDataSync.Api.Models.RunHistoryResponse</c> field for field.</summary>
+    private sealed record RunHistoryResponseDto(List<TaskRunRecord> Runs, string? NextCursor);
+
     // ---- Fixture --------------------------------------------------------------------------------
 
-    private async Task<Dictionary<Guid, RunWatermarkTimes>> GetAsync(string replicationName)
+    private async Task<Dictionary<Guid, RunWatermarkTimes>> GetAsync(string replicationName, string? query = null)
     {
         var response = await _client.GetAsync(
-            $"/api/replications/{replicationName}/runs/watermark-times");
+            $"/api/replications/{replicationName}/runs/watermark-times{(query is null ? "" : $"?{query}")}");
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content

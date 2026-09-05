@@ -755,8 +755,11 @@ public sealed class DropGadgets : IRowTransform
 
     await expect.poll(async () => {
       const response = await page.request.get(`/api/replications/${PROVISIONED_REPLICATION}/runs?limit=30`)
-      const runs: { mappingName: string; status: string; errorSummary: string | null }[] = await response.json()
-      return runs
+      // { runs, nextCursor } since phase 104 added server-side filtering and paging — a bare array
+      // of runs before that.
+      const body: { runs: { mappingName: string; status: string; errorSummary: string | null }[] } =
+        await response.json()
+      return body.runs
         .filter((r) => r.mappingName === NEW_MAPPING)
         .map((r) => `${r.status}${r.errorSummary ? `: ${r.errorSummary}` : ''}`)
     }, { timeout: 90_000 }).toContain('Succeeded')

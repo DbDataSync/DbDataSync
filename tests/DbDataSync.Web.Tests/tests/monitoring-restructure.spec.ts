@@ -70,7 +70,9 @@ async function stub(page: Page) {
   // By RegExp and before the catch-alls, as in run-details-dialog.spec.ts: both carry a query
   // string, and `?` is a wildcard in Playwright's glob syntax.
   await page.route(/\/runs\/watermark-times/, (route) => route.fulfill(json({})))
-  await page.route(/\/runs\?limit=/, (route) => route.fulfill(json(RUNS)))
+  // { runs, nextCursor } since phase 104 added server-side filtering and paging — a bare array
+  // before that.
+  await page.route(/\/runs\?limit=/, (route) => route.fulfill(json({ runs: RUNS, nextCursor: null })))
   // The bare endpoint, no query string, is the trigger — Run Now posts here and nowhere else.
   await page.route(`**${base}/runs`, (route) =>
     route.request().method() === 'POST'

@@ -103,11 +103,28 @@ public sealed class RunsController(
             : BadRequest(new { error = result.Error });
     }
 
+    /// <summary>
+    /// Run history for one replication — filtered and paged since phase 104.
+    /// <para>
+    /// <c>cursor</c> is opaque and round-tripped verbatim from a previous call's <c>nextCursor</c> —
+    /// see <see cref="RunHistoryCursorCodec"/> for what it carries and why a cursor issued under
+    /// different filters is treated the same as no cursor at all rather than rejected outright.
+    /// </para>
+    /// </summary>
     [Authorize(Policies.Viewer)]
     [HttpGet("replications/{name}/runs")]
-    public ActionResult<IReadOnlyList<TaskRunRecord>> History(
-        string name, [FromQuery] RunKind? kind = null, [FromQuery] int limit = 50) =>
-        Ok(taskRunStore.GetRunHistory(name, kind, limit));
+    public ActionResult<RunHistoryResponse> History(
+        string name, [FromQuery] RunKind? kind = null, [FromQuery] string? mappingName = null,
+        [FromQuery] RunStatus? status = null, [FromQuery] string? cursor = null, [FromQuery] int limit = 50)
+    {
+        var decodedCursor = RunHistoryCursorCodec.Decode(cursor, name, kind, mappingName, status);
+        var page = taskRunStore.GetRunHistory(name, kind, mappingName, status, decodedCursor, limit);
+        var nextCursor = page.NextCursor is { } next
+            ? RunHistoryCursorCodec.Encode(next, name, kind, mappingName, status)
+            : null;
+
+        return Ok(new RunHistoryResponse(page, nextCursor));
+    }
 
     /// <summary>
     /// When each of those runs' stored watermarks was the source's own position — see phase 88.
@@ -119,9 +136,12 @@ public sealed class RunsController(
     /// record would make a durable row carry a value that changes as the retention window moves.
     /// </para>
     /// <para>
-    /// Takes the same <paramref name="kind"/> and <paramref name="limit"/> as the history endpoint
-    /// and resolves the same page, so a client asking both questions about one screenful cannot be
-    /// answered about two different sets of runs.
+    /// Takes the same <paramref name="kind"/>, <paramref name="mappingName"/>, <paramref name="status"/>,
+    /// <paramref name="cursor"/> and <paramref name="limit"/> as the history endpoint and resolves the
+    /// same page (phase 104 added the last four alongside its own) — a client asking both questions
+    /// about one screenful cannot be answered about two different sets of runs. Moving in lockstep like
+    /// this matters more once history is filtered and paged, not less: a filtered, paged run with a
+    /// watermark would otherwise show a blank watermark column for no reason a reader could see.
     /// </para>
     /// <para>
     /// Keyed by run id, and a run with no timestamp at all is simply absent: it aged out of
@@ -132,7 +152,8 @@ public sealed class RunsController(
     [Authorize(Policies.Viewer)]
     [HttpGet("replications/{name}/runs/watermark-times")]
     public ActionResult<IReadOnlyDictionary<Guid, RunWatermarkTimes>> WatermarkTimes(
-        string name, [FromQuery] RunKind? kind = null, [FromQuery] int limit = 50)
+        string name, [FromQuery] RunKind? kind = null, [FromQuery] string? mappingName = null,
+        [FromQuery] RunStatus? status = null, [FromQuery] string? cursor = null, [FromQuery] int limit = 50)
     {
         ReplicationTaskConfig task;
         try
@@ -144,7 +165,9 @@ public sealed class RunsController(
             return NotFound();
         }
 
-        return Ok(watermarkTimes.Describe(task, taskRunStore.GetRunHistory(name, kind, limit)));
+        var decodedCursor = RunHistoryCursorCodec.Decode(cursor, name, kind, mappingName, status);
+        var page = taskRunStore.GetRunHistory(name, kind, mappingName, status, decodedCursor, limit);
+        return Ok(watermarkTimes.Describe(task, page));
     }
 
     [Authorize(Policies.Viewer)]

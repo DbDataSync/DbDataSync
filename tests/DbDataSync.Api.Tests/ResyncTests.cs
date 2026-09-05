@@ -150,9 +150,14 @@ public sealed class ResyncTests(TestApiFactory factory) : IClassFixture<TestApiF
         var (replication, mapping) = await SetUpAsync();
         RecordFailedRun(replication, mapping, RunFailureKinds.PositionExpired);
 
-        var history = await _client.GetFromJsonAsync<List<TaskRunRecord>>(
+        // { runs, nextCursor } since phase 104 added paging — a bare array before that.
+        var history = await _client.GetFromJsonAsync<RunHistoryResponseDto>(
             $"/api/replications/{replication}/runs", JsonOptions);
 
-        Assert.Equal(RunFailureKinds.PositionExpired, Assert.Single(history!).FailureKind);
+        Assert.Equal(RunFailureKinds.PositionExpired, Assert.Single(history!.Runs).FailureKind);
     }
+
+    /// <summary>Deserialization target for the paged history response — see
+    /// <c>DbDataSync.Api.Models.RunHistoryResponse</c>, which this mirrors field for field.</summary>
+    private sealed record RunHistoryResponseDto(List<TaskRunRecord> Runs, string? NextCursor);
 }

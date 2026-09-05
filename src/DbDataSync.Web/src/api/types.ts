@@ -868,6 +868,33 @@ export interface TaskRunRecord {
 }
 
 /**
+ * The query parameters `runs` and `runs/watermark-times` both take, since phase 104 — kept as one
+ * type so the two client calls building a query string from it cannot quietly drift apart, which
+ * would blank the watermark column for a filtered or paged run that has one.
+ */
+export interface RunHistoryFilters {
+  kind?: RunKind
+  mappingName?: string
+  status?: RunStatus
+  /** Opaque — round-tripped verbatim from a previous page's `nextCursor`, never built by hand. */
+  cursor?: string
+}
+
+/**
+ * The run-history endpoint's shape since phase 104 added server-side filtering and paging — a page
+ * of runs, and where the next one starts.
+ *
+ * `nextCursor` is opaque: round-trip it verbatim as the next request's `cursor`, and never construct
+ * or parse one — the two column values it is built from are free to change without every caller
+ * needing to learn about it. `null` means this page reached the end of the history, never a cursor
+ * that would loop back to the first page.
+ */
+export interface RunHistoryPage {
+  runs: TaskRunRecord[]
+  nextCursor: string | null
+}
+
+/**
  * When a run's stored watermarks were the source's own position — see phase 88.
  *
  * Resolved on read out of `ChangeCheckHistory`, the polling history that spans time, rather than

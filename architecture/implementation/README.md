@@ -29,11 +29,17 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **104** — run history filtering and paging | independent of 100–103; after 103 only for where the panel lives |
-| 2 | **105** — one provisioning script for the whole replication | independent of everything above it |
-| 3 | **034** — PostgreSQL logical replication | |
-| 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **105** — one provisioning script for the whole replication | independent of everything above it |
+| 2 | **034** — PostgreSQL logical replication | |
+| 3 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-04 (later than everything below): 104 is done and removed — the run history endpoint
+now takes `kind`, `mappingName`, `status` and an opaque keyset `cursor`, `watermark-times` takes the
+identical four so the two never resolve to different pages, and the panel's old client-side
+`all | failed | backfills` filter is gone in favor of the three server-side ones plus paging controls.
+105 moves up to take 104's old spot; nothing else in the ordering rationale below it changes, since 105
+was already independent of everything above it.
 
 Updated 2026-09-04 (latest): 102 is done and removed — the Monitoring tab's rows now show and manage
 every mapping's intent and hold, over phase 100's endpoints and phase 101's capability declarations.

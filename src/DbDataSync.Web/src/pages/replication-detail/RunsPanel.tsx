@@ -5,13 +5,13 @@ import { RunKindBadge, StatusBadge } from '../../components/StatusBadge'
 import { BackfillForm } from './BackfillForm'
 import {
   MONITORING_REFRESH_MS, useCancelRun, useInvalidateRunHistory, useRunHistory,
-  useRunWatermarkTimes, useTriggerRun, useResyncRun,
+  useRunWatermarkTimes, useTableMappings, useTriggerRun, useResyncRun,
 } from '../../api/hooks'
 import { RefreshCountdown } from '../../components/RefreshCountdown'
 import { useRunHub } from '../../api/useRunHub'
 import { TimingDetail, WatermarkCell } from '../../components/RunFigures'
 import { processingTime, queueTime } from '../../components/runTimes'
-import type { TaskRunRecord } from '../../api/types'
+import type { RunHistoryFilters, RunKind, RunStatus, TaskRunRecord } from '../../api/types'
 
 /** A command sent down from the chrome's Backfill…/Run Now buttons. */
 export interface RunsCommand {
@@ -20,7 +20,9 @@ export interface RunsCommand {
 }
 
 const COLUMNS = '1.05fr .65fr .85fr .7fr .5fr .55fr .6fr .7fr 1.15fr .85fr 78px'
-type Filter = 'all' | 'failed' | 'backfills'
+
+const KINDS: RunKind[] = ['Primary', 'Backfill']
+const STATUSES: RunStatus[] = ['Queued', 'Pending', 'Running', 'Succeeded', 'Failed', 'Cancelled']
 
 /**
  * The tight poll while a run is being watched live, unchanged since it was added.
@@ -38,7 +40,15 @@ const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() 
  * The run history — Monitoring's **Run History** sub-tab since phase 103, formerly its own top-level
  * Runs tab. No `.pane` of its own: `MonitoringSection` owns that now, the same way it owns the pane
  * for Current Status beside it. The countdown that used to sit in the shared shell chrome lives in
- * this panel's own "Run history" card-head instead, beside the filter chips.
+ * this panel's own "Run history" card-head instead, beside the filter selects.
+ *
+ * **Filtering and paging are both server-side, since phase 104.** The old `all | failed | backfills`
+ * client-side filter searched only whatever one page the server had already returned — "Failed" would
+ * silently report *no failed runs* for a replication with plenty, just none in the newest fifty. That
+ * filter type is gone; `kind=Backfill` and `status=Failed` are two of the three filters below, sent
+ * to the server alongside a keyset `cursor` the panel keeps as a stack so "Newer" can step back
+ * through it. Live polling continues only on the first page with no cursor applied — an older page
+ * is a stable window a reader is looking at on purpose, and nothing should move under them.
  */
 export function RunsPanel({ replicationName, command }: { replicationName: string; command: RunsCommand | null }) {
   const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined)
@@ -46,13 +56,39 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
   // pass, and several expanded at once would push the rest of the history off the screen.
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
   const [showBackfill, setShowBackfill] = useState(false)
-  const [filter, setFilter] = useState<Filter>('all')
+
+  // The three server-side filters, phase 104's replacement for the old client-side `all | failed |
+  // backfills` — '' means "no filter" (the endpoint's own default) in each of the three selects.
+  const [kindFilter, setKindFilter] = useState<RunKind | ''>('')
+  const [mappingFilter, setMappingFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState<RunStatus | ''>('')
+
+  // The keyset cursor stack: index 0 is always `null` (page one, live). "Older" pushes the page just
+  // read's own `nextCursor`; "Newer" pops back to the one before it. A full array rather than just
+  // the current cursor because "Newer" needs to know what the *previous* page's cursor was, not only
+  // that there is one.
+  const [cursorStack, setCursorStack] = useState<(string | null)[]>([null])
+  const cursor = cursorStack[cursorStack.length - 1]
+  const onFirstPage = cursorStack.length === 1
+
   // The one run whose details are open in the popup — see RunDetailsDialog. Every run can open it,
   // not only a failed one. Independent of expandedRunId, which is only ever a traced run's stage
   // timings inline under its row.
   const [detailsRun, setDetailsRun] = useState<TaskRunRecord | null>(null)
 
   const isWatching = !!activeRunId
+
+  const filters: RunHistoryFilters = {
+    kind: kindFilter || undefined,
+    mappingName: mappingFilter || undefined,
+    status: statusFilter || undefined,
+    cursor: cursor ?? undefined,
+  }
+
+  const resetToFirstPage = () => setCursorStack([null])
+  const changeKind = (value: string) => { setKindFilter(value as RunKind | ''); resetToFirstPage() }
+  const changeMapping = (value: string) => { setMappingFilter(value); resetToFirstPage() }
+  const changeStatus = (value: string) => { setStatusFilter(value as RunStatus | ''); resetToFirstPage() }
 
   // Ten seconds ordinarily; the live-watch backstop while somebody is watching a run, because it is
   // the faster of the two and a query has one interval.
@@ -64,15 +100,25 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
   // a tab nobody has touched. The two cannot storm each other: react-query restarts the interval
   // from the moment data lands, so a push-driven invalidation pushes the next poll ten seconds out
   // rather than racing it.
-  const interval = isWatching ? LIVE_WATCH_MS : MONITORING_REFRESH_MS
-  const { data: runs, error: historyError, dataUpdatedAt } = useRunHistory(replicationName, interval)
+  //
+  // **Only on the first page, with no cursor applied** (phase 104). An older page is a stable keyset
+  // window a reader is looking at on purpose; refetching it on a timer would be the one thing this
+  // phase's paging exists to stop — rows moving under somebody mid-read. `undefined` turns react
+  // query's own interval off rather than this panel special-casing a zero.
+  const interval = onFirstPage ? (isWatching ? LIVE_WATCH_MS : MONITORING_REFRESH_MS) : undefined
+  const { data: page, error: historyError, dataUpdatedAt } = useRunHistory(replicationName, filters, interval)
+  const runs = page?.runs
+
+  const { data: mappingNames } = useTableMappings(replicationName)
 
   // Deliberately the steady cadence even while watching: these timestamps come out of the polling
   // gate's own history, which is written once per scheduling tick, so asking every 1.5 seconds
   // would be re-deriving an answer nothing has changed. The key is nested under the run history's,
   // so the invalidation that fires when a run completes refreshes this too — which is the moment a
-  // new watermark actually appears.
-  const { data: watermarkTimes } = useRunWatermarkTimes(replicationName, MONITORING_REFRESH_MS)
+  // new watermark actually appears. Off the first page for the same reason the list itself stops
+  // polling: a static page's watermarks are not going to change out from under whoever is reading it.
+  const { data: watermarkTimes } = useRunWatermarkTimes(
+    replicationName, filters, onFirstPage ? MONITORING_REFRESH_MS : undefined)
   const trigger = useTriggerRun(replicationName)
   const cancel = useCancelRun(replicationName)
   const resync = useResyncRun(replicationName)
@@ -106,10 +152,8 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [command?.nonce])
 
-  const visible = (runs ?? []).filter((r) =>
-    filter === 'failed' ? r.status === 'Failed'
-    : filter === 'backfills' ? r.runKind === 'Backfill'
-    : true)
+  const visible = runs ?? []
+  const anyFilterActive = !!(kindFilter || mappingFilter || statusFilter)
 
   return (
     <>
@@ -161,29 +205,91 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
       )}
 
       <div className="card flush" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }} data-testid="run-history-table">
-        <div className="card-head tight">
+        <div className="card-head tight" style={{ flexWrap: 'wrap', rowGap: 8 }}>
           <span className="card-title sm">Run history</span>
-          <span className="spacer row" style={{ gap: 6 }}>
-            {(['all', 'failed', 'backfills'] as Filter[]).map((f) => (
-              <button
-                key={f}
-                className={`chip ${filter === f ? 'active' : ''}`}
-                onClick={() => setFilter(f)}
-                data-testid={`run-filter-${f}`}
-              >
-                {f === 'all' ? 'All' : f === 'failed' ? 'Failed' : 'Backfills'}
-              </button>
-            ))}
+          <span className="row" style={{ gap: 8 }}>
+            <select
+              className="select"
+              value={kindFilter}
+              onChange={(e) => changeKind(e.target.value)}
+              data-testid="run-filter-kind"
+              aria-label="Filter by kind"
+            >
+              <option value="">All kinds</option>
+              {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <select
+              className="select"
+              value={mappingFilter}
+              onChange={(e) => changeMapping(e.target.value)}
+              data-testid="run-filter-mapping"
+              aria-label="Filter by mapping"
+            >
+              <option value="">All mappings</option>
+              {(mappingNames ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <select
+              className="select"
+              value={statusFilter}
+              onChange={(e) => changeStatus(e.target.value)}
+              data-testid="run-filter-status"
+              aria-label="Filter by status"
+            >
+              <option value="">All statuses</option>
+              {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
           </span>
-          <RefreshCountdown
-            label="Runs"
-            dataUpdatedAt={dataUpdatedAt}
-            // The interval actually in force, not the constant: while a run is being watched the list
-            // refreshes every 1.5 seconds, and a countdown ticking down from ten beside it would be
-            // describing a schedule the panel is not on.
-            intervalMs={interval}
-            testId="runs-countdown"
-          />
+
+          <span className="spacer row" style={{ gap: 10 }}>
+            {/* An older control matters as much as a newer one: with polling suspended off page one,
+                stepping back — or jumping straight home — is how the live view comes back into view. */}
+            {!onFirstPage && (
+              <button
+                type="button"
+                className="btn-link"
+                onClick={() => setCursorStack([null])}
+                data-testid="run-page-hometop"
+                title="Back to the live first page"
+              >
+                ⇤ Back to top
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={onFirstPage}
+              onClick={() => setCursorStack((stack) => stack.slice(0, -1))}
+              data-testid="run-page-newer"
+            >
+              ◂ Newer
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={!page?.nextCursor}
+              onClick={() => setCursorStack((stack) => (page?.nextCursor ? [...stack, page.nextCursor] : stack))}
+              data-testid="run-page-older"
+            >
+              Older ▸
+            </button>
+          </span>
+
+          {/* Polling continues only on the first page with no cursor applied — an older page is a
+              static keyset window until the reader comes back, so nothing here counts down while one
+              is open; it would otherwise promise a refresh this panel is not making. */}
+          {onFirstPage
+            ? (
+              <RefreshCountdown
+                label="Runs"
+                dataUpdatedAt={dataUpdatedAt}
+                // The interval actually in force, not the constant: while a run is being watched the
+                // list refreshes every 1.5 seconds, and a countdown ticking down from ten beside it
+                // would be describing a schedule the panel is not on.
+                intervalMs={interval}
+                testId="runs-countdown"
+              />
+            )
+            : <span className="faint sm" data-testid="runs-static-note">viewing an older page — not refreshing</span>}
         </div>
 
         <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 12 }}>
@@ -207,7 +313,9 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
         <div style={{ overflow: 'auto' }}>
           {!runs && <div className="empty">Loading…</div>}
           {runs && visible.length === 0 && (
-            <div className="empty">{filter === 'all' ? 'No runs yet.' : 'No runs match this filter.'}</div>
+            <div className="empty">
+              {anyFilterActive || !onFirstPage ? 'No runs match this filter.' : 'No runs yet.'}
+            </div>
           )}
           {visible.map((r) => {
             return (

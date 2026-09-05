@@ -3,17 +3,32 @@ namespace DbDataSync.State.Tests;
 public sealed class TaskRunStoreTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("dbdatasync-state-tests-").FullName;
+    private readonly StateDatabase _database;
     private readonly TaskRunStore _store;
     private readonly WorkQueueStore _queue;
 
     public TaskRunStoreTests()
     {
-        var database = new StateDatabase(Path.Combine(_tempDir, "state.db"));
-        _store = new TaskRunStore(database);
-        _queue = new WorkQueueStore(database);
+        _database = new StateDatabase(Path.Combine(_tempDir, "state.db"));
+        _store = new TaskRunStore(_database);
+        _queue = new WorkQueueStore(_database);
     }
 
     public void Dispose() => Directory.Delete(_tempDir, recursive: true);
+
+    /// <summary>
+    /// A raw write bypassing the store, for the exact timestamp collisions (and the one null) that the
+    /// ordinary enqueue path — stamped from the clock — cannot reliably construct on demand.
+    /// </summary>
+    private void ForceEnqueuedAt(Guid runId, DateTimeOffset? time) =>
+        _database.Retry(() =>
+        {
+            using var connection = _database.OpenConnection();
+            using var cmd = _database.Command(connection, "UPDATE TaskRuns SET EnqueuedAtUtc = $t WHERE RunId = $id;");
+            cmd.Bind(_database, "t", time is { } t ? t.ToString("O") : null);
+            cmd.Bind(_database, "id", runId.ToString());
+            cmd.ExecuteNonQuery();
+        });
 
     // A run's row now always originates from WorkQueueStore.Enqueue (Status=Queued) — there is no
     // longer an INSERT-based "start a run" method on TaskRunStore itself, only BeginRun (an UPDATE
@@ -190,6 +205,200 @@ public sealed class TaskRunStoreTests : IDisposable
         Assert.Equal(backfill, backfillOnly[0].RunId);
 
         Assert.Equal(2, _store.GetRunHistory("crm-sync").Count);
+    }
+
+    [Fact]
+    public void GetRunHistory_FiltersByMappingName()
+    {
+        var orders = QueueAndBegin("crm-sync", "orders");
+        QueueAndBegin("crm-sync", "customers");
+
+        var filtered = _store.GetRunHistory("crm-sync", mappingName: "orders");
+
+        Assert.Single(filtered);
+        Assert.Equal(orders, filtered[0].RunId);
+    }
+
+    [Fact]
+    public void GetRunHistory_FiltersByStatus()
+    {
+        var failed = QueueAndBegin("crm-sync", "orders");
+        _store.CompleteRun(failed, RunStatus.Failed, 0, 0, "boom");
+        var succeeded = QueueAndBegin("crm-sync", "customers");
+        _store.CompleteRun(succeeded, RunStatus.Succeeded, 1, 1, null);
+
+        var failedOnly = _store.GetRunHistory("crm-sync", status: RunStatus.Failed);
+
+        Assert.Single(failedOnly);
+        Assert.Equal(failed, failedOnly[0].RunId);
+    }
+
+    /// <summary>Every filter at once, each excluding a run that matches all but one of them — the case
+    /// where a filter applied on its own would not catch a query that dropped one of the others.</summary>
+    [Fact]
+    public void GetRunHistory_CombinesKindMappingAndStatusFilters()
+    {
+        var match = QueueAndBegin("crm-sync", "orders", runKind: RunKind.Backfill);
+        _store.CompleteRun(match, RunStatus.Failed, 0, 0, "boom");
+
+        var wrongKind = QueueAndBegin("crm-sync", "orders", runKind: RunKind.Primary);
+        _store.CompleteRun(wrongKind, RunStatus.Failed, 0, 0, "boom");
+
+        var wrongMapping = QueueAndBegin("crm-sync", "customers", runKind: RunKind.Backfill);
+        _store.CompleteRun(wrongMapping, RunStatus.Failed, 0, 0, "boom");
+
+        // A distinct segment label, not just QueueAndBegin again with the same (kind, mapping): the
+        // work queue's own in-flight uniqueness is keyed on (task, kind, mapping, segment), and reusing
+        // match's key here — the one dimension this row is deliberately identical to it on — would
+        // dedupe onto match's own still-open WorkQueue row and silently overwrite its status instead of
+        // creating a second run.
+        var wrongStatus = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-2");
+        _store.BeginRun(wrongStatus, pid: null);
+        _store.CompleteRun(wrongStatus, RunStatus.Succeeded, 1, 1, null);
+
+        var combined = _store.GetRunHistory(
+            "crm-sync", runKind: RunKind.Backfill, mappingName: "orders", status: RunStatus.Failed);
+
+        Assert.Single(combined);
+        Assert.Equal(match, combined[0].RunId);
+    }
+
+    /// <summary>A filter matching nothing is a real, ordinary answer — an empty page, and specifically
+    /// a null cursor rather than one that would loop back to a first page that also came up empty.</summary>
+    [Fact]
+    public void GetRunHistory_AFilterThatMatchesNothing_ReturnsAnEmptyPage_WithNoCursor()
+    {
+        QueueAndBegin("crm-sync", "orders");
+
+        var page = _store.GetRunHistory("crm-sync", mappingName: "does-not-exist");
+
+        Assert.Empty(page);
+        Assert.Null(page.NextCursor);
+    }
+
+    /// <summary>
+    /// The property offset paging cannot promise and keyset paging exists for: a page already read is
+    /// not disturbed by rows that arrive after it was read, and paging past it neither repeats what
+    /// page one already showed nor skips the rows that came after.
+    /// </summary>
+    [Fact]
+    public void GetRunHistory_Paging_IsStableWhenNewRunsArriveBetweenPages()
+    {
+        var ids = new List<Guid>();
+        for (var i = 0; i < 5; i++)
+        {
+            ids.Add(QueueAndBegin("crm-sync", $"mapping-{i}"));
+            Thread.Sleep(5);
+        }
+
+        var page1 = _store.GetRunHistory("crm-sync", limit: 2);
+        Assert.Equal(2, page1.Count);
+        Assert.Equal(ids[4], page1[0].RunId); // newest
+        Assert.Equal(ids[3], page1[1].RunId);
+        Assert.NotNull(page1.NextCursor);
+
+        // New runs land at the top of the list exactly as a live poll would see them, in the gap
+        // between reading page one and asking for page two.
+        var lateArrival1 = QueueAndBegin("crm-sync", "late-1");
+        Thread.Sleep(5);
+        var lateArrival2 = QueueAndBegin("crm-sync", "late-2");
+
+        var page2 = _store.GetRunHistory("crm-sync", cursor: page1.NextCursor, limit: 2);
+
+        Assert.Equal(2, page2.Count);
+        Assert.Equal(ids[2], page2[0].RunId);
+        Assert.Equal(ids[1], page2[1].RunId);
+
+        // Neither of page one's own rows repeats, and neither of the two arrivals sneaks in — an
+        // offset-based page two would have been shifted two rows deep by the two new arrivals and
+        // have shown exactly the wrong four here.
+        var page2Ids = page2.Select(r => r.RunId).ToHashSet();
+        Assert.DoesNotContain(ids[4], page2Ids);
+        Assert.DoesNotContain(ids[3], page2Ids);
+        Assert.DoesNotContain(lateArrival1, page2Ids);
+        Assert.DoesNotContain(lateArrival2, page2Ids);
+    }
+
+    /// <summary>
+    /// Every row sharing one EnqueuedAtUtc, which is exactly what a batch enqueued in the same instant
+    /// produces — and the case ORDER BY EnqueuedAtUtc DESC alone leaves to whatever order the engine
+    /// happens to return ties in, unless RunId breaks them.
+    /// </summary>
+    [Fact]
+    public void GetRunHistory_Paging_BreaksTiesOnEnqueuedAtUtc_Deterministically()
+    {
+        var same = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var ids = new[]
+        {
+            QueueAndBegin("crm-sync", "a"),
+            QueueAndBegin("crm-sync", "b"),
+            QueueAndBegin("crm-sync", "c"),
+        };
+        foreach (var id in ids)
+            ForceEnqueuedAt(id, same);
+
+        // The database's own answer for "all three, in the one order it puts ties in" — the ground
+        // truth paging has to reproduce exactly, without this test assuming anything of its own about
+        // how three equal timestamps compare.
+        var whole = _store.GetRunHistory("crm-sync", limit: 10);
+        Assert.Equal(3, whole.Count);
+
+        var page1 = _store.GetRunHistory("crm-sync", limit: 2);
+        Assert.Equal(whole[0].RunId, page1[0].RunId);
+        Assert.Equal(whole[1].RunId, page1[1].RunId);
+        Assert.NotNull(page1.NextCursor);
+
+        var page2 = _store.GetRunHistory("crm-sync", cursor: page1.NextCursor, limit: 2);
+        Assert.Single(page2);
+        Assert.Equal(whole[2].RunId, page2[0].RunId);
+        Assert.Null(page2.NextCursor);
+
+        // Repeats nothing, drops nothing — the property ties exist to threaten and RunId exists to
+        // prevent, even though every row here shares the one column paging orders by.
+        Assert.Equal(whole.Select(r => r.RunId), page1.Concat(page2).Select(r => r.RunId));
+    }
+
+    /// <summary>
+    /// A run with no EnqueuedAtUtc cannot be placed on a timeline a cursor walks — phase 73 backfills
+    /// the column so this should not occur in practice, but the three engines disagree about where
+    /// NULL sorts, and the query excludes such a row rather than trusting any one of them to agree with
+    /// the others about where it belongs.
+    /// </summary>
+    [Fact]
+    public void GetRunHistory_ANullEnqueuedAtUtcRow_IsExcludedRatherThanStrandingPaging()
+    {
+        var dated = QueueAndBegin("crm-sync", "orders");
+        var undated = QueueAndBegin("crm-sync", "customers");
+        ForceEnqueuedAt(undated, null);
+
+        var page = _store.GetRunHistory("crm-sync", limit: 10);
+
+        Assert.Single(page);
+        Assert.Equal(dated, page[0].RunId);
+        Assert.Null(page.NextCursor);
+    }
+
+    [Fact]
+    public void GetRunHistory_NextCursor_IsNullOnlyWhenThereIsNoMorePastThisPage()
+    {
+        var ids = new List<Guid>();
+        for (var i = 0; i < 3; i++)
+        {
+            ids.Add(QueueAndBegin("crm-sync", $"mapping-{i}"));
+            Thread.Sleep(5);
+        }
+
+        var exact = _store.GetRunHistory("crm-sync", limit: 3);
+        Assert.Equal(3, exact.Count);
+        Assert.Null(exact.NextCursor);
+
+        var firstOfTwo = _store.GetRunHistory("crm-sync", limit: 2);
+        Assert.Equal(2, firstOfTwo.Count);
+        Assert.NotNull(firstOfTwo.NextCursor);
+
+        var lastPage = _store.GetRunHistory("crm-sync", cursor: firstOfTwo.NextCursor, limit: 2);
+        Assert.Single(lastPage);
+        Assert.Null(lastPage.NextCursor);
     }
 
     [Fact]

@@ -118,7 +118,9 @@ async function stub(page: Page): Promise<Counts> {
   await page.route(/\/runs\/watermark-times/, (route) => route.fulfill(json(WATERMARK_TIMES)))
   await page.route(/\/runs\?limit=/, (route) => {
     counts.history += 1
-    return route.fulfill(json(RUNS))
+    // { runs, nextCursor } since phase 104 added server-side filtering and paging — a bare array
+    // before that.
+    return route.fulfill(json({ runs: RUNS, nextCursor: null }))
   })
   await page.route(`**${base}/lag`, (route) => route.fulfill(json(LAG_PAYLOAD)))
   await page.route(`**${base}/table-mappings`, (route) => route.fulfill(json(['orders'])))

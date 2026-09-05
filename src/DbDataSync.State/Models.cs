@@ -1,3 +1,5 @@
+using System.Collections;
+
 namespace DbDataSync.State;
 
 public enum RunStatus
@@ -136,6 +138,41 @@ public sealed record RunTiming(
     long? StagingDurationMs = null,
     string? WriterKind = null,
     long? WriterDurationMs = null);
+
+/// <summary>
+/// A position in <c>TaskRunStore.GetRunHistory</c>'s keyset — see phase 104.
+/// <para>
+/// <c>(EnqueuedAtUtc, RunId)</c>, not an offset: the history is append-heavy and polled, so an offset
+/// would shift under a page as new runs land at the top, duplicating some rows and skipping others.
+/// <c>RunId</c> is the tie-break for the (rare, but real for a batch enqueued in one instant) case
+/// where two rows share the same <c>EnqueuedAtUtc</c> — without it, ties would page unpredictably
+/// depending on whichever order the engine happened to return them in.
+/// </para>
+/// </summary>
+public readonly record struct RunHistoryCursor(DateTimeOffset EnqueuedAtUtc, Guid RunId);
+
+/// <summary>
+/// One page of <c>GetRunHistory</c>, and where the next one starts.
+/// <para>
+/// **Implements <see cref="IReadOnlyList{TaskRunRecord}"/> itself, rather than exposing a <c>Runs</c>
+/// list property**, so every caller that only ever wanted "the runs for this task" — which is every
+/// caller but the history endpoint itself, including a long list of existing tests written before
+/// paging existed — keeps compiling and behaving exactly as it did, unaware a next page exists at
+/// all. Only the endpoint that hands a cursor back to a client reads <see cref="NextCursor"/>.
+/// </para>
+/// </summary>
+public sealed class RunHistoryPage(IReadOnlyList<TaskRunRecord> runs, RunHistoryCursor? nextCursor)
+    : IReadOnlyList<TaskRunRecord>
+{
+    /// <summary>Where the next page starts, or null when this page reached the end of the history —
+    /// never a cursor that would loop back to the first page.</summary>
+    public RunHistoryCursor? NextCursor { get; } = nextCursor;
+
+    public int Count => runs.Count;
+    public TaskRunRecord this[int index] => runs[index];
+    public IEnumerator<TaskRunRecord> GetEnumerator() => runs.GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
 
 /// <summary>
 /// Failures with a specific remedy, as opposed to failures an operator has to go and read logs about.

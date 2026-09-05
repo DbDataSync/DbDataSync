@@ -728,5 +728,18 @@ internal static class Migrations
         UPDATE ChangeWatermarks SET Watermark = WatermarkTemp;
         ALTER TABLE ChangeWatermarks DROP COLUMN WatermarkTemp;
         """,
+
+        """
+        -- The run-history keyset's index — see phase 104.
+        --
+        -- GetRunHistory's paging cursor is a WHERE clause over (EnqueuedAtUtc, RunId): "before this
+        -- timestamp, or at it and before this RunId". IX_TaskRuns_TaskName_EnqueuedAt (phase 73) covers
+        -- the TaskName/EnqueuedAtUtc half of that but not the tie-break, which leaves RunId's ordering
+        -- for the engine to sort unaided every time two rows share a timestamp — rare, but not rare
+        -- enough on a busy replication's own IX_TaskRuns_TaskName_RunKind_MappingName to ignore. The
+        -- older index is left in place rather than dropped: it still serves the metrics window and
+        -- the prune's recency ranking, which ask nothing about RunId.
+        CREATE INDEX IX_TaskRuns_TaskName_EnqueuedAt_RunId ON TaskRuns(TaskName, EnqueuedAtUtc, RunId);
+        """,
     ];
 }

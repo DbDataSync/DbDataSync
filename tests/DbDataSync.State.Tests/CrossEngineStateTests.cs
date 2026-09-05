@@ -315,6 +315,80 @@ public sealed class CrossEngineStateTests : IDisposable
         Assert.Equal(2, store.GetRunHistory("crm-sync").Count);
     }
 
+    /// <summary>
+    /// The run-history keyset, on all three engines — phase 104's own reason for existing in this
+    /// file. The expanded predicate
+    /// (<c>EnqueuedAtUtc &lt; $cursorTime OR (EnqueuedAtUtc = $cursorTime AND RunId &lt; $cursorRunId)</c>)
+    /// is what makes this portable at all: the row-value-constructor spelling reads better, passes on
+    /// SQLite and PostgreSQL, and SQL Server rejects it outright — exactly the class of bug a
+    /// SQLite-only run of this suite would not catch, which is why this is here rather than only in
+    /// <c>TaskRunStoreTests</c>.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Engines))]
+    public void RunHistoryKeysetPages_WithoutRepeatingOrDroppingARow(StateEngine engine)
+    {
+        var database = Open(engine);
+        var queue = new WorkQueueStore(database);
+        var store = new TaskRunStore(database);
+
+        var ids = new List<Guid>();
+        for (var i = 0; i < 5; i++)
+        {
+            var runId = queue.Enqueue("crm-sync", RunKind.Primary, $"mapping-{i}");
+            store.BeginRun(runId, pid: null);
+            ids.Add(runId);
+            Thread.Sleep(5);
+        }
+
+        var whole = store.GetRunHistory("crm-sync", limit: 10);
+        Assert.Equal(5, whole.Count);
+        Assert.Equal(ids[4], whole[0].RunId); // newest first
+
+        var page1 = store.GetRunHistory("crm-sync", limit: 2);
+        Assert.Equal(2, page1.Count);
+        Assert.NotNull(page1.NextCursor);
+
+        var page2 = store.GetRunHistory("crm-sync", cursor: page1.NextCursor, limit: 2);
+        Assert.Equal(2, page2.Count);
+        Assert.NotNull(page2.NextCursor);
+
+        var page3 = store.GetRunHistory("crm-sync", cursor: page2.NextCursor, limit: 2);
+        Assert.Single(page3);
+        Assert.Null(page3.NextCursor);
+
+        var pagedIds = page1.Concat(page2).Concat(page3).Select(r => r.RunId).ToList();
+        Assert.Equal(whole.Select(r => r.RunId), pagedIds);
+    }
+
+    /// <summary>Every filter the endpoint offers, each on the general query rather than a second call
+    /// path — see <c>TaskRunStore.GetMappingRunHistory</c>'s own doc comment for why that matters.</summary>
+    [Theory]
+    [MemberData(nameof(Engines))]
+    public void RunHistoryFiltersByKindMappingAndStatus_OnEveryEngine(StateEngine engine)
+    {
+        var database = Open(engine);
+        var queue = new WorkQueueStore(database);
+        var store = new TaskRunStore(database);
+
+        var match = queue.Enqueue("crm-sync", RunKind.Backfill, "orders");
+        store.BeginRun(match, pid: null);
+        store.CompleteRun(match, RunStatus.Failed, 0, 0, "boom");
+
+        var wrongMapping = queue.Enqueue("crm-sync", RunKind.Backfill, "customers");
+        store.BeginRun(wrongMapping, pid: null);
+        store.CompleteRun(wrongMapping, RunStatus.Failed, 0, 0, "boom");
+
+        var combined = store.GetRunHistory(
+            "crm-sync", runKind: RunKind.Backfill, mappingName: "orders", status: RunStatus.Failed);
+        Assert.Single(combined);
+        Assert.Equal(match, combined[0].RunId);
+
+        var noMatch = store.GetRunHistory("crm-sync", mappingName: "does-not-exist");
+        Assert.Empty(noMatch);
+        Assert.Null(noMatch.NextCursor);
+    }
+
     /// <summary>Users, credentials and sessions — the tables with foreign keys, and the ones where a
     /// bounded key column would fail first if the DDL got it wrong.</summary>
     [Theory]

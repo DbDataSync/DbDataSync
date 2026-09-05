@@ -5,6 +5,7 @@ import type {
   BulkCreateRequest,
   DriverType,
   ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig,
+  RunHistoryFilters,
   SegmentingStrategyConfig, SetMappingReadStateRequest, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
@@ -458,10 +459,21 @@ export function useDeleteTableMapping(replicationName: string) {
  */
 export const MONITORING_REFRESH_MS = 10_000
 
-export function useRunHistory(replicationName: string | undefined, refetchInterval?: number) {
+/**
+ * A page of run history — filtered and paged server-side since phase 104 (`filters` carries `kind`,
+ * `mappingName`, `status` and the opaque `cursor` a previous page handed back).
+ *
+ * `filters` is appended to the query key rather than replacing it, so `keys.runHistory(name)` stays a
+ * valid *prefix* every existing invalidation (a trigger, a cancel, a run completing on the hub) can
+ * still match — react-query's `invalidateQueries` matches by prefix by default, so those call sites
+ * needed no change to keep refreshing whichever filter and page happens to be open.
+ */
+export function useRunHistory(
+  replicationName: string | undefined, filters: RunHistoryFilters, refetchInterval?: number,
+) {
   return useQuery({
-    queryKey: keys.runHistory(replicationName ?? ''),
-    queryFn: () => api.runs.history(replicationName!),
+    queryKey: [...keys.runHistory(replicationName ?? ''), filters],
+    queryFn: () => api.runs.history(replicationName!, filters),
     enabled: !!replicationName,
     refetchInterval,
   })
@@ -475,16 +487,19 @@ export function useRunHistory(replicationName: string | undefined, refetchInterv
  * changes as `ChangeCheckHistory`'s retention window moves; the run itself is durable and does not.
  * It shares the run history's cadence so the two halves of a row never disagree by a poll.
  *
- * Its key is nested under `runHistory`'s, which means every existing invalidation of the run list —
- * a trigger, a cancel, a run completing on the hub — refreshes these timestamps too. That is what
- * should happen: a pass that just ended is exactly the one whose new watermark is worth dating.
+ * **Takes the identical `filters` as `useRunHistory`, since phase 104** — the same object, not a
+ * copy assembled separately — so the two can never resolve to different pages of the same
+ * replication's history. Its key is nested under `runHistory`'s, which means every existing
+ * invalidation of the run list — a trigger, a cancel, a run completing on the hub — refreshes these
+ * timestamps too. That is what should happen: a pass that just ended is exactly the one whose new
+ * watermark is worth dating.
  */
 export function useRunWatermarkTimes(
-  replicationName: string | undefined, refetchInterval?: number,
+  replicationName: string | undefined, filters: RunHistoryFilters, refetchInterval?: number,
 ) {
   return useQuery({
-    queryKey: keys.runWatermarkTimes(replicationName ?? ''),
-    queryFn: () => api.runs.watermarkTimes(replicationName!),
+    queryKey: [...keys.runWatermarkTimes(replicationName ?? ''), filters],
+    queryFn: () => api.runs.watermarkTimes(replicationName!, filters),
     enabled: !!replicationName,
     refetchInterval,
   })

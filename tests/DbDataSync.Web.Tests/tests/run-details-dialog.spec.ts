@@ -116,7 +116,9 @@ async function stub(page: Page) {
       newWatermarkTimeUtc: '2026-05-01T09:20:00Z',
     },
   })))
-  await page.route(/\/runs\?limit=/, (route) => route.fulfill(json(RUNS)))
+  // { runs, nextCursor } since phase 104 added server-side filtering and paging — a bare array
+  // before that.
+  await page.route(/\/runs\?limit=/, (route) => route.fulfill(json({ runs: RUNS, nextCursor: null })))
   await page.route(`**${base}/lag`, (route) => route.fulfill(json({
     mappings: {}, lowestLagMs: null, highestLagMs: null, rangeIncludesEstimates: false,
   })))

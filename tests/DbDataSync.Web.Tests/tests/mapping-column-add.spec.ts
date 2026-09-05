@@ -121,7 +121,8 @@ async function stub(page: Page): Promise<Saved> {
     runs: 0, failures: 0, rowsWritten: 0, rowsRead: 0, buckets: [],
     processingP50Ms: null, processingP95Ms: null, processingMaxMs: null, lastCompletedPassUtc: null,
   })))
-  await page.route(/\/runs\?limit=/, (route) => route.fulfill(json([])))
+  // { runs, nextCursor } since phase 104 — a bare array before that.
+  await page.route(/\/runs\?limit=/, (route) => route.fulfill(json({ runs: [], nextCursor: null })))
   await page.route(`**${base}`, (route) => route.fulfill(json(TASK)))
 
   return saved

@@ -47,6 +47,8 @@ import type {
   TableMappingConfig,
   TableMetadata,
   TaskRunRecord,
+  RunHistoryFilters,
+  RunHistoryPage,
   RunWatermarkTimes,
   TriggerResponse,
 } from './types'
@@ -88,6 +90,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 const put = <T>(path: string, body: unknown) =>
   request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
+
+/**
+ * The query string `runs` and `runs/watermark-times` both build from — one function rather than two
+ * copies of the same four `if`s, because the two calls have to ask about exactly the same page (see
+ * phase 104) and a query string assembled twice is a query string that can drift.
+ */
+function runHistoryQuery(filters: RunHistoryFilters, limit: number): string {
+  const params = new URLSearchParams()
+  if (filters.kind) params.set('kind', filters.kind)
+  if (filters.mappingName) params.set('mappingName', filters.mappingName)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.cursor) params.set('cursor', filters.cursor)
+  params.set('limit', String(limit))
+  return params.toString()
+}
 
 export const api = {
   connections: {
@@ -365,19 +382,26 @@ export const api = {
   runs: {
     trigger: (replicationName: string) =>
       request<TriggerResponse>(`/api/replications/${encodeURIComponent(replicationName)}/runs`, { method: 'POST' }),
-    history: (replicationName: string, limit = 50) =>
-      request<TaskRunRecord[]>(
-        `/api/replications/${encodeURIComponent(replicationName)}/runs?limit=${limit}`,
+    /**
+     * A page of run history — filtered and paged server-side since phase 104. `filters` and `limit`
+     * are shared with `watermarkTimes` below through {@link runHistoryQuery}, one function building
+     * both query strings, so the two cannot quietly stop asking about the same page.
+     */
+    history: (replicationName: string, filters: RunHistoryFilters = {}, limit = 50) =>
+      request<RunHistoryPage>(
+        `/api/replications/${encodeURIComponent(replicationName)}/runs?${runHistoryQuery(filters, limit)}`,
       ),
     /**
      * When those same runs' watermarks were the source's position, keyed by run id — see phase 88.
      *
-     * The same limit as `history`, so the two answers cover the same page. A run with no timestamp
-     * at all is absent rather than present with two nulls.
+     * The same filters, cursor and limit as `history`, so the two answers cover the same page — a
+     * filtered or paged run that has a watermark must not show a blank one just because this call
+     * asked a different question than the list beside it did. A run with no timestamp at all is
+     * absent rather than present with two nulls.
      */
-    watermarkTimes: (replicationName: string, limit = 50) =>
+    watermarkTimes: (replicationName: string, filters: RunHistoryFilters = {}, limit = 50) =>
       request<Record<string, RunWatermarkTimes>>(
-        `/api/replications/${encodeURIComponent(replicationName)}/runs/watermark-times?limit=${limit}`,
+        `/api/replications/${encodeURIComponent(replicationName)}/runs/watermark-times?${runHistoryQuery(filters, limit)}`,
       ),
     get: (runId: string) => request<TaskRunRecord>(`/api/runs/${runId}`),
     /** Reloads the table and clears the stored watermark, for a run whose source position expired. */

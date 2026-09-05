@@ -421,32 +421,99 @@ public sealed class TaskRunStore(StateDatabase database)
             return reader.Read() ? ReadRun(reader) : null;
         });
 
-    /// <summary>Run history for a task, optionally filtered to one RunKind. A null runKind (the
-    /// default) mixes Primary and Backfill rows — what the SPA's run-history view wants; scheduling
-    /// due-ness checks must always pass RunKind.Primary explicitly so a Backfill run never perturbs
-    /// the incremental schedule's timing.</summary>
-    public IReadOnlyList<TaskRunRecord> GetRunHistory(string taskName, RunKind? runKind = null, int limit = 50) =>
+    /// <summary>
+    /// Run history for a task, filtered and paged — see phase 104.
+    /// <para>
+    /// A null <paramref name="runKind"/> (the default) mixes Primary and Backfill rows — what the
+    /// SPA's run-history view wants; scheduling due-ness checks must always pass RunKind.Primary
+    /// explicitly so a Backfill run never perturbs the incremental schedule's timing.
+    /// <paramref name="mappingName"/> and <paramref name="status"/> are ordinary equality filters on
+    /// the general query — <b>not</b> a second call path: see <see cref="GetMappingRunHistory"/> for
+    /// why a mapping's history has to stay one method rather than two that could drift apart.
+    /// </para>
+    /// <para>
+    /// <b>The keyset predicate is written the expanded way on purpose</b> —
+    /// <c>EnqueuedAtUtc &lt; $cursorTime OR (EnqueuedAtUtc = $cursorTime AND RunId &lt; $cursorRunId)</c>
+    /// rather than the row-value-constructor form <c>(EnqueuedAtUtc, RunId) &lt; (...)</c>. The row
+    /// form reads better and passes on SQLite and PostgreSQL; SQL Server does not support it at all,
+    /// and this store runs on all three (phase 63). <c>RunId</c> breaks a tie on <c>EnqueuedAtUtc</c>
+    /// deterministically, which matters for a batch of runs enqueued in the same instant — ordering by
+    /// the timestamp alone would page them unpredictably.
+    /// </para>
+    /// <para>
+    /// <b><c>EnqueuedAtUtc IS NOT NULL</c> is deliberate, not incidental.</b> Phase 73 backfills the
+    /// column, so a null is not expected in practice, but the three engines disagree about where NULL
+    /// sorts in an ORDER BY — a keyset cursor that inherited whichever behaviour the engine happened to
+    /// have could silently strand such a row on one engine and not another. Excluding it is a visible,
+    /// portable answer; a row with no timestamp simply cannot be placed in a timeline and is left out
+    /// of one, rather than the query pretending it can.
+    /// </para>
+    /// <para>
+    /// <b>One row over <paramref name="limit"/> is fetched, not a second COUNT query</b>, so "is there
+    /// a next page" is answered by what already came back. The extra row is trimmed before it reaches
+    /// a caller, and its own key becomes <see cref="RunHistoryPage.NextCursor"/>.
+    /// </para>
+    /// </summary>
+    public RunHistoryPage GetRunHistory(
+        string taskName, RunKind? runKind = null, string? mappingName = null, RunStatus? status = null,
+        RunHistoryCursor? cursor = null, int limit = 50) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, $"""
                 SELECT {RunColumns}
-                FROM TaskRuns WHERE TaskName = $taskName {(runKind is null ? "" : "AND RunKind = $runKind")}
-                ORDER BY EnqueuedAtUtc DESC {database.Limit("limit")};
+                FROM TaskRuns
+                WHERE TaskName = $taskName AND EnqueuedAtUtc IS NOT NULL
+                {(runKind is null ? "" : "AND RunKind = $runKind")}
+                {(mappingName is null ? "" : "AND MappingName = $mappingName")}
+                {(status is null ? "" : "AND Status = $status")}
+                {(cursor is null ? "" : "AND (EnqueuedAtUtc < $cursorTime OR (EnqueuedAtUtc = $cursorTime AND RunId < $cursorRunId))")}
+                ORDER BY EnqueuedAtUtc DESC, RunId DESC
+                {database.Limit("fetchLimit")};
                 """);
             cmd.Bind(database, "taskName", taskName);
             if (runKind is not null)
                 cmd.Bind(database, "runKind", runKind.Value.ToString());
-            cmd.Bind(database, "limit", limit);
+            if (mappingName is not null)
+                cmd.Bind(database, "mappingName", mappingName);
+            if (status is not null)
+                cmd.Bind(database, "status", status.Value.ToString());
+            if (cursor is not null)
+            {
+                cmd.Bind(database, "cursorTime", cursor.Value.EnqueuedAtUtc.ToString("O"));
+                cmd.Bind(database, "cursorRunId", cursor.Value.RunId.ToString());
+            }
+            // One more than asked for — see the doc comment above.
+            cmd.Bind(database, "fetchLimit", limit + 1);
+
             using var reader = cmd.ExecuteReader();
             var results = new List<TaskRunRecord>();
             while (reader.Read())
                 results.Add(ReadRun(reader));
-            return (IReadOnlyList<TaskRunRecord>)results;
+
+            RunHistoryCursor? next = null;
+            if (results.Count > limit)
+            {
+                results.RemoveAt(results.Count - 1);
+                var last = results[^1];
+                // EnqueuedAtUtc cannot be null here: the WHERE clause above already excludes it.
+                next = new RunHistoryCursor(last.EnqueuedAtUtc!.Value, last.RunId);
+            }
+
+            return new RunHistoryPage(results, next);
         });
 
-    /// <summary>Run history for one specific table mapping (either RunKind) — used by scheduling
-    /// due-ness (RunKind.Primary) and by the SPA's per-mapping history views.</summary>
+    /// <summary>
+    /// Run history for one specific table mapping (either RunKind) — used by scheduling due-ness
+    /// (RunKind.Primary) and by the SPA's per-mapping history views.
+    /// <para>
+    /// Kept separate from <see cref="GetRunHistory"/> even though that method gained its own
+    /// <c>mappingName</c> filter in phase 104 — that filter is offset/cursor-paged and this one is
+    /// not, and due-ness wants a plain, unpaged, most-recent-first list. Two methods that both mean
+    /// "runs for this mapping" only stays safe because this one is a thin, unfiltered-by-cursor query
+    /// with no keyset logic of its own to drift out of step with the general one's.
+    /// </para>
+    /// </summary>
     public IReadOnlyList<TaskRunRecord> GetMappingRunHistory(string taskName, RunKind runKind, string mappingName, int limit = 50) =>
         database.Retry(() =>
         {
