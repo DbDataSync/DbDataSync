@@ -3,11 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+    # Only so the package job below can trigger on the same tag push release.yml does — see its `if`.
+    # This does not run the rest of the suite a second time: every other job explicitly skips a tag
+    # push, since release.yml's tag is pushed on top of a commit that already went through ci.yml on
+    # main.
+    tags:
+      - "release/v*"
   pull_request:
     branches: [main]
 
 jobs:
   dotnet:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +38,7 @@ jobs:
         run: dotnet test --no-build --configuration Release --filter "Category!=Integration"
 
   dotnet-integration:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     services:
       mssql-source:
@@ -96,6 +104,7 @@ jobs:
         run: dotnet test --no-build --configuration Release --filter "Category=Integration"
 
   web:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -116,6 +125,7 @@ jobs:
   # apply-button-does-not-cache-provisioned-columns.md's golden-path test 18 sit failing on main from
   # phase 94 until somebody happened to run it (architecture/planning/done/playwright-suite-in-ci.md).
   playwright:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     # docker-compose.yml rather than `services:` above, which is otherwise the same three containers on
     # the same three ports. The suite's tests/DbDataSync.Web.Tests/test-db.ts reaches SQL Server by
@@ -177,9 +187,13 @@ jobs:
           path: tests/DbDataSync.Web.Tests/test-results/
           retention-days: 7
 
-  # Built on every push rather than only at release time, because the first time anyone finds out the
-  # Dockerfile or the tool package is broken should not be the release.
+  # Only on the same release/v* tag push that triggers release.yml — restricted from every push (its
+  # original scope) by request, to stop this job's ~150MB nupkg upload from repeatedly hitting the
+  # account's artifact storage quota (see retention-days below, added first; this is the deliberate
+  # follow-up). The tradeoff accepted: the first time anyone finds out the Dockerfile or the tool
+  # package is broken is now the release itself, not an ordinary push beforehand.
   package:
+    if: ${{ startsWith(github.ref, 'refs/tags/release/v') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
