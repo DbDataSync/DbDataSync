@@ -14,6 +14,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+          # No packages.lock.json in this repo, so the cache key is a hash of every .csproj instead —
+          # any dependency change invalidates it. What's cached is the shared ~/.nuget/packages
+          # download, not a job's own build output, so this is safe to turn on in every job that
+          # restores: it only saves the network round-trip to nuget.org, already-restored packages are
+          # still resolved into each project's own bin/obj exactly as before.
+          cache: true
+          cache-dependency-path: "**/*.csproj"
       - name: Restore
         run: dotnet restore
       - name: Build
@@ -72,6 +79,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+          # No packages.lock.json in this repo, so the cache key is a hash of every .csproj instead —
+          # any dependency change invalidates it. What's cached is the shared ~/.nuget/packages
+          # download, not a job's own build output, so this is safe to turn on in every job that
+          # restores: it only saves the network round-trip to nuget.org, already-restored packages are
+          # still resolved into each project's own bin/obj exactly as before.
+          cache: true
+          cache-dependency-path: "**/*.csproj"
       - name: Restore
         run: dotnet restore
       - name: Build
@@ -114,6 +128,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+          # No packages.lock.json in this repo, so the cache key is a hash of every .csproj instead —
+          # any dependency change invalidates it. What's cached is the shared ~/.nuget/packages
+          # download, not a job's own build output, so this is safe to turn on in every job that
+          # restores: it only saves the network round-trip to nuget.org, already-restored packages are
+          # still resolved into each project's own bin/obj exactly as before.
+          cache: true
+          cache-dependency-path: "**/*.csproj"
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -165,6 +186,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+          # No packages.lock.json in this repo, so the cache key is a hash of every .csproj instead —
+          # any dependency change invalidates it. What's cached is the shared ~/.nuget/packages
+          # download, not a job's own build output, so this is safe to turn on in every job that
+          # restores: it only saves the network round-trip to nuget.org, already-restored packages are
+          # still resolved into each project's own bin/obj exactly as before.
+          cache: true
+          cache-dependency-path: "**/*.csproj"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
