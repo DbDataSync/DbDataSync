@@ -207,9 +207,15 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
       <div className="card flush" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }} data-testid="run-history-table">
         <div className="card-head tight" style={{ flexWrap: 'wrap', rowGap: 8 }}>
           <span className="card-title sm">Run history</span>
-          <span className="row" style={{ gap: 8 }}>
+          <span className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {/* .select's own width:100% becomes each one's flex-basis in this row — three of them
+                sharing that evenly shrinks every one past its content, and the longest option
+                ("All mappings") is what actually clipped. flex: none plus an explicit width sized to
+                each select's own longest option (not a shared guess) fixes both: none of the three
+                compete with each other for space, and none is tighter than it needs to be. */}
             <select
               className="select"
+              style={{ flex: 'none', width: 118 }}
               value={kindFilter}
               onChange={(e) => changeKind(e.target.value)}
               data-testid="run-filter-kind"
@@ -220,6 +226,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
             </select>
             <select
               className="select"
+              style={{ flex: 'none', width: 170 }}
               value={mappingFilter}
               onChange={(e) => changeMapping(e.target.value)}
               data-testid="run-filter-mapping"
@@ -230,6 +237,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
             </select>
             <select
               className="select"
+              style={{ flex: 'none', width: 138 }}
               value={statusFilter}
               onChange={(e) => changeStatus(e.target.value)}
               data-testid="run-filter-status"
