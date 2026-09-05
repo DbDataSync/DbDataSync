@@ -33,8 +33,16 @@ public sealed record DriverCapabilities(
 /// an operator having to know the key by heart and type it into a free-form table — which is what
 /// choosing a Kind used to mean.
 /// </param>
+/// <param name="SupportedIntents">
+/// What <see cref="IReadIntentDeclaring.SupportedIntents"/> says, or empty for a reader that does not
+/// implement the interface at all (a reader with no incremental mode, like batch reload) — see phase
+/// 102. **Never includes <see cref="ReadIntent.InitialLoad"/>**, for the same reason the interface
+/// itself never does: every reader can be asked for one regardless of what it declares here, so a UI
+/// offering intents from this list adds <c>InitialLoad</c> itself rather than expecting it in this set.
+/// </param>
 public sealed record ReaderCapability(
-    string Kind, bool SupportsSegmentation, bool DetectsDeletes, IReadOnlyList<ParameterDescriptor> Parameters);
+    string Kind, bool SupportsSegmentation, bool DetectsDeletes, IReadOnlyList<ParameterDescriptor> Parameters,
+    IReadOnlyList<ReadIntent> SupportedIntents);
 
 public sealed record StagingCapability(string Kind, IReadOnlyList<ParameterDescriptor> Parameters);
 

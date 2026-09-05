@@ -15,6 +15,7 @@ import type {
   BulkCreateRequest,
   BulkCreateResult,
   MappingLag,
+  MappingReadState,
   MetadataRefreshResult,
   ReplicationLag,
   CertificateActionResult,
@@ -38,6 +39,7 @@ import type {
   ScriptListItem,
   ScriptTestRequest,
   ScriptTestResult,
+  SetMappingReadStateRequest,
   ScriptSlotInfo,
   LogEntryRecord,
   NotificationFeed,
@@ -184,6 +186,17 @@ export const api = {
       request<void>(
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}`,
         { method: 'DELETE' },
+      ),
+    /** This mapping's resolved intent and hold — see phase 100. */
+    readState: (replicationName: string, mappingName: string) =>
+      request<MappingReadState>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/read-state`,
+      ),
+    /** Sets the intent and clears or sets the hold, in one call — see phase 100. */
+    setReadState: (replicationName: string, mappingName: string, body: SetMappingReadStateRequest) =>
+      request<MappingReadState>(
+        `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}/read-state`,
+        { method: 'POST', body: JSON.stringify(body) },
       ),
   },
   provisioning: {

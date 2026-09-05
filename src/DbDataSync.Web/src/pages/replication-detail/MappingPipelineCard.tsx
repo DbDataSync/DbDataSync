@@ -3,12 +3,15 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import { KeyValueTable } from '../../components/KeyValueTable'
 import { ParameterForm } from '../../components/ParameterForm'
+import { ReadIntentSetting } from '../../components/ReadIntentSetting'
 import { readerNotes } from '../../api/readerNotes'
 import { useCapabilities, useInferredNaturalKey, useScripts } from '../../api/hooks'
 import type {
-  CacheConfig, ParameterDescriptor, ReaderConfig, ReplicationTaskConfig, ResolvedRef, WriterConfig,
+  CacheConfig, ParameterDescriptor, ReaderConfig, ReadIntent, ReplicationTaskConfig, ResolvedRef,
+  WriterConfig,
 } from '../../api/types'
 import { NATURAL_KEY, versionsRows, withoutNaturalKey } from './naturalKey'
+import { offeredIntents } from './readIntent'
 
 /** The three stages a mapping can answer for itself, and what each is called on screen. */
 type Stage = 'reader' | 'cache' | 'writer'
@@ -47,6 +50,7 @@ const FIELD_OF: Record<Stage, keyof PipelineOverrides> = {
  */
 export function MappingPipelineCard({
   replicationName, mappingName, task, source, target, overrides, onChange,
+  defaultReadIntent, onChangeDefaultReadIntent,
 }: {
   replicationName: string
   /** The name as *saved*. The derived-key preview reads config off disk, so a mapping being renamed
@@ -57,6 +61,9 @@ export function MappingPipelineCard({
   target: ResolvedRef
   overrides: PipelineOverrides
   onChange: (next: PipelineOverrides) => void
+  /** This mapping's own `DefaultReadIntent`, in place of the replication's — phase 102. Null inherits. */
+  defaultReadIntent: ReadIntent | null
+  onChangeDefaultReadIntent: (next: ReadIntent | null) => void
 }) {
   const [stage, setStage] = useState<Stage>('writer')
   const { data: scripts } = useScripts()
@@ -226,6 +233,25 @@ export function MappingPipelineCard({
           )}
 
           <span className="hint">Save mapping, at the top of this screen, commits to config history.</span>
+        </div>
+      </div>
+
+      {/* Beside the pipeline it governs, same as the replication's own — see phase 102. Filtered to
+          what *this table's* effective reader — overridden here, or inherited above — can honestly
+          carry out, which is why it reads `kindOf('reader')` rather than the replication's Kind. */}
+      <div className="card">
+        <div className="card-head">
+          <span className="card-title">Read intent</span>
+          <span className="card-note">what this mapping reads next, unless it has already run</span>
+        </div>
+        <div className="card-body">
+          <ReadIntentSetting
+            value={defaultReadIntent}
+            inherited={task?.defaultReadIntent ?? 'InitialLoad'}
+            options={offeredIntents(sourceCapabilities.data?.readers.find((r) => r.kind === kindOf('reader'))?.supportedIntents)}
+            onChange={onChangeDefaultReadIntent}
+            testId="mapping-default-read-intent"
+          />
         </div>
       </div>
     </>

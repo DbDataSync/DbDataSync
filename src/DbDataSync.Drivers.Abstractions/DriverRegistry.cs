@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using DbDataSync.Core.Config;
 
 namespace DbDataSync.Drivers.Abstractions;
@@ -72,7 +73,11 @@ public sealed class DriverRegistry
             ? new DriverCapabilities(
                 driverType,
                 Readers(driverType)
-                    .Select(r => new ReaderCapability(r.Kind, r is ISegmentExpandingReader, r.DetectsDeletes, r.Parameters))
+                    .Select(r => new ReaderCapability(
+                        r.Kind, r is ISegmentExpandingReader, r.DetectsDeletes, r.Parameters,
+                        r is IReadIntentDeclaring declaring
+                            ? declaring.SupportedIntents.OrderBy(i => i).ToList()
+                            : []))
                     .ToList(),
                 driver.StagingProviders.Select(p => new StagingCapability(p.Kind, p.Parameters)).ToList(),
                 driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation, w.Parameters)).ToList(),

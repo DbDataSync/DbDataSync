@@ -8,7 +8,7 @@ import {
 } from '../../api/hooks'
 import { tableExists } from '../../api/tableExists'
 import type {
-  BatchReloadSegment, ColumnMapping, ColumnMetadata, ProvisioningConfig, ReplicationTaskConfig,
+  BatchReloadSegment, ColumnMapping, ColumnMetadata, ProvisioningConfig, ReadIntent, ReplicationTaskConfig,
   ResolvedRef, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
 } from '../../api/types'
 import { MappingSide } from './MappingSide'
@@ -99,6 +99,10 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     cacheOverride: structuredClone(existing?.cacheOverride ?? null),
     writerOverride: structuredClone(existing?.writerOverride ?? null),
   })
+  // Null inherits the replication's DefaultReadIntent — see phase 100/102.
+  const [defaultReadIntent, setDefaultReadIntent] = useState<ReadIntent | null>(
+    existing?.defaultReadIntent ?? null,
+  )
 
   /**
    * Choosing a source fills in the two things that follow from it.
@@ -223,7 +227,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
         // being dropped by a save from here.
         ...existing,
         name, sources: [source], targets: [target], columnMappings, scripts, provisioning,
-        defaultSegmenting, notes, traceTiming, ...pipeline,
+        defaultSegmenting, notes, traceTiming, defaultReadIntent, ...pipeline,
         sourceColumns: captureFor(sourceColumns, existing?.sourceColumns, sourceTableChanged),
         // `catalogTargetColumns`, not `targetColumns` — the latter falls back to the *source's*
         // columns for a target that does not exist yet, which is right for an editor about to
@@ -329,6 +333,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
             defaultSegmenting, setDefaultSegmenting,
             provisioning, setProvisioning,
             pipeline, setPipeline,
+            defaultReadIntent, setDefaultReadIntent,
             notes, setNotes,
             traceTiming, setTraceTiming,
             target,
@@ -364,6 +369,8 @@ export interface MappingEditorContext {
   setProvisioning: (next: ProvisioningConfig) => void
   pipeline: PipelineOverrides
   setPipeline: (next: PipelineOverrides) => void
+  defaultReadIntent: ReadIntent | null
+  setDefaultReadIntent: (next: ReadIntent | null) => void
   notes: string | null
   setNotes: (next: string | null) => void
   traceTiming: boolean
@@ -478,6 +485,7 @@ export function MappingProvisioningTab() {
 export function MappingPipelineTab() {
   const {
     replicationName, existing, task, resolvedSource, resolvedTarget, pipeline, setPipeline,
+    defaultReadIntent, setDefaultReadIntent,
   } = useOutletContext<MappingEditorContext>()
 
   return (
@@ -489,6 +497,8 @@ export function MappingPipelineTab() {
       target={resolvedTarget}
       overrides={pipeline}
       onChange={setPipeline}
+      defaultReadIntent={defaultReadIntent}
+      onChangeDefaultReadIntent={setDefaultReadIntent}
     />
   )
 }

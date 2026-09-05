@@ -6,12 +6,14 @@ import { KeyValueTable } from '../../components/KeyValueTable'
 import { ParameterForm } from '../../components/ParameterForm'
 import { EndpointsCard } from './EndpointsCard'
 import { InheritableToggle } from '../../components/InheritableToggle'
+import { ReadIntentSetting } from '../../components/ReadIntentSetting'
 import { ScheduleCard } from './ScheduleCard'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { SegmentingStrategiesCard } from './SegmentingStrategiesCard'
 import { NotesPanel } from '../../components/NotesPanel'
 import { SubTabs, type SubTab } from '../../components/SubTabs'
 import { readerNotes } from '../../api/readerNotes'
+import { offeredIntents } from './readIntent'
 import { versionsRows, withoutNaturalKey } from './naturalKey'
 import { useConnections, useReplication, useReplicationCapabilities, useScripts, useTableMappings } from '../../api/hooks'
 import type { ParameterDescriptor, ProvisioningConfig, ReplicationTaskConfig } from '../../api/types'
@@ -264,6 +266,25 @@ export function PipelineTab() {
               </Link>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Beside the pipeline it governs, not on a settings screen of its own — see phase 102. What a
+          mapping reads *next* is a fact about the reader configured above, and an operator looking for
+          it should find it where the reader itself lives. */}
+      <div className="card">
+        <div className="card-head">
+          <span className="card-title">Read intent</span>
+          <span className="card-note">what every table mapping reads next, unless it says otherwise</span>
+        </div>
+        <div className="card-body">
+          <ReadIntentSetting
+            value={draft.defaultReadIntent ?? null}
+            inherited="InitialLoad"
+            options={offeredIntents(capabilities.readers.find((r) => r.kind === draft.changeProcessing.reader.kind)?.supportedIntents)}
+            onChange={(next) => setDraft({ ...draft, defaultReadIntent: next })}
+            testId="task-default-read-intent"
+          />
         </div>
       </div>
     </>

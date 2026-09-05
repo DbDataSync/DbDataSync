@@ -46,6 +46,34 @@ export interface ConnectionInput {
   hooks?: Hooks
 }
 
+/**
+ * What a mapping's next pass is meant to do — see phase 100. Named "intent" rather than "state"
+ * deliberately: a config setting or an operator can only ever ask for a pass, never assert that one
+ * already happened.
+ */
+export type ReadIntent = 'InitialLoad' | 'Changes' | 'ChangesFromEarliest' | 'ChangesFromLatest'
+
+/** Why a mapping's next scheduled `Primary` pass is not going to run — a reason, never a fifth
+ * `ReadIntent`. See phase 100/101. */
+export type ReadHold = 'None' | 'PositionExpired' | 'Paused'
+
+/** One mapping's read intent and hold, resolved — never the raw absence of a stored row. See phase 100. */
+export interface MappingReadState {
+  intent: ReadIntent
+  hold: ReadHold
+  /** Null for a mapping that has an intent/hold stored but has not yet completed a pass under it. */
+  watermark: string | null
+  watermarkTimeUtc: string | null
+}
+
+/** Both required, deliberately: recovering from a hold sets the intent and clears the hold as one
+ * call, so there is never a window where the hold is gone and the old intent is still what the next
+ * pass would honour. See phase 100. */
+export interface SetMappingReadStateRequest {
+  intent: ReadIntent
+  hold: ReadHold
+}
+
 export type ScheduleMode = 'Continuous' | 'Periodic'
 
 export interface SchedulingConfig {
@@ -110,6 +138,9 @@ export interface ReplicationTaskConfig {
   segmentingStrategies?: SegmentingStrategyConfig[]
   /** Markdown, git-tracked. What the next person needs to know about this replication. */
   notes?: string | null
+  /** What every table mapping under this replication reads next, unless the mapping says otherwise.
+   * Null means nobody has said, which resolves to `InitialLoad` — see phase 100/102. */
+  defaultReadIntent?: ReadIntent | null
 }
 
 /** One side of a table mapping as configured: null connection/database inherit the replication's
@@ -239,6 +270,9 @@ export interface TableMappingConfig {
   targetColumns?: ColumnMetadata[]
   /** When the two lists above were last written. Null for a mapping nobody has captured. */
   columnsCapturedUtc?: string | null
+  /** What this mapping reads next, in place of the replication's `defaultReadIntent`. Null means
+   * inherit. See phase 100/102. */
+  defaultReadIntent?: ReadIntent | null
 }
 
 export interface TableMetadata {
@@ -609,6 +643,13 @@ export interface ReaderCapability {
    * which can only see rows that still exist, and for a batch reload, whose deletes are the
    * reconciling writer's job rather than the reader's. */
   detectsDeletes: boolean
+  /**
+   * `Changes` / `ChangesFromEarliest` / `ChangesFromLatest` this reader can honestly carry out — empty
+   * for a reader with no incremental mode at all (batch reload). **Never carries `InitialLoad`**: every
+   * reader can be asked for one regardless of what is declared here, so a picker adds it itself rather
+   * than expecting it in this list. See phase 102.
+   */
+  supportedIntents: ReadIntent[]
 }
 
 export interface ConnectionTestReport {

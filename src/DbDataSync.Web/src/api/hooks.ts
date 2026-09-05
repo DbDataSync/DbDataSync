@@ -4,7 +4,8 @@ import { api } from './client'
 import type {
   BulkCreateRequest,
   DriverType,
-  ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig, SegmentingStrategyConfig, TableMappingConfig } from './types'
+  ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig,
+  SegmentingStrategyConfig, SetMappingReadStateRequest, TableMappingConfig } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
@@ -42,6 +43,8 @@ const keys = {
   metrics: (replicationName: string, window: string) =>
     ['replications', replicationName, 'metrics', window] as const,
   replicationLag: (replicationName: string) => ['replications', replicationName, 'lag'] as const,
+  mappingReadState: (replicationName: string, mappingName: string) =>
+    ['replications', replicationName, 'table-mappings', mappingName, 'read-state'] as const,
   verificationResults: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'verification-results', mappingName] as const,
   verificationResult: (replicationName: string, id: number) =>
@@ -700,6 +703,37 @@ export function useReplicationLag(replicationName: string | undefined) {
     queryFn: () => api.replications.lag(replicationName!),
     enabled: !!replicationName,
     refetchInterval: MONITORING_REFRESH_MS,
+  })
+}
+
+/**
+ * One mapping's resolved intent and hold — the Monitoring tab's per-row read (phase 102).
+ *
+ * Polled at the same cadence as the lag figures beside it: a hold an operator has not seen yet is
+ * exactly the case this tab exists to surface, and a screen that only refreshed on demand would show
+ * a stale "reading fine" over a table that has been held for an hour.
+ */
+export function useMappingReadState(replicationName: string | undefined, mappingName: string | undefined) {
+  return useQuery({
+    queryKey: keys.mappingReadState(replicationName ?? '', mappingName ?? ''),
+    queryFn: () => api.tableMappings.readState(replicationName!, mappingName!),
+    enabled: !!replicationName && !!mappingName,
+    refetchInterval: MONITORING_REFRESH_MS,
+  })
+}
+
+/**
+ * Sets a mapping's intent and hold together — the one call an operator recovering from a hold,
+ * changing what runs next, or pausing/resuming this one table makes. See phase 100's endpoint.
+ */
+export function useSetMappingReadState(replicationName: string, mappingName: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (request: SetMappingReadStateRequest) =>
+      api.tableMappings.setReadState(replicationName, mappingName!, request),
+    onSuccess: () => queryClient.invalidateQueries({
+      queryKey: keys.mappingReadState(replicationName, mappingName ?? ''),
+    }),
   })
 }
 

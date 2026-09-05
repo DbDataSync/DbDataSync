@@ -44,6 +44,29 @@ public sealed class DriverCapabilityOptInTests
     }
 
     [Fact]
+    public void SupportedIntents_EmptyForAReaderThatDoesNotDeclareThem()
+    {
+        // Phase 102: a reader absent from IReadIntentDeclaring — batch reload, say — reports no
+        // supported intents at all rather than null, so a UI can offer InitialLoad (always available,
+        // never in this set) plus nothing else without a null check.
+        var registry = new DriverRegistry();
+        registry.Register(new UntestableDriver());
+
+        Assert.Empty(Assert.Single(registry.Describe(ConnectionDriverType.MsSql)!.Readers).SupportedIntents);
+    }
+
+    [Fact]
+    public void SupportedIntents_ReflectsWhatAReaderDeclares_AndNeverIncludesInitialLoad()
+    {
+        var registry = new DriverRegistry();
+        registry.Register(new IntentDeclaringDriver());
+
+        var reader = Assert.Single(registry.Describe(ConnectionDriverType.MsSql)!.Readers);
+        Assert.Equal([ReadIntent.Changes, ReadIntent.ChangesFromEarliest], reader.SupportedIntents);
+        Assert.DoesNotContain(ReadIntent.InitialLoad, reader.SupportedIntents);
+    }
+
+    [Fact]
     public void ADriverThatCannotProvision_ReportsNoSupportedActions()
     {
         var registry = new DriverRegistry();
@@ -113,5 +136,45 @@ public sealed class DriverCapabilityOptInTests
             IReadOnlyList<CachedColumn> sourceColumns,
             IReadOnlyDictionary<string, string> options,
             CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class IntentDeclaringReader : IChangeReader, IReadIntentDeclaring
+    {
+        public string Kind => "IntentDeclaring";
+
+        public IReadOnlySet<ReadIntent> SupportedIntents { get; } =
+            new HashSet<ReadIntent> { ReadIntent.ChangesFromEarliest, ReadIntent.Changes };
+
+        public Task<ReadResult> ReadChangesAsync(
+            DbConnection sourceConnection,
+            SourceTableRef source,
+            string? previousWatermark,
+            ReadIntent intent,
+            IReadOnlyList<ColumnMapping> columnMappings,
+            string mappingName,
+            IReadOnlyList<CachedColumn> sourceColumns,
+            IReadOnlyDictionary<string, string> options,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class IntentDeclaringDriver : IDriver
+    {
+        public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
+        public IReadOnlyList<IChangeReader> Readers { get; } = [new IntentDeclaringReader()];
+        public IReadOnlyList<IStagingProvider> StagingProviders { get; } = [];
+        public IReadOnlyList<IChangeWriter> Writers { get; } = [];
+
+        public DbConnection CreateConnection(ConnectionConfig connection, string? credential) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<string>> ListDatabasesAsync(DbConnection connection, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<TableMetadata>> ListTablesAsync(
+            DbConnection connection, string database, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ColumnMetadata>> ListColumnsAsync(
+            DbConnection connection, string database, string schema, string table, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

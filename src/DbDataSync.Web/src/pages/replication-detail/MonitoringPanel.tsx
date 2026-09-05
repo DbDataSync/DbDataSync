@@ -1,14 +1,24 @@
+import { useState } from 'react'
 import { Outlet, useOutletContext } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { RefreshCountdown } from '../../components/RefreshCountdown'
 import { SubTabs, type SubTab } from '../../components/SubTabs'
+import { MappingReadStateDialog } from '../../components/MappingReadStateDialog'
+import { PauseIcon, PlayIcon } from '../../components/icons'
 import { resolveSide } from '../../api/resolveEndpoint'
-import { useReplication, useReplicationLag, useTableMappingDetails, useTableMappings } from '../../api/hooks'
-import type { MappingLag, ReplicationTaskConfig, TableSpec } from '../../api/types'
+import {
+  useCapabilities, useMappingReadState, useReplication, useReplicationLag, useReplicationStatus,
+  useRunVerification, useSetMappingReadState, useTableMappingDetails, useTableMappings,
+} from '../../api/hooks'
+import type {
+  MappingLag, ReadHold, ReplicationTaskConfig, TableMappingConfig, TableSpec,
+} from '../../api/types'
+import { holdStateOf, HOLD_INFO } from './holdState'
 import { formatLag, lagStateOf } from './lag'
+import { INTENT_INFO, offeredIntents } from './readIntent'
 import { RunsPanel, type RunsCommand } from './RunsPanel'
 
-const COLUMNS = '1fr 1fr 190px'
+const COLUMNS = '1fr 1fr 190px 250px'
 
 const MONITORING_TABS: SubTab[] = [
   { path: null, label: 'Current Status', testId: 'monitoring-tab-current' },
@@ -78,6 +88,9 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
   const { data: task } = useReplication(replicationName)
   const { data: names } = useTableMappings(replicationName)
   const { data: lag, isLoading, error, dataUpdatedAt } = useReplicationLag(replicationName)
+  // The other gate a row's "why is nothing happening" has to account for — phase 64's per-replication
+  // pause, coarser than and checked ahead of any one mapping's own ReadHold. See holdState.ts.
+  const { data: status } = useReplicationStatus(replicationName)
 
   // The mapping configs the sidebar has already loaded, for the source/target each row names. The
   // lag endpoint answers "how far behind", not "behind what" — which is config, and is already here.
@@ -116,17 +129,21 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
 
       <div className="card flush" data-testid="monitoring-mappings">
         <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
-          <span>Source</span><span>Target</span><span>Lag</span>
+          <span>Source</span><span>Target</span><span>Lag</span><span>Intent &amp; hold</span>
         </div>
 
         {(names ?? []).map((name, i) => (
           <MappingLagRow
             key={name}
+            replicationName={replicationName}
             name={name}
             task={task}
+            mapping={mappings[i]?.data}
             source={mappings[i]?.data?.sources[0]}
             target={mappings[i]?.data?.targets[0]}
             lag={lag?.mappings[name]}
+            taskEnabled={task?.enabled ?? true}
+            taskPaused={status?.paused ?? false}
           />
         ))}
 
@@ -137,24 +154,169 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
   )
 }
 
-function MappingLagRow({ name, task, source, target, lag }: {
+function MappingLagRow({ replicationName, name, task, mapping, source, target, lag, taskEnabled, taskPaused }: {
+  replicationName: string
   name: string
   task: ReplicationTaskConfig | undefined
+  mapping: TableMappingConfig | undefined
   source: TableSpec | undefined
   target: TableSpec | undefined
   lag: MappingLag | undefined
+  /** Config's durable intent — see `ReplicationDetailPage`'s own Enabled toggle. */
+  taskEnabled: boolean
+  /** State's temporary hold, per replication (phase 64) — the coarser of the two grains this row's
+   * own IntentHoldCell has to make legible together. */
+  taskPaused: boolean
 }) {
+  const readState = useMappingReadState(replicationName, name)
+  const hold: ReadHold = readState.data?.hold ?? 'None'
+  const holdState = holdStateOf(taskEnabled, taskPaused, hold)
+
   return (
     <div
       className="grid-row auto"
       style={{ gridTemplateColumns: COLUMNS, gap: 14 }}
       data-testid={`monitoring-row-${name}`}
       data-lag-state={lag ? lagStateOf(lag) : undefined}
+      data-hold-state={holdState}
     >
       <Side task={task} spec={source} which="source" />
       <Side task={task} spec={target} which="target" />
       <LagCell name={name} lag={lag} />
+      <IntentHoldCell
+        replicationName={replicationName}
+        name={name}
+        task={task}
+        mapping={mapping}
+        source={source}
+        lag={lag}
+        readState={readState}
+        holdState={holdState}
+      />
     </div>
+  )
+}
+
+/**
+ * What this mapping does next, and whether anything is stopping it — see phase 102.
+ *
+ * A held mapping is the interesting state on this screen: it is the one where nothing is happening
+ * and will not until somebody acts, and it has to read as that rather than as merely idle. The
+ * precedence `holdState` (computed one level up, so the row itself can carry the same `data-hold-state`
+ * `data-lag-state` already models) mirrors `StatusCard`'s own `StateIndicator` — a replication-wide
+ * disable or pause is the more fundamental fact, so a mapping's own hold clearing does not, on its
+ * own, make the row read as running while the replication is still held.
+ */
+function IntentHoldCell({ replicationName, name, task, mapping, source, lag, readState, holdState }: {
+  replicationName: string
+  name: string
+  task: ReplicationTaskConfig | undefined
+  mapping: TableMappingConfig | undefined
+  source: TableSpec | undefined
+  lag: MappingLag | undefined
+  readState: ReturnType<typeof useMappingReadState>
+  holdState: ReturnType<typeof holdStateOf>
+}) {
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const setReadState = useSetMappingReadState(replicationName, name)
+  const runVerification = useRunVerification(replicationName)
+
+  const resolvedSource = source ? resolveSide(task?.endpoints?.source ?? null, source) : undefined
+  const capabilities = useCapabilities(resolvedSource?.connectionName)
+
+  // The reader lag already resolved for this row (`lag.readerKind`) is the same Kind PipelineResolution
+  // would hand a pass — reusing it here means no second resolution that could disagree with what the
+  // Lag cell beside it is already describing.
+  const readerCapability = capabilities.data?.readers.find((r) => r.kind === lag?.readerKind)
+  const offered = offeredIntents(readerCapability?.supportedIntents)
+
+  const intent = readState.data?.intent
+  const hold: ReadHold = readState.data?.hold ?? 'None'
+  const loading = !readState.data
+
+  const maskedByReplication = hold !== 'None' && (holdState === 'replication-disabled' || holdState === 'replication-paused')
+
+  const pauseTogglable = hold !== 'PositionExpired'
+  const paused = hold === 'Paused'
+
+  const togglePause = () => {
+    if (!intent) return
+    setReadState.mutate({ intent, hold: paused ? 'None' : 'Paused' })
+  }
+
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+      <span className="mono sm" data-testid={`monitoring-intent-${name}`}>
+        {intent ? INTENT_INFO[intent].label : '…'}
+      </span>
+
+      {holdState !== 'none' && (
+        <span
+          className="row"
+          style={{ gap: 6 }}
+          data-testid={`monitoring-hold-${name}`}
+          data-hold-state={holdState}
+        >
+          <span className={`dot ${HOLD_INFO[holdState].dot}`} aria-hidden="true" />
+          <span style={{ font: '500 11px var(--ui)', color: 'var(--ink-3)' }}>{HOLD_INFO[holdState].label}</span>
+        </span>
+      )}
+
+      {/* Both grains stay visible even when one masks the other — an operator who resumes the
+          replication still needs to know this table has its own hold to clear, too. */}
+      {maskedByReplication && (
+        <span className="faint sm" data-testid={`monitoring-hold-own-${name}`}>
+          also {hold === 'Paused' ? 'paused on its own' : 'held: position expired'} — resuming the
+          replication alone will not start it
+        </span>
+      )}
+
+      <span className="row" style={{ gap: 10 }}>
+        <button
+          type="button"
+          className="btn-link"
+          disabled={loading}
+          onClick={() => setDialogOpen(true)}
+          data-testid={`monitoring-manage-${name}`}
+        >
+          {hold === 'PositionExpired' ? 'Recover…' : 'Manage…'}
+        </button>
+
+        {pauseTogglable && (
+          <button
+            type="button"
+            className="btn-link quiet"
+            disabled={loading || setReadState.isPending}
+            onClick={togglePause}
+            data-testid={`monitoring-pause-${name}`}
+            title="A per-table hold, finer than the replication's own pause — beside it, not instead of it."
+          >
+            <span className="row" style={{ gap: 4 }}>
+              {paused ? <PlayIcon size={11} /> : <PauseIcon size={11} />}
+              {paused ? 'Resume' : 'Pause'}
+            </span>
+          </button>
+        )}
+      </span>
+
+      {dialogOpen && intent && (
+        <MappingReadStateDialog
+          mappingName={name}
+          sourceLabel={resolvedSource ? `${resolvedSource.schema}.${resolvedSource.table}` : name}
+          currentIntent={intent}
+          currentHold={hold}
+          offered={offered}
+          hasVerificationChecks={(mapping?.verification?.length ?? 0) > 0}
+          verificationHref={`/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(name)}/verification`}
+          verificationPending={runVerification.isPending}
+          onRunVerification={() => runVerification.mutate(name)}
+          busy={setReadState.isPending}
+          error={setReadState.error}
+          onConfirm={(next) => setReadState.mutate(next, { onSuccess: () => setDialogOpen(false) })}
+          onCancel={() => setDialogOpen(false)}
+        />
+      )}
+    </span>
   )
 }
 
