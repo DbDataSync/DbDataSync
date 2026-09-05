@@ -732,6 +732,55 @@ export interface ApplyResult {
   state: ProvisioningState
 }
 
+// The replication-wide Provisioning tab's aggregate plan — phase 105.
+export type ProvisioningEndpointSide = 'Source' | 'Target'
+
+export interface ReplicationProvisioningStep {
+  id: string
+  title: string
+  commandText: string
+  rationale: string | null
+  scope: ProvisioningStepScope
+  side: ProvisioningEndpointSide
+  /** Whether the target's own auto-flags would run this exact statement anyway on the next
+   * unattended pass. Still selectable — see the phase doc — never hidden. */
+  automatic: boolean
+  contributingMappings: string[]
+}
+
+export interface ReplicationProvisioningGroup {
+  connectionName: string
+  database: string
+  side: ProvisioningEndpointSide
+  steps: ReplicationProvisioningStep[]
+}
+
+export interface ExcludedMapping {
+  mappingName: string
+  side: ProvisioningEndpointSide | null
+  reason: string
+}
+
+export interface ReplicationProvisioningPlan {
+  groups: ReplicationProvisioningGroup[]
+  excluded: ExcludedMapping[]
+}
+
+export type ProvisioningStepOutcome = 'Applied' | 'Failed' | 'NoLongerNeeded' | 'NotAttempted'
+
+export interface ReplicationProvisioningStepResult {
+  id: string
+  title: string
+  outcome: ProvisioningStepOutcome
+  error: string | null
+  warning: string | null
+  elapsedMs: number
+}
+
+export interface ReplicationProvisioningApplyResult {
+  steps: ReplicationProvisioningStepResult[]
+}
+
 // Which slice of a source table one reload covers. The discriminator property is "mode", matching
 // DbDataSync.Drivers.Abstractions.BatchReloadSegment's JsonPolymorphic configuration exactly.
 export type SegmentMode = 'full' | 'list' | 'range' | 'auto' | 'custom'

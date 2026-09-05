@@ -158,6 +158,10 @@ public static class DbDataSyncHost
         });
         builder.Services.AddSingleton<ScriptedMetadata>();
         builder.Services.AddSingleton<DriverConnectionFactory>();
+        // Registered by interface as well, not instead — see IConnectionFactory's doc comment.
+        // ProvisioningService depends on the interface so a test can hand it a counting fake; every
+        // other caller still resolves the concrete type.
+        builder.Services.AddSingleton<IConnectionFactory>(sp => sp.GetRequiredService<DriverConnectionFactory>());
         builder.Services.AddSingleton<MetadataService>();
         // Writing a mapping's cached column metadata goes through MetadataService above rather than
         // a catalog of its own, so what gets cached is the same answer the editor's picker showed —

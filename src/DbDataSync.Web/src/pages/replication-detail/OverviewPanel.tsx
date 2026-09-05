@@ -11,6 +11,7 @@ import { ScheduleCard } from './ScheduleCard'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { SegmentingStrategiesCard } from './SegmentingStrategiesCard'
 import { NotesPanel } from '../../components/NotesPanel'
+import { ReplicationProvisioningPanel } from './ReplicationProvisioningPanel'
 import { SubTabs, type SubTab } from '../../components/SubTabs'
 import { readerNotes } from '../../api/readerNotes'
 import { offeredIntents } from './readIntent'
@@ -30,7 +31,7 @@ const STAGES: { id: Stage; label: string }[] = [
 const TABS: SubTab[] = [
   { path: null, label: 'Notes', testId: 'overview-tab-notes' },
   { path: 'pipeline', label: 'Pipeline', testId: 'overview-tab-pipeline' },
-  { path: 'provisioning', label: 'Target Provisioning', testId: 'overview-tab-provisioning' },
+  { path: 'provisioning', label: 'Provisioning', testId: 'overview-tab-provisioning' },
   { path: 'transforms', label: 'Custom Transforms', testId: 'overview-tab-transforms' },
   { path: 'segmenting', label: 'Backfill', testId: 'overview-tab-segmenting' },
 ]
@@ -295,9 +296,16 @@ export function PipelineTab() {
  * The default every mapping under this replication takes unless it says otherwise — parallel to how
  * the endpoints card sets the replication-level endpoints. One answer here beats the same checkbox
  * ticked on forty mappings.
+ * <para>
+ * The aggregate below (phase 105) is why the tab is titled **Provisioning** rather than "Target
+ * provisioning" as it was before: source steps now sit beside these target settings, and the old name
+ * stopped being true the moment they did. The settings stay exactly where they were — what this
+ * mapping *asks for* — with the aggregate underneath answering what that currently amounts to against
+ * live databases, the same "decision above, consequence below" order the per-mapping Setup card uses.
+ * </para>
  */
 export function TargetProvisioningTab() {
-  const { draft, setDraft } = useOutletContext<OverviewOutletContext>()
+  const { replicationName, draft, setDraft } = useOutletContext<OverviewOutletContext>()
 
   // A replication that has never been asked has no provisioning block at all, and both settings read
   // as "nobody has said" — which resolves to off, and is not the same as having said no.
@@ -305,36 +313,40 @@ export function TargetProvisioningTab() {
     ?? { createTargetTableIfMissing: null, alterTargetTableColumnsIfMissingOrChanged: null }
 
   return (
-    <div className="card">
-      <div className="card-head">
-        <span className="card-title">Target provisioning</span>
-        <span className="card-note">the default for every table mapping in this replication</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="card">
+        <div className="card-head">
+          <span className="card-title">Target provisioning</span>
+          <span className="card-note">the default for every table mapping in this replication</span>
+        </div>
+        <div className="card-body" style={{ gap: 14 }}>
+          <InheritableToggle
+            label="Create target table if missing"
+            description="Creates the table only when it does not exist. Never alters one that does."
+            value={draft.provisioning?.createTargetTableIfMissing ?? null}
+            inherited={false}
+            onChange={(next) => setDraft({
+              ...draft,
+              provisioning: { ...provisioningDraft, createTargetTableIfMissing: next },
+            })}
+            testId="task-provisioning-create"
+          />
+          <div className="divider" />
+          <InheritableToggle
+            label="Alter target columns if missing or changed"
+            description="Adds a mapped column the target lacks and changes one whose type no longer matches. Never drops a column."
+            value={draft.provisioning?.alterTargetTableColumnsIfMissingOrChanged ?? null}
+            inherited={false}
+            onChange={(next) => setDraft({
+              ...draft,
+              provisioning: { ...provisioningDraft, alterTargetTableColumnsIfMissingOrChanged: next },
+            })}
+            testId="task-provisioning-alter"
+          />
+        </div>
       </div>
-      <div className="card-body" style={{ gap: 14 }}>
-        <InheritableToggle
-          label="Create target table if missing"
-          description="Creates the table only when it does not exist. Never alters one that does."
-          value={draft.provisioning?.createTargetTableIfMissing ?? null}
-          inherited={false}
-          onChange={(next) => setDraft({
-            ...draft,
-            provisioning: { ...provisioningDraft, createTargetTableIfMissing: next },
-          })}
-          testId="task-provisioning-create"
-        />
-        <div className="divider" />
-        <InheritableToggle
-          label="Alter target columns if missing or changed"
-          description="Adds a mapped column the target lacks and changes one whose type no longer matches. Never drops a column."
-          value={draft.provisioning?.alterTargetTableColumnsIfMissingOrChanged ?? null}
-          inherited={false}
-          onChange={(next) => setDraft({
-            ...draft,
-            provisioning: { ...provisioningDraft, alterTargetTableColumnsIfMissingOrChanged: next },
-          })}
-          testId="task-provisioning-alter"
-        />
-      </div>
+
+      <ReplicationProvisioningPanel replicationName={replicationName} />
     </div>
   )
 }

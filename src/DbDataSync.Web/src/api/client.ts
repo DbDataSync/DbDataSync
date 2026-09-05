@@ -27,6 +27,8 @@ import type {
   DriverType,
   ParameterDescriptor,
   ProvisioningPlanReport,
+  ReplicationProvisioningPlan,
+  ReplicationProvisioningApplyResult,
   QueryPreviewResult,
   ScriptCompileResult,
   ScriptDefinition,
@@ -236,6 +238,17 @@ export const api = {
         `/api/replications/${encodeURIComponent(replicationName)}/table-mappings/${encodeURIComponent(mappingName)}` +
           `/provisioning/${encodeURIComponent(action)}/apply`,
         { method: 'POST' },
+      ),
+    /** Every table mapping's provisioning, aggregated — phase 105's replication-wide Provisioning tab.
+     * Distinct from `get` above, which is one mapping's Setup card. */
+    getReplicationPlan: (replicationName: string) =>
+      request<ReplicationProvisioningPlan>(
+        `/api/replications/${encodeURIComponent(replicationName)}/provisioning`,
+      ),
+    applyReplicationPlan: (replicationName: string, stepIds: string[]) =>
+      request<ReplicationProvisioningApplyResult>(
+        `/api/replications/${encodeURIComponent(replicationName)}/provisioning/apply`,
+        { method: 'POST', body: JSON.stringify({ stepIds }) },
       ),
   },
   auth: {

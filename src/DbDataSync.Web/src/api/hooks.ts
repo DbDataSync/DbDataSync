@@ -33,6 +33,8 @@ const keys = {
   run: (runId: string) => ['runs', runId] as const,
   provisioning: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'provisioning'] as const,
+  replicationProvisioningPlan: (replicationName: string) =>
+    ['replications', replicationName, 'provisioning'] as const,
   inferredColumnTypes: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'inferred-column-types'] as const,
   inferredNaturalKey: (replicationName: string, mappingName: string) =>
@@ -865,6 +867,28 @@ export function useApplyProvisioning(replicationName: string, mappingName: strin
   return useMutation({
     mutationFn: (action: string) => api.provisioning.apply(replicationName, mappingName, action),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.provisioning(replicationName, mappingName) }),
+  })
+}
+
+/** Every table mapping's provisioning for this replication, aggregated — phase 105. Computed on
+ * demand (not polled): the plan is a live read against every mapping's source and target, and is
+ * worth recomputing only when the operator asks — by opening the tab, or by Run refreshing it below. */
+export function useReplicationProvisioningPlan(replicationName: string | undefined) {
+  return useQuery({
+    queryKey: keys.replicationProvisioningPlan(replicationName ?? ''),
+    queryFn: () => api.provisioning.getReplicationPlan(replicationName!),
+    enabled: !!replicationName,
+  })
+}
+
+/** Applies the selected steps across every group at once, and refreshes the plan afterward — an id
+ * that succeeded or was skipped this time should not still show ticked next visit as though nothing
+ * happened. */
+export function useApplyReplicationProvisioningPlan(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (stepIds: string[]) => api.provisioning.applyReplicationPlan(replicationName, stepIds),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.replicationProvisioningPlan(replicationName) }),
   })
 }
 

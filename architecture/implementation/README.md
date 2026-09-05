@@ -29,10 +29,15 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **105** — one provisioning script for the whole replication | independent of everything above it |
-| 2 | **034** — PostgreSQL logical replication | |
-| 3 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **034** — PostgreSQL logical replication | |
+| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 3 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-04 (latest of all): 105 is done and removed — the Overview → Provisioning tab (retitled
+from "Target provisioning") now aggregates every table mapping's plan, grouped by connection and
+database, deduplicated by statement, ordered database-scope before table-scope, individually selectable,
+copyable per group and runnable as one batch. Nothing else in the ordering rationale below changes,
+since 105 was already independent of everything above it.
 
 Updated 2026-09-04 (later than everything below): 104 is done and removed — the run history endpoint
 now takes `kind`, `mappingName`, `status` and an opaque keyset `cursor`, `watermark-times` takes the
