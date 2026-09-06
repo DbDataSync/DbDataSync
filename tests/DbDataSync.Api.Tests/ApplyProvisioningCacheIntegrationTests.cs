@@ -67,12 +67,30 @@ public sealed class ApplyProvisioningCacheIntegrationTests : IClassFixture<TestA
 
     public async Task DisposeAsync()
     {
+        // The API under test keeps pooled connections to these scratch databases. SET SINGLE_USER
+        // kicks its live sessions off, but a pooled one can reconnect into the freed single-user slot
+        // before DROP runs — "database is currently in use". Emptying the pools first stops that, and
+        // a short retry covers the window that remains.
+        SqlConnection.ClearAllPools();
+
         await using var connection = new SqlConnection(ServerConnectionString);
         await connection.OpenAsync();
         foreach (var db in new[] { _sourceDb, _targetDb })
         {
             await ExecuteAsync(connection, $"ALTER DATABASE [{db}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-            await ExecuteAsync(connection, $"DROP DATABASE [{db}];");
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await ExecuteAsync(connection, $"DROP DATABASE [{db}];");
+                    break;
+                }
+                catch (SqlException) when (attempt < 5)
+                {
+                    SqlConnection.ClearAllPools();
+                    await Task.Delay(500);
+                }
+            }
         }
     }
 
