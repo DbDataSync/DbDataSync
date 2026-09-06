@@ -137,6 +137,21 @@ public static class ConfigValidation
     /// rule holds them to it.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The worker's degree of parallelism is a count of concurrent consumers, so it has to be at
+    /// least one — a replication that processes zero mappings at a time processes none. The runner's
+    /// own argument parser enforces the same floor (<c>TaskRunnerOptions</c>); this catches it at
+    /// save, before a worker is ever spawned with a number it would reject on startup.
+    /// </summary>
+    public static void ValidateChangeProcessing(ChangeProcessingConfig changeProcessing, string replicationName)
+    {
+        if (changeProcessing.DegreeOfParallelism < 1)
+            throw new ConfigValidationException(
+                $"Replication '{replicationName}' sets a change-processing degree of parallelism of " +
+                $"{changeProcessing.DegreeOfParallelism}. It has to be at least 1 — that is how many table " +
+                "mappings the worker processes at once.");
+    }
+
     public static void ValidateScheduling(SchedulingConfig scheduling, string replicationName)
     {
         if (scheduling.Mode != ScheduleMode.Continuous)

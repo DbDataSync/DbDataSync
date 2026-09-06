@@ -34,9 +34,9 @@ const TASK = {
   changeProcessing: {
     // The replication's reader is the query reader, so the mapping inherits it and the source tab
     // swaps its pickers without the operator having overridden anything.
-    reader: { kind: 'DuckDbQuery', parallelism: 1, options: { query: SAVED_QUERY } },
+    reader: { kind: 'DuckDbQuery', options: { query: SAVED_QUERY } },
     cache: { kind: 'MsSqlStagingTable', options: {} },
-    writer: { kind: 'MsSqlMerge', parallelism: 1, options: {} },
+    writer: { kind: 'MsSqlMerge', options: {} },
   },
   endpoints: {
     source: { connectionName: 'lake', database: 'memory' },

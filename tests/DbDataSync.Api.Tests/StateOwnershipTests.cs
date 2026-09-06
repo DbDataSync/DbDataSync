@@ -65,7 +65,7 @@ public sealed class StateOwnershipTests
             TaskRunnerDllPath = "/tmp/DbDataSync.TaskRunner.dll",
         };
 
-        var startInfo = ProcessSupervisor.BuildStartInfo(options, "sales", "http://127.0.0.1:5891", token);
+        var startInfo = ProcessSupervisor.BuildStartInfo(options, "sales", "http://127.0.0.1:5891", token, degreeOfParallelism: 4);
 
         Assert.DoesNotContain(token, startInfo.ArgumentList);
         Assert.DoesNotContain(token, startInfo.Arguments);
@@ -74,6 +74,30 @@ public sealed class StateOwnershipTests
 
         // Environment is only honoured with UseShellExecute false, so the two go together.
         Assert.False(startInfo.UseShellExecute);
+    }
+
+    /// <summary>
+    /// The replication's degree of parallelism is passed explicitly on every spawn, as an argument
+    /// (it is not a secret, and an operator debugging a worker should see it in <c>ps</c>) — not left
+    /// to the runner's built-in default, which is the whole reason the setting exists.
+    /// </summary>
+    [Fact]
+    public void The_configured_degree_of_parallelism_is_passed_as_an_argument()
+    {
+        var options = new ApiOptions
+        {
+            RepoRoot = "/tmp/repo",
+            StateDbPath = "/tmp/repo/state.db",
+            TaskRunnerDllPath = "/tmp/DbDataSync.TaskRunner.dll",
+        };
+
+        var startInfo = ProcessSupervisor.BuildStartInfo(
+            options, "sales", "http://127.0.0.1:5891", "token", degreeOfParallelism: 9);
+
+        var args = startInfo.ArgumentList;
+        var flag = args.IndexOf("--degree-of-parallelism");
+        Assert.InRange(flag, 0, args.Count - 2);
+        Assert.Equal("9", args[flag + 1]);
     }
 
     private static string RepoRoot

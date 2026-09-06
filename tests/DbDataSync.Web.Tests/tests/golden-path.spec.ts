@@ -101,6 +101,11 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await selectWhenReady(page, 'task-source-database-select', DB_NAME)
     await selectWhenReady(page, 'task-target-connection-select', TGT_CONNECTION_NAME)
     await selectWhenReady(page, 'task-target-database-select', DB_NAME)
+
+    // How many table mappings this replication's worker processes at once — on the Schedule card,
+    // committed by the same Save as the endpoints above.
+    const dop = page.getByTestId('schedule-degree-of-parallelism-input')
+    await dop.fill('6')
     await shot(page, '04-replication-endpoints.png')
 
     await page.getByTestId('save-settings-button').click()
@@ -108,6 +113,10 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.reload()
     await page.getByTestId('tab-overview').click()
     await expect(page.getByTestId('task-source-connection-select')).toHaveValue(SRC_CONNECTION_NAME, { timeout: 15_000 })
+    await expect(page.getByTestId('schedule-degree-of-parallelism-input')).toHaveValue('6')
+
+    const saved = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()
+    expect(saved.changeProcessing.degreeOfParallelism).toBe(6)
   })
 
   test('04b - the Overview leads with what a replication is, not with an advanced customisation', async ({ page }) => {

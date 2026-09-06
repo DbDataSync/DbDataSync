@@ -51,7 +51,7 @@ export function withQuery(
 ): PipelineOverrides {
   const base = pipeline.readerOverride
     ?? structuredClone(task?.changeProcessing?.reader)
-    ?? { kind: QUERY_READER_KIND, parallelism: 1, options: {} }
+    ?? { kind: QUERY_READER_KIND, options: {} }
 
   return {
     ...pipeline,

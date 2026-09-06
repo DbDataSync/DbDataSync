@@ -79,7 +79,8 @@ public sealed class ProcessSupervisor(
         if (_workers.TryGetValue(taskName, out var existing) && !existing.HasExited)
             return TriggerResult.Started([]);
 
-        var startInfo = BuildStartInfo(options, taskName, stateHost.BaseAddress, runnerToken.Value);
+        var startInfo = BuildStartInfo(
+            options, taskName, stateHost.BaseAddress, runnerToken.Value, ResolveDegreeOfParallelism(taskName));
 
         // Anything this runner spilled while a previous incarnation could not reach us is applied
         // before it starts working again — so a re-run never races the record of the run before it.
@@ -105,7 +106,8 @@ public sealed class ProcessSupervisor(
     /// cannot be checked by reading the code later (that no secret is on the command line) can be
     /// asserted directly.
     /// </summary>
-    public static ProcessStartInfo BuildStartInfo(ApiOptions options, string taskName, string stateEndpoint, string token)
+    public static ProcessStartInfo BuildStartInfo(
+        ApiOptions options, string taskName, string stateEndpoint, string token, int degreeOfParallelism)
     {
         var startInfo = new ProcessStartInfo { FileName = "dotnet", UseShellExecute = false };
         startInfo.ArgumentList.Add("exec");
@@ -116,6 +118,12 @@ public sealed class ProcessSupervisor(
         startInfo.ArgumentList.Add(options.StateDbPath);
         startInfo.ArgumentList.Add("--replication");
         startInfo.ArgumentList.Add(taskName);
+        // Passed explicitly on every spawn, from the replication's own ChangeProcessing config, rather
+        // than left to the runner's built-in default — the whole point of the setting is that a large
+        // replication can raise it. Not a secret, so unlike the endpoint/token below it belongs on the
+        // command line where it is visible to an operator debugging a worker.
+        startInfo.ArgumentList.Add("--degree-of-parallelism");
+        startInfo.ArgumentList.Add(degreeOfParallelism.ToString());
 
         // The endpoint and the token go in the *environment*, not in ArgumentList. On Linux a
         // process's command line is world-readable (/proc/<pid>/cmdline) and its environment is not
@@ -128,6 +136,25 @@ public sealed class ProcessSupervisor(
         startInfo.Environment[StateProtocol.TokenEnvironmentVariable] = token;
 
         return startInfo;
+    }
+
+    /// <summary>
+    /// The replication's configured degree of parallelism, or the built-in default when its config
+    /// cannot be read. A missing task file is not this method's problem to report — the worker it is
+    /// about to spawn exits <c>ConfigError</c> for exactly that, and callers that care
+    /// (<see cref="TriggerReplication"/>) already load the config first — so this just falls back and
+    /// lets that path run.
+    /// </summary>
+    private int ResolveDegreeOfParallelism(string taskName)
+    {
+        try
+        {
+            return configRepository.LoadReplicationTask(taskName).ChangeProcessing.DegreeOfParallelism;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return ChangeProcessingConfig.DefaultDegreeOfParallelism;
+        }
     }
 
     /// <summary>The "Run Now" convenience: enqueues a Primary pass for every table mapping of a

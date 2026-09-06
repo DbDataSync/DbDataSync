@@ -88,7 +88,6 @@ export interface SchedulingConfig {
 
 export interface ReaderConfig {
   kind: string
-  parallelism: number
   options: Record<string, string>
 }
 
@@ -99,7 +98,6 @@ export interface CacheConfig {
 
 export interface WriterConfig {
   kind: string
-  parallelism: number
   options: Record<string, string>
 }
 
@@ -107,6 +105,9 @@ export interface ChangeProcessingConfig {
   reader: ReaderConfig
   cache: CacheConfig
   writer: WriterConfig
+  /** How many of this replication's table mappings its worker processes at once. The server
+   * defaults it to 4 when config says nothing. */
+  degreeOfParallelism: number
 }
 
 // Where a replication reads from and writes to. Every table mapping inherits these unless it sets

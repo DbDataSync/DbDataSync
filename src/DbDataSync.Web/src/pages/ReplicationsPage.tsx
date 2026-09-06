@@ -99,9 +99,10 @@ export function ReplicationsPage() {
         ? { mode, frequencySeconds, cronExpression: null }
         : { mode, frequencySeconds: null, cronExpression },
       changeProcessing: {
-        reader: { kind: defaults!.reader!, parallelism: 1, options: {} },
+        reader: { kind: defaults!.reader!, options: {} },
         cache: { kind: defaults!.cache!, options: {} },
-        writer: { kind: defaults!.writer!, parallelism: 1, options: {} },
+        writer: { kind: defaults!.writer!, options: {} },
+        degreeOfParallelism: 4,
       },
       // Set on the replication's Overview; a mapping created before they are inherits nothing and
       // has to state its own, which the editor's override toggle covers.

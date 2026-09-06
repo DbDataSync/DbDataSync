@@ -19,6 +19,12 @@ internal static class YamlConfigSerializer
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(CamelCaseNamingConvention.Instance)
         .WithTypeConverter(Segments)
+        // A key a past build wrote but this one no longer models (e.g. the per-stage `parallelism`
+        // that `ChangeProcessingConfig.DegreeOfParallelism` replaced) must not stop an existing
+        // task.yaml from loading — it is dropped here and disappears on the next save. This is not
+        // the weakening BatchReloadSegmentYamlConverter's comment warns against: that is specifically
+        // about a segment's discriminator, which still travels through its own hand-written converter.
+        .IgnoreUnmatchedProperties()
         .Build();
 
     public static string Serialize<T>(T value) => Serializer.Serialize(value);

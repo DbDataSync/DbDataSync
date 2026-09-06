@@ -21,6 +21,11 @@ import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
  *
  * The accent still reflects enabled/disabled, because the card is about *this replication's* running,
  * and that is true whether or not the control that drives it lives here.
+ *
+ * **Concurrency sits here too, not on the Pipeline tab.** How many table mappings the worker processes
+ * at once is a fact about *how this replication runs*, the same kind of fact as how often it runs and
+ * when its worker gives up — not about which reader/staging/writer the pipeline uses. Like the other
+ * fields on this card (and unlike the Enabled toggle), it belongs to the batched Save.
  */
 export function ScheduleCard({ draft, enabled, onChange }: {
   draft: ReplicationTaskConfig
@@ -30,6 +35,9 @@ export function ScheduleCard({ draft, enabled, onChange }: {
 }) {
   const setScheduling = (patch: Partial<ReplicationTaskConfig['scheduling']>) =>
     onChange({ ...draft, scheduling: { ...draft.scheduling, ...patch } })
+
+  const setDegreeOfParallelism = (value: number) =>
+    onChange({ ...draft, changeProcessing: { ...draft.changeProcessing, degreeOfParallelism: value } })
 
   const mode = draft.scheduling.mode
 
@@ -88,6 +96,20 @@ export function ScheduleCard({ draft, enabled, onChange }: {
             data-testid="schedule-cron-input"
           />
         )}
+
+        <span className="row" style={{ gap: 6, flex: 'none' }}>
+          <span className="hint">· up to</span>
+          <input
+            className="input sm mono"
+            style={{ width: 44 }}
+            type="number"
+            min={1}
+            value={draft.changeProcessing.degreeOfParallelism ?? 4}
+            onChange={(e) => setDegreeOfParallelism(Number(e.target.value) || 1)}
+            data-testid="schedule-degree-of-parallelism-input"
+          />
+          <span className="hint">mapping(s) at once</span>
+        </span>
 
         <span
           className="hint spacer"

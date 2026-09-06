@@ -120,9 +120,9 @@ const TASK = {
   enabled: true,
   scheduling: { mode: 'Continuous', frequencySeconds: 60, cronExpression: null },
   changeProcessing: {
-    reader: { kind: 'MsSqlChangeTracking', parallelism: 1, options: {} },
+    reader: { kind: 'MsSqlChangeTracking', options: {} },
     cache: { kind: 'MsSqlStagingTable', options: {} },
-    writer: { kind: 'MsSqlMerge', parallelism: 1, options: {} },
+    writer: { kind: 'MsSqlMerge', options: {} },
   },
   endpoints: {
     source: { connectionName: 'src', database: 'AppDb' },

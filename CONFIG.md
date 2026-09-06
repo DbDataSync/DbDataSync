@@ -315,6 +315,13 @@ argument parser; an unrecognized flag is a hard error, not a silent ignore.
 | `--state-endpoint <url>` | no | falls back to the `DBDATASYNC_STATE_ENDPOINT` environment variable |
 | `--state-grace-seconds <n>` | no | `60` |
 
+When the API spawns the runner it always passes `--degree-of-parallelism`, taken from the
+replication's own `changeProcessing.degreeOfParallelism` in `task.yaml` (set on the replication's
+Schedule card in the UI); the `4` above is the fallback for a runner started by hand and for a
+replication whose config does not set it. It is the number of table mappings the worker reads,
+stages and applies at once — one worker process per replication, spanning all its mappings. A single
+mapping never occupies more than one slot regardless of the number.
+
 Two more environment variables exist here, but they're **internal, process-to-process only** — set by
 the parent API when it spawns a runner, never something an operator sets by hand:
 

@@ -185,6 +185,7 @@ public sealed class ConfigRepository
     {
         ConfigValidation.ValidateName(task.Name, nameof(task.Name));
         ConfigValidation.ValidateScheduling(task.Scheduling, task.Name);
+        ConfigValidation.ValidateChangeProcessing(task.ChangeProcessing, task.Name);
         ValidateHooks(task.Hooks);
 
         var path = ConfigPaths.TaskFile(_configRoot, task.Name);
