@@ -13,11 +13,13 @@ namespace DbDataSync.Cli.Tests;
 /// <c>dbdatasync secret set</c> — the same command an admin would actually run — just wrote.
 /// <para>
 /// Needs a real SQL Server reachable at <c>DBDATASYNC_TEST_MSSQL_SERVER</c> (default: the same local
-/// Docker container every other MsSql-backed test in this repo uses). If none is reachable in this
-/// environment, this fails with a connection error rather than being skipped — the same as every other
-/// MsSql-backed test here (see <c>MsSqlTestDatabase</c>, <c>StateEngineFixture</c>).
+/// Docker container every other MsSql-backed test in this repo uses) — the constructor issues
+/// <c>CREATE DATABASE</c> for every test. Tagged <c>Category=Integration</c> so CI's no-container
+/// <c>dotnet</c> job skips it and the <c>dotnet-integration</c> job (which stands one up) runs it,
+/// the same split every other MsSql-backed suite here uses.
 /// </para>
 /// </summary>
+[Trait("Category", "Integration")]
 public sealed class InviteCommandTests : IDisposable
 {
     private const string Password = "DbDataSync_Test_Pw1";
@@ -58,11 +60,12 @@ public sealed class InviteCommandTests : IDisposable
     [Fact]
     public void Invite_AgainstAnMsSqlConfiguredRepo_Succeeds()
     {
-        var connectionString = new SqlConnectionStringBuilder(ServerConnectionString)
-        {
-            InitialCatalog = _databaseName,
-            Password = "", // the connection string DbDataSync itself is configured with never carries one
-        }.ConnectionString.TrimEnd(';');
+        var builder = new SqlConnectionStringBuilder(ServerConnectionString) { InitialCatalog = _databaseName };
+        // The connection string DbDataSync itself is configured with never carries a password —
+        // Remove, not `Password = ""`, which leaves a bare `Password=` in the output that
+        // ConfigValidation.RejectEmbeddedCredential still refuses.
+        builder.Remove("Password");
+        var connectionString = builder.ConnectionString.TrimEnd(';');
 
         DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "StateEngine", "MsSql");
         DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "StateConnectionString", connectionString);
