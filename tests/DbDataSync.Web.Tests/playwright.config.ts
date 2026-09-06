@@ -37,7 +37,12 @@ export default defineConfig({
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  // Locally a failure is a signal to look at; in CI these are end-to-end against real SQL Server,
+  // Postgres, a spawned worker and a git-backed config repo on a runner with a fraction of a dev
+  // box's headroom, so a first-attempt timeout is often just slowness. A genuinely broken test still
+  // fails all three attempts and goes red — a deterministic failure (a missing build output, a real
+  // assertion break) is not rescued by a retry.
+  retries: process.env.CI ? 2 : 0,
   reporter: [['list']],
   use: {
     baseURL: 'http://127.0.0.1:5173',
