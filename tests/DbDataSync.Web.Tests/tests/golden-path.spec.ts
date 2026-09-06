@@ -2196,12 +2196,12 @@ public sealed class Shout : IValueColumnExpression
 
     // Back to deriving, and back to the merge writer, so the rest of this suite's replication is the
     // one it was.
-    await page.reload()
-    // The reload restarts the whole SPA this deep into the run, when the API is also servicing a
-    // live run and provisioning polls: its boot + the pipeline's fan-out of capability/mapping/key
-    // calls can outlast a 20s window on a loaded CI runner even though it is instant locally. Give
-    // it the room the test-level budget (120s on CI) allows before the field assertion's clock.
-    await expect(page.getByTestId('mapping-pipeline')).toBeVisible({ timeout: 45_000 })
+    // Re-navigate to the pipeline tab rather than page.reload(): saving the mapping fires
+    // onSaved -> navigate(base/MAPPING_NAME), which drops the `/pipeline` segment, so a reload
+    // lands on the mapping's default tab once that navigation has settled. Locally the reload
+    // outraces it and still sees `/pipeline`; a slower CI runner does not.
+    await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/pipeline`)
+    await expect(page.getByTestId('mapping-pipeline')).toBeVisible({ timeout: 20_000 })
     await expect(page.getByTestId('mapping-natural-key-input')).toHaveValue(SOURCE_NAME_COLUMN,
       { timeout: 20_000 })
     await page.getByTestId('mapping-natural-key-override').click()
