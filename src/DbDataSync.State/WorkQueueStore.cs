@@ -71,7 +71,8 @@ public sealed class WorkQueueStore(StateDatabase database)
         string mappingName,
         string segmentLabel = NoSegment,
         string? segmentJson = null,
-        WorkItemKinds? kinds = null) =>
+        WorkItemKinds? kinds = null,
+        string? backfillBatchId = null) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
@@ -114,8 +115,8 @@ public sealed class WorkQueueStore(StateDatabase database)
             }
 
             using (var cmd = database.Command(connection, transaction, """
-                    INSERT INTO TaskRuns (RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, EnqueuedAtUtc, RowsRead, RowsWritten)
-                    VALUES ($runId, $taskName, NULL, $status, $runKind, $mapping, $segment, $enqueuedAt, 0, 0);
+                    INSERT INTO TaskRuns (RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, EnqueuedAtUtc, RowsRead, RowsWritten, BackfillBatchId)
+                    VALUES ($runId, $taskName, NULL, $status, $runKind, $mapping, $segment, $enqueuedAt, 0, 0, $batchId);
                     """))
             {
                 cmd.Bind(database, "runId", runId.ToString());
@@ -124,6 +125,7 @@ public sealed class WorkQueueStore(StateDatabase database)
                 cmd.Bind(database, "runKind", runKind.ToString());
                 cmd.Bind(database, "mapping", mappingName);
                 cmd.Bind(database, "segment", segmentLabel == NoSegment ? (object)DBNull.Value : segmentLabel);
+                cmd.Bind(database, "batchId", (object?)backfillBatchId ?? DBNull.Value);
                 // EnqueuedAtUtc, and nothing else: a queued run has not been claimed and has not
                 // started, so ClaimedAtUtc and StartedAtUtc stay null until the moments they name
                 // actually happen (phase 73). Before that, this wrote the enqueue time into

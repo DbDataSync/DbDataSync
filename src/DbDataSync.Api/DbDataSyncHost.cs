@@ -103,6 +103,7 @@ public static class DbDataSyncHost
         });
         builder.Services.AddSingleton(sp => new TaskRunStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunMetricsStore(sp.GetRequiredService<StateDatabase>()));
+        builder.Services.AddSingleton(sp => new BackfillBatchStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new VerificationResultStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new UserStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new SessionStore(sp.GetRequiredService<StateDatabase>()));

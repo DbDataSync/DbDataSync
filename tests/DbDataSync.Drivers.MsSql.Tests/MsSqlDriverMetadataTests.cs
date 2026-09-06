@@ -71,6 +71,28 @@ public sealed class MsSqlDriverMetadataTests(MsSqlTestDatabase db) : IClassFixtu
     }
 
     [Fact]
+    public async Task EstimateRowCountAsync_ReflectsRowsPresent_AndIsNullForAMissingTable()
+    {
+        await using (var insert = _connection.CreateCommand())
+        {
+            insert.CommandText = $"""
+                INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e');
+                """;
+            await insert.ExecuteNonQueryAsync();
+        }
+
+        var table = new TableRef { ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = _tableName };
+        var estimate = await _driver.EstimateRowCountAsync(_connection, table, CancellationToken.None);
+        Assert.Equal(5, estimate);
+
+        var missing = new TableRef
+        {
+            ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = $"NoSuchTable_{Guid.NewGuid():N}",
+        };
+        Assert.Null(await _driver.EstimateRowCountAsync(_connection, missing, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ListColumnsAsync_ReturnsExpectedColumnsWithTypesAndPrimaryKey()
     {
         var columns = await _driver.ListColumnsAsync(_connection, db.DatabaseName, "dbo", _tableName, CancellationToken.None);

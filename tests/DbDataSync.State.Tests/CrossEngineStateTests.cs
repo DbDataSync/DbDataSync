@@ -54,6 +54,7 @@ public sealed class CrossEngineStateTests : IDisposable
         {
             "Tasks", "TaskRuns", "ChangeWatermarks", "Logs", "RunLocks", "WorkQueue",
             "VerificationResults", "Users", "UserCredentials", "Sessions", "Invites", "PauseEvents",
+            "BackfillBatches",
         })
         {
             using var connection = database.OpenConnection();

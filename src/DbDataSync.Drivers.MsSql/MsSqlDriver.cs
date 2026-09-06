@@ -8,7 +8,7 @@ using DbDataSync.Core.Sql;
 
 namespace DbDataSync.Drivers.MsSql;
 
-public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, ITableCatalogProvider, IProvisioner
+public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, ITableCatalogProvider, IProvisioner, ITableRowEstimator
 {
     /// <summary>The catalog this driver's own components use, for anything composing a generic
     /// component for this engine from outside the driver.</summary>
@@ -171,6 +171,31 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
     {
         connection.ChangeDatabase(database);
         return await MsSqlSchemaQueries.GetColumnsAsync(connection, schema, table, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sums the row counts the engine already maintains per heap/clustered-index partition
+    /// (<c>index_id IN (0, 1)</c>) — no scan, and no permission beyond seeing the table itself, since
+    /// <c>sys.partitions</c> is visibility-scoped to objects the login can already see. Null when the
+    /// table resolves to nothing.
+    /// </summary>
+    public async Task<long?> EstimateRowCountAsync(DbConnection connection, TableRef table, CancellationToken cancellationToken)
+    {
+        connection.ChangeDatabase(table.Database);
+
+        using var cmd = connection.CreateTimedCommand();
+        cmd.CommandText = """
+            SELECT SUM(p.rows)
+            FROM sys.partitions p
+            JOIN sys.tables t   ON t.object_id = p.object_id
+            JOIN sys.schemas s  ON s.schema_id = t.schema_id
+            WHERE s.name = @schema AND t.name = @table AND p.index_id IN (0, 1);
+            """;
+        cmd.AddParameter("@schema", table.Schema);
+        cmd.AddParameter("@table", table.Table);
+
+        var value = await cmd.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? null : Convert.ToInt64(value);
     }
 
     /// <summary>

@@ -19,6 +19,7 @@ public sealed class BackfillService(
     ConfigRepository configRepository,
     DriverConnectionFactory connections,
     WorkQueueStore workQueueStore,
+    BackfillBatchStore batchStore,
     ProcessSupervisor supervisor,
     CustomSegmentExpansion customSegments)
 {
@@ -58,6 +59,14 @@ public sealed class BackfillService(
         }
 
         var kinds = new WorkItemKinds(request.ReaderKind, request.CacheKind, request.WriterKind);
+
+        // One id for the whole reload, minted here and carried onto every segment's run, so the
+        // Monitoring screen can add the segments back up. The estimate is read once, now, from the
+        // source's catalog statistics — never a COUNT(*) — as the denominator for "rows copied so far".
+        var batchId = Guid.NewGuid().ToString("N");
+        var (estimatedRows, estimateCaveat) = await EstimateRowsAsync(task, mapping, cancellationToken);
+        batchStore.CreateBatch(batchId, replicationName, mappingName, segments.Count, estimatedRows, estimateCaveat);
+
         var runIds = segments
             .Select(segment => workQueueStore.Enqueue(
                 replicationName,
@@ -65,11 +74,51 @@ public sealed class BackfillService(
                 mappingName,
                 segment.Describe(),
                 SegmentSerializer.Serialize(segment),
-                kinds))
+                kinds,
+                batchId))
             .ToList();
 
         var ensureResult = supervisor.EnsureWorkerRunning(replicationName);
         return ensureResult.Outcome == TriggerOutcome.FailedToStart ? ensureResult : TriggerResult.Started(runIds);
+    }
+
+    /// <summary>
+    /// A whole-table row count from the source engine's catalog statistics (<c>sys.partitions</c>,
+    /// <c>pg_class.reltuples</c>) — a best-effort denominator, not a fact a decision hangs on, so any
+    /// failure here just yields <c>(null, null)</c> and the card shows "Unknown".
+    /// <para>
+    /// Deliberately the whole table even when the mapping has a row <see cref="SourceTableSpec.Filter"/>:
+    /// catalog stats can't answer a predicate, and a scaled guess would be worse than an honest
+    /// overcount with the caveat attached. Null table (a query source) or a driver with no catalog
+    /// (ODBC) → no estimate.
+    /// </para>
+    /// </summary>
+    private async Task<(long? Rows, string? Caveat)> EstimateRowsAsync(
+        ReplicationTaskConfig task, TableMappingConfig mapping, CancellationToken cancellationToken)
+    {
+        var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
+        if (string.IsNullOrWhiteSpace(source.Table))
+            return (null, null);
+
+        try
+        {
+            var (connection, driver) = await connections.OpenAsync(source.ConnectionName, cancellationToken);
+            await using (connection)
+            {
+                if (driver is not ITableRowEstimator estimator)
+                    return (null, null);
+
+                var rows = await estimator.EstimateRowCountAsync(connection, source, cancellationToken);
+                var caveat = rows is not null && !string.IsNullOrWhiteSpace(source.Filter)
+                    ? "ignores row filter"
+                    : null;
+                return (rows, caveat);
+            }
+        }
+        catch (Exception ex) when (ex is System.Data.Common.DbException or InvalidOperationException)
+        {
+            return (null, null);
+        }
     }
 
     /// <summary>

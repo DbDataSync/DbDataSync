@@ -2,6 +2,7 @@ import type {
   AdminCertificateStatus,
   AdminConfigEntry,
   ApplyResult,
+  BackfillBatchProgress,
   BackfillRequest,
   SegmentCandidate,
   SegmentingStrategyConfig,
@@ -174,6 +175,10 @@ export const api = {
     // Every mapping's lag and the range across them, in one call — see phase 86. The per-mapping
     // endpoint below still exists for a caller that wants exactly one.
     lag: (name: string) => request<ReplicationLag>(`/api/replications/${encodeURIComponent(name)}/lag`),
+    backfills: (name: string, limit?: number) =>
+      request<BackfillBatchProgress[]>(
+        `/api/replications/${encodeURIComponent(name)}/backfills${limit ? `?limit=${limit}` : ''}`,
+      ),
   },
   tableMappings: {
     list: (replicationName: string) =>
