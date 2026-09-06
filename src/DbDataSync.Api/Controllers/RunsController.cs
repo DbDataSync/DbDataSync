@@ -14,6 +14,7 @@ public sealed class RunsController(
     ProcessSupervisor supervisor,
     BackfillService backfillService,
     TaskRunStore taskRunStore,
+    BackfillBatchStore backfillBatchStore,
     ResyncService resyncService,
     SegmentingPreviewService segmentingPreview,
     ConfigRepository configRepository,
@@ -52,6 +53,16 @@ public sealed class RunsController(
             _ => StatusCode(500, new { error = result.Reason }),
         };
     }
+
+    /// <summary>
+    /// Recent backfills for one replication, each rolled up across its segment runs — the source for
+    /// the Monitoring screen's "Batch reload" card. Newest first; the card reads only the first, the
+    /// <paramref name="limit"/> is for a future Batch Load History view.
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("replications/{name}/backfills")]
+    public ActionResult<IReadOnlyList<BackfillBatchProgress>> Backfills(string name, [FromQuery] int limit = 5) =>
+        Ok(backfillBatchStore.GetRecentBackfills(name, Math.Clamp(limit, 1, 20)));
 
     /// <summary>
     /// What a segmenting strategy proposes for this mapping, right now — the Backfill form's

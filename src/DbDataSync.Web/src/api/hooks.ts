@@ -46,6 +46,7 @@ const keys = {
   metrics: (replicationName: string, window: string) =>
     ['replications', replicationName, 'metrics', window] as const,
   replicationLag: (replicationName: string) => ['replications', replicationName, 'lag'] as const,
+  backfills: (replicationName: string) => ['replications', replicationName, 'backfills'] as const,
   mappingReadState: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'read-state'] as const,
   verificationResults: (replicationName: string, mappingName: string) =>
@@ -720,6 +721,23 @@ export function useReplicationLag(replicationName: string | undefined) {
     queryFn: () => api.replications.lag(replicationName!),
     enabled: !!replicationName,
     refetchInterval: MONITORING_REFRESH_MS,
+  })
+}
+
+/**
+ * Recent backfills for the Monitoring screen's "Batch reload" card.
+ *
+ * Polls faster while one is running — its "rows copied" and segment counts only move as segments
+ * finish, so a couple of seconds is plenty to feel live, and once nothing is running it drops back to
+ * the tab's ordinary cadence so an idle replication isn't polled every two seconds forever.
+ */
+export function useRecentBackfills(replicationName: string | undefined) {
+  return useQuery({
+    queryKey: keys.backfills(replicationName ?? ''),
+    queryFn: () => api.replications.backfills(replicationName!),
+    enabled: !!replicationName,
+    refetchInterval: (query) =>
+      query.state.data?.some((b) => b.state === 'Running') ? 2_000 : MONITORING_REFRESH_MS,
   })
 }
 

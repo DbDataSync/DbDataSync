@@ -741,5 +741,41 @@ internal static class Migrations
         -- the prune's recency ranking, which ask nothing about RunId.
         CREATE INDEX IX_TaskRuns_TaskName_EnqueuedAt_RunId ON TaskRuns(TaskName, EnqueuedAtUtc, RunId);
         """,
+
+        """
+        -- Groups the segment runs of one backfill so the Monitoring screen can show "this reload, so
+        -- far" rather than a scatter of independent rows. A backfill enqueues one work item per
+        -- segment (BackfillService), each its own RunId with its own final RowsRead/RowsWritten; this
+        -- is the id minted once per enqueue that ties them back together.
+        --
+        -- A table of its own rather than columns on TaskRuns because a batch has facts of its own that
+        -- no single segment carries: how many segments were planned (a queue row can be a no-op if an
+        -- equivalent item is already in flight, so COUNT(RunId) is not it), and one row-count estimate
+        -- for the whole table read once at enqueue from catalog statistics — not a COUNT(*).
+        --
+        -- EstimatedRows nullable: a query source has no table to estimate, and a driver reaching an
+        -- engine through ODBC has no catalog to read. EstimateCaveat carries "ignores row filter" when
+        -- the mapping narrows its source but the estimate counts the whole table anyway — surfaced
+        -- rather than hidden, since the alternative is a denominator the operator can't trust and
+        -- can't see why.
+        CREATE TABLE BackfillBatches (
+            BatchId {{key}} PRIMARY KEY,
+            TaskName {{key}} NOT NULL,
+            MappingName {{key}} NOT NULL,
+            -- {{key}} not {{text}}: it is the sort column of the index below, and SQL Server cannot
+            -- index NVARCHAR(MAX). A fixed-width ISO-8601 string, so text order is time order.
+            CreatedAtUtc {{key}} NOT NULL,
+            SegmentCount {{int}} NOT NULL,
+            EstimatedRows {{int}} NULL,
+            EstimateCaveat {{text}} NULL
+        );
+        CREATE INDEX IX_BackfillBatches_TaskName_CreatedAt ON BackfillBatches(TaskName, CreatedAtUtc);
+
+        -- Nullable, no backfill: a Primary pass and every backfill segment run queued before this
+        -- shipped simply has no batch, and the Monitoring card that reads this only ever asks about
+        -- batches that exist. Same reasoning every migration from phase 72 on has used here.
+        ALTER TABLE TaskRuns {{addcolumn}} BackfillBatchId {{key}} NULL;
+        CREATE INDEX IX_TaskRuns_BackfillBatchId ON TaskRuns(BackfillBatchId);
+        """,
     ];
 }

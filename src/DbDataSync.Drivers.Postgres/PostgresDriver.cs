@@ -18,7 +18,7 @@ namespace DbDataSync.Drivers.Postgres;
 /// later phase; nothing here is waiting on it.
 /// </para>
 /// </summary>
-public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvider, ITableCatalogProvider, IProvisioner
+public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvider, ITableCatalogProvider, IProvisioner, ITableRowEstimator
 {
     /// <summary>The catalog this driver's own components use, for anything composing a generic
     /// component for this engine from outside the driver.</summary>
@@ -129,6 +129,32 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
     {
         await PostgresDialect.Instance.UseDatabaseAsync(connection, database, cancellationToken);
         return await PostgresCatalog.Instance.GetColumnsAsync(connection, schema, table, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads <c>pg_class.reltuples</c>, the planner's own row estimate — set by the last
+    /// <c>ANALYZE</c>/<c>VACUUM</c>, no scan. It is <c>-1</c> on a table that has never been analysed
+    /// (PostgreSQL 14+); that and a missing table both come back as null rather than as a count.
+    /// </summary>
+    public async Task<long?> EstimateRowCountAsync(DbConnection connection, TableRef table, CancellationToken cancellationToken)
+    {
+        await PostgresDialect.Instance.UseDatabaseAsync(connection, table.Database, cancellationToken);
+
+        using var cmd = connection.CreateTimedCommand();
+        cmd.CommandText = """
+            SELECT c.reltuples::bigint
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = @schema AND c.relname = @table;
+            """;
+        cmd.AddParameter("@schema", table.Schema);
+        cmd.AddParameter("@table", table.Table);
+
+        var value = await cmd.ExecuteScalarAsync(cancellationToken);
+        if (value is null or DBNull)
+            return null;
+        var estimate = Convert.ToInt64(value);
+        return estimate < 0 ? null : estimate;
     }
 
     /// <summary>Round-trips <c>version()</c> — no user object, no permission beyond connecting.</summary>

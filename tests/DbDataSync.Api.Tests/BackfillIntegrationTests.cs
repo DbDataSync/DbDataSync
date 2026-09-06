@@ -171,6 +171,33 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
         Assert.Equal(RowsPerTable, runs.Sum(r => r.GetProperty("rowsRead").GetInt64()));
     }
 
+    /// <summary>
+    /// The Monitoring screen's "Batch reload" card reads <c>/backfills</c>: one row per backfill,
+    /// rolled up across its segment runs, with a catalog-statistics estimate of the whole table as
+    /// the denominator (<c>sys.partitions</c>, never a COUNT(*)).
+    /// </summary>
+    [Fact]
+    public async Task Backfills_RollsUpTheSegmentsAndCarriesACatalogEstimate()
+    {
+        var runIds = await ReadRunIdsAsync(await PostBackfillAsync("map-1", new AutoSegment("Id", 3)));
+        Assert.Equal(3, runIds.Count);
+
+        // Before the segments finish: the batch exists, knows its planned segment count, and already
+        // carries the estimate read once at enqueue.
+        var midway = await GetLatestBackfillAsync();
+        Assert.Equal("map-1", midway.GetProperty("mappingName").GetString());
+        Assert.Equal(3, midway.GetProperty("segmentCount").GetInt32());
+        Assert.Equal(RowsPerTable, midway.GetProperty("estimatedRows").GetInt64());
+        Assert.Null(midway.GetProperty("estimateCaveat").GetString());
+
+        AssertAllSucceeded(await Task.WhenAll(runIds.Select(PollUntilTerminalAsync)));
+
+        var done = await GetLatestBackfillAsync();
+        Assert.Equal("Completed", done.GetProperty("state").GetString());
+        Assert.Equal(3, done.GetProperty("segmentsSucceeded").GetInt32());
+        Assert.Equal(RowsPerTable, done.GetProperty("rowsCopied").GetInt64());
+    }
+
     [Fact]
     public async Task Backfill_ForAnUnknownMapping_Is404()
     {
@@ -247,6 +274,15 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
             .Select(r => $"{r.GetProperty("runId").GetString()}: {r.GetProperty("status").GetString()} — {r.GetProperty("errorSummary").GetString()}")
             .ToList();
         Assert.True(failures.Count == 0, "Expected every run to succeed, but got:\n" + string.Join("\n", failures));
+    }
+
+    private async Task<JsonElement> GetLatestBackfillAsync()
+    {
+        var batches = await _client.GetFromJsonAsync<JsonElement>(
+            $"/api/replications/{_replicationName}/backfills", JsonOptions);
+        var list = batches.EnumerateArray().ToList();
+        Assert.NotEmpty(list);
+        return list[0];
     }
 
     private async Task<JsonElement> PollUntilTerminalAsync(Guid runId)

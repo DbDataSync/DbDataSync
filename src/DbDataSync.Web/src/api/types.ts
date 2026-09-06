@@ -920,6 +920,39 @@ export interface TaskRunRecord {
   newWatermark: string | null
 }
 
+/** Where a backfill is, taken as a whole rather than one segment at a time. */
+export type BackfillState = 'Running' | 'Completed' | 'CompletedWithFailures'
+
+/**
+ * A backfill rolled up across its segment runs — the Monitoring screen's "Batch reload" card. A
+ * backfill enqueues one independently-scheduled run per segment; this ties them back together by the
+ * batch id minted at enqueue.
+ */
+export interface BackfillBatchProgress {
+  batchId: string
+  mappingName: string
+  createdAtUtc: string
+  /** Segments planned at enqueue — not a count of the runs, which can be short if an equivalent
+   * segment was already in flight. */
+  segmentCount: number
+  segmentsSucceeded: number
+  segmentsFailed: number
+  segmentsRunning: number
+  rowsRead: number
+  /** Rows written to the target across the segments that have finished — steps up per segment, since
+   * a segment run records its totals only on completion. */
+  rowsCopied: number
+  /** One whole-table estimate from the source engine's catalog statistics, read once at enqueue.
+   * Null when there was no table to estimate (a query source) or the driver has no catalog. */
+  estimatedRows: number | null
+  /** Why the estimate should be read loosely, if it should — e.g. `"ignores row filter"`. Null when
+   * it is clean. */
+  estimateCaveat: string | null
+  startedAtUtc: string | null
+  lastActivityUtc: string | null
+  state: BackfillState
+}
+
 /**
  * The query parameters `runs` and `runs/watermark-times` both take, since phase 104 — kept as one
  * type so the two client calls building a query string from it cannot quietly drift apart, which
