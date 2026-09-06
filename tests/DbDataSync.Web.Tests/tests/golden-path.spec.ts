@@ -2195,6 +2195,9 @@ public sealed class Shout : IValueColumnExpression
     // Back to deriving, and back to the merge writer, so the rest of this suite's replication is the
     // one it was.
     await page.reload()
+    // The reload restarts the whole SPA; give the pipeline its own budget to boot and refetch the
+    // mapping before the field-value assertion's clock starts, the same wait the goto above uses.
+    await expect(page.getByTestId('mapping-pipeline')).toBeVisible({ timeout: 20_000 })
     await expect(page.getByTestId('mapping-natural-key-input')).toHaveValue(SOURCE_NAME_COLUMN,
       { timeout: 20_000 })
     await page.getByTestId('mapping-natural-key-override').click()
