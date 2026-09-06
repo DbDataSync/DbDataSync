@@ -156,11 +156,18 @@ jobs:
         # --wait blocks on the healthchecks docker-compose.yml already declares, so the suite never
         # opens a connection to a SQL Server that is still coming up.
         run: docker compose up -d --wait mssql-source mssql-target postgres
-      - name: Build the API
+      - name: Build the API and the worker
         # Debug, deliberately: playwright.config.ts's webServer runs
         # src/DbDataSync.Api/bin/Debug/net10.0/DbDataSync.Api.dll through `dotnet exec`, so a Release
         # build would leave that path empty and the API would never start.
-        run: dotnet build src/DbDataSync.Api
+        #
+        # DbDataSync.TaskRunner too: the API spawns it as a separate process per run (ApiOptions
+        # resolves it in src/DbDataSync.TaskRunner/bin/Debug), and `dotnet build src/DbDataSync.Api`
+        # does not build it. Without it every triggered run sits Queued forever with nothing to claim
+        # it — which is what silently broke golden-path test 06 on this job.
+        run: |
+          dotnet build src/DbDataSync.Api
+          dotnet build src/DbDataSync.TaskRunner
       - name: Install the SPA's dependencies
         working-directory: src/DbDataSync.Web
         run: npm ci

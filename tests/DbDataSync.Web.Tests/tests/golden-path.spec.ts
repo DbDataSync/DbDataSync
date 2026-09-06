@@ -202,18 +202,7 @@ test.describe.serial('golden path: define, configure, and run a replication end-
       await page.getByTestId('trigger-run-button').click()
 
       await expect(page.getByTestId('live-run-panel')).toBeVisible()
-
-      // The mid-flight log line is best-effort. A two-row run can complete before the browser has
-      // joined the SignalR group and before useRunHub's first REST poll — a CI runner hits exactly
-      // that gap routinely — and the completion badge is watching it live just the same. Wait for
-      // whichever the panel shows first.
-      await expect(async () => {
-        const [log, panel] = await Promise.all([
-          page.getByTestId('live-log-viewer').textContent(),
-          page.getByTestId('live-run-panel').textContent(),
-        ])
-        expect(log?.includes('Run started') || panel?.includes('succeeded')).toBe(true)
-      }).toPass({ timeout: 30_000 })
+      await expect(page.getByTestId('live-log-viewer')).toContainText('Run started', { timeout: 20_000 })
       if (attempt === 1) await shot(page, '07-live-run-in-progress.png')
 
       await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
