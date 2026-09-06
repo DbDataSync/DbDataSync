@@ -339,11 +339,12 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
     /// reads <c>min_lsn</c> **inclusively**, so the change sitting exactly at the feed's surviving floor
     /// is returned rather than silently skipped.
     /// <para>
-    /// Two rows, then the second's own LSN is pushed forward as the capture instance's floor by
-    /// pruning everything before it — <c>sys.sp_cdc_cleanup_change_table</c> is the real mechanism CDC's
-    /// own retention cleanup uses, so this is not simulating a scenario, it is producing the one
-    /// retention produces naturally after enough time passes. The first row is now gone from the change
-    /// table; the second row's LSN <em>is</em> <c>min_lsn</c>.
+    /// Two rows, then everything before the second's own LSN is pruned —
+    /// <c>sys.sp_cdc_cleanup_change_table</c> is the real mechanism CDC's own retention cleanup uses,
+    /// so this is not simulating a scenario, it is producing the one retention produces naturally after
+    /// enough time passes. The first row is now gone from the change table; the second row's change
+    /// survives at the feed's new floor, and reading <see cref="ReadIntent.ChangesFromEarliest"/>
+    /// returns exactly it.
     /// </para>
     /// <para>
     /// The contrast is the point: reading from that same LSN via the *ordinary* incremental path
@@ -364,15 +365,21 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
         var afterSecond = await WaitForCaptureAsync(afterFirst);
 
-        // Prunes everything strictly before the second row's own LSN, and — this is the load-bearing
-        // part — sets the capture instance's start_lsn (what fn_cdc_get_min_lsn reports) to exactly
-        // that value. The second row's own change is retained; the first row's is gone.
+        // Prunes every change with __$start_lsn strictly below the second row's LSN — so the first
+        // row's change is gone and the second row's is retained.
         await ExecuteAsync(
             $"EXEC sys.sp_cdc_cleanup_change_table @capture_instance = N'{captureInstance}', " +
             $"@low_water_mark = 0x{Convert.ToHexString(MsSqlCdcCatalog.FromWatermark(afterSecond))}, @threshold = 1;");
 
+        // The feed's floor moved forward but not to an exact value: sp_cdc_cleanup_change_table rounds
+        // start_lsn down to the nearest cdc.lsn_time_mapping entry, so under load it can land just shy
+        // of the low-water mark rather than on it. What is guaranteed — and what the reads below rely
+        // on — is that it advanced past the empty starting floor and did not overshoot the mark.
         var minLsn = await MsSqlCdcCatalog.GetMinLsnAsync(_connection, captureInstance, CancellationToken.None);
-        Assert.Equal(afterSecond, MsSqlCdcCatalog.ToWatermark(minLsn!));
+        Assert.True(MsSqlCdcCatalog.Compare(minLsn!, new byte[10]) > 0, "the floor did not advance");
+        Assert.True(
+            MsSqlCdcCatalog.Compare(minLsn!, MsSqlCdcCatalog.FromWatermark(afterSecond)) <= 0,
+            "the floor overshot the low-water mark");
 
         var earliest = await _reader.ReadChangesAsync(
             _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromEarliest,

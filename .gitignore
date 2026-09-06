@@ -28,3 +28,6 @@ Thumbs.db
 # Test/coverage output
 [Tt]est[Rr]esult*/
 coverage/
+
+# Stray Playwright output if the suite is ever run from the repo root instead of tests/DbDataSync.Web.Tests
+test-results/
