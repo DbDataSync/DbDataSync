@@ -8,6 +8,7 @@ namespace DbDataSync.Drivers.Postgres.Tests;
 /// ANALYZE/VACUUM, never a scan. A table that has never been analysed reports <c>-1</c>, which comes
 /// back as null rather than as a count.
 /// </summary>
+[Trait("Category", "Integration")]
 public sealed class PostgresRowEstimateTests(PostgresTestDatabase db) : IClassFixture<PostgresTestDatabase>, IAsyncLifetime
 {
     private readonly PostgresDriver _driver = new();
