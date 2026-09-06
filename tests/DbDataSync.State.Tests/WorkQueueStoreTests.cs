@@ -97,6 +97,54 @@ public sealed class WorkQueueStoreTests : IDisposable
     }
 
     [Fact]
+    public void TryClaimNext_WithALane_OnlyReturnsThatLanesKinds()
+    {
+        _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+        _queue.Enqueue("crm-sync", RunKind.Backfill, "customers", segmentLabel: "seg-1");
+        _queue.Enqueue("crm-sync", RunKind.Verification, "products");
+
+        var change1 = _queue.TryClaimNext("crm-sync", "w", RunLane.ChangeProcessing);
+        var change2 = _queue.TryClaimNext("crm-sync", "w", RunLane.ChangeProcessing);
+        Assert.Equal("orders", change1!.MappingName);
+        Assert.Null(change2); // the Backfill and the Verification are not this lane's
+
+        var backfill = new List<string?>
+        {
+            _queue.TryClaimNext("crm-sync", "w", RunLane.Backfill)?.MappingName,
+            _queue.TryClaimNext("crm-sync", "w", RunLane.Backfill)?.MappingName,
+            _queue.TryClaimNext("crm-sync", "w", RunLane.Backfill)?.MappingName,
+        };
+        Assert.Equal(["customers", "products"], backfill.Where(m => m is not null).Order());
+    }
+
+    [Fact]
+    public void TryClaimNext_AChangeProcessingClaim_IsNotBlockedByAPinnedBackfill()
+    {
+        // A backfill segment claimed and Running is exactly the "long reload holding a slot" case the
+        // lane split exists for. The change-processing lane must not so much as notice it.
+        _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-1");
+        var backfill = _queue.TryClaimNext("crm-sync", "backfill-worker", RunLane.Backfill)!;
+        _queue.MarkRunning(backfill.Id);
+
+        _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
+
+        var primary = _queue.TryClaimNext("crm-sync", "change-worker", RunLane.ChangeProcessing);
+
+        Assert.NotNull(primary);
+        Assert.Equal(RunKind.Primary, primary!.RunKind);
+    }
+
+    [Fact]
+    public void HasOutstandingWork_IsPerLane()
+    {
+        _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-1");
+
+        Assert.False(_queue.HasOutstandingWork("crm-sync", RunLane.ChangeProcessing));
+        Assert.True(_queue.HasOutstandingWork("crm-sync", RunLane.Backfill));
+        Assert.True(_queue.HasOutstandingWork("crm-sync")); // no lane = anything at all
+    }
+
+    [Fact]
     public void TryClaimNext_DifferentMappings_BothClaimableConcurrently()
     {
         _queue.Enqueue("crm-sync", RunKind.Primary, "orders");

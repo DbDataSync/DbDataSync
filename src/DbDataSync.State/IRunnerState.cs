@@ -26,9 +26,9 @@ public interface IRunnerState
 
     void UpsertTask(string taskName, bool enabled);
 
-    bool HasOutstandingWork(string taskName);
+    bool HasOutstandingWork(string taskName, RunLane lane);
 
-    WorkItem? TryClaimNext(string taskName, string workerId);
+    WorkItem? TryClaimNext(string taskName, string workerId, RunLane lane);
 
     bool TryAcquireLock(string taskName, RunKind runKind, string mappingName, Guid runId);
 

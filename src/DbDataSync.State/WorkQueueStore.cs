@@ -160,8 +160,12 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// the run it belongs to (phase 73). This is the genuine claim moment — <c>TaskRunStore.BeginRun</c>
     /// happens later, once the worker is actually starting the work, and writes <c>StartedAtUtc</c>.
     /// </para></summary>
-    public WorkItem? TryClaimNext(string taskName, string workerId)
+    /// <param name="lane">Restrict the claim to one lane's <see cref="RunKind"/>s. Null claims from
+    /// any lane — never what the worker wants (it drives each lane's channel from its own claim loop),
+    /// but what a reconciliation check or a test that is not about the split means.</param>
+    public WorkItem? TryClaimNext(string taskName, string workerId, RunLane? lane = null)
     {
+        var laneClause = lane is { } l ? $"AND RunKind IN {RunKindsIn(l)}" : "";
         for (var attempt = 0; attempt < 5; attempt++)
         {
             var candidate = database.Retry(() =>
@@ -172,6 +176,7 @@ public sealed class WorkQueueStore(StateDatabase database)
                            ReaderKind, CacheKind, WriterKind
                     FROM WorkQueue w
                     WHERE TaskName = $task AND Status = 'Pending' AND AvailableAtUtc <= $now
+                      {laneClause}
                       AND NOT EXISTS (
                         SELECT 1 FROM WorkQueue w2
                         WHERE w2.TaskName = w.TaskName AND w2.RunKind = w.RunKind AND w2.MappingName = w.MappingName
@@ -322,16 +327,28 @@ public sealed class WorkQueueStore(StateDatabase database)
             return cmd.ExecuteNonQuery() == 1;
         });
 
-    /// <summary>True if any Pending/Claimed/Running item remains for this task — a worker's drain
-    /// loop exits once this is false.</summary>
-    public bool HasOutstandingWork(string taskName) =>
+    /// <summary>True if any Pending/Claimed/Running item remains for this task. With
+    /// <paramref name="lane"/> set, only that lane's <see cref="RunKind"/>s count — a worker's
+    /// per-lane drain loop exits once its lane is empty, and never waits on the other lane's work.
+    /// Null means "anything at all", which is what reconciliation asks.</summary>
+    public bool HasOutstandingWork(string taskName, RunLane? lane = null) =>
         database.Retry(() =>
         {
+            var laneClause = lane is { } l ? $"AND RunKind IN {RunKindsIn(l)}" : "";
             using var connection = database.OpenConnection();
-            using var cmd = database.Command(connection, "SELECT COUNT(*) FROM WorkQueue WHERE TaskName = $task AND Status IN ('Pending','Claimed','Running');");
+            using var cmd = database.Command(connection, $"""
+                SELECT COUNT(*) FROM WorkQueue
+                WHERE TaskName = $task AND Status IN ('Pending','Claimed','Running') {laneClause};
+                """);
             cmd.Bind(database, "task", taskName);
             return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
         });
+
+    /// <summary>The <c>RunKind IN (…)</c> fragment for a lane — from <see cref="RunLanes.KindsFor"/>,
+    /// which is the single definition of which kinds a lane owns. Enum names, never user input, so
+    /// inlining them is safe and keeps the claim query one string.</summary>
+    private static string RunKindsIn(RunLane lane) =>
+        "(" + string.Join(", ", RunLanes.KindsFor(lane).Select(k => $"'{k}'")) + ")";
 
     private void SetStatus(long id, WorkItemStatus status) =>
         database.Retry(() =>

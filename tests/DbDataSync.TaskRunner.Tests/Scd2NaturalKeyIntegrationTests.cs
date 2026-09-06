@@ -228,7 +228,7 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
     private async Task<TaskRunRecord> EnqueueAndDrainAsync(string mappingName)
     {
         var runId = _workQueueStore.Enqueue(TaskName, RunKind.Primary, mappingName);
-        await _executor.ExecuteWorkerAsync(TaskName, degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync(TaskName, WorkerLanes.Uniform(1), CancellationToken.None);
         return _taskRunStore.GetRun(runId)!;
     }
 

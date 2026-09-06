@@ -20,9 +20,10 @@ public sealed class LocalRunnerState(
 {
     public void UpsertTask(string taskName, bool enabled) => taskRuns.UpsertTask(taskName, enabled);
 
-    public bool HasOutstandingWork(string taskName) => workQueue.HasOutstandingWork(taskName);
+    public bool HasOutstandingWork(string taskName, RunLane lane) => workQueue.HasOutstandingWork(taskName, lane);
 
-    public WorkItem? TryClaimNext(string taskName, string workerId) => workQueue.TryClaimNext(taskName, workerId);
+    public WorkItem? TryClaimNext(string taskName, string workerId, RunLane lane) =>
+        workQueue.TryClaimNext(taskName, workerId, lane);
 
     public bool TryAcquireLock(string taskName, RunKind runKind, string mappingName, Guid runId) =>
         runLocks.TryAcquire(taskName, runKind, mappingName, runId);

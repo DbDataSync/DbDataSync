@@ -105,9 +105,12 @@ export interface ChangeProcessingConfig {
   reader: ReaderConfig
   cache: CacheConfig
   writer: WriterConfig
-  /** How many of this replication's table mappings its worker processes at once. The server
-   * defaults it to 4 when config says nothing. */
+  /** Consumers on the worker's change-processing lane — how many incremental (Primary) passes run at
+   * once. The server defaults it to 4 when config says nothing. */
   degreeOfParallelism: number
+  /** Consumers on the worker's backfill lane — backfill segments and verifications. Its own budget so
+   * a large reload never takes a slot an incremental pass needs. Defaults to 4. */
+  backfillDegreeOfParallelism: number
 }
 
 // Where a replication reads from and writes to. Every table mapping inherits these unless it sets

@@ -228,7 +228,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     private async Task<TaskRunRecord> EnqueueAndDrainAsync()
     {
         var runId = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
         return _taskRunStore.GetRun(runId)!;
     }
 
@@ -253,7 +253,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await SetUpConfigAsync(frequencySeconds: 2, idleTimeoutSeconds: 6);
 
         var first = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
-        var worker = _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
+        var worker = _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
 
         // Wait for the first pass to land, then produce more work for a worker that is already idle.
         var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
@@ -380,7 +380,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     private async Task DrainMappingsAsync(params string[] mappingNames)
     {
         var ids = mappingNames.Select(name => _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, name)).ToList();
-        await _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
         foreach (var id in ids)
         {
             // A failed pass writes no watermark, so without this a broken run reads as "the two
@@ -541,7 +541,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         var backfillRunId = _workQueueStore.Enqueue(
             "e2e-sync", RunKind.Backfill, "main", segment.Describe(), SegmentSerializer.Serialize(segment),
             new WorkItemKinds(MsSqlDriverKinds.BatchReload, MsSqlDriverKinds.StagingTable, MsSqlDriverKinds.MergeReconcile));
-        await _executor.ExecuteWorkerAsync("e2e-sync", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(backfillRunId)!.Status);
 
@@ -567,7 +567,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await SetUpReloadReplicationAsync([new RangeSegment("Id", "1", "6"), new RangeSegment("Id", "6", "11")]);
 
         var runId = _workQueueStore.Enqueue("reload-only", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("reload-only", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("reload-only", WorkerLanes.Uniform(1), CancellationToken.None);
 
         var run = _taskRunStore.GetRun(runId)!;
         Assert.Equal(RunStatus.Succeeded, run.Status);
@@ -592,7 +592,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await SetUpReloadReplicationAsync(([new AutoSegment("Id", 3)]));
 
         var runId = _workQueueStore.Enqueue("reload-only", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("reload-only", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("reload-only", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
         // Every row lands exactly once — the buckets have to tile the range and cover MAX for this
@@ -770,14 +770,14 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         // The first pass is a full load, which stores a position without reading the shadow table.
         // The second is the incremental one whose position is worth acknowledging.
         var first = _workQueueStore.Enqueue("trg-sync", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("trg-sync", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("trg-sync", WorkerLanes.Uniform(1), CancellationToken.None);
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(first)!.Status);
 
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
         Assert.True(await ShadowRowCountAsync() > 0);
 
         var second = _workQueueStore.Enqueue("trg-sync", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("trg-sync", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("trg-sync", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(second)!.Status);
         Assert.Equal(0, await ShadowRowCountAsync());
@@ -796,7 +796,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
 
         var runId = _workQueueStore.Enqueue("trg-fail", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("trg-fail", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("trg-fail", WorkerLanes.Uniform(1), CancellationToken.None);
 
         var run = _taskRunStore.GetRun(runId)!;
         Assert.Equal(RunStatus.Failed, run.Status);
@@ -874,7 +874,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.Empty(_configRepository.LoadTableMapping("prov-create", "main").TargetColumns);
 
         var runId = _workQueueStore.Enqueue("prov-create", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("prov-create", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("prov-create", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
         Assert.Equal(new Dictionary<int, string> { [1] = "Alice" }, await GetRowsAsync(target));
@@ -894,7 +894,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
 
         _workQueueStore.Enqueue("prov-create", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("prov-create", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("prov-create", WorkerLanes.Uniform(1), CancellationToken.None);
 
         var reloaded = _configRepository.LoadTableMapping("prov-create", "main");
         Assert.Equal(["Id", "Name"], reloaded.TargetColumns.Select(c => c.Name));
@@ -910,7 +910,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         // And a second pass runs from it, reading a freshly-loaded mapping like any other process.
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
         var second = _workQueueStore.Enqueue("prov-create", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("prov-create", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("prov-create", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(second)!.Status);
         Assert.Equal(new Dictionary<int, string> { [1] = "Alice", [2] = "Bob" }, await GetRowsAsync(target));
@@ -935,7 +935,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.Equal(["Id"], _configRepository.LoadTableMapping("prov-alter", "main").TargetColumns.Select(c => c.Name));
 
         var runId = _workQueueStore.Enqueue("prov-alter", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("prov-alter", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("prov-alter", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
         Assert.Equal(new Dictionary<int, string> { [1] = "Alice" }, await GetRowsAsync(target));
@@ -982,7 +982,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
 
         var runId = _workQueueStore.Enqueue("prov-off", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("prov-off", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("prov-off", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
         Assert.Equal(new Dictionary<int, string> { [1] = "Alice" }, await GetRowsAsync(target));
@@ -1023,7 +1023,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
 
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
         var runId = _workQueueStore.Enqueue("prov-off", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("prov-off", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("prov-off", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
         Assert.False(LoggedInspection(runId));
@@ -1044,7 +1044,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
 
         var runId = _workQueueStore.Enqueue("prov-off", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("prov-off", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("prov-off", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(runId)!.Status);
         Assert.Empty(await CachedColumnsAsync("dbo", target));

@@ -150,6 +150,12 @@ public static class ConfigValidation
                 $"Replication '{replicationName}' sets a change-processing degree of parallelism of " +
                 $"{changeProcessing.DegreeOfParallelism}. It has to be at least 1 — that is how many table " +
                 "mappings the worker processes at once.");
+
+        if (changeProcessing.BackfillDegreeOfParallelism < 1)
+            throw new ConfigValidationException(
+                $"Replication '{replicationName}' sets a backfill degree of parallelism of " +
+                $"{changeProcessing.BackfillDegreeOfParallelism}. It has to be at least 1 — that is how many " +
+                "backfill segments and verifications the worker processes at once.");
     }
 
     public static void ValidateScheduling(SchedulingConfig scheduling, string replicationName)

@@ -31,6 +31,39 @@ public enum RunKind
     Verification,
 }
 
+/// <summary>
+/// The two lanes a replication's worker process drains in parallel, each with its own bounded channel,
+/// its own pool of consumers and its own configured degree of parallelism — so a long-running reload
+/// can never occupy a slot an incremental pass needs. See
+/// <c>DbDataSync.Core.Config.ChangeProcessingConfig</c> and phase-108.
+/// </summary>
+public enum RunLane
+{
+    /// <summary>Ongoing incremental sync — <see cref="RunKind.Primary"/> only. The latency-sensitive
+    /// lane: its passes are scheduled and an operator watching lag expects them to keep up.</summary>
+    ChangeProcessing,
+
+    /// <summary>On-demand, non-incremental work — <see cref="RunKind.Backfill"/> and
+    /// <see cref="RunKind.Verification"/>. Both read whole tables and can run for a long time; keeping
+    /// them off the change-processing lane is the point of the split.</summary>
+    Backfill,
+}
+
+/// <summary>Which <see cref="RunKind"/>s belong to which <see cref="RunLane"/> — the one place the
+/// mapping is stated, so the claim query and the worker cannot disagree about it.</summary>
+public static class RunLanes
+{
+    public static IReadOnlyList<RunKind> KindsFor(RunLane lane) => lane switch
+    {
+        RunLane.ChangeProcessing => [RunKind.Primary],
+        RunLane.Backfill => [RunKind.Backfill, RunKind.Verification],
+        _ => throw new ArgumentOutOfRangeException(nameof(lane), lane, null),
+    };
+
+    public static RunLane LaneFor(RunKind kind) =>
+        kind == RunKind.Primary ? RunLane.ChangeProcessing : RunLane.Backfill;
+}
+
 // Deliberately not named LogLevel — avoids ambiguity wherever this is used alongside
 // Microsoft.Extensions.Logging.LogLevel (the API/TaskRunner hosts, later phases).
 public enum LogSeverity

@@ -36,7 +36,7 @@ public sealed class RemoteRunnerStateTests : IDisposable
         var owner = new FakeOwner { Reachable = false };
         using var state = Create(owner);
 
-        var ex = Assert.Throws<StateOwnerUnavailableException>(() => state.TryClaimNext("sales", "worker-1"));
+        var ex = Assert.Throws<StateOwnerUnavailableException>(() => state.TryClaimNext("sales", "worker-1", RunLane.ChangeProcessing));
 
         Assert.Contains("did not respond", ex.Message);
         Assert.True(state.OwnerLost);
@@ -52,7 +52,7 @@ public sealed class RemoteRunnerStateTests : IDisposable
         owner.OnRequest = _ => { if (owner.Requests.Count >= 3) owner.Reachable = true; };
         using var state = Create(owner, grace: TimeSpan.FromSeconds(5));
 
-        Assert.True(state.HasOutstandingWork("sales"));
+        Assert.True(state.HasOutstandingWork("sales", RunLane.ChangeProcessing));
 
         Assert.False(state.OwnerLost);
         Assert.Single(_reports);
@@ -190,7 +190,7 @@ public sealed class RemoteRunnerStateTests : IDisposable
         // constructed with, so nothing here can leak it into a URL or a body.
         var owner = new FakeOwner();
         using var state = Create(owner);
-        state.HasOutstandingWork("sales");
+        state.HasOutstandingWork("sales", RunLane.ChangeProcessing);
 
         Assert.DoesNotContain(owner.Requests, r => r.Contains("token", StringComparison.OrdinalIgnoreCase));
     }

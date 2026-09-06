@@ -31,7 +31,7 @@ public static class StateProtocol
 // ---- Requests. One record per operation, so the controller is a switch and not a parser. ----
 
 public sealed record UpsertTaskRequest(string TaskName, bool Enabled);
-public sealed record TryClaimNextRequest(string TaskName, string WorkerId);
+public sealed record TryClaimNextRequest(string TaskName, string WorkerId, RunLane Lane);
 public sealed record TryAcquireLockRequest(string TaskName, RunKind RunKind, string MappingName, Guid RunId);
 public sealed record ReleaseLockRequest(string TaskName, RunKind RunKind, string MappingName);
 public sealed record BeginRunRequest(Guid RunId, int? Pid);

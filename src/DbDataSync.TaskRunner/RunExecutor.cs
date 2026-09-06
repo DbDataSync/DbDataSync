@@ -66,13 +66,23 @@ public sealed class RunExecutor(
         DateTimeOffset.UtcNow - new DateTimeOffset(Interlocked.Read(ref _lastProductiveTicks), TimeSpan.Zero);
 
     /// <summary>
-    /// Claims and processes this replication's pending WorkQueue items until the queue is drained
-    /// (no Pending/Claimed/Running items remain for it), using <paramref name="degreeOfParallelism"/>
-    /// concurrent consumers. Per-item outcomes live in TaskRuns/WorkQueue, not this method's return
-    /// value — the process exit code only distinguishes "the worker ran and drained cleanly" from
-    /// "the worker itself failed to start" (config errors before any item could even be claimed).
+    /// Claims and processes this replication's pending WorkQueue items until the queue is drained,
+    /// running <b>two independent lanes</b> — <see cref="RunLane.ChangeProcessing"/>
+    /// (<c>RunKind.Primary</c>) and <see cref="RunLane.Backfill"/> (<c>RunKind.Backfill</c> +
+    /// <c>RunKind.Verification</c>) — each with its own bounded channel and its own pool of consumers,
+    /// sized by <paramref name="lanes"/>. A long-running reload in one lane can never occupy a slot the
+    /// other lane needs. Per-item outcomes live in TaskRuns/WorkQueue, not this method's return value —
+    /// the process exit code only distinguishes "the worker ran and drained cleanly" from "the worker
+    /// itself failed to start".
+    /// <para>
+    /// The change-processing lane owns the process lifetime — it runs today's continuous idle-timeout
+    /// / periodic-drain logic. The backfill lane rides the process: under a continuous replication it
+    /// keeps polling for reloads rather than exiting on its own, and winds down only once the
+    /// change-processing lane has (its producer's <c>finally</c> cancels <c>winddown</c>). That is
+    /// what keeps a backfill enqueued mid-life from sitting unclaimed until the worker respawns.
+    /// </para>
     /// </summary>
-    public async Task<ExitCode> ExecuteWorkerAsync(string taskName, int degreeOfParallelism, CancellationToken cancellationToken)
+    public async Task<ExitCode> ExecuteWorkerAsync(string taskName, WorkerLanes lanes, CancellationToken cancellationToken)
     {
         ReplicationTaskConfig task;
         try
@@ -88,22 +98,70 @@ public sealed class RunExecutor(
         state.UpsertTask(task.Name, task.Enabled);
 
         var workerId = Guid.NewGuid().ToString("N");
+        using var winddown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        async Task ChangeLane()
+        {
+            try
+            {
+                await RunLaneAsync(
+                    taskName, task.Scheduling, RunLane.ChangeProcessing, lanes.ChangeProcessing,
+                    workerId, winddown: cancellationToken, hardStop: cancellationToken);
+            }
+            finally
+            {
+                // The process's lifetime is the change lane's. Whether it drained cleanly or crashed,
+                // the backfill lane — which otherwise rides a continuous replication's process
+                // forever — is now free to do its last drain and stop.
+                winddown.Cancel();
+            }
+        }
+
+        var change = ChangeLane();
+        var backfill = RunLaneAsync(
+            taskName, task.Scheduling, RunLane.Backfill, lanes.Backfill,
+            workerId, winddown: winddown.Token, hardStop: cancellationToken);
+
+        // WhenAll waits for both even if one faults, so a lane failing still lets the other finish
+        // recording what it was mid-way through — the journal-vs-lost-work line the single-lane
+        // version drew for producer-vs-consumers, now drawn between the lanes too. Awaited (not
+        // .Wait()ed) so cancellation surfaces as OperationCanceledException, which is exactly what
+        // Program.cs and the tests expect on Ctrl+C.
+        ExceptionDispatchInfo? failure = null;
+        try
+        {
+            await Task.WhenAll(change, backfill);
+        }
+        catch (Exception ex)
+        {
+            failure = ExceptionDispatchInfo.Capture(ex);
+        }
+
+        state.Flush();
+        failure?.Throw();
+
+        return ExitCode.Success;
+    }
+
+    /// <summary>One lane: its own bounded channel, one producer claiming only that lane's
+    /// <see cref="RunKind"/>s, and <paramref name="degreeOfParallelism"/> consumers. Mirrors what
+    /// <see cref="ExecuteWorkerAsync"/> used to do for the whole worker — await the producer (capturing
+    /// its failure), then await every consumer so nothing in flight is lost, then rethrow.</summary>
+    private async Task RunLaneAsync(
+        string taskName, SchedulingConfig scheduling, RunLane lane, int degreeOfParallelism,
+        string workerId, CancellationToken winddown, CancellationToken hardStop)
+    {
         var channel = Channel.CreateBounded<WorkItem>(new BoundedChannelOptions(Math.Max(1, degreeOfParallelism) * 2)
         {
             SingleWriter = true,
             SingleReader = degreeOfParallelism == 1,
         });
 
-        var producer = ProduceAsync(taskName, task.Scheduling, workerId, channel.Writer, cancellationToken);
+        var producer = ProduceAsync(taskName, scheduling, lane, workerId, channel.Writer, winddown, hardStop);
         var consumers = Enumerable.Range(0, Math.Max(1, degreeOfParallelism))
-            .Select(_ => ConsumeAsync(channel.Reader, cancellationToken))
+            .Select(_ => ConsumeAsync(channel.Reader, hardStop))
             .ToArray();
 
-        // The producer can fail while consumers are mid-item, and the owner going away is exactly
-        // that case. Its finally completes the writer, so the consumers still drain what they already
-        // hold — but they have to be *awaited*, or this process returns from Main and takes them with
-        // it, along with the outcomes they were in the middle of recording. That is the whole
-        // difference between spilling to a journal and losing the work.
         ExceptionDispatchInfo? producerFailure = null;
         try
         {
@@ -115,10 +173,7 @@ public sealed class RunExecutor(
         }
 
         await Task.WhenAll(consumers);
-        state.Flush();
         producerFailure?.Throw();
-
-        return ExitCode.Success;
     }
 
     /// <summary>Empty polls (queue observed to have no outstanding work) required before a
@@ -139,54 +194,81 @@ public sealed class RunExecutor(
     /// </summary>
     private const int EmptyPollsBeforeExit = 5;
 
-    /// <summary>Claims the next available item for this task in a loop, feeding it to the bounded
-    /// channel (which applies backpressure once consumers fall behind), until the queue is observed
-    /// empty for this task across <see cref="EmptyPollsBeforeExit"/> consecutive polls — at which
-    /// point the worker has nothing left to do and exits. New work enqueued after this point is
-    /// picked up by the next spawned worker (see ProcessSupervisor).</summary>
+    /// <summary>Claims the next available item for one lane in a loop, feeding it to that lane's
+    /// bounded channel (which applies backpressure once consumers fall behind), until the lane has
+    /// nothing left to do.
+    /// <para>
+    /// The <b>change-processing lane</b> exits on today's rules: a periodic worker after
+    /// <see cref="EmptyPollsBeforeExit"/> empty polls, a continuous one once it has gone a whole idle
+    /// timeout without a <c>Primary</c> pass reading anything.
+    /// </para>
+    /// <para>
+    /// The <b>backfill lane</b> follows the change lane. Under a periodic replication it drains and
+    /// exits the same way. Under a continuous one it never exits on its own — an empty backfill queue
+    /// is the normal state and the process is staying up for the change lane anyway — so it keeps
+    /// polling until <paramref name="winddown"/> is cancelled (the change lane's producer finished),
+    /// then does one last drain and stops. Without that, a backfill enqueued while the worker is alive
+    /// would sit unclaimed until the worker respawned.
+    /// </para></summary>
     private async Task ProduceAsync(
-        string taskName, SchedulingConfig scheduling, string workerId, ChannelWriter<WorkItem> writer,
-        CancellationToken cancellationToken)
+        string taskName, SchedulingConfig scheduling, RunLane lane, string workerId,
+        ChannelWriter<WorkItem> writer, CancellationToken winddown, CancellationToken hardStop)
     {
-        var continuous = scheduling.Mode == ScheduleMode.Continuous;
+        var runsContinuously = scheduling.Mode == ScheduleMode.Continuous;
+        var ridesTheProcess = lane == RunLane.Backfill && runsContinuously;
         var consecutiveEmptyPolls = 0;
         try
         {
-            while (!cancellationToken.IsCancellationRequested)
+            while (!hardStop.IsCancellationRequested)
             {
-                var item = state.TryClaimNext(taskName, workerId);
+                var item = state.TryClaimNext(taskName, workerId, lane);
                 if (item is not null)
                 {
                     consecutiveEmptyPolls = 0;
-                    await writer.WriteAsync(item, cancellationToken);
+                    await writer.WriteAsync(item, hardStop);
                     continue;
                 }
 
-                if (state.HasOutstandingWork(taskName))
+                // The backfill lane winds down with the process. Checked here — after one last claim
+                // sweep, before anything that could wait — so a Running row we do not own (an orphan
+                // the reconciler will release, or the other lane's item) cannot keep this lane alive
+                // past the change lane's own exit.
+                if (ridesTheProcess && winddown.IsCancellationRequested)
+                    break;
+
+                if (state.HasOutstandingWork(taskName, lane))
                 {
                     // Consumers are still busy. Poll quickly — this is not idleness, it is waiting for
                     // a colleague.
                     consecutiveEmptyPolls = 0;
-                    await Task.Delay(PollInterval, cancellationToken);
+                    await Task.Delay(PollInterval, hardStop);
                     continue;
                 }
 
-                if (!continuous)
+                if (ridesTheProcess)
+                {
+                    // Nothing to reload right now, and the change lane has not wound down — stay with
+                    // the process, which is up for that lane.
+                    await Task.Delay(PollInterval, hardStop);
+                    continue;
+                }
+
+                if (!runsContinuously)
                 {
                     if (++consecutiveEmptyPolls >= EmptyPollsBeforeExit)
                         break;
-                    await Task.Delay(PollInterval, cancellationToken);
+                    await Task.Delay(PollInterval, hardStop);
                     continue;
                 }
 
-                // Continuous: an empty queue is the normal state between passes, not a reason to go.
-                // The worker leaves only once it has gone a whole idle timeout without a pass reading
-                // anything — under a live load that never arrives, so the process stays up instead of
-                // being respawned several times a minute.
+                // Continuous change-processing lane: an empty queue is the normal state between
+                // passes, not a reason to go. It leaves only once it has gone a whole idle timeout
+                // without a Primary pass reading anything — under a live load that never arrives, so
+                // the process stays up instead of being respawned several times a minute.
                 if (IdleFor() >= scheduling.IdleTimeout)
                     break;
 
-                await WaitForWorkAsync(taskName, scheduling.Frequency, cancellationToken);
+                await WaitForWorkAsync(taskName, lane, scheduling.Frequency, hardStop);
             }
         }
         finally
@@ -196,16 +278,17 @@ public sealed class RunExecutor(
     }
 
     /// <summary>
-    /// Waits out one interval between passes, and stops early the moment there is something to claim.
+    /// Waits out one interval between passes, and stops early the moment there is something to claim
+    /// in this lane.
     /// <para>
     /// The interval is the configured frequency because that is when the next pass is due; sleeping
     /// straight through it would be right if nothing else could enqueue work, and something can — a
-    /// person pressing Run Now, or a backfill. A manual trigger no-ops
+    /// person pressing Run Now. A manual trigger no-ops
     /// <c>ProcessSupervisor.EnsureWorkerRunning</c> while this process is alive, so if this slept the
     /// full minute, so would they.
     /// </para>
     /// </summary>
-    private async Task WaitForWorkAsync(string taskName, TimeSpan interval, CancellationToken cancellationToken)
+    private async Task WaitForWorkAsync(string taskName, RunLane lane, TimeSpan interval, CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + interval;
         while (DateTimeOffset.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
@@ -214,7 +297,7 @@ public sealed class RunExecutor(
             await Task.Delay(remaining < PollInterval ? remaining : PollInterval, cancellationToken);
             // Nothing is in flight at this point — the queue was empty when we got here — so anything
             // outstanding is something to claim.
-            if (state.HasOutstandingWork(taskName))
+            if (state.HasOutstandingWork(taskName, lane))
                 return;
         }
     }
@@ -292,7 +375,12 @@ public sealed class RunExecutor(
             // Idle is "looked for changes and found none", not "the queue is empty" — the queue is
             // empty for a moment after every single pass, which is why the worker used to exit
             // straight through a live load. A pass that read nothing leaves the clock running.
-            if (rowsRead > 0)
+            //
+            // Only a Primary pass counts: the idle timeout is the *change-processing* lane's, and a
+            // backfill or a verification reading rows says nothing about whether incremental changes
+            // are still arriving. A continuous worker held up purely by backfills running is exactly
+            // the coupling this phase removed.
+            if (rowsRead > 0 && item.RunKind == RunKind.Primary)
                 MarkProductive();
         }
         catch (Exception ex) when (ex is FileNotFoundException or ConfigValidationException)

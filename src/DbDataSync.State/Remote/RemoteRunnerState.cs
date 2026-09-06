@@ -54,11 +54,12 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
     public void UpsertTask(string taskName, bool enabled) =>
         Required("upsert-task", new UpsertTaskRequest(taskName, enabled));
 
-    public bool HasOutstandingWork(string taskName) =>
-        Required<BoolResponse>($"has-outstanding-work?taskName={Uri.EscapeDataString(taskName)}").Value;
+    public bool HasOutstandingWork(string taskName, RunLane lane) =>
+        Required<BoolResponse>(
+            $"has-outstanding-work?taskName={Uri.EscapeDataString(taskName)}&lane={lane}").Value;
 
-    public WorkItem? TryClaimNext(string taskName, string workerId) =>
-        Required<WorkItemResponse>("try-claim-next", new TryClaimNextRequest(taskName, workerId)).Item;
+    public WorkItem? TryClaimNext(string taskName, string workerId, RunLane lane) =>
+        Required<WorkItemResponse>("try-claim-next", new TryClaimNextRequest(taskName, workerId, lane)).Item;
 
     public bool TryAcquireLock(string taskName, RunKind runKind, string mappingName, Guid runId) =>
         Required<BoolResponse>("try-acquire-lock", new TryAcquireLockRequest(taskName, runKind, mappingName, runId)).Value;

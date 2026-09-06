@@ -312,15 +312,23 @@ argument parser; an unrecognized flag is a hard error, not a silent ignore.
 | `--state-db <path>` | yes | — |
 | `--replication <name>` | yes | — |
 | `--degree-of-parallelism <n>` | no | `4` |
+| `--backfill-parallelism <n>` | no | `4` |
 | `--state-endpoint <url>` | no | falls back to the `DBDATASYNC_STATE_ENDPOINT` environment variable |
 | `--state-grace-seconds <n>` | no | `60` |
 
-When the API spawns the runner it always passes `--degree-of-parallelism`, taken from the
-replication's own `changeProcessing.degreeOfParallelism` in `task.yaml` (set on the replication's
-Schedule card in the UI); the `4` above is the fallback for a runner started by hand and for a
-replication whose config does not set it. It is the number of table mappings the worker reads,
-stages and applies at once — one worker process per replication, spanning all its mappings. A single
-mapping never occupies more than one slot regardless of the number.
+The worker runs **two independent lanes** (phase-108), each with its own bounded queue and its own
+pool of consumers:
+
+- `--degree-of-parallelism` sizes the **change-processing lane** — incremental (`Primary`) passes.
+- `--backfill-parallelism` sizes the **backfill lane** — backfill segments and verifications.
+
+A long-running reload on the backfill lane can no longer take a slot an incremental pass needs. When
+the API spawns the runner it always passes both, from `changeProcessing.degreeOfParallelism` and
+`changeProcessing.backfillDegreeOfParallelism` in `task.yaml` (both on the replication's Schedule
+card in the UI); the `4`s above are the fallback for a runner started by hand and for a replication
+whose config does not set them. Each number is table mappings processed at once within that lane;
+a single mapping never occupies more than one slot in a lane regardless of the number, and the total
+concurrency ceiling for the replication is the two added.
 
 Two more environment variables exist here, but they're **internal, process-to-process only** — set by
 the parent API when it spawns a runner, never something an operator sets by hand:

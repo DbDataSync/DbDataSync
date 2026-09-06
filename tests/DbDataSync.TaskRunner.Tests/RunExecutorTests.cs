@@ -109,14 +109,14 @@ public sealed class RunExecutorTests : IDisposable
     private async Task<Guid> EnqueueAndDrainAsync(string taskName, string mappingName)
     {
         var runId = _workQueueStore.Enqueue(taskName, RunKind.Primary, mappingName);
-        await _executor.ExecuteWorkerAsync(taskName, degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync(taskName, WorkerLanes.Uniform(1), CancellationToken.None);
         return runId;
     }
 
     [Fact]
     public async Task ExecuteWorkerAsync_WhenReplicationDoesNotExist_ReturnsConfigError()
     {
-        var result = await _executor.ExecuteWorkerAsync("nonexistent", degreeOfParallelism: 1, CancellationToken.None);
+        var result = await _executor.ExecuteWorkerAsync("nonexistent", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(ExitCode.ConfigError, result);
     }
@@ -126,7 +126,7 @@ public sealed class RunExecutorTests : IDisposable
     {
         // A config-load failure happens before any WorkQueue item could exist for this task name —
         // there's nothing real to attribute a run row to for a replication that doesn't exist.
-        var result = await _executor.ExecuteWorkerAsync("nonexistent", degreeOfParallelism: 1, CancellationToken.None);
+        var result = await _executor.ExecuteWorkerAsync("nonexistent", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(ExitCode.ConfigError, result);
         Assert.Empty(_taskRunStore.GetRunHistory("nonexistent"));
@@ -217,7 +217,7 @@ public sealed class RunExecutorTests : IDisposable
         var customersRunId = _workQueueStore.Enqueue("crm-sync", RunKind.Primary, "customers");
         Assert.NotEqual(ordersRunId, customersRunId);
 
-        await _executor.ExecuteWorkerAsync("crm-sync", degreeOfParallelism: 2, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("crm-sync", WorkerLanes.Uniform(2), CancellationToken.None);
 
         var ordersRun = _taskRunStore.GetRun(ordersRunId);
         var customersRun = _taskRunStore.GetRun(customersRunId);
@@ -409,7 +409,7 @@ public sealed class RunExecutorTests : IDisposable
         SaveTask("resident", ScheduleMode.Continuous, frequencySeconds: 1, idleTimeoutSeconds: 8);
 
         var started = Stopwatch.GetTimestamp();
-        await _executor.ExecuteWorkerAsync("resident", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("resident", WorkerLanes.Uniform(1), CancellationToken.None);
         var elapsed = Stopwatch.GetElapsedTime(started);
 
         Assert.True(elapsed >= TimeSpan.FromSeconds(6.5), $"left after {elapsed.TotalSeconds:F1}s.");
@@ -433,7 +433,7 @@ public sealed class RunExecutorTests : IDisposable
         }, Author);
 
         using var cancellation = new CancellationTokenSource();
-        var worker = _executor.ExecuteWorkerAsync("responsive", degreeOfParallelism: 1, cancellation.Token);
+        var worker = _executor.ExecuteWorkerAsync("responsive", WorkerLanes.Uniform(1), cancellation.Token);
 
         await Task.Delay(TimeSpan.FromSeconds(1));
         var runId = _workQueueStore.Enqueue("responsive", RunKind.Primary, "main");
@@ -451,6 +451,42 @@ public sealed class RunExecutorTests : IDisposable
     }
 
     /// <summary>
+    /// One worker, two lanes: a Primary pass and a Backfill segment queued together are both claimed
+    /// and both driven to a terminal state in a single invocation. (Both fail for want of a database,
+    /// which is beside the point — they were each picked up, in their own lane.)
+    /// </summary>
+    [Fact]
+    public async Task ExecuteWorkerAsync_DrainsBothLanes()
+    {
+        SaveTask("crm-sync");
+        _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+        }, Author);
+        _configRepository.SaveConnection(new ConnectionInput
+        {
+            Name = "src",
+            DriverType = ConnectionDriverType.MsSql,
+            Host = "127.0.0.1",
+            Port = 1,
+            Database = "App",
+            AuthMode = AuthMode.IntegratedAuth,
+            Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
+        }, Author);
+
+        var primaryRunId = _workQueueStore.Enqueue("crm-sync", RunKind.Primary, "orders");
+        var backfillRunId = _workQueueStore.Enqueue(
+            "crm-sync", RunKind.Backfill, "orders", segmentLabel: "full", segmentJson: "{\"mode\":\"full\"}");
+
+        await _executor.ExecuteWorkerAsync("crm-sync", WorkerLanes.Uniform(1), CancellationToken.None);
+
+        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(primaryRunId)!.Status);
+        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(backfillRunId)!.Status);
+    }
+
+    /// <summary>
     /// A cron replication keeps the old fast exit. Its next occurrence can be hours away, and holding
     /// a process open for that is not restraint, it is a leak.
     /// </summary>
@@ -460,7 +496,7 @@ public sealed class RunExecutorTests : IDisposable
         SaveTask("nightly", ScheduleMode.Periodic, frequencySeconds: 0, idleTimeoutSeconds: null);
 
         var started = Stopwatch.GetTimestamp();
-        await _executor.ExecuteWorkerAsync("nightly", degreeOfParallelism: 1, CancellationToken.None);
+        await _executor.ExecuteWorkerAsync("nightly", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(30), "a cron worker waited out an idle timeout.");
     }

@@ -9,17 +9,26 @@ namespace DbDataSync.TaskRunner;
 /// </param>
 /// <param name="StateGraceSeconds">How long to keep retrying an unreachable owner before journalling
 /// and shutting down. The owner is this process's parent, so a restart should be far shorter.</param>
+/// <param name="DegreeOfParallelism">Consumers on the change-processing lane (<c>RunKind.Primary</c>).</param>
+/// <param name="BackfillDegreeOfParallelism">Consumers on the backfill lane (<c>RunKind.Backfill</c> +
+/// <c>RunKind.Verification</c>). Its own budget so a big reload never takes a slot an incremental pass
+/// needs — see phase-108.</param>
 public sealed record TaskRunnerOptions(
     string RepoRoot,
     string StateDbPath,
     string Replication,
     int DegreeOfParallelism = 4,
+    int BackfillDegreeOfParallelism = 4,
     string? StateEndpoint = null,
     int StateGraceSeconds = 60)
 {
+    public const int DefaultDegreeOfParallelism = 4;
+
     /// <summary>config/ lives at a fixed location under the git repo root — the same convention
     /// DbDataSync.Core.Config.ConfigPaths uses.</summary>
     public string ConfigRoot => Path.Combine(RepoRoot, "config");
+
+    public WorkerLanes Lanes => new(DegreeOfParallelism, BackfillDegreeOfParallelism);
 
     public static bool TryParse(string[] args, out TaskRunnerOptions? options, out string? error)
     {
@@ -27,6 +36,7 @@ public sealed record TaskRunnerOptions(
         string? stateDbPath = null;
         string? replication = null;
         int? degreeOfParallelism = null;
+        int? backfillDegreeOfParallelism = null;
         string? stateEndpoint = null;
         int? graceSeconds = null;
 
@@ -64,6 +74,15 @@ public sealed record TaskRunnerOptions(
                     }
                     degreeOfParallelism = parsedDop;
                     break;
+                case "--backfill-parallelism" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], out var parsedBackfillDop) || parsedBackfillDop < 1)
+                    {
+                        options = null;
+                        error = $"'--backfill-parallelism' value '{args[i]}' must be a positive integer.";
+                        return false;
+                    }
+                    backfillDegreeOfParallelism = parsedBackfillDop;
+                    break;
                 default:
                     options = null;
                     error = $"Unrecognized argument '{args[i]}'.";
@@ -83,7 +102,9 @@ public sealed record TaskRunnerOptions(
         }
 
         options = new TaskRunnerOptions(
-            repoRoot!, stateDbPath!, replication!, degreeOfParallelism ?? 4,
+            repoRoot!, stateDbPath!, replication!,
+            degreeOfParallelism ?? DefaultDegreeOfParallelism,
+            backfillDegreeOfParallelism ?? DefaultDegreeOfParallelism,
             // The endpoint may also arrive by environment, beside the token — see StateProtocol.
             stateEndpoint ?? Environment.GetEnvironmentVariable(DbDataSync.State.Remote.StateProtocol.EndpointEnvironmentVariable),
             graceSeconds ?? 60);

@@ -14,7 +14,8 @@ if (!TaskRunnerOptions.TryParse(args, out var options, out var parseError))
 {
     Console.Error.WriteLine($"Argument error: {parseError}");
     Console.Error.WriteLine(
-        "Usage: DbDataSync.TaskRunner --repo-root <path> --state-db <path> --replication <name> [--degree-of-parallelism <n>]");
+        "Usage: DbDataSync.TaskRunner --repo-root <path> --state-db <path> --replication <name> " +
+        "[--degree-of-parallelism <n>] [--backfill-parallelism <n>]");
     return (int)ExitCode.ConfigError;
 }
 
@@ -52,7 +53,7 @@ Console.CancelKeyPress += (_, e) =>
 ExitCode exitCode;
 try
 {
-    exitCode = await executor.ExecuteWorkerAsync(options.Replication, options.DegreeOfParallelism, cts.Token);
+    exitCode = await executor.ExecuteWorkerAsync(options.Replication, options.Lanes, cts.Token);
 }
 catch (StateOwnerUnavailableException ex)
 {

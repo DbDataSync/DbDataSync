@@ -32,11 +32,11 @@ public static class RunnerStateEndpoints
             return Results.Ok();
         });
 
-        group.MapGet("/has-outstanding-work", (string taskName) =>
-            new BoolResponse(state.HasOutstandingWork(taskName)));
+        group.MapGet("/has-outstanding-work", (string taskName, RunLane lane) =>
+            new BoolResponse(state.HasOutstandingWork(taskName, lane)));
 
         group.MapPost("/try-claim-next", (TryClaimNextRequest r) =>
-            new WorkItemResponse(state.TryClaimNext(r.TaskName, r.WorkerId)));
+            new WorkItemResponse(state.TryClaimNext(r.TaskName, r.WorkerId, r.Lane)));
 
         group.MapPost("/try-acquire-lock", (TryAcquireLockRequest r) =>
             new BoolResponse(state.TryAcquireLock(r.TaskName, r.RunKind, r.MappingName, r.RunId)));

@@ -112,9 +112,9 @@ public sealed class RunnerStateEndpointTests : IClassFixture<TestApiFactory>
             Client(_token.Value), new StateJournal(Path.Combine(_factory.RepoRoot, "unused.jsonl")),
             TimeSpan.Zero, _ => { });
 
-        Assert.True(remote.HasOutstandingWork(taskName));
+        Assert.True(remote.HasOutstandingWork(taskName, RunLane.ChangeProcessing));
 
-        var claimed = remote.TryClaimNext(taskName, "worker-1");
+        var claimed = remote.TryClaimNext(taskName, "worker-1", RunLane.ChangeProcessing);
         Assert.NotNull(claimed);
         Assert.Equal("Orders", claimed.MappingName);
 
@@ -142,7 +142,7 @@ public sealed class RunnerStateEndpointTests : IClassFixture<TestApiFactory>
         Assert.Equal(
             new MappingReadState(ReadIntent.ChangesFromEarliest, ReadHold.PositionExpired, "1234", null),
             owner.GetReadState(taskName, "orders", "dbo.Orders"));
-        Assert.False(remote.HasOutstandingWork(taskName));
+        Assert.False(remote.HasOutstandingWork(taskName, RunLane.ChangeProcessing));
 
         var run = _factory.Services.GetRequiredService<TaskRunStore>().GetRun(claimed.RunId);
         Assert.Equal(RunStatus.Succeeded, run!.Status);

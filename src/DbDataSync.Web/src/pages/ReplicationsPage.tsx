@@ -103,6 +103,7 @@ export function ReplicationsPage() {
         cache: { kind: defaults!.cache!, options: {} },
         writer: { kind: defaults!.writer!, options: {} },
         degreeOfParallelism: 4,
+        backfillDegreeOfParallelism: 4,
       },
       // Set on the replication's Overview; a mapping created before they are inherits nothing and
       // has to state its own, which the editor's override toggle covers.

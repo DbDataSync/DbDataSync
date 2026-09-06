@@ -22,10 +22,12 @@ import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
  * The accent still reflects enabled/disabled, because the card is about *this replication's* running,
  * and that is true whether or not the control that drives it lives here.
  *
- * **Concurrency sits here too, not on the Pipeline tab.** How many table mappings the worker processes
- * at once is a fact about *how this replication runs*, the same kind of fact as how often it runs and
- * when its worker gives up — not about which reader/staging/writer the pipeline uses. Like the other
- * fields on this card (and unlike the Enabled toggle), it belongs to the batched Save.
+ * **Concurrency sits here too, not on the Pipeline tab.** How many mappings the worker processes at
+ * once is a fact about *how this replication runs*, the same kind of fact as how often it runs and
+ * when its worker gives up — not about which reader/staging/writer the pipeline uses. The worker runs
+ * two independent lanes (phase-108): incremental passes, and backfills-plus-verifications. Each gets
+ * its own number, so a large reload can no longer take a slot an incremental pass needs. Like the
+ * other fields here (and unlike the Enabled toggle), both belong to the batched Save.
  */
 export function ScheduleCard({ draft, enabled, onChange }: {
   draft: ReplicationTaskConfig
@@ -36,8 +38,9 @@ export function ScheduleCard({ draft, enabled, onChange }: {
   const setScheduling = (patch: Partial<ReplicationTaskConfig['scheduling']>) =>
     onChange({ ...draft, scheduling: { ...draft.scheduling, ...patch } })
 
-  const setDegreeOfParallelism = (value: number) =>
-    onChange({ ...draft, changeProcessing: { ...draft.changeProcessing, degreeOfParallelism: value } })
+  const setParallelism = (patch: Partial<Pick<
+    ReplicationTaskConfig['changeProcessing'], 'degreeOfParallelism' | 'backfillDegreeOfParallelism'>>) =>
+    onChange({ ...draft, changeProcessing: { ...draft.changeProcessing, ...patch } })
 
   const mode = draft.scheduling.mode
 
@@ -105,10 +108,20 @@ export function ScheduleCard({ draft, enabled, onChange }: {
             type="number"
             min={1}
             value={draft.changeProcessing.degreeOfParallelism ?? 4}
-            onChange={(e) => setDegreeOfParallelism(Number(e.target.value) || 1)}
+            onChange={(e) => setParallelism({ degreeOfParallelism: Number(e.target.value) || 1 })}
             data-testid="schedule-degree-of-parallelism-input"
           />
-          <span className="hint">mapping(s) at once</span>
+          <span className="hint">mapping(s), and</span>
+          <input
+            className="input sm mono"
+            style={{ width: 44 }}
+            type="number"
+            min={1}
+            value={draft.changeProcessing.backfillDegreeOfParallelism ?? 4}
+            onChange={(e) => setParallelism({ backfillDegreeOfParallelism: Number(e.target.value) || 1 })}
+            data-testid="schedule-backfill-parallelism-input"
+          />
+          <span className="hint" title="Backfill segments and verifications run on their own lane, so a large reload never takes a slot an incremental pass needs.">backfill(s), at once</span>
         </span>
 
         <span
