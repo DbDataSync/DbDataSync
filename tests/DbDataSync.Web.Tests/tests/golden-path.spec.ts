@@ -2016,6 +2016,7 @@ public sealed class Shout : IValueColumnExpression
 
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('backfill-button').click()
+    await expect(page.getByTestId('backfill-mode-select')).toBeVisible({ timeout: 20_000 })
     await page.getByTestId('backfill-mode-select').selectOption('custom')
     await page.getByTestId('backfill-strategy-select').selectOption('by-id-band')
 

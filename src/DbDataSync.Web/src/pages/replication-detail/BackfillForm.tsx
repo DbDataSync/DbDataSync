@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import {
@@ -61,10 +61,20 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
   // entry drives the form's mode controls — the form edits one segment, while a stored default may
   // be a list; a multi-entry default is honoured on the *scheduled* path, and here it seeds the
   // shape rather than pretending the form can show all of it.
+  const seededFor = useRef<string | null>(null)
   useEffect(() => {
-    const stored = mapping?.defaultSegmenting?.[0]
+    const name = mapping?.name
+    // Wait for the mapping query to resolve — running while it is undefined would seed off nothing.
+    if (!name || seededFor.current === name) return
+    // The `undefined -> loaded` transition of the *initial* mapping is not a mapping change: the form
+    // already starts on 'full', and treating it as one resets a mode the operator picked in the
+    // moment before this query landed (which a fast open, or a slow API, makes a real window).
+    const isMappingChange = seededFor.current !== null
+    seededFor.current = name
+
+    const stored = mapping.defaultSegmenting?.[0]
     if (!stored) {
-      setMode('full')
+      if (isMappingChange) setMode('full')
       return
     }
     setMode(stored.mode)

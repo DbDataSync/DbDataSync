@@ -34,7 +34,10 @@ const secretEnv = {
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 60_000,
+  // A CI runner takes noticeably longer to stand up the API, the SPA, a spawned worker and a run
+  // against real SQL Server than a dev box does; a step that is comfortably under 60s locally can
+  // brush against it there. Double the ceiling on CI so genuine slowness is not read as a hang.
+  timeout: process.env.CI ? 120_000 : 60_000,
   fullyParallel: false,
   workers: 1,
   // Locally a failure is a signal to look at; in CI these are end-to-end against real SQL Server,
