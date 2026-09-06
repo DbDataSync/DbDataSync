@@ -487,6 +487,52 @@ public sealed class RunExecutorTests : IDisposable
     }
 
     /// <summary>
+    /// The point of the split: a backfill segment already Running — the "long reload holding a slot"
+    /// case — does not keep a Primary pass from being claimed and finished, and does not keep the
+    /// worker alive past its idle timeout either (the backfill lane winds down with the change lane
+    /// even while a Running row it does not own is still on the books).
+    /// </summary>
+    [Fact]
+    public async Task ExecuteWorkerAsync_ABusyBackfillLane_DoesNotBlockChangeProcessing()
+    {
+        SaveTask("crm-sync"); // continuous, 2s idle timeout
+        _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+        }, Author);
+        _configRepository.SaveConnection(new ConnectionInput
+        {
+            Name = "src",
+            DriverType = ConnectionDriverType.MsSql,
+            Host = "127.0.0.1",
+            Port = 1,
+            Database = "App",
+            AuthMode = AuthMode.IntegratedAuth,
+            Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
+        }, Author);
+
+        // Pin a backfill segment Running and never finish it — a stand-in for a reload that takes
+        // hours. Claimed by a different "worker", so the worker under test never touches it.
+        _workQueueStore.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-1");
+        var pinned = _workQueueStore.TryClaimNext("crm-sync", "slow-backfill", RunLane.Backfill)!;
+        _workQueueStore.MarkRunning(pinned.Id);
+
+        var primaryRunId = _workQueueStore.Enqueue("crm-sync", RunKind.Primary, "orders");
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await _executor.ExecuteWorkerAsync(
+            "crm-sync", new WorkerLanes(ChangeProcessing: 1, Backfill: 1), cancellation.Token);
+
+        Assert.False(cancellation.IsCancellationRequested, "the worker did not exit on its own — the backfill lane hung.");
+        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(primaryRunId)!.Status);
+        // The worker under test never claimed the pinned segment — it belongs to another worker — so
+        // it recorded no outcome for it.
+        Assert.NotEqual(RunStatus.Failed, _taskRunStore.GetRun(pinned.RunId)!.Status);
+    }
+
+    /// <summary>
     /// A cron replication keeps the old fast exit. Its next occurrence can be hours away, and holding
     /// a process open for that is not restraint, it is a leak.
     /// </summary>

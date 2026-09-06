@@ -50,7 +50,7 @@ public sealed class RunnerStateEndpointTests : IClassFixture<TestApiFactory>
         using var client = Client(_token.Value);
 
         var response = await client.GetAsync(
-            $"{StateProtocol.Route}/has-outstanding-work?taskName=nothing-here");
+            $"{StateProtocol.Route}/has-outstanding-work?taskName=nothing-here&lane=ChangeProcessing");
 
         response.EnsureSuccessStatusCode();
         Assert.False((await response.Content.ReadFromJsonAsync<BoolResponse>())!.Value);
@@ -67,7 +67,7 @@ public sealed class RunnerStateEndpointTests : IClassFixture<TestApiFactory>
         using var client = Client(token);
 
         var response = await client.GetAsync(
-            $"{StateProtocol.Route}/has-outstanding-work?taskName=nothing-here");
+            $"{StateProtocol.Route}/has-outstanding-work?taskName=nothing-here&lane=ChangeProcessing");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
