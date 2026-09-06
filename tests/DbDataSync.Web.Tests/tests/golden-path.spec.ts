@@ -249,9 +249,11 @@ test.describe.serial('golden path: define, configure, and run a replication end-
 
     // The Kind pickers are populated from the live capabilities endpoint, and default by capability:
     // a reader that can be scoped to a segment, and a writer that reconciles rather than only upserts.
-    await expect(page.getByTestId('backfill-reader-select')).toHaveValue('MsSqlBatchReload')
-    await expect(page.getByTestId('backfill-writer-select')).toHaveValue('MsSqlMergeReconcile')
-    await expect(page.getByTestId('backfill-mapping-select')).toHaveValue(MAPPING_NAME)
+    await expect(page.getByTestId('backfill-reader-select')).toHaveValue('MsSqlBatchReload', { timeout: 20_000 })
+    await expect(page.getByTestId('backfill-writer-select')).toHaveValue('MsSqlMergeReconcile', { timeout: 20_000 })
+    // Its own query (useTableMappings), not the capabilities one the two above share — on a loaded
+    // CI runner it can land after the default 5s even when the Kind pickers are already populated.
+    await expect(page.getByTestId('backfill-mapping-select')).toHaveValue(MAPPING_NAME, { timeout: 20_000 })
     await shot(page, '11-backfill-form.png')
 
     await page.getByTestId('backfill-submit-button').click()
@@ -2195,9 +2197,11 @@ public sealed class Shout : IValueColumnExpression
     // Back to deriving, and back to the merge writer, so the rest of this suite's replication is the
     // one it was.
     await page.reload()
-    // The reload restarts the whole SPA; give the pipeline its own budget to boot and refetch the
-    // mapping before the field-value assertion's clock starts, the same wait the goto above uses.
-    await expect(page.getByTestId('mapping-pipeline')).toBeVisible({ timeout: 20_000 })
+    // The reload restarts the whole SPA this deep into the run, when the API is also servicing a
+    // live run and provisioning polls: its boot + the pipeline's fan-out of capability/mapping/key
+    // calls can outlast a 20s window on a loaded CI runner even though it is instant locally. Give
+    // it the room the test-level budget (120s on CI) allows before the field assertion's clock.
+    await expect(page.getByTestId('mapping-pipeline')).toBeVisible({ timeout: 45_000 })
     await expect(page.getByTestId('mapping-natural-key-input')).toHaveValue(SOURCE_NAME_COLUMN,
       { timeout: 20_000 })
     await page.getByTestId('mapping-natural-key-override').click()
