@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using Microsoft.Data.SqlClient;
@@ -20,7 +19,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
 
     public async Task InitializeAsync()
     {
-        _connection = db.OpenConnection();
+        _connection = db.OpenConnection(pooled: false);
         _tableName = $"CdcProbe_{Guid.NewGuid():N}";
 
         await ExecuteAsync($"""
@@ -30,8 +29,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
             );
             """);
 
-        if (!await MsSqlCdcCatalog.CdcIsEnabledAsync(_connection, CancellationToken.None))
-            await ExecuteAsync("EXEC sys.sp_cdc_enable_db;");
+        await CdcCaptureJob.EnableDbAsync(_connection);
 
         // Retried on 1205. Enabling capture registers the Agent jobs, which touches msdb — and so
         // does the capture job that is already running for this database. SQL Server deadlocks the two
@@ -40,10 +38,25 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         // which is honest, and retrying a DDL apply on their behalf is a separate decision.
         await EnableCaptureWithRetryAsync();
 
-        // sp_cdc_enable_db creates the Agent jobs; it does not wait for them to start scanning. Until
-        // the first scan there is no max LSN, and the reader correctly reports that as "the capture
-        // job has not run" — which is the right answer and not the one these tests are asking about.
-        await WaitForCaptureStartedAsync();
+        // From here the fixture drives the scan by hand (ScanAsync stops the Agent capture job first),
+        // so the tests that wait on CDC are waiting on nothing but their own scan — "did not advance
+        // within 60s" and cleanup rounding against an un-scanned change table both stop being possible.
+        // One scan now so the instance has a max and min LSN; the reader reports their absence as "the
+        // capture job has not run", which is right and not what these tests are asking about.
+        await CdcCaptureJob.ScanAsync(_connection);
+        await AssertCaptureEstablishedAsync();
+    }
+
+    /// <summary>The scan in <see cref="InitializeAsync"/> establishes both boundaries; this fails
+    /// fast, with the capture job's state, if it somehow did not.</summary>
+    private async Task AssertCaptureEstablishedAsync()
+    {
+        var max = await MsSqlCdcCatalog.GetMaxLsnAsync(_connection, CancellationToken.None);
+        var min = await MsSqlCdcCatalog.GetMinLsnAsync(_connection, $"dbo_{_tableName}", CancellationToken.None);
+        if (max is null || min is null)
+            throw new InvalidOperationException(
+                $"CDC capture is not established after a scan (max={max is not null}, min={min is not null}). " +
+                $"{await CdcCaptureJob.DiagnoseAsync(_connection)}.");
     }
 
     private async Task EnableCaptureWithRetryAsync()
@@ -80,33 +93,13 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         ex.Errors.Cast<SqlError>().Any(e => e.Number == 1205)
         || ex.Message.Contains("was deadlocked on lock resources", StringComparison.Ordinal);
 
-    /// <summary>
-    /// Waits until capture is actually established: a max LSN means the job has scanned, and a min
-    /// LSN means the instance's start has been recorded. Both, because the window between them is
-    /// exactly where the reader's two boundary bugs lived.
-    /// </summary>
-    private async Task WaitForCaptureStartedAsync()
+    public async Task DisposeAsync()
     {
-        var started = Stopwatch.GetTimestamp();
-        while (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(90))
-        {
-            var max = await MsSqlCdcCatalog.GetMaxLsnAsync(_connection, CancellationToken.None);
-            var min = await MsSqlCdcCatalog.GetMinLsnAsync(_connection, $"dbo_{_tableName}", CancellationToken.None);
-            if (max is not null && min is not null)
-                return;
-
-            await Task.Delay(500);
-        }
-
-        throw new TimeoutException(
-            "The CDC capture job never produced a maximum LSN. Is SQL Server Agent running? " +
-            "(docker-compose.yml sets MSSQL_AGENT_ENABLED on mssql-source.)");
-    }
-
-    public Task DisposeAsync()
-    {
+        // Stop this database's capture job before the fixture drops the database, so it is not left
+        // scanning a vanished database and contending for the log reader with the next CDC test class.
+        try { await CdcCaptureJob.StopCaptureJobAsync(_connection); }
+        catch { /* best-effort teardown */ }
         _connection.Dispose();
-        return Task.CompletedTask;
     }
 
     private async Task ExecuteAsync(string sql)
@@ -169,25 +162,20 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
     }
 
     /// <summary>
-    /// The capture job scans the log on its own schedule, so a change is not readable the instant it
-    /// is committed. Waiting for the max LSN to move past a known point is what an operator's next
-    /// pass does too — this is the real latency, not a test artifact.
+    /// Captures everything committed so far and returns the position after it. A production pass waits
+    /// for the Agent capture job to come round; the fixture stopped that job and scans the log itself,
+    /// so this is the same guarantee without the wait — after it returns, every prior commit is in the
+    /// change table. <paramref name="after"/> is the caller's previous position, kept for readability
+    /// at the call sites; the scan makes no use of it.
     /// </summary>
     private async Task<string> WaitForCaptureAsync(string after)
     {
-        var deadline = Stopwatch.GetTimestamp();
-        while (Stopwatch.GetElapsedTime(deadline) < TimeSpan.FromSeconds(60))
-        {
-            var max = await MsSqlCdcCatalog.GetMaxLsnAsync(_connection, CancellationToken.None);
-            if (max is not null && MsSqlCdcCatalog.Compare(max, MsSqlCdcCatalog.FromWatermark(after)) > 0)
-                return MsSqlCdcCatalog.ToWatermark(max);
-
-            await Task.Delay(500);
-        }
-
-        throw new TimeoutException(
-            "The CDC capture job did not advance within 60s. Is SQL Server Agent running? " +
-            "(docker-compose.yml sets MSSQL_AGENT_ENABLED.)");
+        _ = after; // see the summary: kept for call-site readability, unused by the scan
+        await CdcCaptureJob.ScanAsync(_connection);
+        var max = await MsSqlCdcCatalog.GetMaxLsnAsync(_connection, CancellationToken.None)
+            ?? throw new InvalidOperationException(
+                $"No max LSN after a scan. {await CdcCaptureJob.DiagnoseAsync(_connection)}.");
+        return MsSqlCdcCatalog.ToWatermark(max);
     }
 
     /// <summary>CDC's change table holds only what happened since capture was enabled, so a table that
@@ -472,6 +460,9 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
             EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'{table}',
                  @role_name = NULL, @supports_net_changes = 0;
             """);
+        // A scan so this second instance records its start position — the fixture's stopped capture
+        // job will not do it, and an InitialLoad read against an instance with no floor is an error.
+        await CdcCaptureJob.ScanAsync(_connection);
 
         var source = new SourceTableRef
         {
@@ -544,32 +535,25 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
             [], "mapping", [], options, CancellationToken.None);
 
     /// <summary>
-    /// Waits until the capture job has caught up to a known number of pending changes, by reading the
-    /// window uncapped and counting it.
+    /// Scans the log and confirms all <paramref name="expected"/> pending changes are now captured, by
+    /// reading the window uncapped and counting it.
     /// <para>
     /// A read does not consume anything — the watermark belongs to the caller — so peeking like this
-    /// is free and leaves the position untouched for the capped pass under test. Needed because CDC's
-    /// latency is real: "the capped pass returned two of six" and "the capped pass returned two of the
-    /// two that had been captured so far" are the same observation, and only one of them is the
-    /// behaviour being asserted.
+    /// is free and leaves the position untouched for the capped pass under test. It matters because
+    /// "the capped pass returned two of six" and "the capped pass returned two of the two captured so
+    /// far" are the same observation, and only one is the behaviour being asserted — so the scan has
+    /// to have caught up to all six before the capped read is taken.
     /// </para>
     /// </summary>
     private async Task WaitForPendingChangesAsync(string watermark, int expected, SourceTableRef? source = null)
     {
-        var started = Stopwatch.GetTimestamp();
-        var last = -1;
-        while (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(90))
-        {
-            last = (await CollectAsync((await ReadAsync(watermark, Uncapped(), source)).Rows)).Count;
-            if (last >= expected)
-                return;
+        await CdcCaptureJob.ScanAsync(_connection);
 
-            await Task.Delay(500);
-        }
-
-        throw new TimeoutException(
-            $"The CDC capture job produced {last} of {expected} expected changes within 90s. " +
-            "Is SQL Server Agent running? (docker-compose.yml sets MSSQL_AGENT_ENABLED.)");
+        var captured = (await CollectAsync((await ReadAsync(watermark, Uncapped(), source)).Rows)).Count;
+        if (captured < expected)
+            throw new InvalidOperationException(
+                $"A scan captured {captured} of {expected} expected changes. " +
+                $"{await CdcCaptureJob.DiagnoseAsync(_connection)}.");
     }
 
     /// <summary>
@@ -653,6 +637,8 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
             EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'{table}',
                  @role_name = NULL, @supports_net_changes = 0;
             """);
+        // A scan so this second instance records its start position (see AnInstanceWithoutNetChanges).
+        await CdcCaptureJob.ScanAsync(_connection);
 
         var source = new SourceTableRef
         {

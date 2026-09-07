@@ -84,7 +84,11 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         (await _client.PutAsJsonAsync($"/api/replications/{_replicationName}", new ReplicationTaskConfig
         {
             Name = _replicationName,
-            Enabled = true,
+            // Disabled so the scheduler never spawns a worker: every test here drives its own run
+            // through TriggerAndWaitAsync (a manual trigger, which ignores Enabled), and an automatic
+            // pass landing between a test's "before" and "after" reads is exactly what made
+            // Metrics_ReportTheRunThatJustHappened flaky — it asserts an exact run count.
+            Enabled = false,
             Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
             ChangeProcessing = new ChangeProcessingConfig
             {

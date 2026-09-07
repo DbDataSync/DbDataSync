@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.Data.SqlClient;
 using Xunit;
 
@@ -29,7 +28,7 @@ public sealed class MsSqlCdcLsnTimeTests(MsSqlTestDatabase db)
 
     public async Task InitializeAsync()
     {
-        _connection = db.OpenConnection();
+        _connection = db.OpenConnection(pooled: false);
         _tableName = $"CdcLsnTime_{Guid.NewGuid():N}";
 
         await ExecuteAsync($"""
@@ -39,16 +38,19 @@ public sealed class MsSqlCdcLsnTimeTests(MsSqlTestDatabase db)
             );
             """);
 
-        if (!await MsSqlCdcCatalog.CdcIsEnabledAsync(_connection, CancellationToken.None))
-            await ExecuteAsync("EXEC sys.sp_cdc_enable_db;");
+        await CdcCaptureJob.EnableDbAsync(_connection);
 
         await EnableCaptureWithRetryAsync();
+
+        // WaitForMaxLsnAsync drives the scan itself from here (ScanAsync stops the Agent capture job
+        // first), so fn_cdc_map_lsn_to_time has a populated cdc.lsn_time_mapping without a timer wait.
     }
 
-    public Task DisposeAsync()
+    public async Task DisposeAsync()
     {
+        try { await CdcCaptureJob.StopCaptureJobAsync(_connection); }
+        catch { /* best-effort teardown */ }
         _connection.Dispose();
-        return Task.CompletedTask;
     }
 
     [Fact]
@@ -116,18 +118,10 @@ public sealed class MsSqlCdcLsnTimeTests(MsSqlTestDatabase db)
 
     private async Task<byte[]> WaitForMaxLsnAsync()
     {
-        var started = Stopwatch.GetTimestamp();
-        while (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(90))
-        {
-            if (await MsSqlCdcCatalog.GetMaxLsnAsync(_connection, CancellationToken.None) is { } max)
-                return max;
-
-            await Task.Delay(500);
-        }
-
-        throw new TimeoutException(
-            "The CDC capture job never produced a maximum LSN. Is SQL Server Agent running? " +
-            "(docker-compose.yml sets MSSQL_AGENT_ENABLED on mssql-source.)");
+        await CdcCaptureJob.ScanAsync(_connection);
+        return await MsSqlCdcCatalog.GetMaxLsnAsync(_connection, CancellationToken.None)
+            ?? throw new InvalidOperationException(
+                $"No max LSN after a scan. {await CdcCaptureJob.DiagnoseAsync(_connection)}.");
     }
 
     private async Task ExecuteAsync(string sql)

@@ -36,12 +36,19 @@ public sealed class MsSqlTestDatabase : IAsyncLifetime
         await ExecuteAsync(connection, $"DROP DATABASE [{DatabaseName}];");
     }
 
-    public SqlConnection OpenConnection()
+    /// <param name="pooled">
+    /// The CDC fixtures pass <c>false</c>. <c>sys.sp_cdc_scan</c> checks the database's log reader out
+    /// to its session and does not check it back in, so a pooled connection carries that lock back to
+    /// the pool and the next test's scan fails with "another connection is already running
+    /// 'sp_replcmds'". An unpooled connection releases it when the test disposes the connection.
+    /// </param>
+    public SqlConnection OpenConnection(bool pooled = true)
     {
         var builder = new SqlConnectionStringBuilder(ServerConnectionString)
         {
             InitialCatalog = DatabaseName,
             MultipleActiveResultSets = true,
+            Pooling = pooled,
         };
         var connection = new SqlConnection(builder.ConnectionString);
         connection.Open();

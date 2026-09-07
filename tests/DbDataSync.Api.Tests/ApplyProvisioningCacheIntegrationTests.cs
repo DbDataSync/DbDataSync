@@ -287,6 +287,11 @@ public sealed class ApplyProvisioningCacheIntegrationTests : IClassFixture<TestA
         (await _client.PutAsJsonAsync($"/api/replications/{_replicationName}", new ReplicationTaskConfig
         {
             Name = _replicationName,
+            // Disabled: these tests only exercise the Apply endpoint and never trigger a run, so a
+            // scheduled worker spawning against the scratch databases is pure noise — and a worker
+            // still holding a connection when DisposeAsync runs DROP DATABASE is what surfaced as an
+            // intermittent "database is currently in use" teardown failure.
+            Enabled = false,
             Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 30 },
             ChangeProcessing = new ChangeProcessingConfig
             {
