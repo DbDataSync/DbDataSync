@@ -342,6 +342,36 @@ public sealed class ProvisioningService(
                 results.Add(new ReplicationProvisioningStepResult(
                     id, id, ProvisioningStepOutcome.NoLongerNeeded, null, null, 0));
 
+        // Whoever creates or alters a target's shape records what it created — the same rule the
+        // per-mapping Apply already follows (phase 94/97's ApplyAsync above). Without this, a mapping
+        // provisioned only through this aggregate page would create its target correctly and then fail
+        // its own first run against an uncached target shape, exactly the bug phase 97 fixed for the
+        // Setup card's own Apply button.
+        //
+        // A mapping earns the cache refresh when every Table-scope, Target-side step it contributed to
+        // this call actually applied — never for a step that is merely absent from the fresh plan
+        // (NoLongerNeeded), since that case has no ContributingMappings to read here at all: the step
+        // vanished from the plan before this loop ever saw it.
+        var outcomeById = results.ToDictionary(r => r.Id, r => r.Outcome);
+        var provisionedMappings = plan.Groups
+            .Where(g => g.Side == ProvisioningEndpointSide.Target)
+            .SelectMany(g => g.Steps)
+            .Where(s => s.Scope == ProvisioningStepScope.Table && selected.Contains(s.Id))
+            .SelectMany(s => s.ContributingMappings.Select(mapping => (Mapping: mapping, s.Id)))
+            .GroupBy(x => x.Mapping);
+
+        foreach (var group in provisionedMappings)
+        {
+            var allApplied = group.All(x =>
+                outcomeById.TryGetValue(x.Id, out var outcome) && outcome == ProvisioningStepOutcome.Applied);
+            if (!allApplied)
+                continue;
+
+            var (_, mapping, _, target) = LoadMapping(replicationName, group.Key);
+            MarkRenamesApplied(replicationName, mapping);
+            await CacheTargetColumnsAsync(replicationName, group.Key, target, cancellationToken);
+        }
+
         return new ReplicationProvisioningApplyResult(results);
     }
 
