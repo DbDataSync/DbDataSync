@@ -286,15 +286,20 @@ it does.
   from one table and written to another) would otherwise produce one group mixing `EnableSourceChangeCapture`
   steps and `CreateTargetTable` steps under one ambiguous "which side is this?" header. Adding `Side` to
   the key sidesteps that edge case entirely rather than special-casing it later.
-- **The batch apply does not (yet) call `MarkRenamesApplied` or `CacheTargetColumnsAsync`** the way the
-  per-mapping `ApplyAsync` does after a successful `CreateTargetTable`/`AlterTargetTable`. The phase doc's
-  batch-apply section describes per-step outcomes and stop-at-first-failure, not these two bits of
-  per-mapping bookkeeping, and doing it correctly here means mapping a merged step back to *every*
-  mapping it named (`ContributingMappings`) rather than one — solvable, but a real extension of scope
-  next to everything else this phase asks for. Flagged here rather than silently: an operator who
-  provisions a new target table entirely through this page rather than the per-mapping Setup card will
-  not get its columns cached automatically the way phase 97 intended, until a follow-up closes this
-  gap.
+- **Closed the same day it was flagged.** The batch apply initially did not call `MarkRenamesApplied` or
+  `CacheTargetColumnsAsync` the way the per-mapping `ApplyAsync` does after a successful
+  `CreateTargetTable`/`AlterTargetTable` — an operator provisioning a target entirely through this page
+  would create it correctly and then fail its own first run against an uncached shape, exactly the bug
+  phase 97 fixed for the Setup card's own Apply button. `ApplyReplicationPlanAsync` now walks every
+  Table-scope, Target-side step in the fresh plan, groups its `ContributingMappings` by mapping name, and
+  — for a mapping whose contributed steps *all* actually applied in this call (never for one merely
+  absent from the fresh plan, since a vanished step carries no `ContributingMappings` to read) — reloads
+  that mapping and runs both side effects, the same order the per-mapping path uses. Pinned by
+  `Apply_ATargetTableStep_CachesTheMappingsTargetColumns_AndMarksItsRenamesApplied`, which fails cleanly
+  against the pre-fix code (verified by hand: reverting just the production file reproduces the exact
+  failure) and required promoting the test file's fakes from an always-null `CurrentUser`/an
+  intentionally-throwing `IColumnCatalog` to real ones, since the original 13 tests never exercised a
+  successful Target-side Table apply for a mapping carrying real renames.
 - **Step rows show the statement as plain text, not one `CodeEditor` (Monaco) instance per row** the
   way the per-mapping Setup card's `PlanPanel` does. A page aggregating dozens of steps across a large
   replication mounting dozens of Monaco instances would be needlessly heavy; Copy still hands the DBA

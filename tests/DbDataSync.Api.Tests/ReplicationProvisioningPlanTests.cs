@@ -1,11 +1,13 @@
 using System.Data;
 using System.Data.Common;
 using ClrKernel.Core.Secrets;
+using DbDataSync.Api.Auth;
 using DbDataSync.Api.Services;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
 using LibGit2Sharp;
+using Microsoft.AspNetCore.Http;
 using Xunit;
 
 namespace DbDataSync.Api.Tests;
@@ -410,6 +412,50 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
     }
 
     [Fact]
+    public async Task Apply_ATargetTableStep_CachesTheMappingsTargetColumns_AndMarksItsRenamesApplied()
+    {
+        // The gap this pins: ApplyReplicationPlanAsync ran the DDL but never called the two side
+        // effects the per-mapping Setup card's own ApplyAsync already does after creating a target
+        // table — MarkRenamesApplied and CacheTargetColumnsAsync (phase 94/97). Unlike the other tests
+        // in this file, this one uses a *working* IColumnCatalog and a real CurrentUser, so those two
+        // side effects are actually observable rather than silently swallowed.
+        var sourceDriver = SatisfiedTargetDriver();
+        var targetDriver = CreateTableTargetDriver();
+        var factory = new FakeConnectionFactory(
+            connectionName => connectionName == "src" ? sourceDriver : targetDriver);
+
+        _config.SaveTableMapping(Replication, new TableMappingConfig
+        {
+            Name = "a",
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "Sales", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+            ColumnMappings =
+            [
+                new ColumnMapping
+                {
+                    SourceColumn = "Id", TargetColumn = "Id",
+                    Renames = [new RenameStep { From = "OldId", To = "Id", Applied = false }],
+                },
+            ],
+            Provisioning = new ProvisioningConfig(),
+        }, Author);
+
+        var service = CreateServiceWithSideEffects(factory);
+        var plan = await service.GetReplicationPlanAsync(Replication, CancellationToken.None);
+        var step = Assert.Single(
+            plan.Groups.Single(g => g.Side == ProvisioningEndpointSide.Target).Steps,
+            s => s.Scope == ProvisioningStepScope.Table);
+
+        var result = await service.ApplyReplicationPlanAsync(Replication, [step.Id], CancellationToken.None);
+        Assert.Equal(ProvisioningStepOutcome.Applied, Assert.Single(result.Steps).Outcome);
+
+        var reloaded = _config.LoadTableMapping(Replication, "a");
+        Assert.True(reloaded.ColumnMappings.Single().Renames.Single().Applied);
+        Assert.Equal("Id", Assert.Single(reloaded.TargetColumns).Name);
+        Assert.NotNull(reloaded.ColumnsCapturedUtc);
+    }
+
+    [Fact]
     public async Task Apply_ASelectedTableStep_WhoseDatabasePrerequisiteWasExcluded_StillRuns_WithAWarning()
     {
         var sourceDriver = ChangeTrackingSourceDriver("Sales");
@@ -439,19 +485,31 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
 
     // ---- Fakes ------------------------------------------------------------------------------------
 
-    // `CurrentUser` and the column reader are never exercised: nothing here calls the per-mapping
-    // `ApplyAsync` (which is what stamps rename bookkeeping and the target-column cache) — only
-    // `GetReplicationPlanAsync` and `ApplyReplicationPlanAsync`, neither of which touches either. See
-    // the phase doc's retrospective for why the aggregate Apply does not (yet) replicate those two
-    // per-mapping side effects.
+    // `CurrentUser` and the column reader are unused by most tests here: `ApplyReplicationPlanAsync`'s
+    // rename/target-column side effects (see the fix below) only fire once a Table-scope, Target-side
+    // step actually applies, and `UnusedColumnCatalog.ListColumnsAsync` throwing is caught and turned
+    // into an "unreadable" result rather than propagating — so a test built with this factory never
+    // touches `currentUser` even when it does exercise that path (nothing to rename, nothing to cache).
+    // `CreateServiceWithSideEffects` below is the one test that needs those effects to actually happen.
     private ProvisioningService CreateService(FakeConnectionFactory factory) =>
         new(_config, factory, currentUser: null!, new MappingColumnReader(new UnusedColumnCatalog()));
+
+    private ProvisioningService CreateServiceWithSideEffects(FakeConnectionFactory factory) =>
+        new(_config, factory, new CurrentUser(new HttpContextAccessor(), new AuthOptions()),
+            new MappingColumnReader(new FakeColumnCatalog()));
 
     private sealed class UnusedColumnCatalog : IColumnCatalog
     {
         public Task<IReadOnlyList<ColumnMetadata>> ListColumnsAsync(
             string connectionName, string database, string schema, string table, CancellationToken cancellationToken) =>
             throw new NotSupportedException("Not exercised by these tests.");
+    }
+
+    private sealed class FakeColumnCatalog : IColumnCatalog
+    {
+        public Task<IReadOnlyList<ColumnMetadata>> ListColumnsAsync(
+            string connectionName, string database, string schema, string table, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<ColumnMetadata>>([new ColumnMetadata("Id", "int", false, true, false)]);
     }
 
     private sealed class FakeConnectionFactory(
