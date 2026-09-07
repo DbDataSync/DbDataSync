@@ -7,6 +7,7 @@ import {
   useUpsertTableMapping,
 } from '../../api/hooks'
 import { tableExists } from '../../api/tableExists'
+import { canonicalJson } from '../../api/canonicalJson'
 import type {
   BatchReloadSegment, ColumnMapping, ColumnMetadata, ProvisioningConfig, ReadIntent, ReplicationTaskConfig,
   ResolvedRef, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
@@ -28,6 +29,10 @@ import { isQuerySource, queryOf, withQuery } from './querySource'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
 const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
+
+/** The provisioning a mapping starts with: inherit both answers rather than opt out of them (phase 68). */
+const inheritedProvisioning: ProvisioningConfig =
+  { createTargetTableIfMissing: null, alterTargetTableColumnsIfMissingOrChanged: null }
 
 /**
  * Whether two specs point at the same table, for deciding whether a save re-captures that side's
@@ -82,12 +87,11 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   const [scripts, setScripts] = useState<ScriptBindings>(structuredClone(existing?.scripts ?? {}))
   const [notes, setNotes] = useState<string | null>(existing?.notes ?? null)
   const [traceTiming, setTraceTiming] = useState(existing?.traceTiming ?? false)
+  // Null, not false: a mapping that has never been asked inherits, and a mapping that was asked and
+  // said no does not. Starting a new one at false would opt it out of a replication-level default it
+  // should have picked up.
   const [provisioning, setProvisioning] = useState<ProvisioningConfig>(
-    existing?.provisioning
-      // Null, not false: a mapping that has never been asked inherits, and a mapping that was asked
-      // and said no does not. Starting a new one at false would opt it out of a replication-level
-      // default it should have picked up.
-      ?? { createTargetTableIfMissing: null, alterTargetTableColumnsIfMissingOrChanged: null },
+    existing?.provisioning ?? inheritedProvisioning,
   )
   const [defaultSegmenting, setDefaultSegmenting] = useState<BatchReloadSegment[]>(
     structuredClone(existing?.defaultSegmenting ?? []),
@@ -194,6 +198,41 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     && columnMappings.length > 0
 
   /**
+   * Whether the draft differs from the mapping as saved. Save commits a change, so with nothing
+   * changed the button is disabled rather than a no-op that restamps the document (and, before this,
+   * bounced the operator to a different tab for their trouble).
+   *
+   * Only the fields this form edits are compared, in the same shape and with the same inherit
+   * fallbacks the state above is seeded with — so an untouched draft compares equal. Captured column
+   * metadata is deliberately absent: a save carries it across, but Refresh on the Column Mapping tab
+   * is what changes it, never an edit here. A brand-new mapping has nothing to compare against and is
+   * dirty as soon as it is valid.
+   */
+  const draftShape = canonicalJson({
+    name, source, target, columnMappings, scripts, provisioning, defaultSegmenting,
+    notes, traceTiming, defaultReadIntent,
+    readerOverride: pipeline.readerOverride,
+    cacheOverride: pipeline.cacheOverride,
+    writerOverride: pipeline.writerOverride,
+  })
+  const savedShape = existing && canonicalJson({
+    name: existing.name,
+    source: existing.sources[0] ?? { ...emptySpec, filter: null },
+    target: existing.targets[0] ?? { ...emptySpec },
+    columnMappings: existing.columnMappings ?? [],
+    scripts: existing.scripts ?? {},
+    provisioning: existing.provisioning ?? inheritedProvisioning,
+    defaultSegmenting: existing.defaultSegmenting ?? [],
+    notes: existing.notes ?? null,
+    traceTiming: existing.traceTiming ?? false,
+    defaultReadIntent: existing.defaultReadIntent ?? null,
+    readerOverride: existing.readerOverride ?? null,
+    cacheOverride: existing.cacheOverride ?? null,
+    writerOverride: existing.writerOverride ?? null,
+  })
+  const dirty = !existing || draftShape !== savedShape
+
+  /**
    * The cached column metadata this save should carry — phase 90.
    *
    * **Captured from the lists this form already fetched, never from a query of its own.** The
@@ -257,7 +296,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
               Delete
             </button>
           )}
-          <button type="submit" className="btn btn-primary" disabled={!canSave || upsert.isPending} data-testid="save-mapping-button">
+          <button type="submit" className="btn btn-primary" disabled={!canSave || !dirty || upsert.isPending} data-testid="save-mapping-button">
             {upsert.isPending ? 'Saving…' : 'Save mapping'}
           </button>
         </div>

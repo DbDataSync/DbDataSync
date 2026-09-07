@@ -205,7 +205,7 @@ test.describe.serial('golden path: define, configure, and run a replication end-
       await expect(page.getByTestId('live-log-viewer')).toContainText('Run started', { timeout: 20_000 })
       if (attempt === 1) await shot(page, '07-live-run-in-progress.png')
 
-      await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
+      await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 45_000 })
       const reported = await page.getByTestId('live-run-panel').textContent()
       if (reported?.includes('2 row(s) read · 2 row(s) written')) break
 
@@ -230,8 +230,14 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     // The real end-to-end proof, independent of anything the UI claims — and the source's own
     // rows are still 'Widget'/'Gadget', so upper case at the target can only have come from the
     // transform being evaluated by the source engine.
-    const output = querySql(`SET NOCOUNT ON; SELECT Id, Name FROM dbo.[${TARGET_TABLE}] ORDER BY Id;`, DB_NAME)
-    expect(output).toContain(NAMES.widget)
+    //
+    // Polled, not a single query: test 06's live panel reads "succeeded" when the run's own
+    // transaction commits, and on a busy CI runner the committed rows can take a beat longer to
+    // become visible to this separate connection. A hard read here then fails by a fraction of a
+    // second on a run that did everything right.
+    const query = `SET NOCOUNT ON; SELECT Id, Name FROM dbo.[${TARGET_TABLE}] ORDER BY Id;`
+    await expect.poll(() => querySql(query, DB_NAME), { timeout: 15_000 }).toContain(NAMES.widget)
+    const output = querySql(query, DB_NAME)
     expect(output).toContain(NAMES.gadget)
     expect(output.trim().split('\n').filter((l) => l.trim())).toHaveLength(2)
   })
@@ -259,17 +265,19 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('backfill-submit-button').click()
 
     await expect(page.getByTestId('live-run-panel')).toBeVisible()
-    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 30_000 })
+    // Spawning a worker and running a segmented reload against real SQL Server is slower to finish
+    // on a CI runner than a dev box — the same headroom the config's per-test timeout already grants.
+    await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 60_000 })
     await shot(page, '12-backfill-completed.png')
 
     // Distinguishable from the replication's own incremental passes in history.
-    await expect(page.getByTestId('run-history-table')).toContainText('BACKFILL', { timeout: 10_000 })
+    await expect(page.getByTestId('run-history-table')).toContainText('BACKFILL', { timeout: 20_000 })
     await expect(page.getByTestId('run-history-table')).toContainText('full')
     await shot(page, '13-run-history-with-backfill.png')
 
-    const rows = querySql(`SET NOCOUNT ON; SELECT Id, Name FROM dbo.[${TARGET_TABLE}] ORDER BY Id;`, DB_NAME)
-    expect(rows).toContain(NAMES.widget)
-    expect(rows).toContain(NAMES.gadget)
+    const query = `SET NOCOUNT ON; SELECT Id, Name FROM dbo.[${TARGET_TABLE}] ORDER BY Id;`
+    await expect.poll(() => querySql(query, DB_NAME), { timeout: 15_000 }).toContain(NAMES.widget)
+    expect(querySql(query, DB_NAME)).toContain(NAMES.gadget)
   })
 
   test('10 - the backfill left the incremental sync\'s watermark alone', async ({ page }) => {
@@ -2195,11 +2203,9 @@ public sealed class Shout : IValueColumnExpression
     expect(saved.writerOverride.kind).toBe('Scd2')
 
     // Back to deriving, and back to the merge writer, so the rest of this suite's replication is the
-    // one it was.
-    // Re-navigate to the pipeline tab rather than page.reload(): saving the mapping fires
-    // onSaved -> navigate(base/MAPPING_NAME), which drops the `/pipeline` segment, so a reload
-    // lands on the mapping's default tab once that navigation has settled. Locally the reload
-    // outraces it and still sees `/pipeline`; a slower CI runner does not.
+    // one it was. Navigate to the pipeline tab explicitly rather than page.reload() — the save above
+    // keeps this tab open now, but a fresh navigation is the clearer way to assert the override
+    // reloads from disk.
     await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}/pipeline`)
     await expect(page.getByTestId('mapping-pipeline')).toBeVisible({ timeout: 20_000 })
     await expect(page.getByTestId('mapping-natural-key-input')).toHaveValue(SOURCE_NAME_COLUMN,

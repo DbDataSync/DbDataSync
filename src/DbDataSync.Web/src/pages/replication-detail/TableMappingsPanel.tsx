@@ -1,4 +1,4 @@
-import { Navigate, NavLink, Outlet, useMatch, useNavigate, useOutletContext, useParams } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, useLocation, useMatch, useNavigate, useOutletContext, useParams } from 'react-router-dom'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { useTableMapping, useTableMappings } from '../../api/hooks'
 import { TableMappingForm } from './TableMappingForm'
@@ -101,6 +101,7 @@ export function MappingEditorRoute() {
   const { replicationName, base } = useOutletContext<MappingsOutletContext>()
   const { mappingName } = useParams<{ mappingName: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const { data: existing, isLoading } = useTableMapping(replicationName, mappingName)
   if (mappingName && isLoading) return <div className="empty">Loading…</div>
@@ -113,8 +114,15 @@ export function MappingEditorRoute() {
       existing={existing}
       base={base}
       // A save can rename, and a create names something that had no route a moment ago — so the URL
-      // follows what was actually saved rather than what was open.
-      onSaved={(savedName) => navigate(`${base}/${encodeURIComponent(savedName)}`, { replace: true })}
+      // follows what was actually saved rather than what was open. An existing mapping being re-saved
+      // stays on whichever tab it was edited from: saving from Pipeline lands back on Pipeline, not
+      // the default Notes tab. A create goes to the new mapping's canonical (tab-less) URL.
+      onSaved={(savedName) => {
+        const to = `${base}/${encodeURIComponent(savedName)}`
+        const from = mappingName && `${base}/${encodeURIComponent(mappingName)}`
+        const tab = from && location.pathname.startsWith(from) ? location.pathname.slice(from.length) : ''
+        navigate(`${to}${tab}`, { replace: true })
+      }}
       onRemoved={() => navigate(base, { replace: true })}
       onCancel={() => navigate(base)}
     />
