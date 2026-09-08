@@ -13,6 +13,12 @@ public interface IDriver
 {
     string DriverType { get; }
 
+    /// <summary>What an operator sees in the connection editor's engine picker. Defaults to
+    /// <see cref="DriverType"/> for every built-in — none has ever needed anything friendlier — so a
+    /// descriptor driver (which does: <c>driver.yaml</c>'s <c>displayName</c>, phase 109d) is the only
+    /// one that overrides it.</summary>
+    string DisplayName => DriverType;
+
     /// <summary>
     /// Everything this driver's connections take — addressing, authentication, database, and the
     /// free-form properties bag — with each parameter's visibility already decided from

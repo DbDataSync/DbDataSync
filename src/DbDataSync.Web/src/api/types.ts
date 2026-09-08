@@ -705,6 +705,15 @@ export interface DriverCapabilities {
   supportedProvisioningActions: string[]
 }
 
+/** One entry from `GET /api/drivers` — every driver currently registered, built-in or added from a
+ * `driver.yaml` descriptor (phase 109d). */
+export interface DriverSummary {
+  id: DriverType
+  displayName: string
+  builtIn: boolean
+  source: 'builtin' | 'descriptor'
+}
+
 // The Setup card — see architecture/implementation/todo/phase-025-database-provisioning.md.
 export type ProvisioningState = 'Satisfied' | 'Missing' | 'Unsupported' | 'Unknown'
 export type ProvisioningStepScope = 'Database' | 'Table'

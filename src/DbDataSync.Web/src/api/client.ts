@@ -13,6 +13,7 @@ import type {
   ConnectionTestReport,
   CredentialSource,
   DriverCapabilities,
+  DriverSummary,
   BulkCreateRequest,
   BulkCreateResult,
   MappingLag,
@@ -333,6 +334,9 @@ export const api = {
       ),
   },
   drivers: {
+    /** Every registered driver — the three built-ins plus any `driver.yaml` descriptor an operator has
+     * added (phase 109d). What the connection editor's engine picker reads instead of a hardcoded list. */
+    list: () => request<DriverSummary[]>('/api/drivers'),
     /** What a connection of this driver takes, given what it has been given so far. A POST because
      * the answer depends on the values — Host is not a setting in connection-string mode — and those
      * are an arbitrary operator-typed bag that does not belong in a query string. */

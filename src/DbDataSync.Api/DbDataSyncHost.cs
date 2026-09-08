@@ -14,6 +14,7 @@ using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Scripting;
+using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.Postgres;
 using DbDataSync.Providers;
 using DbDataSync.State;
@@ -162,6 +163,14 @@ public static class DbDataSyncHost
             // columns by contract. Registered through the same helper anyway, so there is one
             // registration shape rather than a special case to keep in step.
             registry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
+
+            // A descriptor-defined driver's provider (resolved above) is already loadable; this is
+            // what actually stands one up and puts it beside the three built-ins.
+            var providerRegistry = sp.GetRequiredService<ProviderRegistry>();
+            var repoRoot = sp.GetRequiredService<ApiOptions>().RepoRoot;
+            DriverLoader.LoadDescriptorDrivers(repoRoot, providerRegistry, registry,
+                (message, ex) => sp.GetRequiredService<ILogger<DriverRegistry>>().LogError(ex, "{Message}", message));
+
             return registry;
         });
         builder.Services.AddSingleton<ScriptedMetadata>();

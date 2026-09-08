@@ -10,6 +10,7 @@ import type {
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
+  drivers: ['drivers'] as const,
   connections: ['connections'] as const,
   connection: (name: string) => ['connections', name] as const,
   capabilities: (name: string) => ['connections', name, 'capabilities'] as const,
@@ -112,6 +113,12 @@ export function useSignOut() {
     mutationFn: () => api.auth.signOut(),
     onSuccess: () => queryClient.invalidateQueries(),
   })
+}
+
+/** Every registered driver — the engine picker's data source, so a `driver.yaml` descriptor (phase
+ * 109d) appears without a SPA change. Rarely if ever changes within a session, so no polling. */
+export function useDrivers() {
+  return useQuery({ queryKey: keys.drivers, queryFn: api.drivers.list })
 }
 
 export function useConnections() {

@@ -4,7 +4,7 @@ import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import { ParameterForm } from '../components/ParameterForm'
-import { useCapabilities, useConnectionParameters, useConnections, useDeleteConnection, useTestConnection, useUpsertConnection } from '../api/hooks'
+import { useCapabilities, useConnectionParameters, useConnections, useDeleteConnection, useDrivers, useTestConnection, useUpsertConnection } from '../api/hooks'
 import { ConnectionTestCard } from './connection-edit/ConnectionTestCard'
 import { ScriptBindingsCard } from '../components/ScriptBindings'
 import type { AuthMode, ConnectionInput, DriverType, ParameterDescriptor } from '../api/types'
@@ -112,6 +112,7 @@ export function ConnectionEditPage() {
   const navigate = useNavigate()
 
   const { data: connections } = useConnections()
+  const { data: drivers } = useDrivers()
   const upsert = useUpsertConnection()
   const del = useDeleteConnection()
   const test = useTestConnection()
@@ -281,9 +282,13 @@ export function ConnectionEditPage() {
                     }}
                     data-testid="connection-driver-select"
                   >
-                    <option value="MsSql">MsSql</option>
-                    <option value="Postgres">Postgres</option>
-                    <option value="DuckDb">DuckDb</option>
+                    {/* Every registered driver, built-in or from a driver.yaml descriptor (phase
+                        109d) — falls back to the three built-ins by id if the list hasn't loaded
+                        yet, so a fresh page load never shows an empty picker. */}
+                    {(drivers ?? [{ id: 'MsSql', displayName: 'MsSql' }, { id: 'Postgres', displayName: 'Postgres' }, { id: 'DuckDb', displayName: 'DuckDb' }])
+                      .map((driver) => (
+                        <option key={driver.id} value={driver.id}>{driver.displayName}</option>
+                      ))}
                   </select>
                 </Field>
 

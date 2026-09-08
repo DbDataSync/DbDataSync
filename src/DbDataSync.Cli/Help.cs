@@ -38,6 +38,12 @@ public static class Help
                   than by rebuilding DbDataSync. Runs `dotnet publish` under the hood — no network
                   access from the running host itself.
 
+              dbdatasync driver install <id> --provider <packageId> --version <v> [--factory-type type] [--from mysql] [--display-name name]
+              dbdatasync driver list | uninstall <id>
+                  Adds a whole new SQL engine — a driver.yaml descriptor plus its restored provider —
+                  without a DbDataSync rebuild. Watermark and batch-reload replication only; see
+                  architecture/planning/todo/nuget-loaded-drivers.md for what a descriptor can and can't do.
+
               dbdatasync version
             """);
     }

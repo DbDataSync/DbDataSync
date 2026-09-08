@@ -5,6 +5,7 @@
     <Project Path="src/DbDataSync.Cli/DbDataSync.Cli.csproj" />
     <Project Path="src/DbDataSync.Core/DbDataSync.Core.csproj" />
     <Project Path="src/DbDataSync.Drivers.Abstractions/DbDataSync.Drivers.Abstractions.csproj" />
+    <Project Path="src/DbDataSync.Drivers.Descriptor/DbDataSync.Drivers.Descriptor.csproj" />
     <Project Path="src/DbDataSync.Drivers.DuckDb/DbDataSync.Drivers.DuckDb.csproj" />
     <Project Path="src/DbDataSync.Drivers.Generic/DbDataSync.Drivers.Generic.csproj" />
     <Project Path="src/DbDataSync.Drivers.MsSql/DbDataSync.Drivers.MsSql.csproj" />
@@ -26,6 +27,7 @@
     <Project Path="tests/DbDataSync.Cli.Tests/DbDataSync.Cli.Tests.csproj" />
     <Project Path="tests/DbDataSync.Core.Tests/DbDataSync.Core.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.Abstractions.Tests/DbDataSync.Drivers.Abstractions.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Drivers.Descriptor.Tests/DbDataSync.Drivers.Descriptor.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.DuckDb.Tests/DbDataSync.Drivers.DuckDb.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.Generic.Tests/DbDataSync.Drivers.Generic.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.MsSql.Tests/DbDataSync.Drivers.MsSql.Tests.csproj" />

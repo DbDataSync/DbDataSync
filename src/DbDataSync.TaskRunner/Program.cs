@@ -2,6 +2,7 @@ using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.Postgres;
@@ -30,9 +31,9 @@ var scriptHost = new ScriptHost(
 
 // Loaded before DriverRegistry for the same reason the API loads it first: a descriptor or compiled
 // driver registered from 109d/109e on resolves its provider through this. The worker is a separate
-// process per phase 24's "two composition roots" note, so it repeats this rather than sharing the
+// process per the plan doc's "two composition roots" note, so it repeats this rather than sharing the
 // API's in-memory registry.
-new ProviderRegistry(options.RepoRoot).LoadAll();
+var providerRegistry = new ProviderRegistry(options.RepoRoot).LoadAll();
 
 var driverRegistry = new DriverRegistry();
 // The scripted reader is composed here rather than inside a driver, because it needs the script host
@@ -40,6 +41,7 @@ var driverRegistry = new DriverRegistry();
 driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
+DriverLoader.LoadDescriptorDrivers(options.RepoRoot, providerRegistry, driverRegistry);
 
 // Phase 39: a runner spawned by the API never opens the state file. It applies its changes over
 // loopback to the process that owns it, and journals to disk if that process goes away mid-run.

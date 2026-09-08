@@ -18,6 +18,7 @@ return command switch
     "invite" => InviteCommand.Run(rest),
     "secret" => SecretCommand.Run(rest),
     "provider" => await ProviderCommand.RunAsync(rest),
+    "driver" => await DriverCommand.RunAsync(rest),
     "version" => Version(),
     _ => Unknown(command),
 };

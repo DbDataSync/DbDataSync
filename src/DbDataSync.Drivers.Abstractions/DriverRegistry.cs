@@ -26,6 +26,10 @@ public sealed class DriverRegistry
             _hostReaders[driver.DriverType] = hostReaders;
     }
 
+    /// <summary>Every registered driver — for <c>GET /api/drivers</c> (phase 109d), the one place an
+    /// operator sees what's available without already knowing an id to ask <see cref="Get"/> for.</summary>
+    public IReadOnlyCollection<IDriver> All => _drivers.Values;
+
     /// <summary>Every reader available for this engine — the driver's own plus any the host supplied.
     /// The one place to ask, so a host-supplied reader is not visible to the pipeline but invisible to
     /// the capability endpoint, or the other way round.</summary>

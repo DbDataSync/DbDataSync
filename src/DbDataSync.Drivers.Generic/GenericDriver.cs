@@ -36,6 +36,8 @@ public sealed class GenericDriver : IDriver, IConnectionTester, IDialectProvider
 
     public string DriverType => _spec.Id;
 
+    public string DisplayName => _spec.DisplayName ?? _spec.Id;
+
     public int? DefaultPort => _spec.DefaultPort;
 
     public IReadOnlyList<IChangeReader> Readers { get; }
