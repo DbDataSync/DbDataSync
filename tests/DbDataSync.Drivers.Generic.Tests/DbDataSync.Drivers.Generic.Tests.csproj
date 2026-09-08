@@ -12,6 +12,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- GenericDriverTests proves GenericDriver against a real, non-trivial engine (Postgres) without
+         referencing DbDataSync.Drivers.Postgres itself — the point is that nothing but the ADO.NET
+         provider and DbDataSync.Core.Sql's PostgresDialect is needed to stand one up. -->
+    <PackageReference Include="Npgsql" Version="9.0.3" />
   </ItemGroup>
 
   <ItemGroup>
