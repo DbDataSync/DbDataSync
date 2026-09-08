@@ -82,6 +82,20 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # phase 109c: an engine the build does not reference, for ProviderLoadTests' proof that a
+      # `dbdatasync provider install`-restored MySqlConnector opens a real connection.
+      mysql:
+        image: mysql:9
+        env:
+          MYSQL_ROOT_PASSWORD: DbDataSync_Test_Pw1
+          MYSQL_DATABASE: dbdatasync
+        ports:
+          - 13306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -pDbDataSync_Test_Pw1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4

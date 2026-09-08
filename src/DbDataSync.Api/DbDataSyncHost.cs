@@ -15,6 +15,7 @@ using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Scripting;
 using DbDataSync.Drivers.Postgres;
+using DbDataSync.Providers;
 using DbDataSync.State;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
 
@@ -140,6 +141,12 @@ public static class DbDataSyncHost
             ScriptCacheDirectory.BesideStateDatabase(sp.GetRequiredService<ApiOptions>().StateDbPath));
         builder.Services.AddSingleton<ScriptCompiler>();
         builder.Services.AddSingleton<ScriptHost>();
+
+        // Loaded before DriverRegistry: a descriptor or a compiled driver registered from 109d/109e
+        // on resolves its provider through this, so the provider closure has to be loadable first.
+        // An absent or empty providers/ directory is a silent no-op — most deployments have none.
+        builder.Services.AddSingleton(sp =>
+            new ProviderRegistry(sp.GetRequiredService<ApiOptions>().RepoRoot).LoadAll());
 
         builder.Services.AddSingleton(sp =>
         {

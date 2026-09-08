@@ -9,6 +9,7 @@
     <Project Path="src/DbDataSync.Drivers.Generic/DbDataSync.Drivers.Generic.csproj" />
     <Project Path="src/DbDataSync.Drivers.MsSql/DbDataSync.Drivers.MsSql.csproj" />
     <Project Path="src/DbDataSync.Drivers.Postgres/DbDataSync.Drivers.Postgres.csproj" />
+    <Project Path="src/DbDataSync.Providers/DbDataSync.Providers.csproj" />
     <Project Path="src/DbDataSync.Scripting/DbDataSync.Scripting.csproj" />
     <Project Path="src/DbDataSync.Scripting.Abstractions/DbDataSync.Scripting.Abstractions.csproj" />
     <Project Path="src/DbDataSync.State/DbDataSync.State.csproj" />
@@ -29,6 +30,7 @@
     <Project Path="tests/DbDataSync.Drivers.Generic.Tests/DbDataSync.Drivers.Generic.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.MsSql.Tests/DbDataSync.Drivers.MsSql.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.Postgres.Tests/DbDataSync.Drivers.Postgres.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Providers.Tests/DbDataSync.Providers.Tests.csproj" />
     <Project Path="tests/DbDataSync.Scripting.Tests/DbDataSync.Scripting.Tests.csproj" />
     <Project Path="tests/DbDataSync.State.Tests/DbDataSync.State.Tests.csproj" />
     <Project Path="tests/DbDataSync.Verification.Tests/DbDataSync.Verification.Tests.csproj" />

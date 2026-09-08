@@ -30,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="..\DbDataSync.Api\DbDataSync.Api.csproj" />
     <ProjectReference Include="..\DbDataSync.Certificates\DbDataSync.Certificates.csproj" />
+    <ProjectReference Include="..\DbDataSync.Providers\DbDataSync.Providers.csproj" />
     <ProjectReference Include="..\DbDataSync.State\DbDataSync.State.csproj" />
     <!-- Referenced so the worker lands in the same output directory as the host that spawns it,
          which is what ApiOptions' beside-the-assembly resolution then finds. -->

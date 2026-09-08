@@ -31,6 +31,13 @@ public static class Help
                   Stores, checks, or removes a secret in the OS credential store — e.g. the state
                   database's password: dbdatasync secret set dbdatasync:config:stateConnectionString "Password=..."
 
+              dbdatasync provider install <packageId>[ <packageId>...] [--as <id>] --version <v> [--factory-type type] [--source feed]
+              dbdatasync provider sync [<id>] | list | uninstall <id>
+                  Restores an ADO.NET provider package (Microsoft.Data.SqlClient, Npgsql, MySqlConnector, ...)
+                  into <repo>/providers/<id>/, so it can be swapped by installing a new version rather
+                  than by rebuilding DbDataSync. Runs `dotnet publish` under the hood — no network
+                  access from the running host itself.
+
               dbdatasync version
             """);
     }

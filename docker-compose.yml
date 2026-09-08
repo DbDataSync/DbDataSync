@@ -63,7 +63,28 @@ services:
       retries: 10
       start_period: 10s
 
+  # A server engine the build does not reference — phase 109c's proof that a provider restored by
+  # `dbdatasync provider install` (MySqlConnector, here) opens a real connection with no compile-time
+  # dependency anywhere in the solution.
+  mysql:
+    image: mysql:9
+    container_name: dbdatasync-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DBDATASYNC_MYSQL_ROOT_PASSWORD:-DbDataSync_Test_Pw1}
+      MYSQL_DATABASE: dbdatasync
+    ports:
+      - "13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 volumes:
   mssql-source-data:
   mssql-target-data:
   postgres-data:
+  mysql-data:

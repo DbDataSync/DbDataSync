@@ -5,6 +5,7 @@ using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.Postgres;
+using DbDataSync.Providers;
 using DbDataSync.Scripting;
 using DbDataSync.State;
 using DbDataSync.State.Remote;
@@ -26,6 +27,12 @@ var configRepository = new ConfigRepository(options!.ConfigRoot, new GitCommitSe
 // every pass would start a compiler before compiling anything of ours.
 var scriptHost = new ScriptHost(
     configRepository, new ScriptCompiler(ScriptCacheDirectory.BesideStateDatabase(options.StateDbPath)));
+
+// Loaded before DriverRegistry for the same reason the API loads it first: a descriptor or compiled
+// driver registered from 109d/109e on resolves its provider through this. The worker is a separate
+// process per phase 24's "two composition roots" note, so it repeats this rather than sharing the
+// API's in-memory registry.
+new ProviderRegistry(options.RepoRoot).LoadAll();
 
 var driverRegistry = new DriverRegistry();
 // The scripted reader is composed here rather than inside a driver, because it needs the script host

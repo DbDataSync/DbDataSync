@@ -1,0 +1,139 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+namespace DbDataSync.Providers;
+
+/// <summary>
+/// Restores a provider package (and its full transitive closure — managed dependencies and any
+/// <c>runtimes/&lt;rid&gt;/native/</c> assets) into <c>&lt;repo&gt;/providers/&lt;id&gt;/lib/</c>, using
+/// nothing but the <c>dotnet</c> muxer <see cref="System.Diagnostics.ProcessStartInfo"/> already runs
+/// everywhere else in this solution — no NuGet client library in the host.
+/// <para>
+/// The mechanism is a throwaway SDK-style class-library project referencing every package in the
+/// manifest, published (not merely restored) so the SDK's own build copies the full dependency closure —
+/// managed DLLs, <c>.deps.json</c>, and any native <c>runtimes/</c> assets — into one flat output
+/// directory, which is copied verbatim into <c>lib/</c>.
+/// </para>
+/// </summary>
+public static class ProviderInstaller
+{
+    /// <summary>
+    /// Installs (or reinstalls) one provider. <paramref name="factoryType"/> defaults to
+    /// <see cref="KnownProviderFactories"/>'s guess for <paramref name="packages"/>'s first entry when
+    /// not given explicitly — the CLI is what requires one or the other.
+    /// </summary>
+    public static async Task<ProviderManifest> InstallAsync(
+        string repoRoot, string id, IReadOnlyList<ProviderPackageRef> packages, string factoryType,
+        string? nugetSource = null, CancellationToken cancellationToken = default)
+    {
+        var providerDir = ProviderPaths.ProviderDir(repoRoot, id);
+        var libDir = ProviderPaths.LibDir(providerDir);
+        Directory.CreateDirectory(providerDir);
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"dbdatasync-provider-{Guid.NewGuid():N}");
+        var outDir = Path.Combine(tempDir, "out");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            await PublishAsync(tempDir, outDir, packages, nugetSource, cancellationToken);
+
+            // A fresh lib/ each install — a version downgrade or a dropped transitive dependency must
+            // not leave a stale DLL from the previous version behind for the loader to pick up instead.
+            if (Directory.Exists(libDir))
+                Directory.Delete(libDir, recursive: true);
+            Directory.CreateDirectory(libDir);
+            CopyAll(outDir, libDir);
+
+            var manifest = new ProviderManifest(id, factoryType, packages);
+            manifest.Write(ProviderPaths.ManifestPath(providerDir));
+            return manifest;
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch (IOException) { /* best effort */ }
+        }
+    }
+
+    /// <summary>Re-runs the restore for an already-written manifest — a fresh deployment, or after
+    /// hand-editing a package version in <c>provider.json</c>.</summary>
+    public static async Task SyncAsync(string repoRoot, string id, CancellationToken cancellationToken = default)
+    {
+        var providerDir = ProviderPaths.ProviderDir(repoRoot, id);
+        var manifest = ProviderManifest.Read(ProviderPaths.ManifestPath(providerDir));
+        await InstallAsync(repoRoot, id, manifest.Packages, manifest.FactoryType, cancellationToken: cancellationToken);
+    }
+
+    private static async Task PublishAsync(
+        string tempDir, string outDir, IReadOnlyList<ProviderPackageRef> packages, string? nugetSource,
+        CancellationToken cancellationToken)
+    {
+        var csprojPath = Path.Combine(tempDir, "provider.csproj");
+        var packageRefs = string.Join(
+            Environment.NewLine, packages.Select(p => $"""    <PackageReference Include="{p.Id}" Version="{p.Version}" />"""));
+        // A RuntimeIdentifier (framework-dependent, not self-contained) so a package with
+        // runtimes/<rid>/native/ assets (SqlClient's SNI shim, DuckDB's libs) has its native binaries
+        // for *this* machine copied into the flat publish output — a portable, RID-less publish skips
+        // native assets entirely, which would silently strand exactly the packages this mechanism
+        // exists to carry.
+        var rid = RuntimeInformation.RuntimeIdentifier;
+        await File.WriteAllTextAsync(csprojPath, $"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <Nullable>disable</Nullable>
+                <RuntimeIdentifier>{rid}</RuntimeIdentifier>
+                <SelfContained>false</SelfContained>
+              </PropertyGroup>
+              <ItemGroup>
+            {packageRefs}
+              </ItemGroup>
+            </Project>
+            """, cancellationToken);
+
+        var args = new List<string> { "publish", csprojPath, "-c", "Release", "-o", outDir, "--nologo" };
+        if (nugetSource is not null)
+        {
+            args.Add("--source");
+            args.Add(nugetSource);
+        }
+
+        var (exitCode, output) = await RunDotnetAsync(args, cancellationToken);
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"`dotnet publish` failed restoring [{string.Join(", ", packages.Select(p => $"{p.Id} {p.Version}"))}]:\n{output}");
+        }
+    }
+
+    private static async Task<(int ExitCode, string Output)> RunDotnetAsync(
+        IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var arg in args)
+            startInfo.ArgumentList.Add(arg);
+
+        using var process = new Process { StartInfo = startInfo };
+        process.Start();
+        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        return (process.ExitCode, stdout + stderr);
+    }
+
+    private static void CopyAll(string sourceDir, string destDir)
+    {
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, file);
+            var destPath = Path.Combine(destDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            File.Copy(file, destPath, overwrite: true);
+        }
+    }
+}
