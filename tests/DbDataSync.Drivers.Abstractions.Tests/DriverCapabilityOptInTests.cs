@@ -18,7 +18,7 @@ public sealed class DriverCapabilityOptInTests
         var registry = new DriverRegistry();
         registry.Register(new UntestableDriver());
 
-        var capabilities = registry.Describe(ConnectionDriverType.MsSql);
+        var capabilities = registry.Describe(DriverIds.MsSql);
 
         Assert.NotNull(capabilities);
         Assert.False(capabilities!.SupportsConnectionTest);
@@ -30,7 +30,7 @@ public sealed class DriverCapabilityOptInTests
         var registry = new DriverRegistry();
         registry.Register(new TestableDriver());
 
-        Assert.True(registry.Describe(ConnectionDriverType.MsSql)!.SupportsConnectionTest);
+        Assert.True(registry.Describe(DriverIds.MsSql)!.SupportsConnectionTest);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public sealed class DriverCapabilityOptInTests
         var registry = new DriverRegistry();
         registry.Register(new UntestableDriver());
 
-        Assert.False(Assert.Single(registry.Describe(ConnectionDriverType.MsSql)!.Readers).DetectsDeletes);
+        Assert.False(Assert.Single(registry.Describe(DriverIds.MsSql)!.Readers).DetectsDeletes);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public sealed class DriverCapabilityOptInTests
         var registry = new DriverRegistry();
         registry.Register(new UntestableDriver());
 
-        Assert.Empty(Assert.Single(registry.Describe(ConnectionDriverType.MsSql)!.Readers).SupportedIntents);
+        Assert.Empty(Assert.Single(registry.Describe(DriverIds.MsSql)!.Readers).SupportedIntents);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class DriverCapabilityOptInTests
         var registry = new DriverRegistry();
         registry.Register(new IntentDeclaringDriver());
 
-        var reader = Assert.Single(registry.Describe(ConnectionDriverType.MsSql)!.Readers);
+        var reader = Assert.Single(registry.Describe(DriverIds.MsSql)!.Readers);
         Assert.Equal([ReadIntent.Changes, ReadIntent.ChangesFromEarliest], reader.SupportedIntents);
         Assert.DoesNotContain(ReadIntent.InitialLoad, reader.SupportedIntents);
     }
@@ -72,7 +72,7 @@ public sealed class DriverCapabilityOptInTests
         var registry = new DriverRegistry();
         registry.Register(new UntestableDriver());
 
-        Assert.Empty(registry.Describe(ConnectionDriverType.MsSql)!.SupportedProvisioningActions);
+        Assert.Empty(registry.Describe(DriverIds.MsSql)!.SupportedProvisioningActions);
     }
 
     [Fact]
@@ -83,12 +83,12 @@ public sealed class DriverCapabilityOptInTests
 
         Assert.Equal(
             [ProvisioningActions.CreateTargetTable],
-            registry.Describe(ConnectionDriverType.MsSql)!.SupportedProvisioningActions);
+            registry.Describe(DriverIds.MsSql)!.SupportedProvisioningActions);
     }
 
     private class UntestableDriver : IDriver
     {
-        public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
+        public string DriverType => DriverIds.MsSql;
         public IReadOnlyList<IChangeReader> Readers { get; } = [new SilentReader()];
         public IReadOnlyList<IStagingProvider> StagingProviders { get; } = [];
         public IReadOnlyList<IChangeWriter> Writers { get; } = [];
@@ -159,7 +159,7 @@ public sealed class DriverCapabilityOptInTests
 
     private sealed class IntentDeclaringDriver : IDriver
     {
-        public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
+        public string DriverType => DriverIds.MsSql;
         public IReadOnlyList<IChangeReader> Readers { get; } = [new IntentDeclaringReader()];
         public IReadOnlyList<IStagingProvider> StagingProviders { get; } = [];
         public IReadOnlyList<IChangeWriter> Writers { get; } = [];

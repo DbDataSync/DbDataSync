@@ -8,7 +8,7 @@ namespace DbDataSync.Drivers.Abstractions;
 /// reconciliation) against whatever drivers happen to be registered, instead of hardcoding a list
 /// that silently goes stale the moment a second driver exists.</summary>
 public sealed record DriverCapabilities(
-    ConnectionDriverType DriverType,
+    string DriverType,
     IReadOnlyList<ReaderCapability> Readers,
     IReadOnlyList<StagingCapability> StagingProviders,
     IReadOnlyList<WriterCapability> Writers,

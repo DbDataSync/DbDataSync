@@ -51,7 +51,7 @@ public sealed class SchedulerServiceHoldTests(TestApiFactory factory) : IClassFi
         (await _client.PutAsJsonAsync($"/api/connections/hold-src-{testName}", new ConnectionInput
         {
             Name = $"hold-src-{testName}",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.SqlAuth,

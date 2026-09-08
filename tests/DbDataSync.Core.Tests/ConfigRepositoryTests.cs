@@ -80,7 +80,7 @@ public sealed class ConfigRepositoryTests : IDisposable
         var input = new ConnectionInput
         {
             Name = "warehouse-db",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "warehouse.internal",
             AuthMode = AuthMode.IntegratedAuth,
         };
@@ -96,7 +96,7 @@ public sealed class ConfigRepositoryTests : IDisposable
         var input = new ConnectionInput
         {
             Name = "orders-db",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "sql01",
             AuthMode = AuthMode.SqlAuth,
             UserId = "svc_orders",
@@ -117,7 +117,7 @@ public sealed class ConfigRepositoryTests : IDisposable
         var input = new ConnectionInput
         {
             Name = "orders-db",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "sql01",
             AuthMode = AuthMode.SqlAuth,
             UserId = "svc_orders",
@@ -138,7 +138,7 @@ public sealed class ConfigRepositoryTests : IDisposable
         var loaded = _repository.LoadConnection("orders-db");
 
         Assert.Equal("orders-db", loaded.Name);
-        Assert.Equal(ConnectionDriverType.MsSql, loaded.DriverType);
+        Assert.Equal(DriverIds.MsSql, loaded.DriverType);
         Assert.Equal("sql01", loaded.Host);
     }
 
@@ -331,7 +331,7 @@ public sealed class ConfigRepositoryTests : IDisposable
         new()
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "sql01",
             Port = 1433,
             Database = "App",

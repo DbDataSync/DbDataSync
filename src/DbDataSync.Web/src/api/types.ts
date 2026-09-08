@@ -3,7 +3,11 @@
 // already knows the exact contract, and a codegen step would add a moving part (fetching a live
 // OpenAPI doc) without reducing risk here.
 
-export type DriverType = 'MsSql' | 'Postgres' | 'DuckDb'
+// Was a closed union of the three built-ins; now a plain string so a driver installed at runtime
+// (a YAML descriptor or a compiled plugin) is just another value of it — see `GET /api/drivers`
+// (added in phase 109d), which is what the connection editor's picker will read from instead of a
+// hardcoded list.
+export type DriverType = string
 /** What DbDataSync supplies when connecting. `None` is what a wallet, a DSN with stored credentials, a
  * .pgpass file or a credential-bearing URL all look like from here — the address or the environment
  * provides it and DbDataSync passes nothing. */

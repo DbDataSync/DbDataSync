@@ -41,7 +41,7 @@ public sealed class MappingReadStateTests(TestApiFactory factory) : IClassFixtur
         factory.Services.GetRequiredService<ConfigRepository>().SaveConnection(new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.SqlAuth,

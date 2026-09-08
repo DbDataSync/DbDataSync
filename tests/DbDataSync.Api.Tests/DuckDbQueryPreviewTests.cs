@@ -33,7 +33,7 @@ public sealed class DuckDbQueryPreviewTests(TestApiFactory factory) : IClassFixt
         var response = await _client.PutAsJsonAsync($"/api/connections/{name}", new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.DuckDb,
+            DriverType = DriverIds.DuckDb,
             // The whole connection: no host, no port, no credential. An embedded engine has none of
             // them, which is why this phase added no ConnectionConfig fields to describe one.
             ConnectionString = ":memory:",

@@ -11,7 +11,7 @@ namespace DbDataSync.Drivers.Abstractions;
 /// </summary>
 public interface IDriver
 {
-    ConnectionDriverType DriverType { get; }
+    string DriverType { get; }
 
     /// <summary>
     /// Everything this driver's connections take — addressing, authentication, database, and the

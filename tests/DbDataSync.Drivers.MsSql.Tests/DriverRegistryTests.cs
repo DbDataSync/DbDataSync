@@ -15,21 +15,21 @@ public sealed class DriverRegistryTests
         var driver = new MsSqlDriver();
         registry.Register(driver);
 
-        Assert.Same(driver, registry.Get(ConnectionDriverType.MsSql));
+        Assert.Same(driver, registry.Get(DriverIds.MsSql));
     }
 
     [Fact]
     public void Get_WhenNotRegistered_Throws()
     {
         var registry = new DriverRegistry();
-        Assert.Throws<InvalidOperationException>(() => registry.Get(ConnectionDriverType.MsSql));
+        Assert.Throws<InvalidOperationException>(() => registry.Get(DriverIds.MsSql));
     }
 
     [Fact]
     public void TryGet_WhenNotRegistered_ReturnsFalse()
     {
         var registry = new DriverRegistry();
-        Assert.False(registry.TryGet(ConnectionDriverType.MsSql, out _));
+        Assert.False(registry.TryGet(DriverIds.MsSql, out _));
     }
 
     [Theory]
@@ -41,7 +41,7 @@ public sealed class DriverRegistryTests
         var registry = new DriverRegistry();
         registry.Register(new MsSqlDriver());
 
-        Assert.Equal(expected, registry.SupportsReader(ConnectionDriverType.MsSql, kind));
+        Assert.Equal(expected, registry.SupportsReader(DriverIds.MsSql, kind));
     }
 
     [Fact]
@@ -50,8 +50,8 @@ public sealed class DriverRegistryTests
         var registry = new DriverRegistry();
         registry.Register(new MsSqlDriver());
 
-        Assert.True(registry.SupportsStagingProvider(ConnectionDriverType.MsSql, MsSqlDriverKinds.StagingTable));
-        Assert.True(registry.SupportsWriter(ConnectionDriverType.MsSql, MsSqlDriverKinds.Merge));
-        Assert.False(registry.SupportsWriter(ConnectionDriverType.MsSql, "Bogus"));
+        Assert.True(registry.SupportsStagingProvider(DriverIds.MsSql, MsSqlDriverKinds.StagingTable));
+        Assert.True(registry.SupportsWriter(DriverIds.MsSql, MsSqlDriverKinds.Merge));
+        Assert.False(registry.SupportsWriter(DriverIds.MsSql, "Bogus"));
     }
 }

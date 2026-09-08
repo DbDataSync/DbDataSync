@@ -277,7 +277,7 @@ public sealed class RunWatermarkTimeTests(TestApiFactory factory) : IClassFixtur
         (await _client.PutAsJsonAsync("/api/connections/wmtime-src", new ConnectionInput
         {
             Name = "wmtime-src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.SqlAuth,

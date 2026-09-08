@@ -36,7 +36,7 @@ public abstract class TargetEngine
     }
 
     public abstract string Name { get; }
-    public abstract ConnectionDriverType DriverType { get; }
+    public abstract string DriverType { get; }
     public abstract string Host { get; }
     public abstract int Port { get; }
     public abstract string UserId { get; }
@@ -136,7 +136,7 @@ public abstract class TargetEngine
     private sealed class MsSqlTarget : TargetEngine
     {
         public override string Name => "mssql";
-        public override ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
+        public override string DriverType => DriverIds.MsSql;
         public override string Host => "localhost";
         public override int Port => 14331;
         public override string UserId => "sa";
@@ -213,7 +213,7 @@ public abstract class TargetEngine
     private sealed class PostgresTarget : TargetEngine
     {
         public override string Name => "postgres";
-        public override ConnectionDriverType DriverType => ConnectionDriverType.Postgres;
+        public override string DriverType => DriverIds.Postgres;
         public override string Host => "localhost";
         public override int Port => 15432;
         public override string UserId => "dbdatasync";

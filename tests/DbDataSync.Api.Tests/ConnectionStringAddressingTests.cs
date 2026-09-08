@@ -37,7 +37,7 @@ public sealed class ConnectionStringAddressingTests(TestApiFactory factory) : IC
         var response = await SaveAsync(name, new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             ConnectionString = "Server=localhost,14330;TrustServerCertificate=True",
             Database = "master",
             AuthMode = AuthMode.SqlAuth,
@@ -69,7 +69,7 @@ public sealed class ConnectionStringAddressingTests(TestApiFactory factory) : IC
         (await SaveAsync(name, new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             ConnectionString = "Server=localhost,14330;TrustServerCertificate=True;Application Name=DbDataSyncTest",
             AuthMode = AuthMode.SqlAuth,
             UserId = "sa",
@@ -90,7 +90,7 @@ public sealed class ConnectionStringAddressingTests(TestApiFactory factory) : IC
         var response = await SaveAsync(name, new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             ConnectionString = "Server=localhost,14330;User Id=sa;Password=DbDataSync_Test_Pw1",
             AuthMode = AuthMode.SqlAuth,
             UserId = "sa",
@@ -112,7 +112,7 @@ public sealed class ConnectionStringAddressingTests(TestApiFactory factory) : IC
 
         var response = await SaveAsync(name, new ConnectionInput
         {
-            Name = name, DriverType = ConnectionDriverType.MsSql, AuthMode = AuthMode.SqlAuth, UserId = "sa",
+            Name = name, DriverType = DriverIds.MsSql, AuthMode = AuthMode.SqlAuth, UserId = "sa",
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -127,7 +127,7 @@ public sealed class ConnectionStringAddressingTests(TestApiFactory factory) : IC
         (await SaveAsync(name, new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Port = 14330,
             Database = "master",
@@ -152,7 +152,7 @@ public sealed class ConnectionStringAddressingTests(TestApiFactory factory) : IC
         (await SaveAsync(name, new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.Postgres,
+            DriverType = DriverIds.Postgres,
             ConnectionString = "Host=localhost;Port=15432;Timeout=5",
             Database = "postgres",
             AuthMode = AuthMode.SqlAuth,

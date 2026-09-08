@@ -27,7 +27,7 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
     /// <summary>What a script generating SQL for this engine is told about it.</summary>
     public SqlDialect Dialect => PostgresDialect.Instance;
 
-    public ConnectionDriverType DriverType => ConnectionDriverType.Postgres;
+    public string DriverType => DriverIds.Postgres;
 
     /// <summary>Postgres's default listening port, pre-filled on a new connection. Declared here
     /// rather than in the SPA, which had a table of these that a third driver would have made stale.</summary>

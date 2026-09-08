@@ -120,8 +120,11 @@ public sealed class ConnectionParametersTests(TestApiFactory factory) : IClassFi
             "/api/drivers/MsSql/connection-parameters", new Dictionary<string, string>(), JsonOptions);
         response.EnsureSuccessStatusCode();
 
+        // Phase 109a: the route's driverType went from a closed enum to a string, so an unrecognised
+        // id no longer fails ASP.NET model binding (which surfaced as 400) — it now reaches the
+        // handler's own `driverRegistry.TryGet` check below and gets that check's real answer, 404.
         var missing = await _client.PostAsJsonAsync(
             "/api/drivers/NotADriver/connection-parameters", new Dictionary<string, string>(), JsonOptions);
-        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 }

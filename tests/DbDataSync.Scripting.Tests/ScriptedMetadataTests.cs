@@ -42,7 +42,7 @@ public sealed class ScriptedMetadataTests : IDisposable
     {
         var input = new ConnectionInput
         {
-            Name = ConnectionName, DriverType = ConnectionDriverType.MsSql, Host = "h", AuthMode = AuthMode.IntegratedAuth,
+            Name = ConnectionName, DriverType = DriverIds.MsSql, Host = "h", AuthMode = AuthMode.IntegratedAuth,
         };
         if (boundScript is not null)
             input.Scripts[ScriptSlots.MetadataProvider] = new ScriptBinding { ScriptName = boundScript };
@@ -228,7 +228,7 @@ public sealed class ScriptedMetadataTests : IDisposable
     {
         public int ColumnCalls { get; private set; }
 
-        public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
+        public string DriverType => DriverIds.MsSql;
         public IReadOnlyList<IChangeReader> Readers { get; } = [];
         public IReadOnlyList<IStagingProvider> StagingProviders { get; } = [];
         public IReadOnlyList<IChangeWriter> Writers { get; } = [];

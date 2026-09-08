@@ -53,7 +53,7 @@ public sealed class ScriptDialectAdapter(SqlDialect dialect, string engineName) 
     /// </summary>
     public static IScriptDialect? For(IDriver driver) =>
         driver is IDialectProvider provider
-            ? new ScriptDialectAdapter(provider.Dialect, driver.DriverType.ToString())
+            ? new ScriptDialectAdapter(provider.Dialect, driver.DriverType)
             : null;
 
     public string EngineName => engineName;

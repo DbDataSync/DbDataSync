@@ -172,7 +172,7 @@ public sealed class RunExecutorTests : IDisposable
         _configRepository.SaveConnection(new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "127.0.0.1",
             Port = 1,
             Database = "App",
@@ -205,7 +205,7 @@ public sealed class RunExecutorTests : IDisposable
         _configRepository.SaveConnection(new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "127.0.0.1",
             Port = 1,
             Database = "App",
@@ -256,7 +256,7 @@ public sealed class RunExecutorTests : IDisposable
         _configRepository.SaveConnection(new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "127.0.0.1",
             Port = 1,
             Database = "App",
@@ -328,7 +328,7 @@ public sealed class RunExecutorTests : IDisposable
         _configRepository.SaveConnection(new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "127.0.0.1",
             Port = 1,
             Database = "App",
@@ -374,7 +374,7 @@ public sealed class RunExecutorTests : IDisposable
         _configRepository.SaveConnection(new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "127.0.0.1",
             Port = 1,
             Database = "App",
@@ -468,7 +468,7 @@ public sealed class RunExecutorTests : IDisposable
         _configRepository.SaveConnection(new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "127.0.0.1",
             Port = 1,
             Database = "App",
@@ -505,7 +505,7 @@ public sealed class RunExecutorTests : IDisposable
         _configRepository.SaveConnection(new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "127.0.0.1",
             Port = 1,
             Database = "App",

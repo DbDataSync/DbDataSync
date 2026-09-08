@@ -63,7 +63,7 @@ public sealed class ApiClient(string baseUrl) : IDisposable
         await PutAsync($"/api/connections/{Scenario.SourceConnectionName}", new ConnectionInput
         {
             Name = Scenario.SourceConnectionName,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = Scenario.SourceHost,
             Port = Scenario.SourcePort,
             Database = Scenario.DatabaseName,

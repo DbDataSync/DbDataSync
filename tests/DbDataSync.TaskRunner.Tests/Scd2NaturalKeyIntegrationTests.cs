@@ -176,7 +176,7 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
     {
         ConnectionInput MakeConnectionInput(string name) => new()
         {
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Port = 14330,
             Database = _databaseName,

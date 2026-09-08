@@ -80,7 +80,7 @@ public sealed class ConnectionsController(
     /// </summary>
     [Authorize(Policies.Viewer)]
     [HttpGet("~/api/drivers/{driverType}/capabilities")]
-    public ActionResult<DriverCapabilities> CapabilitiesForDriver(ConnectionDriverType driverType)
+    public ActionResult<DriverCapabilities> CapabilitiesForDriver(string driverType)
     {
         var capabilities = driverRegistry.Describe(driverType);
         return capabilities is null
@@ -107,7 +107,7 @@ public sealed class ConnectionsController(
     [Authorize(Policies.Viewer)]
     [HttpPost("~/api/drivers/{driverType}/connection-parameters")]
     public ActionResult<IReadOnlyList<ParameterDescriptor>> ConnectionParameters(
-        ConnectionDriverType driverType, [FromBody] Dictionary<string, string>? values)
+        string driverType, [FromBody] Dictionary<string, string>? values)
     {
         if (!driverRegistry.TryGet(driverType, out var driver))
             return NotFound(new { error = $"No driver is registered for '{driverType}'." });

@@ -19,7 +19,8 @@ public sealed class ParameterCheck(DriverRegistry driverRegistry, ConfigReposito
     public void ThrowIfInvalid(ConnectionInput input)
     {
         if (!driverRegistry.TryGet(input.DriverType, out var driver))
-            return;
+            throw new ConfigValidationException(
+                $"Unknown driver '{input.DriverType}'. Install it with `dbdatasync driver install <package>`.");
 
         var values = DriverParameters.ValuesOf(input);
 

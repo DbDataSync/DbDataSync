@@ -529,7 +529,7 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
     }
 
     /// <summary>A driver whose provisioning behaviour is entirely delegate-driven, so each test states
-    /// only the plan(s) it cares about. <see cref="ConnectionDriverType.MsSql"/> throughout — never
+    /// only the plan(s) it cares about. <see cref="DriverIds.MsSql"/> throughout — never
     /// exercised for its real behaviour here, only so <c>ResolveDialect</c> and the column-building
     /// helpers <see cref="DbDataSync.Api.Services.ProvisioningService"/> already runs for real have a
     /// dialect to translate through.</summary>
@@ -539,7 +539,7 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
         private static readonly IReadOnlyList<ColumnMetadata> DefaultColumns =
             [new ColumnMetadata("Id", "int", false, true, false)];
 
-        public ConnectionDriverType DriverType => ConnectionDriverType.MsSql;
+        public string DriverType => DriverIds.MsSql;
         public IReadOnlyList<IChangeReader> Readers { get; } = [];
         public IReadOnlyList<IStagingProvider> StagingProviders { get; } = [];
         public IReadOnlyList<IChangeWriter> Writers { get; } = [];

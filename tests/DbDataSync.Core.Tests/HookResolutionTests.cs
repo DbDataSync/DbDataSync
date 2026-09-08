@@ -14,7 +14,7 @@ public sealed class HookResolutionTests
     {
         var connection = new ConnectionConfig
         {
-            Name = "tgt", DriverType = ConnectionDriverType.MsSql, Host = "h", AuthMode = AuthMode.SqlAuth,
+            Name = "tgt", DriverType = DriverIds.MsSql, Host = "h", AuthMode = AuthMode.SqlAuth,
         };
         foreach (var (point, list) in hooks)
             connection.Hooks[point] = list;

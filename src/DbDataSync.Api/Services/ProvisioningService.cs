@@ -785,17 +785,17 @@ public sealed class ProvisioningService(
         configRepository.SaveTableMapping(replicationName, mapping, currentUser.Author);
     }
 
-    private static ProvisioningPlan Unsupported(string action, ConnectionDriverType driverType) =>
+    private static ProvisioningPlan Unsupported(string action, string driverType) =>
         new(action, ProvisioningState.Unknown, [], [$"The '{driverType}' driver does not support provisioning."]);
 
     /// <summary>Same shape as <c>DbDataSync.TaskRunner.RunExecutor.ResolveDialect</c> — the one place
     /// this layer needs a concrete <see cref="SqlDialect"/> for an engine it isn't otherwise driving,
     /// to translate the *source's* native column types into canonical form.</summary>
-    private static SqlDialect ResolveDialect(ConnectionDriverType driverType) => driverType switch
+    private static SqlDialect ResolveDialect(string driverType) => driverType switch
     {
-        ConnectionDriverType.MsSql => MsSqlDialect.Instance,
-        ConnectionDriverType.Postgres => PostgresDialect.Instance,
-        ConnectionDriverType.DuckDb => DuckDbDialect.Instance,
+        DriverIds.MsSql => MsSqlDialect.Instance,
+        DriverIds.Postgres => PostgresDialect.Instance,
+        DriverIds.DuckDb => DuckDbDialect.Instance,
         _ => throw new InvalidOperationException($"No SqlDialect is registered for driver type '{driverType}'."),
     };
 }

@@ -20,7 +20,7 @@ namespace DbDataSync.Drivers.DuckDb;
 /// </summary>
 public sealed class DuckDbDriver : IDriver, IConnectionTester, IDialectProvider
 {
-    public ConnectionDriverType DriverType => ConnectionDriverType.DuckDb;
+    public string DriverType => DriverIds.DuckDb;
 
     public SqlDialect Dialect => DuckDbDialect.Instance;
 

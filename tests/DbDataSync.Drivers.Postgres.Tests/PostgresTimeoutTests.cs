@@ -12,7 +12,7 @@ public sealed class PostgresTimeoutTests
     private static ConnectionConfig Config(int? connect = null, int? command = null) => new()
     {
         Name = "timeouts",
-        DriverType = ConnectionDriverType.Postgres,
+        DriverType = DriverIds.Postgres,
         Host = "localhost",
         Port = 5432,
         Database = "probe",

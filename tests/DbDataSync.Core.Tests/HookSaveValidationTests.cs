@@ -29,7 +29,7 @@ public sealed class HookSaveValidationTests : IDisposable
 
     private ConnectionInput Connection(Dictionary<string, List<HookConfig>?> hooks) => new()
     {
-        Name = "tgt", DriverType = ConnectionDriverType.MsSql, Host = "h", AuthMode = AuthMode.IntegratedAuth, Hooks = hooks,
+        Name = "tgt", DriverType = DriverIds.MsSql, Host = "h", AuthMode = AuthMode.IntegratedAuth, Hooks = hooks,
     };
 
     [Fact]

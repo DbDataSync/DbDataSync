@@ -217,7 +217,7 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
         (await _client.PutAsJsonAsync($"/api/connections/{name}", new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = host,
             Port = port,
             Database = _databaseName,

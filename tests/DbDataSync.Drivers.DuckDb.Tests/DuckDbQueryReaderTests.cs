@@ -26,7 +26,7 @@ public sealed class DuckDbQueryReaderTests
     private static async Task<DbConnection> OpenAsync()
     {
         var connection = new DuckDbDriver().CreateConnection(
-            new ConnectionConfig { Name = "duck", DriverType = ConnectionDriverType.DuckDb, AuthMode = AuthMode.None },
+            new ConnectionConfig { Name = "duck", DriverType = DriverIds.DuckDb, AuthMode = AuthMode.None },
             credential: null);
         await connection.OpenAsync();
         return connection;

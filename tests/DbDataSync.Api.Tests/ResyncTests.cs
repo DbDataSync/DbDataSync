@@ -37,7 +37,7 @@ public sealed class ResyncTests(TestApiFactory factory) : IClassFixture<TestApiF
         (await _client.PutAsJsonAsync("/api/connections/src", new ConnectionInput
         {
             Name = "src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.SqlAuth,

@@ -27,7 +27,7 @@ public sealed class ParameterCheckTests(TestApiFactory factory) : IClassFixture<
         (await _client.PutAsJsonAsync($"/api/connections/{name}", new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.IntegratedAuth,
@@ -55,6 +55,31 @@ public sealed class ParameterCheckTests(TestApiFactory factory) : IClassFixture<
                 Writer = new WriterConfig { Kind = "MsSqlMerge" },
             },
         }, JsonOptions);
+    }
+
+    /// <summary>
+    /// Phase 109a: <c>ConnectionInput.DriverType</c> became a plain string so a not-yet-real
+    /// runtime-installed driver id is just another value of it. Until phase 109d gives operators a way
+    /// to install one, an unregistered id can only ever be a typo — this is that typo's message,
+    /// naming the install command that will exist once it does.
+    /// </summary>
+    [Fact]
+    public async Task AConnectionNamingAnUnregisteredDriver_IsRefusedNamingTheInstallCommand()
+    {
+        var name = $"param-{Guid.NewGuid():N}";
+        var response = await _client.PutAsJsonAsync($"/api/connections/{name}", new ConnectionInput
+        {
+            Name = name,
+            DriverType = "oracle",
+            Host = "localhost",
+            Database = "App",
+            AuthMode = AuthMode.IntegratedAuth,
+        }, JsonOptions);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("oracle", body);
+        Assert.Contains("dbdatasync driver install", body);
     }
 
     [Fact]

@@ -15,7 +15,7 @@ namespace DbDataSync.Scripting.Abstractions;
 public interface IScriptDialect
 {
     /// <summary>The engine's name, for a script that has to branch: <c>MsSql</c>, <c>Postgres</c>.
-    /// Matches <c>ConnectionDriverType</c>'s member names.</summary>
+    /// Matches <see cref="DbDataSync.Core.Config.DriverIds"/>'s built-in values.</summary>
     string EngineName { get; }
 
     string QuoteIdentifier(string identifier);

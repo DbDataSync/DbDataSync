@@ -42,7 +42,7 @@ public sealed class MsSqlDriverMetadataTests(MsSqlTestDatabase db) : IClassFixtu
         var config = new ConnectionConfig
         {
             Name = "test",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Port = 14330,
             Database = db.DatabaseName,

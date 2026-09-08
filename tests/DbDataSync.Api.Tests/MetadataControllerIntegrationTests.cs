@@ -63,7 +63,7 @@ public sealed class MetadataControllerIntegrationTests : IClassFixture<TestApiFa
         await _client.PutAsJsonAsync($"/api/connections/{name}", new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Port = 14330,
             Database = _databaseName,

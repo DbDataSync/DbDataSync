@@ -72,7 +72,7 @@ public sealed class ChangePollingGateTests(TestApiFactory factory) : IClassFixtu
         (await _client.PutAsJsonAsync($"/api/connections/{_connectionName}", new ConnectionInput
         {
             Name = _connectionName,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.SqlAuth,

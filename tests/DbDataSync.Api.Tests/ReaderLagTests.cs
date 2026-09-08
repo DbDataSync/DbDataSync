@@ -89,7 +89,7 @@ public sealed class ReaderLagTests(TestApiFactory factory) : IClassFixture<TestA
         (await _client.PutAsJsonAsync("/api/connections/lag-src", new ConnectionInput
         {
             Name = "lag-src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.SqlAuth,

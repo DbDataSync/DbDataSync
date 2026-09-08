@@ -35,7 +35,7 @@ public sealed class ScriptUsageScannerTests : IDisposable
         _config.SaveConnection(new ConnectionInput
         {
             Name = name,
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.IntegratedAuth,

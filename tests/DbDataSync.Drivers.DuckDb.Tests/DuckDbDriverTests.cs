@@ -9,7 +9,7 @@ public sealed class DuckDbDriverTests
     private static ConnectionConfig Config(string? connectionString = null) => new()
     {
         Name = "duck",
-        DriverType = ConnectionDriverType.DuckDb,
+        DriverType = DriverIds.DuckDb,
         AuthMode = AuthMode.None,
         ConnectionString = connectionString,
     };
@@ -115,7 +115,7 @@ public sealed class DuckDbDriverTests
         var registry = new DriverRegistry();
         registry.Register(new DuckDbDriver());
 
-        var capability = Assert.Single(registry.Describe(ConnectionDriverType.DuckDb)!.Readers);
+        var capability = Assert.Single(registry.Describe(DriverIds.DuckDb)!.Readers);
 
         Assert.False(capability.SupportsSegmentation);
         Assert.False(capability.DetectsDeletes);

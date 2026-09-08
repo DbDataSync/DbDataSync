@@ -29,6 +29,6 @@ public static class ScriptedQueryRegistration
             return;
         }
 
-        registry.Register(driver, [new ScriptedQueryReader(scriptHost, dialect, driver.DriverType.ToString(), catalog)]);
+        registry.Register(driver, [new ScriptedQueryReader(scriptHost, dialect, driver.DriverType, catalog)]);
     }
 }

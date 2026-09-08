@@ -219,7 +219,7 @@ public sealed class ReplicationLagTests(TestApiFactory factory) : IClassFixture<
         (await _client.PutAsJsonAsync("/api/connections/biglag-src", new ConnectionInput
         {
             Name = "biglag-src",
-            DriverType = ConnectionDriverType.MsSql,
+            DriverType = DriverIds.MsSql,
             Host = "localhost",
             Database = "App",
             AuthMode = AuthMode.SqlAuth,

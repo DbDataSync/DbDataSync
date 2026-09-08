@@ -2,11 +2,16 @@ using DbDataSync.Core.Sql;
 
 namespace DbDataSync.Core.Config;
 
-/// <summary>Database engines a connection can target. Extended as new drivers are added (see implementation-plan.md's Backlog section).</summary>
-public enum ConnectionDriverType
+/// <summary>
+/// The built-in driver ids. A connection's <see cref="ConnectionConfig.DriverType"/> is a plain
+/// string — not a closed enum — so a driver installed at runtime (a YAML descriptor or a compiled
+/// plugin; see <c>architecture/planning/todo/nuget-loaded-drivers.md</c>) is just another value of
+/// it. These constants exist so the three built-ins stay greppable and a rename is one edit.
+/// </summary>
+public static class DriverIds
 {
-    MsSql,
-    Postgres,
+    public const string MsSql = "MsSql";
+    public const string Postgres = "Postgres";
 
     /// <summary>
     /// DuckDB, embedded. Unlike the other two it is not a server: the "address" is a file path or
@@ -14,7 +19,7 @@ public enum ConnectionDriverType
     /// because what a DuckDB source reads is a query an operator wrote — see
     /// <c>DbDataSync.Drivers.DuckDb.DuckDbQueryReader</c>.
     /// </summary>
-    DuckDb,
+    public const string DuckDb = "DuckDb";
 }
 
 /// <summary>
@@ -48,7 +53,7 @@ public enum AuthMode
 public sealed class ConnectionConfig
 {
     public required string Name { get; set; }
-    public required ConnectionDriverType DriverType { get; set; }
+    public required string DriverType { get; set; }
 
     /// <summary>Host-mode addressing. Null when <see cref="ConnectionString"/> is used instead —
     /// exactly one of the two, enforced at save (see <c>ConfigValidation.ValidateAddressing</c>).</summary>
@@ -122,7 +127,7 @@ public sealed class ConnectionConfig
 public sealed class ConnectionInput
 {
     public required string Name { get; set; }
-    public required ConnectionDriverType DriverType { get; set; }
+    public required string DriverType { get; set; }
     public string? Host { get; set; }
     public int? Port { get; set; }
 

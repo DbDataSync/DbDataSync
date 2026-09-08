@@ -15,7 +15,7 @@ public sealed class MsSqlTimeoutTests
     private static ConnectionConfig Config(int? connect = null, int? command = null) => new()
     {
         Name = "timeouts",
-        DriverType = ConnectionDriverType.MsSql,
+        DriverType = DriverIds.MsSql,
         Host = "localhost",
         Port = 1433,
         Database = "probe",

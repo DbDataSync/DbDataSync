@@ -29,7 +29,7 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
     private static ConnectionInput MakeInput(string name) => new()
     {
         Name = name,
-        DriverType = ConnectionDriverType.MsSql,
+        DriverType = DriverIds.MsSql,
         Host = "sql01",
         Port = 1433,
         Database = "App",
@@ -55,7 +55,7 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
         var capabilities = await response.Content.ReadFromJsonAsync<DriverCapabilities>(JsonOptions);
 
         Assert.NotNull(capabilities);
-        Assert.Equal(ConnectionDriverType.MsSql, capabilities!.DriverType);
+        Assert.Equal(DriverIds.MsSql, capabilities!.DriverType);
 
         // Only the reload readers can expand an Auto segment into concrete ranges — this driver's own
         // and the portable one it registers alongside it.

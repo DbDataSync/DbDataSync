@@ -15,7 +15,7 @@ public sealed class ScriptResolutionTests
     {
         var connection = new ConnectionConfig
         {
-            Name = "src", DriverType = ConnectionDriverType.MsSql, Host = "h", AuthMode = AuthMode.SqlAuth,
+            Name = "src", DriverType = DriverIds.MsSql, Host = "h", AuthMode = AuthMode.SqlAuth,
         };
         foreach (var (slot, binding) in scripts)
             connection.Scripts[slot] = binding;
