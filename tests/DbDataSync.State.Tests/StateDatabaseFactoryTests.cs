@@ -21,9 +21,9 @@ public sealed class StateDatabaseFactoryTests : IDisposable
         // A connection string here would be nonsensical for SQLite — proving it's ignored is proving
         // the by-path constructor, not StateDatabase(engine, connectionString), is what actually ran.
         var database = StateDatabase.FromOptions(
-            StateEngine.Sqlite, _sqliteDbPath, "this is not a connection string", SecretStore.ForProviders([]));
+            StateEngineIds.Sqlite, _sqliteDbPath, "this is not a connection string", SecretStore.ForProviders([]));
 
-        Assert.Equal(StateEngine.Sqlite, database.Dialect.Engine);
+        Assert.Equal(StateEngineIds.Sqlite, database.Dialect.Engine);
         Assert.True(File.Exists(_sqliteDbPath));
     }
 
@@ -31,7 +31,7 @@ public sealed class StateDatabaseFactoryTests : IDisposable
     public void NonSqlite_NoConnectionString_ThrowsNamingTheMissingSetting()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            StateDatabase.FromOptions(StateEngine.MsSql, _sqliteDbPath, null, SecretStore.ForProviders([])));
+            StateDatabase.FromOptions(StateEngineIds.MsSql, _sqliteDbPath, null, SecretStore.ForProviders([])));
 
         Assert.Contains("DbDataSync:StateConnectionString", ex.Message);
     }
@@ -44,7 +44,7 @@ public sealed class StateDatabaseFactoryTests : IDisposable
         var secrets = SecretStore.ForProviders([new InMemorySecretProvider()]);
 
         var ex = Record.Exception(() =>
-            StateDatabase.FromOptions(StateEngine.MsSql, _sqliteDbPath, "Server=127.0.0.1,1;Database=x;", secrets));
+            StateDatabase.FromOptions(StateEngineIds.MsSql, _sqliteDbPath, "Server=127.0.0.1,1;Database=x;", secrets));
 
         Assert.NotNull(ex);
         Assert.DoesNotContain("Password", ex!.Message, StringComparison.OrdinalIgnoreCase);
@@ -62,7 +62,7 @@ public sealed class StateDatabaseFactoryTests : IDisposable
         // Getting a network-shaped failure instead is exactly the evidence the splice produced a
         // connection string SqlClient accepted as well-formed.
         var ex = Record.Exception(() =>
-            StateDatabase.FromOptions(StateEngine.MsSql, _sqliteDbPath, "Server=127.0.0.1,1;Database=x;", secrets));
+            StateDatabase.FromOptions(StateEngineIds.MsSql, _sqliteDbPath, "Server=127.0.0.1,1;Database=x;", secrets));
 
         Assert.NotNull(ex);
         Assert.IsNotType<ArgumentException>(ex);

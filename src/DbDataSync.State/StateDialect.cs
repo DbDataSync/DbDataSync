@@ -23,15 +23,12 @@ namespace DbDataSync.State;
 /// </summary>
 public abstract class StateDialect
 {
-    public static StateDialect For(StateEngine engine) => engine switch
-    {
-        StateEngine.Sqlite => SqliteStateDialect.Instance,
-        StateEngine.MsSql => MsSqlStateDialect.Instance,
-        StateEngine.Postgres => PostgresStateDialect.Instance,
-        _ => throw new ArgumentOutOfRangeException(nameof(engine), engine, "Unknown state engine."),
-    };
+    /// <summary>Looked up on <see cref="StateDialectRegistry.Default"/> — the three built-ins are
+    /// always there; anything else must have been registered first (a compiled plugin, 109h) or this
+    /// throws naming the built-ins and what a custom one requires.</summary>
+    public static StateDialect For(string engine) => StateDialectRegistry.Default.Get(engine);
 
-    public abstract StateEngine Engine { get; }
+    public abstract string Engine { get; }
 
     /// <summary>The mechanical differences — quoting and parameter spelling — reused from the
     /// replication side rather than restated here.</summary>

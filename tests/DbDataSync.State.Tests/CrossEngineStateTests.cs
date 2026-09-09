@@ -26,9 +26,9 @@ public sealed class CrossEngineStateTests : IDisposable
         Directory.Delete(_tempDir, recursive: true);
     }
 
-    private StateDatabase Open(StateEngine engine)
+    private StateDatabase Open(string engine)
     {
-        if (engine == StateEngine.Sqlite)
+        if (engine == StateEngineIds.Sqlite)
             return new StateDatabase(Path.Combine(_tempDir, $"{Guid.NewGuid():N}.db"));
 
         var fixture = new StateEngineFixture(engine);
@@ -36,7 +36,7 @@ public sealed class CrossEngineStateTests : IDisposable
         return fixture.Database;
     }
 
-    public static TheoryData<StateEngine> Engines => [StateEngine.Sqlite, StateEngine.MsSql, StateEngine.Postgres];
+    public static TheoryData<string> Engines => [StateEngineIds.Sqlite, StateEngineIds.MsSql, StateEngineIds.Postgres];
 
     /// <summary>
     /// The DDL renders and applies. Nothing else in this file can pass if this does not, but it fails
@@ -44,7 +44,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void TheSchemaIsCreated(StateEngine engine)
+    public void TheSchemaIsCreated(string engine)
     {
         var database = Open(engine);
 
@@ -67,7 +67,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// it (a pragma on one, a table on the other two).</summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void ReopeningDoesNotReapplyMigrations(StateEngine engine)
+    public void ReopeningDoesNotReapplyMigrations(string engine)
     {
         var database = Open(engine);
         var store = new TaskRunStore(database);
@@ -85,7 +85,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// <summary>The upsert idiom: insert, then overwrite, never two rows and never an error.</summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void UpsertOverwritesRatherThanDuplicating(StateEngine engine)
+    public void UpsertOverwritesRatherThanDuplicating(string engine)
     {
         var database = Open(engine);
         var watermarks = new ChangeWatermarkStore(database);
@@ -103,7 +103,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void ALockIsGrantedOnceAndRefusedAfterwards(StateEngine engine)
+    public void ALockIsGrantedOnceAndRefusedAfterwards(string engine)
     {
         var database = Open(engine);
         var locks = new RunLockStore(database);
@@ -130,7 +130,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void TheQueueAllowsOneInFlightRow_AndAnotherOnceItIsDone(StateEngine engine)
+    public void TheQueueAllowsOneInFlightRow_AndAnotherOnceItIsDone(string engine)
     {
         var database = Open(engine);
         var queue = new WorkQueueStore(database);
@@ -151,7 +151,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// also has to agree about which rows are the most recent.</summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void HistoryRespectsItsLimit_AndItsOrder(StateEngine engine)
+    public void HistoryRespectsItsLimit_AndItsOrder(string engine)
     {
         var database = Open(engine);
         var store = new TaskRunStore(database);
@@ -175,7 +175,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void GeneratedKeysIncrease(StateEngine engine)
+    public void GeneratedKeysIncrease(string engine)
     {
         var database = Open(engine);
         var store = new TaskRunStore(database);
@@ -193,7 +193,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// round-tripping as each engine's text type.</summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void ARunRoundTrips(StateEngine engine)
+    public void ARunRoundTrips(string engine)
     {
         var database = Open(engine);
         var queue = new WorkQueueStore(database);
@@ -221,7 +221,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// were made nullable for — and null is the one thing engines most often disagree about.</summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void AnUntracedRunHasNoTiming(StateEngine engine)
+    public void AnUntracedRunHasNoTiming(string engine)
     {
         var database = Open(engine);
         var queue = new WorkQueueStore(database);
@@ -244,7 +244,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void LogsAreWrittenAndReadBack(StateEngine engine)
+    public void LogsAreWrittenAndReadBack(string engine)
     {
         var database = Open(engine);
         var queue = new WorkQueueStore(database);
@@ -268,7 +268,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void AReplayedLogLineIsStoredOnce_ButTwoLiveOnesAreTwo(StateEngine engine)
+    public void AReplayedLogLineIsStoredOnce_ButTwoLiveOnesAreTwo(string engine)
     {
         var database = Open(engine);
         var queue = new WorkQueueStore(database);
@@ -292,7 +292,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// single statement in the store.</summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void PruningRemovesRunsAndTheirLogs(StateEngine engine)
+    public void PruningRemovesRunsAndTheirLogs(string engine)
     {
         var database = Open(engine);
         var queue = new WorkQueueStore(database);
@@ -327,7 +327,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void RunHistoryKeysetPages_WithoutRepeatingOrDroppingARow(StateEngine engine)
+    public void RunHistoryKeysetPages_WithoutRepeatingOrDroppingARow(string engine)
     {
         var database = Open(engine);
         var queue = new WorkQueueStore(database);
@@ -366,7 +366,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// path — see <c>TaskRunStore.GetMappingRunHistory</c>'s own doc comment for why that matters.</summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void RunHistoryFiltersByKindMappingAndStatus_OnEveryEngine(StateEngine engine)
+    public void RunHistoryFiltersByKindMappingAndStatus_OnEveryEngine(string engine)
     {
         var database = Open(engine);
         var queue = new WorkQueueStore(database);
@@ -394,7 +394,7 @@ public sealed class CrossEngineStateTests : IDisposable
     /// bounded key column would fail first if the DDL got it wrong.</summary>
     [Theory]
     [MemberData(nameof(Engines))]
-    public void AUserAndTheirCredentialRoundTrip(StateEngine engine)
+    public void AUserAndTheirCredentialRoundTrip(string engine)
     {
         var database = Open(engine);
         var users = new UserStore(database);

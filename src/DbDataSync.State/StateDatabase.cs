@@ -38,11 +38,11 @@ public sealed partial class StateDatabase
     /// <summary>The SQLite path constructor, unchanged from before there was a choice — an existing
     /// deployment reaches this and nothing about its database moves.</summary>
     public StateDatabase(string sqliteFilePath)
-        : this(StateEngine.Sqlite, SqliteConnectionString(sqliteFilePath))
+        : this(StateEngineIds.Sqlite, SqliteConnectionString(sqliteFilePath))
     {
     }
 
-    public StateDatabase(StateEngine engine, string connectionString)
+    public StateDatabase(string engine, string connectionString)
     {
         Dialect = StateDialect.For(engine);
         _connectionString = connectionString;
@@ -110,7 +110,7 @@ public sealed partial class StateDatabase
     public DbCommand Command(DbConnection connection, string sql)
     {
         var command = connection.CreateCommand();
-        command.CommandText = Dialect.Engine == StateEngine.Sqlite
+        command.CommandText = Dialect.Engine == StateEngineIds.Sqlite
             ? sql
             : ParameterPlaceholder.Replace(sql, match => Dialect.Parameter(match.Groups[1].Value));
         return command;

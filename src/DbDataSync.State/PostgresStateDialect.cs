@@ -18,7 +18,7 @@ public sealed class PostgresStateDialect : StateDialect
 
     private PostgresStateDialect() { }
 
-    public override StateEngine Engine => StateEngine.Postgres;
+    public override string Engine => StateEngineIds.Postgres;
 
     public override SqlDialect Sql => PostgresDialect.Instance;
 

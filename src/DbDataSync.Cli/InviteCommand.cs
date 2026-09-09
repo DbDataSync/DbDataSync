@@ -34,16 +34,19 @@ public static class InviteCommand
         // already), then handed to the same factory, so the two never drift on how a non-SQLite state
         // store is reached.
         var config = DbDataSyncConfigFile.Read(root);
-        var engine = Enum.TryParse<StateEngine>(
-            Environment.GetEnvironmentVariable("DbDataSync__StateEngine") ?? config.GetValueOrDefault("DbDataSync:StateEngine"),
-            ignoreCase: true, out var parsedEngine)
-            ? parsedEngine
-            : StateEngine.Sqlite;
+        // Not validated here — same reasoning as ApiOptions.FromConfiguration (phase 109f): the raw
+        // string is handed to StateDialect.For, downstream inside StateDatabase.FromOptions, which is
+        // the one place that actually needs to answer "is this a real engine" and can say so with a
+        // useful error rather than this command silently guessing SQLite for a typo.
+        var engine =
+            Environment.GetEnvironmentVariable("DbDataSync__StateEngine")
+            ?? config.GetValueOrDefault("DbDataSync:StateEngine")
+            ?? StateEngineIds.Sqlite;
         var stateConnectionString =
             Environment.GetEnvironmentVariable("DbDataSync__StateConnectionString")
             ?? config.GetValueOrDefault("DbDataSync:StateConnectionString");
 
-        if (engine == StateEngine.Sqlite && !File.Exists(stateDb))
+        if (engine == StateEngineIds.Sqlite && !File.Exists(stateDb))
         {
             Console.Error.WriteLine(
                 $"No state database at '{stateDb}'. Start DbDataSync once before inviting anybody, or " +

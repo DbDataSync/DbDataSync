@@ -21,24 +21,24 @@ public sealed class StateEngineFixture : IDisposable
         Environment.GetEnvironmentVariable("DBDATASYNC_TEST_POSTGRES_SERVER")
         ?? "Host=localhost;Port=15432;Username=dbdatasync;Password=DbDataSync_Test_Pw1;Database=postgres";
 
-    private readonly StateEngine _engine;
+    private readonly string _engine;
     private readonly string _databaseName;
 
     public StateDatabase Database { get; }
 
-    public StateEngineFixture(StateEngine engine)
+    public StateEngineFixture(string engine)
     {
         _engine = engine;
         _databaseName = $"dbdatasync_state_{Guid.NewGuid():N}";
 
         switch (engine)
         {
-            case StateEngine.MsSql:
+            case StateEngineIds.MsSql:
                 Execute(MsSqlServer, $"CREATE DATABASE [{_databaseName}];");
                 Database = new StateDatabase(engine, MsSqlConnectionString(_databaseName));
                 break;
 
-            case StateEngine.Postgres:
+            case StateEngineIds.Postgres:
                 Execute(PostgresServer, $"CREATE DATABASE {_databaseName};");
                 Database = new StateDatabase(engine, PostgresConnectionString(_databaseName));
                 break;
@@ -53,7 +53,7 @@ public sealed class StateEngineFixture : IDisposable
     {
         try
         {
-            if (_engine == StateEngine.MsSql)
+            if (_engine == StateEngineIds.MsSql)
             {
                 Execute(MsSqlServer, $"ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
                 Execute(MsSqlServer, $"DROP DATABASE [{_databaseName}];");

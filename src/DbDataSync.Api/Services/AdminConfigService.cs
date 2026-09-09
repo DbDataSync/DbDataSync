@@ -51,8 +51,8 @@ public sealed class AdminConfigService(
             SupportsWrite: true),
         new("DbDataSync:StateEngine",
             "Which database backs the state store. Sqlite, MsSql or Postgres — run history, the work " +
-            "queue, watermarks, users and sessions all live here. An unrecognized value falls back to " +
-            "Sqlite rather than refusing to start.",
+            "queue, watermarks, users and sessions all live here. An unrecognized value refuses to " +
+            "start rather than silently falling back to Sqlite.",
             SupportsWrite: true),
         new("DbDataSync:StateConnectionString",
             "How to reach StateEngine when it isn't Sqlite. Never carries a password — set that " +
@@ -254,7 +254,7 @@ public sealed class AdminConfigService(
         "DbDataSync:RepoRoot" => apiOptions.RepoRoot,
         "DbDataSync:Url" => null,
         "DbDataSync:StateDbPath" => apiOptions.StateDbPath,
-        "DbDataSync:StateEngine" => apiOptions.StateEngine.ToString(),
+        "DbDataSync:StateEngine" => apiOptions.StateEngine,
         "DbDataSync:StateConnectionString" => apiOptions.StateConnectionString,
         "DbDataSync:TaskRunnerDllPath" => apiOptions.TaskRunnerDllPath,
         "DbDataSync:StatePort" => apiOptions.StatePort.ToString(),
@@ -287,7 +287,7 @@ public sealed class AdminConfigService(
     /// </summary>
     private static string? DefaultValueFor(string key) => key switch
     {
-        "DbDataSync:StateEngine" => ApiOptions.DefaultStateEngine.ToString(),
+        "DbDataSync:StateEngine" => ApiOptions.DefaultStateEngine,
         "DbDataSync:StatePort" => ApiOptions.DefaultStatePort.ToString(),
         "DbDataSync:RunRetentionDays" => ApiOptions.DefaultRunRetentionDays.ToString(),
         "DbDataSync:RunRetentionMaxPerMapping" => ApiOptions.DefaultRunRetentionMaxPerMapping.ToString(),

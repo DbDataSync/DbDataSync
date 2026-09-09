@@ -18,7 +18,7 @@ public sealed class SqliteStateDialect : StateDialect
 
     private SqliteStateDialect() { }
 
-    public override StateEngine Engine => StateEngine.Sqlite;
+    public override string Engine => StateEngineIds.Sqlite;
 
     public override SqlDialect Sql => SqliteSqlDialect.Instance;
 

@@ -25,7 +25,7 @@ public sealed class MsSqlStateDialect : StateDialect
 
     private MsSqlStateDialect() { }
 
-    public override StateEngine Engine => StateEngine.MsSql;
+    public override string Engine => StateEngineIds.MsSql;
 
     public override SqlDialect Sql => MsSqlDialect.Instance;
 

@@ -12,7 +12,7 @@ public sealed partial class StateDatabase
     /// <para>
     /// Before phase 79, <c>InviteCommand</c> didn't make this decision at all — it called
     /// <c>new StateDatabase(stateDb)</c> unconditionally, so an admin locked out of a
-    /// <see cref="StateEngine.MsSql"/> or <see cref="StateEngine.Postgres"/> deployment had no way to
+    /// <see cref="StateEngineIds.MsSql"/> or <see cref="StateEngineIds.Postgres"/> deployment had no way to
     /// mint a recovery invite. Extracting the branch <c>DbDataSyncHost.cs</c> already had, rather than
     /// writing a second one, is what makes that fix safe.
     /// </para>
@@ -26,11 +26,11 @@ public sealed partial class StateDatabase
     /// </para>
     /// </summary>
     public static StateDatabase FromOptions(
-        StateEngine engine, string stateDbPath, string? stateConnectionString, SecretStore secrets)
+        string engine, string stateDbPath, string? stateConnectionString, SecretStore secrets)
     {
         // SQLite keeps its own constructor and its own setting, so a deployment that has never heard
         // of phase 63 (or phase 79) reaches exactly the code it always did.
-        if (engine == StateEngine.Sqlite)
+        if (engine == StateEngineIds.Sqlite)
             return new StateDatabase(stateDbPath);
 
         if (stateConnectionString is null)

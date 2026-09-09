@@ -13,7 +13,7 @@ public sealed class ApiOptions
     // Named so the admin config screen's "Reset" action (phase 81 follow-up) can offer exactly the
     // literal FromConfiguration falls back to, rather than a second copy of these numbers that could
     // drift from the one actually applied.
-    public const StateEngine DefaultStateEngine = StateEngine.Sqlite;
+    public const string DefaultStateEngine = StateEngineIds.Sqlite;
     public const int DefaultStatePort = 0;
     public const int DefaultRunRetentionDays = 90;
     public const int DefaultRunRetentionMaxPerMapping = 1_000;
@@ -39,7 +39,7 @@ public sealed class ApiOptions
     /// anything — a follow-up, per the plan.
     /// </para>
     /// </summary>
-    public StateEngine StateEngine { get; init; } = StateEngine.Sqlite;
+    public string StateEngine { get; init; } = StateEngineIds.Sqlite;
 
     /// <summary>
     /// How to reach that engine. Ignored for SQLite, which uses <see cref="StateDbPath"/> — the
@@ -131,11 +131,13 @@ public sealed class ApiOptions
         {
             RepoRoot = repoRoot,
             StateDbPath = stateDbPath,
-            // Anything unrecognised is SQLite, loudly wrong rather than quietly fatal: a typo in an
-            // engine name should not stop the API starting on the store it has always used.
-            StateEngine = Enum.TryParse<StateEngine>(section["StateEngine"], ignoreCase: true, out var engine)
-                ? engine
-                : DefaultStateEngine,
+            // Not validated here — phase 109f moved that to StateDialect.For, the one place that
+            // actually needs an answer (StateDatabase.FromOptions, downstream of this). An id this
+            // build has never heard of is exactly as fatal as a real deployment needs it to be: with
+            // an open id space (a custom StateDialect can be registered), a typo and "I meant a real
+            // custom engine that just isn't registered yet" look identical from here, and silently
+            // falling back to SQLite would start an empty store instead of surfacing either mistake.
+            StateEngine = section["StateEngine"] ?? DefaultStateEngine,
             StateConnectionString = section["StateConnectionString"],
             TaskRunnerDllPath = taskRunnerDllPath,
             StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : DefaultStatePort,
