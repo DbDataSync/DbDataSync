@@ -1,4 +1,5 @@
 using DbDataSync.Api.Auth;
+using DbDataSync.Api.Configuration;
 using DbDataSync.State;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -14,9 +15,10 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
 {
     private StateDatabase Database => factory.Services.GetRequiredService<StateDatabase>();
 
-    private static BootstrapInvite Bootstrap(UserStore users, InviteStore invites, bool disabled = false) =>
+    private static BootstrapInvite Bootstrap(UserStore users, InviteStore invites, string root, bool disabled = false) =>
         new(users, invites,
             new AuthOptions { AdminGroup = "g", Disabled = disabled },
+            new ApiOptions { RepoRoot = root, StateDbPath = Path.Combine(root, "state.db"), TaskRunnerDllPath = "unused" },
             NullLogger<BootstrapInvite>.Instance);
 
     /// <summary>Fresh state, so "are there users" means what it says rather than what the rest of the
@@ -34,7 +36,7 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
         var (users, invites, root) = Fresh();
         try
         {
-            await Bootstrap(users, invites).StartAsync(CancellationToken.None);
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
 
             var invite = Assert.Single(invites.ListOutstanding());
             Assert.Equal(UserRole.Admin, invite.Role);
@@ -58,8 +60,8 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
         var (users, invites, root) = Fresh();
         try
         {
-            await Bootstrap(users, invites).StartAsync(CancellationToken.None);
-            await Bootstrap(users, invites).StartAsync(CancellationToken.None);
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
 
             Assert.Single(invites.ListOutstanding());
         }
@@ -77,10 +79,10 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
         var (users, invites, root) = Fresh();
         try
         {
-            await Bootstrap(users, invites).StartAsync(CancellationToken.None);
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
             users.CreateUser("Somebody", null, UserRole.Admin);
 
-            await Bootstrap(users, invites).StartAsync(CancellationToken.None);
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
 
             Assert.Empty(invites.ListOutstanding());
         }
@@ -101,7 +103,7 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
             var admin = users.CreateUser("Somebody", null, UserRole.Admin);
             invites.Create(UserRole.Viewer, forUserId: null, createdByUserId: admin.Id);
 
-            await Bootstrap(users, invites).StartAsync(CancellationToken.None);
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
 
             Assert.Single(invites.ListOutstanding());
         }
@@ -118,9 +120,53 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
         var (users, invites, root) = Fresh();
         try
         {
-            await Bootstrap(users, invites, disabled: true).StartAsync(CancellationToken.None);
+            await Bootstrap(users, invites, root, disabled: true).StartAsync(CancellationToken.None);
 
             Assert.Empty(invites.ListOutstanding());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>The one way in for a process with no console at all — a Windows service — so the
+    /// invite code has to reach disk, not just the log.</summary>
+    [Fact]
+    public async Task WithNoUsers_FirstRunFileIsWritten()
+    {
+        var (users, invites, root) = Fresh();
+        try
+        {
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
+
+            var path = Path.Combine(root, BootstrapInvite.FileName);
+            Assert.True(File.Exists(path));
+            var invite = Assert.Single(invites.ListOutstanding());
+            Assert.Contains($"/invite#", File.ReadAllText(path));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>Once somebody exists, the file goes with the invite it named — left behind, it would
+    /// be a standing way in nobody needs any more.</summary>
+    [Fact]
+    public async Task OnceAUserExists_FirstRunFileIsRemoved()
+    {
+        var (users, invites, root) = Fresh();
+        try
+        {
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
+            var path = Path.Combine(root, BootstrapInvite.FileName);
+            Assert.True(File.Exists(path));
+
+            users.CreateUser("Somebody", null, UserRole.Admin);
+            await Bootstrap(users, invites, root).StartAsync(CancellationToken.None);
+
+            Assert.False(File.Exists(path));
         }
         finally
         {

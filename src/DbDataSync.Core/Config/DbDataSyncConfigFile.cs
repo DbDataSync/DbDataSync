@@ -153,6 +153,81 @@ public static class DbDataSyncConfigFile
     }
 
     /// <summary>
+    /// As <see cref="SetValue"/>, for a YAML block sequence rather than a scalar — <c>Auth:Passkeys:Origins</c>
+    /// (phase 110's <c>setup</c> command) is the one key documented so far that needs this shape; every
+    /// other <c>DbDataSync:*</c> setting is a plain value. Replaces the whole existing block (the key
+    /// line and every more-indented line under it), not just the key line, since a shorter new list
+    /// left a stale trailing item behind otherwise.
+    /// </summary>
+    public static void SetListValue(string repoRoot, string section, string key, IReadOnlyList<string> values)
+    {
+        var path = PathIn(repoRoot);
+        var lines = File.Exists(path) ? File.ReadAllLines(path).ToList() : [];
+        var keyLinePrefix = $"  {key}:";
+        var newBlock = new List<string> { keyLinePrefix };
+        newBlock.AddRange(values.Select(v => $"    - {QuoteYamlScalar(v)}"));
+
+        var sectionHeaderIndex = lines.FindIndex(l => l.TrimEnd() == $"{section}:");
+        if (sectionHeaderIndex < 0)
+        {
+            if (lines.Count > 0 && lines[^1].Length > 0)
+                lines.Add("");
+
+            lines.Add($"{section}:");
+            lines.AddRange(newBlock);
+            File.WriteAllLines(path, lines, Encoding.UTF8);
+            return;
+        }
+
+        var keyLineIndex = -1;
+        var keyBlockEnd = -1;
+        for (var i = sectionHeaderIndex + 1; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && !line.TrimStart().StartsWith('#'))
+                break; // the next top-level section
+
+            if (keyLineIndex < 0 && line.TrimStart().StartsWith(keyLinePrefix.TrimStart(), StringComparison.Ordinal)
+                && !line.TrimStart().StartsWith('#'))
+            {
+                keyLineIndex = i;
+                var keyIndent = line.Length - line.TrimStart().Length;
+                var j = i + 1;
+                while (j < lines.Count)
+                {
+                    var candidate = lines[j];
+                    if (candidate.Length == 0)
+                    {
+                        j++;
+                        continue;
+                    }
+
+                    var candidateIndent = candidate.Length - candidate.TrimStart().Length;
+                    if (candidateIndent <= keyIndent)
+                        break;
+
+                    j++;
+                }
+
+                keyBlockEnd = j;
+                break;
+            }
+        }
+
+        if (keyLineIndex >= 0)
+        {
+            lines.RemoveRange(keyLineIndex, keyBlockEnd - keyLineIndex);
+            lines.InsertRange(keyLineIndex, newBlock);
+        }
+        else
+        {
+            lines.InsertRange(sectionHeaderIndex + 1, newBlock);
+        }
+
+        File.WriteAllLines(path, lines, Encoding.UTF8);
+    }
+
+    /// <summary>
     /// Always double-quoted. A plain YAML scalar is legal unquoted for most of what goes in this file
     /// (a bare URL, an engine name), but a connection string's own <c>;</c>/<c>=</c> punctuation is one
     /// edge case away from being read back wrong, and one quoting rule that is always correct beats a

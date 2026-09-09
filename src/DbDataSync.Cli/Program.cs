@@ -19,6 +19,8 @@ return command switch
     "secret" => SecretCommand.Run(rest),
     "provider" => await ProviderCommand.RunAsync(rest),
     "driver" => await DriverCommand.RunAsync(rest),
+    "doctor" => await DoctorCommand.RunAsync(rest),
+    "setup" => await SetupCommand.RunAsync(rest, new ConsolePromptIo()),
     "version" => Version(),
     _ => Unknown(command),
 };

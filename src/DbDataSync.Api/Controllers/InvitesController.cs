@@ -1,4 +1,5 @@
 using DbDataSync.Api.Auth;
+using DbDataSync.Api.Configuration;
 using DbDataSync.State;
 using Fido2NetLib;
 using Microsoft.AspNetCore.Authorization;
@@ -33,7 +34,8 @@ public sealed class InvitesController(
     UserStore users,
     SessionStore sessions,
     PasskeyService passkeys,
-    CurrentUser currentUser) : ControllerBase
+    CurrentUser currentUser,
+    ApiOptions apiOptions) : ControllerBase
 {
     private const string RegistrationStateCookie = "dbdatasync.passkey-registration";
     private const string AssertionStateCookie = "dbdatasync.passkey-assertion";
@@ -127,8 +129,10 @@ public sealed class InvitesController(
 
         users.AddCredential(user.Id, CredentialMethods.Passkey, credentialId, publicKey, label: "Passkey");
 
-        // The bootstrap invite exists only while there is no way in. There is now.
+        // The bootstrap invite exists only while there is no way in. There is now — and the file
+        // BootstrapInvite wrote for it goes too, rather than waiting for the next restart to notice.
         invites.DeleteBootstrapInvites();
+        TryDeleteFirstRunFile();
 
         Response.Cookies.Delete(RegistrationStateCookie);
         IssueSession(user);
@@ -193,4 +197,17 @@ public sealed class InvitesController(
     /// </summary>
     private string UrlFor(string code) =>
         $"{Request.Scheme}://{Request.Host}/invite#{code}";
+
+    /// <summary>Best effort, same reasoning as <see cref="BootstrapInvite"/>'s own write: a permissions
+    /// problem here should never fail a registration that has already fully succeeded.</summary>
+    private void TryDeleteFirstRunFile()
+    {
+        try
+        {
+            System.IO.File.Delete(Path.Combine(apiOptions.RepoRoot, BootstrapInvite.FileName));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 }

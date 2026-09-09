@@ -7,6 +7,14 @@ public static class Help
         Console.WriteLine($"""
             dbdatasync — cross-database replication.
 
+              dbdatasync setup [--repo <path>]
+                  Interactive walk-through for a fresh install, or a review screen for an existing
+                  one. Refuses to run when stdin/stdout aren't a real console.
+
+              dbdatasync doctor [--repo <path>] [--json]
+                  Non-interactive readiness check — repo, state store, providers/drivers, auth,
+                  binding, first admin. Exits 1 if anything fails; what `setup`'s review screen runs.
+
               dbdatasync serve [--repo <path>] [--state-db <path>] [--url <url>]
                   Starts the API, the scheduler and the web console in one process.
                   Defaults: --repo {CliOptions.DefaultRoot}, --url http://localhost:5080
