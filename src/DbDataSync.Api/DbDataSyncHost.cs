@@ -102,6 +102,15 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<AdminConfigService>();
         builder.Services.AddSingleton<AdminCertificateService>();
         builder.Services.AddSingleton<LibrariesService>();
+        // A short timeout: this is a read-only search-index query an operator is waiting on in a
+        // browser tab, not a background job — a slow or unreachable public index should degrade the
+        // Libraries screen to manual entry in a few seconds, not hang the request.
+        builder.Services.AddHttpClient(LibrarySearchService.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("DbDataSync-LibrarySearch/1.0");
+        });
+        builder.Services.AddSingleton<LibrarySearchService>();
 
         builder.Services.AddSingleton(sp =>
         {

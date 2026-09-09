@@ -16,6 +16,7 @@ import type {
   DriverSummary,
   KnownDriverSummary,
   KnownLibrarySummary,
+  LibrarySearchResponse,
   LibrarySummary,
   BulkCreateRequest,
   BulkCreateResult,
@@ -342,6 +343,11 @@ export const api = {
     list: () => request<LibrarySummary[]>('/api/libraries'),
     knownLibraries: () => request<KnownLibrarySummary[]>('/api/known-libraries'),
     knownDrivers: () => request<KnownDriverSummary[]>('/api/known-drivers'),
+    /** A read-only proxy onto the public NuGet index (phase 119). A disabled deployment answers 503,
+     * which `request` surfaces as a thrown `ApiError` — the caller treats that the same as a
+     * `status: "unavailable"` body (a 200 the call still resolved with), both meaning "fall back to
+     * manual entry". */
+    search: (q: string) => request<LibrarySearchResponse>(`/api/libraries/search?q=${encodeURIComponent(q)}`),
   },
   drivers: {
     /** Every registered driver — the three built-ins plus any `driver.yaml` descriptor an operator has

@@ -140,6 +140,13 @@ export function useKnownDrivers() {
   return useQuery({ queryKey: keys.knownDrivers, queryFn: api.libraries.knownDrivers })
 }
 
+/** The NuGet search box on the Libraries screen (phase 119) — a mutation, not a query: it runs once
+ * per operator-initiated search rather than being cached against a query key, since the same term
+ * typed twice should still hit the (possibly-changed) live index. */
+export function useSearchLibraries() {
+  return useMutation({ mutationFn: (q: string) => api.libraries.search(q) })
+}
+
 export function useConnections() {
   return useQuery({ queryKey: keys.connections, queryFn: api.connections.list })
 }

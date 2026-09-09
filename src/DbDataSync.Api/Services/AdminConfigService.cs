@@ -76,6 +76,10 @@ public sealed class AdminConfigService(
         new("DbDataSync:ChangeCheckRetentionDays",
             "How long the scheduler's change-check history (phase 75) is kept. 0 keeps forever.",
             SupportsWrite: true, Unit: "days"),
+        new("DbDataSync:NuGetSearchEnabled",
+            "Whether the Libraries screen's search box may call the public NuGet index. Disable in an " +
+            "air-gapped or locked-down deployment.",
+            SupportsWrite: true),
         new("DbDataSync:Auth:Disabled",
             "Runs with no authentication at all. Nested under Auth, one level past what " +
             "dbdatasync.config.yaml's writer can address — set via environment variable or CLI flag.",
@@ -262,6 +266,7 @@ public sealed class AdminConfigService(
         "DbDataSync:RunRetentionMaxPerMapping" => apiOptions.RunRetentionMaxPerMapping?.ToString() ?? "0",
         "DbDataSync:RunPruningIntervalMinutes" => ((int)apiOptions.RunPruningInterval.TotalMinutes).ToString(),
         "DbDataSync:ChangeCheckRetentionDays" => apiOptions.ChangeCheckRetentionDays?.ToString() ?? "0",
+        "DbDataSync:NuGetSearchEnabled" => apiOptions.NuGetSearchEnabled ? "true" : "false",
         "DbDataSync:Auth:Disabled" => authOptions.Disabled ? "true" : "false",
         "DbDataSync:Auth:AdminGroup" => authOptions.AdminGroup,
         "DbDataSync:Auth:ViewerGroup" => authOptions.ViewerGroup,
@@ -293,6 +298,7 @@ public sealed class AdminConfigService(
         "DbDataSync:RunRetentionMaxPerMapping" => ApiOptions.DefaultRunRetentionMaxPerMapping.ToString(),
         "DbDataSync:RunPruningIntervalMinutes" => ApiOptions.DefaultRunPruningIntervalMinutes.ToString(),
         "DbDataSync:ChangeCheckRetentionDays" => ApiOptions.DefaultChangeCheckRetentionDays.ToString(),
+        "DbDataSync:NuGetSearchEnabled" => ApiOptions.DefaultNuGetSearchEnabled ? "true" : "false",
         _ => null,
     };
 }

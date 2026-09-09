@@ -19,6 +19,7 @@ public sealed class ApiOptions
     public const int DefaultRunRetentionMaxPerMapping = 1_000;
     public const int DefaultChangeCheckRetentionDays = 7;
     public const int DefaultRunPruningIntervalMinutes = 60;
+    public const bool DefaultNuGetSearchEnabled = true;
 
     public required string RepoRoot { get; init; }
     public required string StateDbPath { get; init; }
@@ -119,6 +120,13 @@ public sealed class ApiOptions
     /// </summary>
     public TimeSpan RunPruningInterval { get; init; } = TimeSpan.FromHours(1);
 
+    /// <summary>
+    /// Whether the Libraries screen's search box (phase 119) may call the public NuGet index. True by
+    /// default; an air-gapped or locked-down deployment sets this false so the endpoint refuses the
+    /// call outright rather than timing out against a network it was never going to reach.
+    /// </summary>
+    public bool NuGetSearchEnabled { get; init; } = DefaultNuGetSearchEnabled;
+
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection("DbDataSync");
@@ -150,6 +158,9 @@ public sealed class ApiOptions
                 int.TryParse(section["RunPruningIntervalMinutes"], out var minutes) && minutes > 0
                     ? minutes
                     : DefaultRunPruningIntervalMinutes),
+            NuGetSearchEnabled = bool.TryParse(section["NuGetSearchEnabled"], out var nuGetSearchEnabled)
+                ? nuGetSearchEnabled
+                : DefaultNuGetSearchEnabled,
         };
     }
 

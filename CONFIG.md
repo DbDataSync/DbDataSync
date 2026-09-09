@@ -237,6 +237,7 @@ sets; see "`dbdatasync.config.yaml`," above, for the file itself.
 | `RunRetentionMaxPerMapping` | `DbDataSync__RunRetentionMaxPerMapping` | `1000` | most recent N finished runs kept, *per table mapping* (not global); `0` = no cap |
 | `RunPruningIntervalMinutes` | `DbDataSync__RunPruningIntervalMinutes` | `60` | how often the retention sweep runs |
 | `ChangeCheckRetentionDays` | `DbDataSync__ChangeCheckRetentionDays` | `7` | how long the scheduler's change-check history (phase 75) is kept; `0` = keep forever |
+| `NuGetSearchEnabled` | `DbDataSync__NuGetSearchEnabled` | `true` | whether the Libraries screen's search box (phase 119) may call the public NuGet index; `false` for an air-gapped or locked-down deployment |
 
 `TaskRunnerDllPath` resolves in this order: (1) beside the running assembly — true for the tool, the
 container, and any plain `dotnet publish`; (2) a dev-repo-layout guess (swaps `DbDataSync.Api/bin` for

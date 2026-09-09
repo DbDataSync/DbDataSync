@@ -33,7 +33,12 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-09 (later than the note below): 118 is done and removed — `GET /api/drivers` now
+Updated 2026-09-09 (later than the note below): 119 is done and removed — `GET
+/api/libraries/search` proxies the public NuGet index (a new `DbDataSync:NuGetSearchEnabled` key
+gates it), and the Libraries screen's search box, quick-add chips, and copyable install command all
+build on it. 120 (the actual Install/Add buttons) is what's left of this arc.
+
+Updated 2026-09-09 (earlier): 118 is done and removed — `GET /api/drivers` now
 reports a driver's bound library and kind-name capabilities, a new `GET /api/libraries` (and the two
 `known-*` catalog endpoints) back a new Admin → Drivers/Libraries tab pair, all read-only. 119–120
 build on it in order, same as before.

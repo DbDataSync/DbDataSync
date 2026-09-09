@@ -758,6 +758,27 @@ export interface KnownDriverSummary {
   boundLibrary: string
 }
 
+/** One row from `GET /api/libraries/search` (phase 119) — a NuGet package, reshaped from the public
+ * search index. `id` is what a caller would pass as `packageId` to `config library install`. */
+export interface LibrarySearchResult {
+  id: string
+  description: string
+  latestVersion: string
+  versions: string[]
+  totalDownloads: number
+  verified: boolean
+}
+
+/** `"ok"` (`results` may still be empty), `"disabled"` (`DbDataSync:NuGetSearchEnabled` is false — the
+ * server never called out), or `"unavailable"` (the call was made but failed or timed out). The SPA
+ * falls back to manual package-id/version entry for anything other than `"ok"`. */
+export type LibrarySearchStatus = 'ok' | 'disabled' | 'unavailable'
+
+export interface LibrarySearchResponse {
+  status: LibrarySearchStatus
+  results: LibrarySearchResult[] | null
+}
+
 // The Setup card — see architecture/implementation/todo/phase-025-database-provisioning.md.
 export type ProvisioningState = 'Satisfied' | 'Missing' | 'Unsupported' | 'Unknown'
 export type ProvisioningStepScope = 'Database' | 'Table'
