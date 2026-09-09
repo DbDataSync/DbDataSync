@@ -86,10 +86,11 @@ public sealed class ConfigCommandTests : IDisposable
     [Fact]
     public async Task Cert_ForwardsToCertCommand()
     {
-        var (exitCode, output) = await Run(["cert", "status"]);
+        // "list" (unlike "status"/"use-pem"/"use-pfx" since phase 113) stays Windows-only, gated the
+        // same way whether reached directly or through `config` — this environment is Linux, so the
+        // platform message is what proves the forward happened.
+        var (exitCode, output) = await Run(["cert", "list"]);
 
-        // Windows-only, gated the same way whether reached directly or through `config` — this
-        // environment is Linux, so the platform message is what proves the forward happened.
         Assert.Equal(1, exitCode);
         Assert.Contains("Windows-only", output);
     }

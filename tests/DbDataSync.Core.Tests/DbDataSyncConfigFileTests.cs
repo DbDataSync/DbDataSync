@@ -89,6 +89,61 @@ public sealed class DbDataSyncConfigFileTests : IDisposable
     }
 
     [Fact]
+    public void RemoveValue_NoFile_IsANoOp()
+    {
+        DbDataSyncConfigFile.RemoveValue(_repoRoot, "DbDataSync", "Url");
+
+        Assert.False(File.Exists(Path_));
+    }
+
+    [Fact]
+    public void RemoveValue_KeyNotPresent_IsANoOp()
+    {
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://localhost:5080");
+
+        DbDataSyncConfigFile.RemoveValue(_repoRoot, "DbDataSync", "StateEngine");
+
+        Assert.Equal("http://localhost:5080", DbDataSyncConfigFile.Read(_repoRoot)["DbDataSync:Url"]);
+    }
+
+    [Fact]
+    public void RemoveValue_ExistingKey_RemovesOnlyThatLine()
+    {
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://localhost:5080");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "StateEngine", "Postgres");
+
+        DbDataSyncConfigFile.RemoveValue(_repoRoot, "DbDataSync", "StateEngine");
+
+        var flattened = DbDataSyncConfigFile.Read(_repoRoot);
+        Assert.Equal("http://localhost:5080", flattened["DbDataSync:Url"]);
+        Assert.False(flattened.ContainsKey("DbDataSync:StateEngine"));
+    }
+
+    [Fact]
+    public void RemoveValue_PreservesCommentsAndOtherSections()
+    {
+        File.WriteAllText(Path_,
+            """
+            # A note an operator left for themselves.
+            DbDataSync:
+              Url: http://localhost:5080
+              StateEngine: Postgres
+
+            Kestrel:Certificates:Default:
+              Path: /etc/certs/cert.pem
+              KeyPath: /etc/certs/key.pem
+            """);
+
+        DbDataSyncConfigFile.RemoveValue(_repoRoot, "Kestrel:Certificates:Default", "KeyPath");
+
+        var text = File.ReadAllText(Path_);
+        Assert.Contains("# A note an operator left for themselves.", text);
+        Assert.Contains("StateEngine: Postgres", text);
+        Assert.Contains("Path: /etc/certs/cert.pem", text);
+        Assert.DoesNotContain("KeyPath", text);
+    }
+
+    [Fact]
     public void SetValue_PreservesCommentsElsewhereInTheFile()
     {
         File.WriteAllText(Path_,

@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using DbDataSync.Api.Auth;
 using DbDataSync.Certificates;
@@ -14,47 +15,122 @@ namespace DbDataSync.Cli;
 /// bootstrapping it cannot depend on a browser reaching it first, the same reasoning phase 51 applied to
 /// <c>dbdatasync service install</c>.
 /// <para>
-/// Gated once, at the top, the same way <see cref="ServiceCommand.Run"/> gates its own Windows-only
-/// surface — nothing under this command runs, or is even reached, off Windows.
+/// **Windows-only except <c>use-pem</c>/<c>use-pfx</c>/<c>status</c> (phase 113).** Everything else —
+/// issuance from the Windows certificate store or an AD CS enterprise CA, and binding a store-installed
+/// certificate by thumbprint — has no equivalent off Windows and keeps its own
+/// <see cref="SupportedOSPlatformAttribute"/>. The three exceptions work with a certificate *file*
+/// instead (<see cref="System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile"/> /
+/// <see cref="System.Security.Cryptography.X509Certificates.X509CertificateLoader"/>, both genuine
+/// cross-platform .NET cryptography, the same reasoning <see cref="CertificateBuilder"/>'s own doc
+/// comment gives for why it isn't gated either) — the answer for Linux and macOS this phase adds.
 /// </para>
 /// </summary>
 public static class CertCommand
 {
     public static int Run(string[] args)
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            Console.Error.WriteLine(
-                "Certificate management is Windows-only. On Linux, terminate TLS in front of the " +
-                "container, the way any reverse proxy would — see the phase 82 doc's scope.");
-            return 1;
-        }
-
         if (args.Length == 0)
         {
             PrintUsage();
             return 1;
         }
 
+        var sub = args[0].ToLowerInvariant();
         var rest = args[1..];
-        return args[0].ToLowerInvariant() switch
+
+        // A plain `if (OperatingSystem.IsWindows())` guard, not folded into the condition below, is
+        // what the CA1416 platform-compatibility analyzer actually recognises as making everything
+        // inside it safe to call — a combined condition (`!IsWindows() && sub is not (...)`) does not
+        // get the same recognition, and every Windows-only case below would warn.
+        if (OperatingSystem.IsWindows())
+        {
+            return sub switch
+            {
+                "status" => Status(rest),
+                "list" => List(rest),
+                "new-self-signed" => NewSelfSigned(rest),
+                "enroll" => Enroll(rest),
+                "renew" => Renew(rest),
+                "retrieve" => Retrieve(rest),
+                "templates" => Templates(rest),
+                "bind" => Bind(rest),
+                "use-pem" => UsePem(rest),
+                "use-pfx" => UsePfx(rest),
+                var other => Unknown(other),
+            };
+        }
+
+        return sub switch
         {
             "status" => Status(rest),
-            "list" => List(rest),
-            "new-self-signed" => NewSelfSigned(rest),
-            "enroll" => Enroll(rest),
-            "renew" => Renew(rest),
-            "retrieve" => Retrieve(rest),
-            "templates" => Templates(rest),
-            "bind" => Bind(rest),
+            "use-pem" => UsePem(rest),
+            "use-pfx" => UsePfx(rest),
+            "list" or "new-self-signed" or "enroll" or "renew" or "retrieve" or "templates" or "bind" =>
+                WindowsOnlyRefusal(),
             var other => Unknown(other),
         };
     }
 
-    [SupportedOSPlatform("windows")]
+    private static int WindowsOnlyRefusal()
+    {
+        Console.Error.WriteLine(
+            "Certificate management beyond use-pem/use-pfx/status is Windows-only. On Linux/macOS, " +
+            "point Kestrel at a certificate file with `dbdatasync config cert use-pem`/`use-pfx`, or " +
+            "terminate TLS in front of the container with a reverse proxy.");
+        return 1;
+    }
+
+    /// <summary>
+    /// Cross-platform since phase 113: a file-based certificate (<c>Kestrel:Certificates:Default:Path</c>)
+    /// reports the same way on every OS; a Windows store-based one (<c>:Subject</c>) still needs
+    /// <see cref="StatusForStoreCertificate"/>.
+    /// </summary>
     private static int Status(string[] args)
     {
         var root = DbDataSyncRoot.Resolve(args);
+        var path = DbDataSyncConfigFile.Read(root).GetValueOrDefault($"{CertificateBinding.Section}:Path");
+
+        if (!string.IsNullOrEmpty(path))
+            return StatusForFileCertificate(root, path);
+
+        if (OperatingSystem.IsWindows())
+            return StatusForStoreCertificate(args, root);
+
+        Console.WriteLine(
+            "No certificate is bound. Run 'dbdatasync config cert use-pem' or 'dbdatasync config cert use-pfx'.");
+        return 0;
+    }
+
+    private static int StatusForFileCertificate(string root, string path)
+    {
+        var keyPath = DbDataSyncConfigFile.Read(root).GetValueOrDefault($"{CertificateBinding.Section}:KeyPath");
+        X509Certificate2 certificate;
+        try
+        {
+            certificate = LoadFileCertificate(path, keyPath);
+        }
+        catch (Exception ex) when (ex is CryptographicException or IOException)
+        {
+            Console.Error.WriteLine($"'{path}' does not load: {ex.Message}");
+            return 1;
+        }
+
+        var info = CertificateInfo.From(certificate);
+        Console.WriteLine("Bound certificate (file):");
+        Console.WriteLine($"  path            {path}");
+        if (!string.IsNullOrEmpty(keyPath))
+            Console.WriteLine($"  key path        {keyPath}");
+        Console.WriteLine($"  subject         {info.SubjectCommonName}");
+        Console.WriteLine($"  DNS names       {string.Join(", ", info.DnsNames)}");
+        Console.WriteLine($"  not before      {info.NotBefore:u}");
+        Console.WriteLine($"  not after       {info.NotAfter:u}");
+        Console.WriteLine($"  days remaining  {info.DaysRemaining(DateTimeOffset.UtcNow)}");
+        return 0;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static int StatusForStoreCertificate(string[] args, string root)
+    {
         var bound = CertificateBinding.Read(root);
         if (bound.Subject is null)
         {
@@ -293,6 +369,158 @@ public static class CertCommand
         return 0;
     }
 
+    /// <summary>
+    /// Cross-platform (phase 113) — every other issuance/binding path here needs the Windows
+    /// certificate store; this one needs a file the operator already has (certbot, an internal PKI, a
+    /// platform team) and writes <c>Kestrel:Certificates:Default:{Path,KeyPath}</c> directly, the file
+    /// shape Kestrel's own configuration binder already understands with no code in
+    /// <c>DbDataSyncHost</c> needed to read it back.
+    /// <para>
+    /// **An encrypted private key is not supported.** Splicing a password in from the secret store the
+    /// way <see cref="DbDataSync.State.StateDatabase.Factory"/> does for the state connection string
+    /// would need Kestrel's certificate to be loaded and handed to it explicitly rather than left to
+    /// its own automatic <c>Path</c>/<c>KeyPath</c>/<c>Password</c> config binding — a real feature,
+    /// not built here because nothing in this environment can verify that interaction against a real
+    /// Kestrel listener. Refusing loudly and pointing at decrypting the key first is simpler and
+    /// honest about what this phase actually built.
+    /// </para>
+    /// </summary>
+    private static int UsePem(string[] args)
+    {
+        var certPath = CliOptions.Read(args, "--cert");
+        var keyPath = CliOptions.Read(args, "--key");
+        if (certPath is null || keyPath is null)
+        {
+            Console.Error.WriteLine("Usage: dbdatasync config cert use-pem --cert <path> --key <path> [--repo <path>]");
+            return 1;
+        }
+
+        certPath = Path.GetFullPath(certPath);
+        keyPath = Path.GetFullPath(keyPath);
+        if (!File.Exists(certPath))
+        {
+            Console.Error.WriteLine($"'{certPath}' does not exist.");
+            return 1;
+        }
+
+        if (!File.Exists(keyPath))
+        {
+            Console.Error.WriteLine($"'{keyPath}' does not exist.");
+            return 1;
+        }
+
+        X509Certificate2 certificate;
+        try
+        {
+            certificate = X509Certificate2.CreateFromPemFile(certPath, keyPath);
+        }
+        catch (CryptographicException ex)
+        {
+            Console.Error.WriteLine(
+                $"Could not load '{certPath}'/'{keyPath}': {ex.Message}\n" +
+                "An encrypted private key is not supported yet — decrypt it first (e.g. `openssl rsa " +
+                "-in key.pem -out key-decrypted.pem`), or use a Windows-store certificate via " +
+                "`dbdatasync config cert bind` instead.");
+            return 1;
+        }
+
+        var root = DbDataSyncRoot.Resolve(args);
+        ClearStoreBasedBinding(root);
+        DbDataSyncConfigFile.SetValue(root, CertificateBinding.Section, "Path", certPath);
+        DbDataSyncConfigFile.SetValue(root, CertificateBinding.Section, "KeyPath", keyPath);
+        new GitCommitService(root).CommitChanges(
+            [DbDataSyncConfigFile.PathIn(root)],
+            $"Use PEM certificate '{CertificateBinding.SubjectCommonName(certificate)}' for Kestrel",
+            CurrentUser.SystemAuthor);
+
+        Console.WriteLine("Certificate configured:");
+        PrintCertificateSummary(certificate);
+        Console.WriteLine();
+        Console.WriteLine("Nothing takes effect until the DbDataSync service restarts.");
+        return 0;
+    }
+
+    /// <summary>As <see cref="UsePem"/>, for a PFX/PKCS#12 file. A password-protected one is refused
+    /// for the same reason an encrypted PEM key is — see that method's doc comment.</summary>
+    private static int UsePfx(string[] args)
+    {
+        var pfxPath = CliOptions.Read(args, "--pfx");
+        if (pfxPath is null)
+        {
+            Console.Error.WriteLine("Usage: dbdatasync config cert use-pfx --pfx <path> [--repo <path>]");
+            return 1;
+        }
+
+        pfxPath = Path.GetFullPath(pfxPath);
+        if (!File.Exists(pfxPath))
+        {
+            Console.Error.WriteLine($"'{pfxPath}' does not exist.");
+            return 1;
+        }
+
+        X509Certificate2 certificate;
+        try
+        {
+            certificate = X509CertificateLoader.LoadPkcs12FromFile(pfxPath, password: null);
+        }
+        catch (CryptographicException ex)
+        {
+            Console.Error.WriteLine(
+                $"Could not load '{pfxPath}': {ex.Message}\n" +
+                "A password-protected PFX is not supported yet — export one with no password, or use " +
+                "a Windows-store certificate via `dbdatasync config cert bind` instead.");
+            return 1;
+        }
+
+        var root = DbDataSyncRoot.Resolve(args);
+        ClearStoreBasedBinding(root);
+        // A PFX carries its own private key — no separate KeyPath. Clearing a stale one left behind by
+        // an earlier `use-pem` here matters: Kestrel's certificate loader treats the section as
+        // PEM-shaped whenever KeyPath is present, and would try to open this PFX file as a key.
+        DbDataSyncConfigFile.RemoveValue(root, CertificateBinding.Section, "KeyPath");
+        DbDataSyncConfigFile.SetValue(root, CertificateBinding.Section, "Path", pfxPath);
+        new GitCommitService(root).CommitChanges(
+            [DbDataSyncConfigFile.PathIn(root)],
+            $"Use PFX certificate '{CertificateBinding.SubjectCommonName(certificate)}' for Kestrel",
+            CurrentUser.SystemAuthor);
+
+        Console.WriteLine("Certificate configured:");
+        PrintCertificateSummary(certificate);
+        Console.WriteLine();
+        Console.WriteLine("Nothing takes effect until the DbDataSync service restarts.");
+        return 0;
+    }
+
+    /// <summary>The inverse of <see cref="UsePem"/>/<see cref="UsePfx"/>'s own clearing of a prior
+    /// store-based bind: a fresh <see cref="Bind"/> already does this on its own side (see
+    /// <see cref="CertificateBinding.Bind"/>) — this is the file-based side's half of keeping the two
+    /// shapes from coexisting.</summary>
+    private static void ClearStoreBasedBinding(string root)
+    {
+        DbDataSyncConfigFile.RemoveValue(root, CertificateBinding.Section, "Subject");
+        DbDataSyncConfigFile.RemoveValue(root, CertificateBinding.Section, "Store");
+        DbDataSyncConfigFile.RemoveValue(root, CertificateBinding.Section, "Location");
+        DbDataSyncConfigFile.RemoveValue(root, CertificateBinding.Section, "AllowInvalid");
+    }
+
+    /// <summary>Loads whatever <see cref="CertificateBinding.Section"/>'s file-based keys currently
+    /// name — PEM (cert + key) when <paramref name="keyPath"/> is given, else PFX. Shared by
+    /// <c>status</c>'s file-reporting path and phase 113's readiness check
+    /// (<see cref="ReadinessChecks"/>), so the two never disagree about how those keys resolve to a
+    /// certificate.</summary>
+    internal static X509Certificate2 LoadFileCertificate(string path, string? keyPath) =>
+        string.IsNullOrEmpty(keyPath)
+            ? X509CertificateLoader.LoadPkcs12FromFile(path, password: null)
+            : X509Certificate2.CreateFromPemFile(path, keyPath);
+
+    private static void PrintCertificateSummary(X509Certificate2 certificate)
+    {
+        var info = CertificateInfo.From(certificate);
+        Console.WriteLine($"  subject     {info.SubjectCommonName}");
+        Console.WriteLine($"  DNS names   {string.Join(", ", info.DnsNames)}");
+        Console.WriteLine($"  not after   {info.NotAfter:u}");
+    }
+
     [SupportedOSPlatform("windows")]
     private static int Bind(string[] args)
     {
@@ -511,13 +739,15 @@ public static class CertCommand
     private static void PrintUsage() =>
         Console.Error.WriteLine(
             """
-            Usage: dbdatasync config cert status [--account <account>]
-                   dbdatasync config cert list [--location LocalMachine|CurrentUser]
-                   dbdatasync config cert new-self-signed --dns <names> [--days <n>] [--account <account>]
-                   dbdatasync config cert enroll --dns <names> [--ca <config>] [--template <name>] [--account <account>]
-                   dbdatasync config cert renew [--ca <config>] [--template <name>] [--account <account>] [--days <n>]
-                   dbdatasync config cert retrieve --request-id <id> [--account <account>]
-                   dbdatasync config cert templates [--ca <config>]
-                   dbdatasync config cert bind --thumbprint <thumbprint> [--location LocalMachine|CurrentUser] [--allow-invalid|--no-allow-invalid]
+            Usage: dbdatasync config cert use-pem --cert <path> --key <path> [--repo <path>]     (any OS)
+                   dbdatasync config cert use-pfx --pfx <path> [--repo <path>]                    (any OS)
+                   dbdatasync config cert status [--account <account>]                            (any OS; --account is Windows-only)
+                   dbdatasync config cert list [--location LocalMachine|CurrentUser]               (Windows only)
+                   dbdatasync config cert new-self-signed --dns <names> [--days <n>] [--account <account>]  (Windows only)
+                   dbdatasync config cert enroll --dns <names> [--ca <config>] [--template <name>] [--account <account>]  (Windows only)
+                   dbdatasync config cert renew [--ca <config>] [--template <name>] [--account <account>] [--days <n>]    (Windows only)
+                   dbdatasync config cert retrieve --request-id <id> [--account <account>]        (Windows only)
+                   dbdatasync config cert templates [--ca <config>]                                (Windows only)
+                   dbdatasync config cert bind --thumbprint <thumbprint> [--location LocalMachine|CurrentUser] [--allow-invalid|--no-allow-invalid]  (Windows only)
             """);
 }

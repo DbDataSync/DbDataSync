@@ -1,5 +1,7 @@
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using ClrKernel.Core.Secrets;
+using DbDataSync.Certificates;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Core.Secrets;
@@ -72,6 +74,82 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Contains("looks like a URL", check.Detail);
     }
 
+    [Fact]
+    public async Task NoFileBasedCertificateConfigured_CertificateCheckPasses()
+    {
+        ServeCommand.Prepare(_root);
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        Assert.Equal(CheckStatus.Ok, Find(results, "Certificate").Status);
+    }
+
+    [Fact]
+    public async Task ConfiguredCertificateFileMissing_CertificateCheckFails()
+    {
+        ServeCommand.Prepare(_root);
+        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "Path", Path.Combine(_root, "missing.pem"));
+        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "KeyPath", Path.Combine(_root, "missing-key.pem"));
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Certificate");
+        Assert.Equal(CheckStatus.Fail, check.Status);
+        Assert.Contains("does not exist", check.Detail);
+    }
+
+    [Fact]
+    public async Task ConfiguredCertificate_SanCoversTheConsoleUrlHost_CertificateCheckPasses()
+    {
+        ServeCommand.Prepare(_root);
+        var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "Path", certPath);
+        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "KeyPath", keyPath);
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Certificate");
+        Assert.Equal(CheckStatus.Ok, check.Status);
+    }
+
+    [Fact]
+    public async Task ConfiguredCertificate_SanDoesNotCoverTheConsoleUrlHost_CertificateCheckFails()
+    {
+        ServeCommand.Prepare(_root);
+        var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://a-different-host.example:5080");
+        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "Path", certPath);
+        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "KeyPath", keyPath);
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Certificate");
+        Assert.Equal(CheckStatus.Fail, check.Status);
+        Assert.Contains("does not cover", check.Detail);
+    }
+
+    /// <summary>Writes a fresh self-signed PEM cert+key pair for <paramref name="dnsName"/>, valid 90
+    /// days — comfortably outside the default 30-day expiry-warning window, so this is unambiguously
+    /// an <see cref="CheckStatus.Ok"/> case rather than a <see cref="CheckStatus.Warn"/> one.</summary>
+    private static (string CertPath, string KeyPath) WriteSelfSignedPem(string root, string dnsName)
+    {
+        using var certificate = CertificateBuilder.CreateSelfSigned(
+            new CertificateSpec(dnsName, [dnsName], ValidityDays: 90, FriendlyName: null));
+
+        var certPath = Path.Combine(root, "cert.pem");
+        var keyPath = Path.Combine(root, "key.pem");
+        File.WriteAllText(certPath, certificate.ExportCertificatePem());
+        using (var rsa = certificate.GetRSAPrivateKey())
+            File.WriteAllText(keyPath, rsa!.ExportPkcs8PrivateKeyPem());
+
+        return (certPath, keyPath);
+    }
+
     /// <summary>Drives the real CLI path (<c>dbdatasync config check --json</c>) rather than the
     /// engine directly, so this one test also proves <see cref="ConfigCommand"/>'s own dispatch and
     /// exit-code plumbing, not just the check list.</summary>
@@ -89,6 +167,7 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Contains("State store", names);
         Assert.Contains("Providers / drivers", names);
         Assert.Contains("Auth", names);
+        Assert.Contains("Certificate", names);
         Assert.Contains("Binding", names);
         Assert.Contains("First admin", names);
     }

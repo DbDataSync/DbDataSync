@@ -1,7 +1,10 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using ClrKernel.Core.Secrets;
 using DbDataSync.Api.Auth;
 using DbDataSync.Api.Configuration;
+using DbDataSync.Certificates;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Core.Secrets;
@@ -72,6 +75,7 @@ internal static class ReadinessChecks
         new StateStoreCheck(),
         new ProvidersAndDriversCheck(),
         new AuthCheck(),
+        new CertificateCheck(),
         new BindingCheck(),
         new FirstAdminCheck(),
     ];
@@ -289,6 +293,69 @@ internal sealed class AuthCheck : IReadinessCheck
             context.AuthOptions.WindowsEnabled
                 ? $"Windows groups configured (admin: {context.AuthOptions.AdminGroup ?? "none"})."
                 : $"Passkeys — relying party '{context.PasskeyOptions.RelyingPartyId}'."));
+    }
+}
+
+/// <summary>
+/// A file-based certificate (phase 113), if one is configured: the file loads, its SANs cover the
+/// console URL's host, and it isn't near expiry. A Windows store-based binding
+/// (<c>Kestrel:Certificates:Default:Subject</c>) isn't covered here — <c>CertificateExpiryService</c>
+/// already watches that path independently, and duplicating it would mean two different answers for
+/// the same certificate if they ever disagreed.
+/// </summary>
+internal sealed class CertificateCheck : IReadinessCheck
+{
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
+    {
+        var path = context.Configuration["Kestrel:Certificates:Default:Path"];
+        if (string.IsNullOrEmpty(path))
+            return Task.FromResult(new CheckResult("Certificate", CheckStatus.Ok, "No file-based certificate configured."));
+
+        if (!File.Exists(path))
+        {
+            return Task.FromResult(new CheckResult(
+                "Certificate", CheckStatus.Fail, $"'{path}' does not exist.",
+                "Run `dbdatasync config cert use-pem`/`use-pfx` again with a valid path."));
+        }
+
+        X509Certificate2 certificate;
+        try
+        {
+            var keyPath = context.Configuration["Kestrel:Certificates:Default:KeyPath"];
+            certificate = CertCommand.LoadFileCertificate(path, keyPath);
+        }
+        catch (Exception ex) when (ex is CryptographicException or IOException)
+        {
+            return Task.FromResult(new CheckResult("Certificate", CheckStatus.Fail, $"'{path}' does not load: {ex.Message}"));
+        }
+
+        var url = context.Configuration["DbDataSync:Url"] ?? "http://localhost:5080";
+        var host = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : null;
+        var dnsNames = CertificateSanReader.GetDnsNames(certificate);
+        var sanOk = host is null || dnsNames.Any(name =>
+            string.Equals(name, host, StringComparison.OrdinalIgnoreCase)
+            || (name.StartsWith("*.", StringComparison.Ordinal)
+                && host.EndsWith(name[1..], StringComparison.OrdinalIgnoreCase)));
+
+        if (!sanOk)
+        {
+            return Task.FromResult(new CheckResult(
+                "Certificate", CheckStatus.Fail,
+                $"'{path}' does not cover '{host}' — SANs: {string.Join(", ", dnsNames)}."));
+        }
+
+        var daysRemaining = (int)Math.Floor((certificate.NotAfter - DateTimeOffset.UtcNow).TotalDays);
+        if (daysRemaining <= 0)
+            return Task.FromResult(new CheckResult("Certificate", CheckStatus.Fail, $"Expired {-daysRemaining} day(s) ago."));
+
+        if (daysRemaining <= context.CertificateOptions.ExpiryWarningDays)
+        {
+            return Task.FromResult(new CheckResult(
+                "Certificate", CheckStatus.Warn, $"Expires in {daysRemaining} day(s) — renew soon.",
+                "Run `dbdatasync config cert use-pem`/`use-pfx` again with the renewed file."));
+        }
+
+        return Task.FromResult(new CheckResult("Certificate", CheckStatus.Ok, $"Valid for {daysRemaining} more day(s)."));
     }
 }
 

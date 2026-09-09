@@ -231,6 +231,17 @@ public static class SetupCommand
                 });
             }
         }
+        else if (prompt.YesNo("Point Kestrel at a certificate file (PEM), e.g. from certbot?", false))
+        {
+            // Cross-platform (phase 113), unlike the Windows steps above — printed as a command to run
+            // rather than invoked here anyway, matching how every other cert step in this walk-through
+            // works, and because the path an operator gives here is exactly what `use-pem` itself
+            // still needs to validate before writing anything.
+            var certPath = prompt.Text("Certificate file (PEM)");
+            var keyPath = prompt.Text("Private key file (PEM, unencrypted)");
+            io.WriteLine("Run this to finish:");
+            io.WriteLine($"    dbdatasync config cert use-pem --cert \"{certPath}\" --key \"{keyPath}\" --repo \"{root}\"");
+        }
 
         // Step 8 — finish.
         new GitCommitService(root).CommitChanges(

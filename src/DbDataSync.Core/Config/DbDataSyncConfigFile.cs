@@ -153,6 +153,42 @@ public static class DbDataSyncConfigFile
     }
 
     /// <summary>
+    /// Removes one <c>Section:Key</c> line if present — <see cref="SetValue"/>'s counterpart, needed
+    /// when a later write makes an earlier one meaningless rather than merely stale. Phase 113:
+    /// switching <c>Kestrel:Certificates:Default</c> from a PEM cert+key pair to a PFX file must drop
+    /// the old <c>KeyPath</c>, or Kestrel's own certificate loader still treats the section as
+    /// PEM-shaped and tries to open the PFX file as a private key. A no-op when the section or key
+    /// does not exist.
+    /// </summary>
+    public static void RemoveValue(string repoRoot, string section, string key)
+    {
+        var path = PathIn(repoRoot);
+        if (!File.Exists(path))
+            return;
+
+        var lines = File.ReadAllLines(path).ToList();
+        var sectionHeaderIndex = lines.FindIndex(l => l.TrimEnd() == $"{section}:");
+        if (sectionHeaderIndex < 0)
+            return;
+
+        var keyLinePrefix = $"  {key}:";
+        for (var i = sectionHeaderIndex + 1; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && !line.TrimStart().StartsWith('#'))
+                break; // the next top-level section
+
+            if (line.TrimStart().StartsWith(keyLinePrefix.TrimStart(), StringComparison.Ordinal)
+                && !line.TrimStart().StartsWith('#'))
+            {
+                lines.RemoveAt(i);
+                File.WriteAllLines(path, lines, Encoding.UTF8);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
     /// As <see cref="SetValue"/>, for a YAML block sequence rather than a scalar — <c>Auth:Passkeys:Origins</c>
     /// (phase 110's <c>setup</c> command) is the one key documented so far that needs this shape; every
     /// other <c>DbDataSync:*</c> setting is a plain value. Replaces the whole existing block (the key

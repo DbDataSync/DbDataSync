@@ -68,6 +68,13 @@ public static class CertificateBinding
     {
         var subject = SubjectCommonName(certificate);
 
+        // Phase 113 added a second, file-based shape (Path/KeyPath) in this same section. Binding a
+        // store-based certificate must drop those, or Kestrel's own certificate loader has both a
+        // Subject and a Path to reconcile — undocumented, and not a state this codebase should ever
+        // deliberately produce.
+        DbDataSyncConfigFile.RemoveValue(repoRoot, Section, "Path");
+        DbDataSyncConfigFile.RemoveValue(repoRoot, Section, "KeyPath");
+
         DbDataSyncConfigFile.SetValue(repoRoot, Section, "Subject", subject);
         DbDataSyncConfigFile.SetValue(repoRoot, Section, "Store", "My");
         DbDataSyncConfigFile.SetValue(repoRoot, Section, "Location", "LocalMachine");

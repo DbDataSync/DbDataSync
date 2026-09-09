@@ -63,6 +63,25 @@ public sealed class CertificateBindingTests : IDisposable
         Assert.Contains(certificate.Thumbprint, head.Message);
     }
 
+    /// <summary>Phase 113 added a second, file-based shape (<c>Path</c>/<c>KeyPath</c>) in this same
+    /// section. Binding a store-based certificate must drop those, or Kestrel's own certificate loader
+    /// has both a <c>Subject</c> and a <c>Path</c> to reconcile.</summary>
+    [Fact]
+    public void Bind_AfterAPriorFileBasedConfiguration_RemovesPathAndKeyPath()
+    {
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", "/tmp/cert.pem");
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "KeyPath", "/tmp/key.pem");
+
+        var spec = new CertificateSpec("dbdatasync.example.com", ["dbdatasync.example.com"], 365, null);
+        using var certificate = CertificateBuilder.CreateSelfSigned(spec);
+        CertificateBinding.Bind(_root, certificate, allowInvalid: true, new GitCommitService(_root), new GitAuthor("Test", "test@localhost"));
+
+        var values = DbDataSyncConfigFile.Read(_root);
+        Assert.False(values.ContainsKey("Kestrel:Certificates:Default:Path"));
+        Assert.False(values.ContainsKey("Kestrel:Certificates:Default:KeyPath"));
+        Assert.Equal("dbdatasync.example.com", values["Kestrel:Certificates:Default:Subject"]);
+    }
+
     [Fact]
     public void Read_WithNothingBoundYet_ReturnsNullSubject()
     {

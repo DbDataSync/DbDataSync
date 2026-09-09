@@ -124,15 +124,18 @@ Registers the tool's own installed executable via `sc.exe create`, with `serve -
 baked into `binPath`. **A connection using integrated authentication connects as this service
 account** — worth deciding `--account` deliberately rather than accepting `LocalSystem`.
 
-### `dbdatasync cert status|list|new-self-signed|enroll|renew|retrieve|templates|bind`
+### `dbdatasync config cert use-pem|use-pfx|status|list|new-self-signed|enroll|renew|retrieve|templates|bind`
 
-Windows-only (phase 82) — issues, installs, binds, renews and reports on the certificate Kestrel serves
-TLS with, entirely from the CLI so setting up HTTPS never depends on HTTPS already working. Run
-`dbdatasync cert` with no subcommand for the full flag list.
+`use-pem`/`use-pfx`/`status` work on any platform (phase 113); everything else is Windows-only
+(phase 82) — issues, installs, binds, renews and reports on the certificate Kestrel serves TLS with,
+entirely from the CLI so setting up HTTPS never depends on HTTPS already working. Run
+`dbdatasync config cert` with no subcommand for the full flag list.
 
 | command | does |
 | --- | --- |
-| `status` | what is bound (thumbprint, SANs, `NotAfter`, days remaining), and whether the resolved service account can read its private key |
+| `use-pem --cert <path> --key <path>` | points Kestrel at a PEM certificate + unencrypted private key file — the Linux/macOS answer; an encrypted key is not supported yet |
+| `use-pfx --pfx <path>` | as `use-pem`, for a PFX/PKCS#12 file with no password |
+| `status` | on any platform, whatever is configured — a file (`use-pem`/`use-pfx`) reports path, SANs, `NotAfter`, days remaining; a Windows-only store binding reports the same plus thumbprint and whether the resolved service account can read the private key |
 | `list [--location LocalMachine\|CurrentUser]` | server-authentication certificates in `<location>\My` |
 | `new-self-signed --dns <names> [--days] [--account]` | issues and installs a self-signed certificate, in-box .NET (`CertificateRequest.CreateSelfSigned`), no PowerShell |
 | `enroll --dns <names> [--ca] [--template] [--account]` | submits a CSR to an enterprise CA over COM (`ICertRequest`); a template requiring approval reports a request id and exits — not an error |

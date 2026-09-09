@@ -29,6 +29,7 @@ public sealed class SetupCommandTests : IDisposable
                 "",   // additional drivers -> none
                 "",   // authentication -> default (passkeys)
                 "",   // relying party id -> default (localhost)
+                "",   // point Kestrel at a certificate file? -> no (non-Windows step)
                 "n",  // start DbDataSync now? -> no
             ]);
 
@@ -103,6 +104,7 @@ public sealed class SetupCommandTests : IDisposable
                 "8.0.32",                                    // MySqlConnector version
                 "",                                          // authentication -> default (passkeys)
                 "",                                          // relying party id -> default (localhost)
+                "",                                          // point Kestrel at a certificate file? -> no (non-Windows step)
                 "n",                                         // start DbDataSync now? -> no
             ],
             keys: "hunter2\r".Select(c => c == '\r' ? ScriptedPromptIo.Enter : ScriptedPromptIo.Char(c)));
@@ -130,7 +132,7 @@ public sealed class SetupCommandTests : IDisposable
     }
 
     private static readonly string?[] SqliteWalkthroughWithNoStart =
-        ["", "", "", "", "", "", "", "n"];
+        ["", "", "", "", "", "", "", "", "n"];
 
     private static ScriptedPromptIo ScriptFor(string?[] lines) => new(lines);
 
