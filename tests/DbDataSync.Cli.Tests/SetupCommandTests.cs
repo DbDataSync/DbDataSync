@@ -29,6 +29,7 @@ public sealed class SetupCommandTests : IDisposable
                 "",   // additional drivers -> none
                 "",   // authentication -> default (passkeys)
                 "",   // relying party id -> default (localhost)
+                "",   // register as a systemd service? -> no (Linux step)
                 "",   // point Kestrel at a certificate file? -> no (non-Windows step)
                 "n",  // start DbDataSync now? -> no
             ]);
@@ -104,6 +105,7 @@ public sealed class SetupCommandTests : IDisposable
                 "8.0.32",                                    // MySqlConnector version
                 "",                                          // authentication -> default (passkeys)
                 "",                                          // relying party id -> default (localhost)
+                "",                                          // register as a systemd service? -> no (Linux step)
                 "",                                          // point Kestrel at a certificate file? -> no (non-Windows step)
                 "n",                                         // start DbDataSync now? -> no
             ],
@@ -132,7 +134,7 @@ public sealed class SetupCommandTests : IDisposable
     }
 
     private static readonly string?[] SqliteWalkthroughWithNoStart =
-        ["", "", "", "", "", "", "", "", "n"];
+        ["", "", "", "", "", "", "", "", "", "n"];
 
     private static ScriptedPromptIo ScriptFor(string?[] lines) => new(lines);
 

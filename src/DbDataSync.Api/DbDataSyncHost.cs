@@ -43,6 +43,12 @@ public static class DbDataSyncHost
         // interactive run would make Ctrl+C and console output behave unlike every other command.
         if (Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService())
             builder.Host.UseWindowsService(options => options.ServiceName = "DbDataSync");
+        // Phase 111's Linux analog — UseSystemd() switches the lifetime to one that sends
+        // sd_notify(READY=1) once the host has actually started (which is what lets the unit be
+        // Type=notify: systemctl start blocks until the host is really serving, not until the process
+        // merely exists) and routes logging to the journal format. Same "only when it's real" guard.
+        else if (Microsoft.Extensions.Hosting.Systemd.SystemdHelpers.IsSystemdService())
+            builder.Host.UseSystemd();
 
         builder.Services.AddControllers()
             // Named explicitly, because controller discovery starts from the *entry* assembly and the

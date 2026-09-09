@@ -198,10 +198,10 @@ public static class SetupCommand
             }
         }
 
-        // Steps 6/7 — Windows-only service and certificate registration. Neither is orchestrated
-        // programmatically: both need real elevation and real Windows APIs this process cannot fake or
-        // verify from a Linux build, so setup prints the exact command to run rather than guessing at
-        // behaviour nothing here can test.
+        // Step 6 — service registration: Windows (sc.exe) or Linux (systemd, phase 111). Neither is
+        // orchestrated programmatically — both need real elevation this process cannot assume it has —
+        // so setup prints the exact command to run rather than guessing at behaviour nothing here can
+        // verify without actually elevating mid-session.
         if (OperatingSystem.IsWindows())
         {
             if (prompt.YesNo("Register dbdatasync as a Windows service?", false))
@@ -210,7 +210,20 @@ public static class SetupCommand
                 io.WriteLine("Run this in an elevated prompt to finish:");
                 io.WriteLine($"    dbdatasync service install --repo \"{root}\" --url {url} --account {account}");
             }
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            if (prompt.YesNo("Register dbdatasync as a systemd service?", false))
+            {
+                var user = prompt.Text("Service user", "dbdatasync");
+                io.WriteLine("Run this as root to finish:");
+                io.WriteLine($"    sudo dbdatasync service install --repo \"{root}\" --url {url} --user {user}");
+            }
+        }
 
+        // Step 7 — certificate: the Windows store, or (any other platform, phase 113) a file.
+        if (OperatingSystem.IsWindows())
+        {
             if (prompt.YesNo("Set up the TLS certificate?", false))
             {
                 var certChoice = prompt.Choice(

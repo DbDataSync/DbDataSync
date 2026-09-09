@@ -4,12 +4,18 @@ using System.Runtime.InteropServices;
 namespace DbDataSync.Cli;
 
 /// <summary>
-/// Registers this tool as a Windows service, and says what it did.
+/// Registers this tool as a Windows service or (phase 111) a Linux systemd service, and says what it
+/// did.
 /// <para>
-/// The binary registered is **the tool's own apphost shim** — the <c>dbdatasync.exe</c> the SDK put in
-/// the user's tools directory — with <c>serve</c> and fully resolved paths as its arguments. Resolved
-/// at install time and printed, because a service has no console to say "I could not find my config
-/// repository" on: the moment to find that out is now.
+/// The binary registered is **the tool's own apphost shim** — the <c>dbdatasync.exe</c>/apphost the
+/// SDK put in the user's tools directory — with <c>serve</c> and fully resolved paths as its
+/// arguments. Resolved at install time and printed, because a service has no console to say "I could
+/// not find my config repository" on: the moment to find that out is now.
+/// </para>
+/// <para>
+/// The systemd path lives in its own file (<see cref="SystemdService"/>), the same way this file's
+/// own <c>sc.exe</c> mechanics stay separate from it — each platform's machinery is separable, even
+/// though both are reached through this one command.
 /// </para>
 /// </summary>
 public static class ServiceCommand
@@ -18,27 +24,44 @@ public static class ServiceCommand
 
     public static int Run(string[] args)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            Console.Error.WriteLine(
-                "Service registration is Windows-only. On Linux, run `dbdatasync serve` under systemd, " +
-                "or use the container image.");
-            return 1;
+            if (args.Length == 0)
+            {
+                Console.Error.WriteLine("Usage: dbdatasync service install|uninstall|status");
+                return 1;
+            }
+
+            return args[0].ToLowerInvariant() switch
+            {
+                "install" => Install(args),
+                "uninstall" => Sc("delete", ServiceName),
+                "status" => Sc("query", ServiceName),
+                var other => Unknown(other),
+            };
         }
 
-        if (args.Length == 0)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            Console.Error.WriteLine("Usage: dbdatasync service install|uninstall|status");
-            return 1;
+            if (args.Length == 0)
+            {
+                Console.Error.WriteLine("Usage: dbdatasync service install|uninstall|status");
+                return 1;
+            }
+
+            return args[0].ToLowerInvariant() switch
+            {
+                "install" => SystemdService.Install(args),
+                "uninstall" => SystemdService.Uninstall(),
+                "status" => SystemdService.Status(),
+                var other => Unknown(other),
+            };
         }
 
-        return args[0].ToLowerInvariant() switch
-        {
-            "install" => Install(args),
-            "uninstall" => Sc("delete", ServiceName),
-            "status" => Sc("query", ServiceName),
-            var other => Unknown(other),
-        };
+        Console.Error.WriteLine(
+            "Service registration is Windows and Linux (systemd) only. On macOS, run `dbdatasync serve` " +
+            "directly, or use the container image.");
+        return 1;
     }
 
     private static int Install(string[] args)

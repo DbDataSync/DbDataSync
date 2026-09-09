@@ -112,17 +112,23 @@ defaults.
 
 ### `dbdatasync service install|uninstall|status`
 
-Windows-only; `install` needs an elevated prompt.
+Windows or Linux (systemd, phase 111); `install` needs an elevated prompt (Windows) or root (Linux,
+`sudo`). macOS keeps bailing with a pointer to `dbdatasync serve` / the container.
 
 | flag | applies to | default |
 | --- | --- | --- |
 | `--repo <path>` | `install` | `CliOptions.DefaultRoot` — **not** the walk-up resolver; see above |
 | `--url <url>` | `install` | `http://localhost:5080` |
-| `--account <account>` | `install` | `LocalSystem` |
+| `--account <account>` (Windows) | `install` | `LocalSystem` |
+| `--user <user>` (Linux) | `install` | `dbdatasync` — created as a system user if it doesn't exist |
 
-Registers the tool's own installed executable via `sc.exe create`, with `serve --repo ... --url ...`
-baked into `binPath`. **A connection using integrated authentication connects as this service
-account** — worth deciding `--account` deliberately rather than accepting `LocalSystem`.
+Windows: registers the tool's own installed executable via `sc.exe create`, with `serve --repo ...
+--url ...` baked into `binPath`. Linux: writes `/etc/systemd/system/dbdatasync.service`
+(`ExecStart=` carries the same resolved values), `systemctl daemon-reload`s, and `enable`s it —
+`install` does not start it; run `sudo systemctl start dbdatasync` for that, so the first start's own
+output is visible rather than scrolling by during `install`. Either way, **a connection using
+integrated authentication connects/authenticates as this account** — worth deciding `--account`/
+`--user` deliberately rather than accepting the default.
 
 ### `dbdatasync config cert use-pem|use-pfx|status|list|new-self-signed|enroll|renew|retrieve|templates|bind`
 

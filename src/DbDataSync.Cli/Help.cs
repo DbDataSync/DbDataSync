@@ -16,8 +16,10 @@ public static class Help
                   Defaults: --repo {CliOptions.DefaultRoot}, --url http://localhost:5080
 
               dbdatasync service install|uninstall|status [--repo <path>] [--url <url>] [--account <account>]
-                  Registers this tool as a Windows service. Windows only, and install needs an
-                  elevated prompt.
+                  On Windows: registers this tool as a Windows service. Needs an elevated prompt.
+              dbdatasync service install|uninstall|status [--repo <path>] [--url <url>] [--user <user>]
+                  On Linux: registers a systemd unit (default user: dbdatasync). Needs root
+                  (`sudo`); enables but does not start it — run `systemctl start dbdatasync` next.
 
               dbdatasync invite [--role Admin|Viewer] [--repo <path>] [--url <url>]
                   Prints a fresh single-use invitation URL. For when the first-run one has scrolled
@@ -35,10 +37,15 @@ public static class Help
                         auth, binding, first admin. Exits 1 if anything fails; what `setup`'s
                         review screen runs.
 
+                    cert      use-pem --cert <path> --key <path> | use-pfx --pfx <path>
+                        Points Kestrel at a certificate file — unencrypted PEM key or
+                        unprotected PFX. Any platform.
                     cert      status|list|new-self-signed|enroll|renew|retrieve|templates|bind
-                        Issues, installs, binds and renews the certificate Kestrel serves TLS
-                        with. Windows only; run `dbdatasync config cert` with no subcommand to
-                        see every subcommand's flags.
+                        Issues, installs, binds and renews a certificate from the Windows
+                        certificate store or an AD CS CA. `status` also works on any platform
+                        (reports whichever of the two above is configured); the rest are
+                        Windows only. Run `dbdatasync config cert` with no subcommand to see
+                        every subcommand's flags.
 
                     secret    set <ref> <value>|list [<ref> ...]|remove <ref>
                         Stores, checks, or removes a secret in the OS credential store — e.g. the

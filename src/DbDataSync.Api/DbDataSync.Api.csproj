@@ -13,6 +13,10 @@
     <!-- Lifetime and logging for a process the Windows SCM starts. Cross-platform to reference; the
          helper it provides answers false everywhere else, so nothing is conditional here. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
+    <!-- Phase 111's systemd analog of the package above — sd_notify(READY=1)/journal logging for a
+         process systemd starts. Same cross-platform-to-reference reasoning: its own helper answers
+         false everywhere but a real systemd unit. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.0" />
     <!-- Kerberos/NTLM under Kestrel. Cross-platform to reference; it only authenticates anybody on
          Windows, and the sign-in endpoint says so where it does not. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.11" />
