@@ -79,7 +79,43 @@ public static class ServiceCommand
         Console.WriteLine(
             "  Connections using integrated authentication will connect as this account.");
 
+        GrantDataDirectoryAccess(root, account);
+
         return Sc([.. arguments]);
+    }
+
+    /// <summary>
+    /// Issuing and granting are one operation from the operator's point of view — the same principle
+    /// phase 82 applied to a certificate's private key. Phase 112 made the data directory machine-wide
+    /// (<c>%ProgramData%\DbDataSync</c> by default) rather than per-user, so a named service account
+    /// is no longer guaranteed to have write access to it the way a person's own profile directory
+    /// would be. <c>LocalSystem</c> needs no grant — its access already covers a directory anyone just
+    /// created, the same as before this phase.
+    /// </summary>
+    private static void GrantDataDirectoryAccess(string root, string? account)
+    {
+        if (account is null || string.Equals(account, "LocalSystem", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        Directory.CreateDirectory(root);
+
+        var startInfo = new ProcessStartInfo("icacls") { UseShellExecute = false };
+        startInfo.ArgumentList.Add(root);
+        startInfo.ArgumentList.Add("/grant");
+        startInfo.ArgumentList.Add($"{account}:(OI)(CI)M");
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            Console.Error.WriteLine($"  Warning: could not start icacls to grant '{account}' access to '{root}'.");
+            return;
+        }
+
+        process.WaitForExit();
+        Console.WriteLine(process.ExitCode == 0
+            ? $"  Granted '{account}' access to '{root}'."
+            : $"  Warning: icacls exited {process.ExitCode} granting '{account}' access to '{root}' — " +
+              "grant it manually before starting the service.");
     }
 
     private static int Unknown(string command)

@@ -36,16 +36,33 @@ The SPA's dev-server proxy (`DBDATASYNC_API_URL`, below) defaults to `5183` — 
 Parsing is a simple `--flag value` scan (`CliOptions.Read`/`Has`) — no positional magic, no `=`
 syntax. Run `dbdatasync --help` or any subcommand's `--help` for the same text.
 
-### Repo root resolution (`serve`, `invite`, `health`)
+### Repo root resolution (`serve`, `invite`, `health`, `setup`, `config check`)
 
-These three commands resolve their repo root the same way, via a shared resolver
-(`DbDataSyncRoot.Resolve`, phase 79):
+These commands resolve their repo root the same way, via a shared resolver
+(`DbDataSyncRoot.Resolve`, phase 79, extended by phase 112):
 
 1. An explicit `--repo <path>` wins outright.
 2. Otherwise, walk upward from the current directory — the same shape `git` itself uses to find
    `.git` — looking for `dbdatasync.config.yaml` at each parent in turn.
-3. Otherwise, fall back to `%LOCALAPPDATA%\DbDataSync` (Windows) / the OS-equivalent local-app-data
-   dir (`CliOptions.DefaultRoot`), unchanged from before this walk-up existed.
+3. Otherwise, `DbDataSync__RepoRoot` — the environment-variable form of the `DbDataSync:RepoRoot`
+   config key, not a name invented for this resolver.
+4. Otherwise, fall back to one documented, **machine-wide** directory per platform
+   (`CliOptions.DefaultRoot`, phase 112):
+
+   | platform | default |
+   | --- | --- |
+   | Windows | `%ProgramData%\DbDataSync` |
+   | macOS | `/Library/Application Support/DbDataSync` |
+   | FreeBSD | `/var/db/dbdatasync` |
+   | Linux (and any other Unix-like OS) | `/var/lib/dbdatasync` |
+
+   Machine-wide, not per-user, so an interactive `serve`/`setup` and a registered service agree on one
+   repo with no `--repo` needed on either side — before phase 112 this was a per-user location
+   (`%LOCALAPPDATA%\DbDataSync` / `~/.local/share/DbDataSync`), which put a Windows service (running
+   as `LocalSystem`, a different profile than a person's) on a different repo than an interactive run.
+   An operator upgrading from before phase 112 whose only configuration is still at that old location
+   sees a one-time message naming both paths (`LegacyRootMigration`) rather than silently finding
+   nothing at the new default.
 
 `dbdatasync service install` does **not** use this resolver — its `--repo` (and `--url`) keep working
 exactly as before, baked into the registered service's `binPath` at install time; a service that
@@ -99,7 +116,7 @@ Windows-only; `install` needs an elevated prompt.
 
 | flag | applies to | default |
 | --- | --- | --- |
-| `--repo <path>` | `install` | `%LOCALAPPDATA%\DbDataSync` — **not** the walk-up resolver; see above |
+| `--repo <path>` | `install` | `CliOptions.DefaultRoot` — **not** the walk-up resolver; see above |
 | `--url <url>` | `install` | `http://localhost:5080` |
 | `--account <account>` | `install` | `LocalSystem` |
 
@@ -366,10 +383,10 @@ No `.env` files ship with the project — this is the only variable Vite itself 
 docker run -p 8080:8080 -v dbdatasync-data:/var/lib/dbdatasync <image>
 ```
 
-- `EXPOSE 8080`; entrypoint is `dbdatasync serve --url http://0.0.0.0:8080`, with `CMD ["--repo", "/var/lib/dbdatasync"]` as the default trailing arguments — override at `docker run` time to pass different `dbdatasync serve` flags.
+- `EXPOSE 8080`; entrypoint is `dbdatasync serve --url http://0.0.0.0:8080` — no trailing `--repo` argument; override at `docker run` time (`docker run ... <image> --repo /some/other/path`) to pass different `dbdatasync serve` flags.
 - `HEALTHCHECK` runs `dbdatasync health --url http://127.0.0.1:8080`.
 - `VOLUME ["/var/lib/dbdatasync"]` — one mount is a complete deployment: the config repository and the state database live together, so a backup of this directory is a backup of everything that isn't the image itself.
-- **`ENV DBDATASYNC_HOME=/var/lib/dbdatasync` is set in the image but not currently read anywhere in the application.** The actual root comes from the `--repo` argument in `CMD`, not this variable — treat `DBDATASYNC_HOME` as vestigial today, not as a supported override.
+- `ENV DbDataSync__RepoRoot=/var/lib/dbdatasync` (phase 112) — the environment-variable form of the `DbDataSync:RepoRoot` config key, honoured by the same repo-root resolver every command uses (below). `CliOptions.DefaultRoot` already resolves to the same path on Linux, so this is set explicitly rather than relied on as a coincidence.
 
 ## `tools/dev-harness` — development and testing only
 

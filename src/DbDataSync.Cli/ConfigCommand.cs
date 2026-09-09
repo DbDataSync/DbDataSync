@@ -48,10 +48,17 @@ public static class ConfigCommand
 
         if (asJson)
         {
+            // No free text mixed into machine-readable output — a CI reader parses this as JSON.
             Console.WriteLine(JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true }));
         }
         else
         {
+            if (LegacyRootMigration.DetectAt(context.Root) is { } legacyRoot)
+            {
+                Console.WriteLine(LegacyRootMigration.Message(legacyRoot, context.Root));
+                Console.WriteLine();
+            }
+
             foreach (var result in results)
             foreach (var line in ReadinessChecks.FormatResult(result))
                 Console.WriteLine(line);

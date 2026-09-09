@@ -18,6 +18,17 @@ public static class ServeCommand
     public static async Task<int> RunAsync(string[] args)
     {
         var root = DbDataSyncRoot.Resolve(args);
+
+        // Phase 112: resolution fell through to the new machine-wide default, and the only real
+        // configuration this install has ever had is still sitting at the old per-user one. Printing
+        // and continuing would silently bootstrap a second, empty repo right next to a working one —
+        // refuse instead, and name both paths.
+        if (LegacyRootMigration.DetectAt(root) is { } legacyRoot)
+        {
+            Console.WriteLine(LegacyRootMigration.Message(legacyRoot, root));
+            return 1;
+        }
+
         var stateDb = CliOptions.Read(args, "--state-db") ?? Path.Combine(root, "state.db");
         // --url / DbDataSync__Url still override the file, exactly like every other DbDataSync:* key
         // (see DbDataSyncHost.InsertConfigFile) — the file is read here, rather than through

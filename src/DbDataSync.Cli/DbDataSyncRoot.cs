@@ -9,8 +9,8 @@ namespace DbDataSync.Cli;
 /// **Explicit <c>--repo</c> wins outright.** Otherwise this walks upward from the current directory —
 /// the same shape git itself uses to find <c>.git</c> — looking for <c>dbdatasync.config.yaml</c> at
 /// each parent in turn, so a command run from anywhere inside a repo root finds it, not just from the
-/// root itself. Falls back to <see cref="CliOptions.DefaultRoot"/>, unchanged from every command's old
-/// default, only when neither says otherwise.
+/// root itself. Otherwise <c>DbDataSync__RepoRoot</c> (phase 112), and only then
+/// <see cref="CliOptions.DefaultRoot"/>.
 /// </para>
 /// <para>
 /// Before this phase, each of <c>serve</c>/<c>invite</c>/<c>health</c> did its own
@@ -32,7 +32,14 @@ public static class DbDataSyncRoot
         if (explicitRoot is not null)
             return explicitRoot;
 
-        return FindUpward(startDirectory) ?? CliOptions.DefaultRoot;
+        // DbDataSync__RepoRoot is not a new name invented for this resolver — it's the
+        // environment-variable form of the DbDataSync:RepoRoot config key the raw API's own
+        // configuration chain already honours (phase 112). serve/invite/health resolve the root
+        // *before* that chain exists, so it has to be read directly here too, the same way
+        // ServeCommand already reads DbDataSync__Url and InviteCommand reads DbDataSync__StateEngine.
+        return FindUpward(startDirectory)
+            ?? Environment.GetEnvironmentVariable("DbDataSync__RepoRoot")
+            ?? CliOptions.DefaultRoot;
     }
 
     /// <summary>

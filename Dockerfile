@@ -30,7 +30,13 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
 # One mount is a complete deployment: the config repository and the state database live together, so
 # a backup of this directory is a backup of everything that is not the image.
-ENV DBDATASYNC_HOME=/var/lib/dbdatasync
+#
+# DbDataSync__RepoRoot is not a container-only name — it's the environment-variable form of the
+# DbDataSync:RepoRoot config key (phase 112), the same one an interactive install or a Windows/Linux
+# service points at its own machine-wide data directory with. This container happens to already
+# resolve /var/lib/dbdatasync as CliOptions.DefaultRoot's own Linux answer, but setting it explicitly
+# here means the image's behaviour doesn't depend on that coincidence continuing to hold.
+ENV DbDataSync__RepoRoot=/var/lib/dbdatasync
 VOLUME ["/var/lib/dbdatasync"]
 
 WORKDIR /app
@@ -45,4 +51,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD ["dotnet", "/app/DbDataSync.Cli.dll", "health", "--url", "http://127.0.0.1:8080"]
 
 ENTRYPOINT ["dotnet", "/app/DbDataSync.Cli.dll", "serve", "--url", "http://0.0.0.0:8080"]
-CMD ["--repo", "/var/lib/dbdatasync"]

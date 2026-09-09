@@ -45,7 +45,18 @@ public static class SetupCommand
 
         if (!ExistingSetup.DetectedAt(root))
         {
-            root = Path.GetFullPath(prompt.Text("Config folder", candidate));
+            // Phase 112: the platform default is machine-wide now, and the operator's only real
+            // configuration may still be sitting at the old per-user one. Default the folder prompt
+            // to it instead of guessing silently — Enter does the sensible thing (review it in
+            // place), typing something else starts fresh at the new location deliberately.
+            var legacyRoot = LegacyRootMigration.DetectAt(candidate);
+            if (legacyRoot is not null)
+            {
+                io.WriteLine(LegacyRootMigration.Message(legacyRoot, candidate));
+                io.WriteLine("");
+            }
+
+            root = Path.GetFullPath(prompt.Text("Config folder", legacyRoot ?? candidate));
             if (ExistingSetup.DetectedAt(root))
                 io.WriteLine("That folder already has a DbDataSync configuration.");
             else
