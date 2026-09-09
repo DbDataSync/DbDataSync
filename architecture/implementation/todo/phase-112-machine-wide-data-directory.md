@@ -18,19 +18,25 @@ which it partly supersedes (see below).
 
 There is no reason for the default operating mode to differ by platform or by launch method. Give
 every major platform **one documented, machine-wide data directory**, so `serve`, `setup`, `doctor`
-and the service all resolve the same repo with no `--repo`, and give every *other* platform a single
-environment variable to point at one of its own.
+and the service all resolve the same repo with no `--repo`, and give every *other* platform the
+existing repo-root environment variable to point at one of its own.
 
 ## What this builds
 
-### 1. Root resolution — an env var, then a per-platform default
+### 1. Root resolution — the existing env var, then a per-platform default
 
 `DbDataSyncRoot.Resolve` becomes: explicit `--repo` → walk up for `dbdatasync.config.yaml` (git-style,
-unchanged) → **`$DBDATASYNC_HOME`** → `CliOptions.DefaultRoot`.
+unchanged) → **`DbDataSync__RepoRoot`** → `CliOptions.DefaultRoot`.
 
-`DBDATASYNC_HOME` already exists as a decorative `ENV` in the `Dockerfile` and is read *nowhere*.
-Formalise it: it is the escape hatch for any platform whose default this phase does not get right
-(and lets the container image drop the explicit `--repo` from its `CMD` — §4).
+`DbDataSync__RepoRoot` is not new — it is the environment-variable form of the `DbDataSync:RepoRoot`
+config key, already documented in `CONFIG.md` and already honoured by the raw API's config chain.
+`serve` / `invite` / `health` resolve the root *before* that chain exists, so they must read it
+directly here — exactly as `ServeCommand` already reads `DbDataSync__Url` and `InviteCommand` reads
+`DbDataSync__StateEngine`. No new name, no screaming-snake one-off.
+
+The `Dockerfile`'s `ENV DBDATASYNC_HOME=/var/lib/dbdatasync` is a one-off that maps to no config key
+and is read nowhere. Replace it with `ENV DbDataSync__RepoRoot=/var/lib/dbdatasync`, which the image
+then actually honours — so the explicit `CMD ["--repo", "/var/lib/dbdatasync"]` can go (§4).
 
 `CliOptions.DefaultRoot` — platform switch:
 
@@ -48,7 +54,7 @@ public static string DefaultRoot =>
 | **macOS** | `/Library/Application Support/DbDataSync` (hard-coded) | the machine-wide app-support location; `CommonApplicationData` maps to `/usr/share` on macOS, which is wrong |
 | **FreeBSD** | `/var/db/dbdatasync` (hard-coded) | FreeBSD `hier(7)` puts server application data under `/var/db/<app>` (`/var/db/mysql`, `/var/db/pkg`); **`/var/lib` does not exist** on a stock FreeBSD |
 | **Linux** | `/var/lib/dbdatasync` | FHS `/var/lib/<pkg>`; matches the container image and phase 111's unit |
-| **other Unix** (Solaris/illumos, NetBSD, OpenBSD, …) | falls through to `/var/lib/dbdatasync` | `/var/lib` exists on Solaris and is the least-surprising generic default; it is **not** idiomatic everywhere (NetBSD/OpenBSD favour `/var/db`), so the docs tell these operators to set `DBDATASYNC_HOME`. .NET has no `Is*` for these and barely runs on them — a per-OS branch is not worth carrying |
+| **other Unix** (Solaris/illumos, NetBSD, OpenBSD, …) | falls through to `/var/lib/dbdatasync` | `/var/lib` exists on Solaris and is the least-surprising generic default; it is **not** idiomatic everywhere (NetBSD/OpenBSD favour `/var/db`), so the docs tell these operators to set `DbDataSync__RepoRoot`. .NET has no `Is*` for these and barely runs on them — a per-OS branch is not worth carrying |
 
 `OperatingSystem.IsFreeBSD()` is a real BCL method (since .NET 5). There is no `IsSolaris` /
 `IsNetBSD` / `IsOpenBSD`, which is why those share the final fallthrough.
@@ -68,11 +74,11 @@ The default location is no longer guaranteed writable by the running user:
 - **Linux / FreeBSD** — phase 111's systemd `install` already creates the directory and `chown`s it
   to the service `User`. An interactive `serve` as a non-root user that cannot write `/var/lib`
   (`/var/db` on FreeBSD) fails clearly: *"Cannot create /var/lib/dbdatasync (permission denied). Run
-  `dbdatasync setup` (which uses sudo where needed), set `DBDATASYNC_HOME` to a writable path, or
+  `dbdatasync setup` (which uses sudo where needed), set `DbDataSync__RepoRoot` to a writable path, or
   pass `--repo`."*
 - **macOS** — `/Library/Application Support` needs admin to create a subdirectory. `dbdatasync setup`
   runs the `mkdir` + `chown` under `sudo`; a bare `serve` prints the same message. (A per-user Mac
-  dev who does not want `sudo` sets `DBDATASYNC_HOME=~/Library/Application Support/DbDataSync`.)
+  dev who does not want `sudo` sets `DbDataSync__RepoRoot=~/Library/Application Support/DbDataSync`.)
 
 ### 3. Migration for existing installs
 
@@ -99,10 +105,10 @@ check the *old* per-user location:
 
 ### 4. Docs, the container image, and phase 111
 
-- `CONFIG.md`'s "Repo root resolution" section gains the `DBDATASYNC_HOME` step and a per-platform
+- `CONFIG.md`'s "Repo root resolution" section gains the `DbDataSync__RepoRoot` step and a per-platform
   default table (Windows / macOS / FreeBSD / Linux / other-Unix), and notes the last row's operators
-  should set `DBDATASYNC_HOME`.
-- **`Dockerfile`** — with `DBDATASYNC_HOME=/var/lib/dbdatasync` now actually read, the explicit
+  should set `DbDataSync__RepoRoot`.
+- **`Dockerfile`** — with the ENV renamed to `DbDataSync__RepoRoot` and now actually read, the explicit
   `CMD ["--repo", "/var/lib/dbdatasync"]` is redundant and can go (the `ENTRYPOINT` keeps `serve
   --url …`). One less place the path is written.
 - Phase 111's carve-out ("`serve` run interactively is unchanged — it still uses … `DefaultRoot`")
@@ -117,7 +123,7 @@ check the *old* per-user location:
   project directly" dev path and is not a distribution concern.
 - A `dbdatasync migrate` command. If the "move it yourself" message proves to generate support
   load, a helper is a small follow-up.
-- Per-OS branches for Solaris/illumos, NetBSD, OpenBSD. `DBDATASYNC_HOME` is their answer; if one of
+- Per-OS branches for Solaris/illumos, NetBSD, OpenBSD. `DbDataSync__RepoRoot` is their answer; if one of
   them becomes a real target, a one-line `IsX()`-style check (once .NET exposes one) is trivial to
   add.
 
@@ -127,7 +133,7 @@ check the *old* per-user location:
 - **`CliOptionsTests`** — `DefaultRoot` returns the expected path on the running OS (Windows / macOS
   / Linux at least; a CI matrix already runs on all three), and it is machine-wide, not under a user
   profile.
-- **`DbDataSyncRootTests`** — `$DBDATASYNC_HOME` beats `DefaultRoot` but loses to an explicit
+- **`DbDataSyncRootTests`** — `DbDataSync__RepoRoot` beats `DefaultRoot` but loses to an explicit
   `--repo` and to a walk-up hit; unset behaves as today.
 - **`ServiceCommandTests`** — Windows `install --account CONTOSO\svc` emits an `icacls` grant for
   the data directory; Linux `install --user dbdatasync` creates and `chown`s it (fake runners).
@@ -146,8 +152,8 @@ check the *old* per-user location:
    take ownership for the service account. Decide when writing the `icacls` call.
 2. **macOS creation UX.** `/Library/Application Support/DbDataSync` needs admin to create. Is
    `setup` shelling `sudo mkdir` acceptable, or should the Mac default fall back to per-user when
-   the process is not admin and `DBDATASYNC_HOME` is unset? Leaning: machine-wide with the `sudo`
-   step (consistent with every other platform), `DBDATASYNC_HOME` for the dev who wants otherwise.
+   the process is not admin and `DbDataSync__RepoRoot` is unset? Leaning: machine-wide with the `sudo`
+   step (consistent with every other platform), `DbDataSync__RepoRoot` for the dev who wants otherwise.
 3. **FreeBSD: `/var/db` vs `/usr/local/var`.** Ports-installed daemons sometimes use
    `/usr/local/var/<app>`; `hier(7)` and the datadir precedents (`/var/db/mysql`) point at
    `/var/db`. Leaning: `/var/db/dbdatasync`. Confirm with anyone actually running it there.
