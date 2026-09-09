@@ -3,7 +3,7 @@
 **Status**: Planned, not started. **Starts with a spike** (Open questions 1).
 **Plan reference**: `architecture/planning/todo/linux-tls-without-a-reverse-proxy.md`, tier 3.
 Builds on phase 113's cert-swap seam; independent of it otherwise. Cross-refs phase 111 (systemd
-capabilities) and phase 110 (`doctor`).
+capabilities) and phase 115 (`config check`, née phase 110's `doctor`).
 
 ## Why
 
@@ -83,9 +83,9 @@ config has `Tls:Acme:Challenge: http-01` (or `tls-alpn-01` binding 443 as non-ro
 capability; installing it always would also be defensible. Add `ExecReload=/bin/kill -HUP $MAINPID`
 or a reload endpoint hook so a manual cert refresh is possible.
 
-### 6. `doctor` and `setup`
+### 6. `config check` and `setup`
 
-- `doctor` — an ACME check: `Enabled` and options valid; account key present; a current cert for
+- `config check` — an ACME check: `Enabled` and options valid; account key present; a current cert for
   every `Domain`; `NotAfter` beyond the renewal threshold; the last renewal attempt's outcome and
   time. On `http-01`, a note if port 80 does not look bindable.
 - `setup` step 7 — "Automatic (Let's Encrypt / ACME)" becomes a certificate option: prompt the
@@ -96,7 +96,7 @@ or a reload endpoint hook so a manual cert refresh is possible.
 ### 7. Cross-platform
 
 `DbDataSync:Tls:Acme` is valid on Windows. The doc and `setup` present three certificate paths there
-— Windows store (`cert bind`/`enroll`), bring-your-own file (phase 113), ACME — and one or two on
+— Windows store (`config cert bind`/`enroll`), bring-your-own file (phase 113), ACME — and one or two on
 Linux/macOS (file, ACME). This is the convergence phase 112's "one operating mode per platform"
 points at.
 
@@ -106,8 +106,8 @@ points at.
   A later addition; until then such a deployment points `DirectoryUrl` at an internal ACME CA that
   can validate over the internal network, or uses phase 113.
 - **Multi-certificate / SNI** for more than one hostname's cert — `Domains` is one cert's SAN list.
-- **A Linux cert admin screen** — `AdminCertificatePage` stays Windows-store-shaped; `doctor` covers
-  the operational need, a small "ACME status" panel is a later UI task.
+- **A Linux cert admin screen** — `AdminCertificatePage` stays Windows-store-shaped; `config check`
+  covers the operational need, a small "ACME status" panel is a later UI task.
 - **Removing `UseHttpsRedirection`** except where the http-01 listener's 308 already covers it.
 
 ## How to verify when built
@@ -124,7 +124,7 @@ points at.
 - **Integration** — host with ACME enabled against Pebble, http-01: `GET https://<domain>/api/health`
   succeeds after issuance; the served cert's issuer is Pebble; forcing a renewal swaps the cert
   without dropping connections.
-- **`DoctorCommandTests`** — ACME enabled but no cert yet → `Warn` ("provisioning"); cert present
+- **`ReadinessChecksTests`** — ACME enabled but no cert yet → `Warn` ("provisioning"); cert present
   and fresh → `Ok`; last renewal failed → `Fail` with the reason.
 - Manual: a real internet-facing Linux host, Let's Encrypt production, http-01 — issues, serves,
   and renews (fast-forward the clock or wait).
@@ -140,7 +140,7 @@ points at.
 2. **Internal ACME CA trust.** The box must trust the internal CA to load and validate its own
    issued cert. Does the phase add the CA root to the OS trust store, set `AllowInvalid`, or leave
    it to the operator? Leaning: document that the CA root must be OS-trusted (which it usually
-   already is on a domain-joined box), and `doctor` reports a chain-build failure clearly.
+   already is on a domain-joined box), and `config check` reports a chain-build failure clearly.
 3. **Where the ACME account is scoped** — one account per deployment (per `<repo>/tls/`) is simplest
    and what most tools do. Confirm no reason to share across deployments.
 4. **First-issuance startup** — the process cannot serve HTTPS until issuance completes (seconds to

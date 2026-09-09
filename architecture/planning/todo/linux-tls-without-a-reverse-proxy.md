@@ -13,7 +13,7 @@ HTTPS anywhere but `localhost`, so this is on the critical path for any non-triv
 
 1. **Bring your own certificate** — point DbDataSync at a PEM/PFX file the operator already keeps
    current (certbot, an internal PKI, a platform team). → **phase 113**
-   (`phase-113-tls-bring-your-own-certificate.md`). A cross-platform `dbdatasync cert use-pem`
+   (`phase-113-tls-bring-your-own-certificate.md`). A cross-platform `dbdatasync config cert use-pem`
    writing the standard `Kestrel:Certificates:Default:*` keys, with the credential in the secret
    store; the cert-reload seam it builds is shared with tier 3.
 2. **Managed self-signed** — DbDataSync generates its own certificate, serves it, and regenerates it
@@ -33,7 +33,7 @@ rate limits) but every client has to be told to trust the cert, which ACME and t
 
 ### What it would be
 
-- Generalise `dbdatasync cert new-self-signed` — Windows-only today — to a cross-platform command
+- Generalise `dbdatasync config cert new-self-signed` — Windows-only today — to a cross-platform command
   that builds a keypair with `CertificateRequest` / `X509Certificate2`, writes it to `<repo>/tls/`
   (git-ignored, the same directory tier 3 defines), and sets
   `Kestrel:Certificates:Default:{Path,KeyPath}` + `AllowInvalid=true`.
@@ -79,5 +79,5 @@ rate limits) but every client has to be told to trust the cert, which ACME and t
 3. **`setup` default** — should a fresh non-localhost install get a self-signed cert automatically,
    or only on request? Leaning: on request, with the browser-warning caveat stated; automatic HTTPS
    that every browser flags is its own kind of bad first impression.
-4. **Interaction with `doctor`** — a self-signed cert is `AllowInvalid`, so `doctor`'s cert check
-   has to distinguish "deliberately self-signed and current" from "misconfigured."
+4. **Interaction with `config check`** — a self-signed cert is `AllowInvalid`, so `config check`'s
+   cert check has to distinguish "deliberately self-signed and current" from "misconfigured."

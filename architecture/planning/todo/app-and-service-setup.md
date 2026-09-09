@@ -20,10 +20,10 @@ step that does not exist today, and it should be designed rather than accreted.
    database, common drivers, authentication, and on Windows the service registration and TLS
    certificate. It writes nothing you cannot also write by hand; it is a guided front over the
    config file and the existing subcommands.
-2. **`dbdatasync doctor`** — the non-interactive core of `setup`'s review: the same checks, one
-   numbered "ready / here is what is wrong" report, exit 0/1, for a CI smoke test or a service
-   wrapper. `setup`'s review screen is `doctor` rendered for a human with "fix this now" actions
-   attached.
+2. **`dbdatasync config check`** (implemented as `doctor` in phase 110; folded under `config` by
+   phase 115) — the non-interactive core of `setup`'s review: the same checks, one numbered "ready /
+   here is what is wrong" report, exit 0/1, for a CI smoke test or a service wrapper. `setup`'s
+   review screen is `config check` rendered for a human with "fix this now" actions attached.
 3. **First-run output that a human actually sees.** The bootstrap admin invite is currently a
    `LogWarning` interleaved with Kestrel startup lines. Make `serve`'s first run print a framed
    "next steps" block, and write the invite to `<repo>/FIRST-RUN.txt` (removed when redeemed) so a
@@ -31,7 +31,7 @@ step that does not exist today, and it should be designed rather than accreted.
 4. **`docs/getting-started.md`** — the happy path, once, per deployment shape (local, container,
    Windows service, Linux behind a proxy). Points at `dbdatasync setup` for the interactive path and
    at `CONFIG.md` for the full surface; does not duplicate either.
-5. **Provider/driver setup wired into `setup`, `serve` and `doctor`** — `driver sync` on deploy, a
+5. **Provider/driver setup wired into `setup`, `serve` and `config check`** — `config driver sync` on deploy, a
    clear failure when a configured engine's provider is missing, and the offline story. Design this
    alongside phase 109, not after.
 
@@ -53,8 +53,8 @@ What a deployer works with today:
   ports** (5183 / 5080 / 8080), which `CONFIG.md` itself calls the most common source of confusion.
 - **State store** — SQLite by default (a file beside the repo, zero config). `StateEngine: MsSql` or
   `Postgres` needs `StateConnectionString` (credential-free) in the config file plus
-  `dbdatasync secret set dbdatasync:config:stateConnectionString "Password=…"` — a verbatim magic
-  ref string.
+  `dbdatasync config secret set dbdatasync:config:stateConnectionString "Password=…"` — a verbatim
+  magic ref string.
 - **Auth** (`AuthOptions`, `PasskeyOptions`, `BootstrapInvite`) — closed by default. First `serve`
   with zero users mints an Admin bootstrap invite and `LogWarning`s `/invite#<code>`; it is revoked
   the moment a user exists and re-minted every restart until then. `dbdatasync invite` reprints one.
@@ -62,7 +62,7 @@ What a deployer works with today:
   `DbDataSync:Auth:Passkeys:RelyingPartyId` + `Origins`, over HTTPS. `PasskeyOptions.Problem()` runs
   at startup and `LogWarning`s a mismatch. Windows: `AdminGroup` / `ViewerGroup`. Escape hatch:
   `DbDataSync:Auth:Disabled=true`.
-- **TLS** — `dbdatasync cert …` issues/binds a certificate **on Windows only**. Linux has no
+- **TLS** — `dbdatasync config cert …` issues/binds a certificate **on Windows only**. Linux has no
   in-product story and nothing documents the reverse-proxy alternative — which matters because
   passkeys need HTTPS anywhere but `localhost`.
 - **Health** — `dbdatasync health` hits `GET /api/health` (no auth), exits 0/1; the container's
@@ -74,13 +74,13 @@ What a deployer works with today:
 ### The gap phase 109 opens
 
 After phase 109, a deployment has a `<repo>/providers/` and `<repo>/drivers/` tree of manifests, and
-the DLLs are restored (not committed — Q2) by `dbdatasync provider|driver sync`. That means:
+the DLLs are restored (not committed — Q2) by `dbdatasync config provider|driver sync`. That means:
 
 - A **fresh deployment pointed at an existing config repo** must `sync` before `serve`, or `serve`
   must do it. Undefined today.
 - After phase 109g, a **SQL Server or Postgres state backend needs its provider installed** — a
-  behaviour change for existing deployments, and exactly the kind of thing `doctor` should catch and
-  `serve` should refuse clearly rather than fail with "assembly not found."
+  behaviour change for existing deployments, and exactly the kind of thing `config check` should
+  catch and `serve` should refuse clearly rather than fail with "assembly not found."
 - **Air-gapped / offline** deployments need `--source <internal-feed>` and a documented flow.
 
 ---
@@ -89,16 +89,16 @@ the DLLs are restored (not committed — Q2) by `dbdatasync provider|driver sync
 
 ### 1. `dbdatasync setup`
 
-An interactive command, dispatched from `Program.cs` alongside `serve` / `service` / `cert`. It is
+An interactive command, dispatched from `Program.cs` alongside `serve` / `service` / `config`. It is
 what `getting-started.md` tells a first-time deployer to run, and what an existing deployment runs to
 check or change its configuration. Everything it does is also doable by editing
 `dbdatasync.config.yaml` and running the individual subcommands — `setup` is a guided front over
 them, never a second source of truth.
 
 **Requires a TTY.** When input is redirected or there is no interactive console
-(`Console.IsInputRedirected`), it prints *"setup is interactive — run `dbdatasync doctor` to check a
-configuration, or edit `dbdatasync.config.yaml` (see CONFIG.md)"* and exits non-zero. There is no
-`--non-interactive` mode; that role belongs to the config file.
+(`Console.IsInputRedirected`), it prints *"setup is interactive — run `dbdatasync config check` to
+check a configuration, or edit `dbdatasync.config.yaml` (see CONFIG.md)"* and exits non-zero. There
+is no `--non-interactive` mode; that role belongs to the config file.
 
 **No new dependency.** A small internal `Prompt` helper — text-with-default, yes/no, single choice,
 multi-choice, masked secret — over `Console.ReadLine`/`ReadKey`. The CLI project has zero package
@@ -120,7 +120,7 @@ references today and this keeps it that way.
 
 #### The review screen (existing setup)
 
-The human form of `doctor` (§2) — the same checks, each line ✓ or ✗-with-fix: resolved root ·
+The human form of `config check` (§2) — the same checks, each line ✓ or ✗-with-fix: resolved root ·
 console URL · state engine, reachability, schema version · auth method + passkey RP status ·
 certificate status (Windows) · installed providers/drivers, and whether a `sync` is pending ·
 whether a first admin exists.
@@ -148,14 +148,14 @@ Ordered, every step defaulted so `Enter` accepts:
 3. **State database** —
    - **SQLite** (default) — a path beside the repo; nothing else.
    - **SQL Server / PostgreSQL** — prompt the credential-free connection string, then the password
-     (masked) → store it via the `secret set dbdatasync:config:stateConnectionString` path. Offer to
-     `provider install` the matching ADO.NET provider (required after phase 109g; skipped while it is
-     still a hard reference). Open a test connection before continuing.
+     (masked) → store it via the `config secret set dbdatasync:config:stateConnectionString` path.
+     Offer to `config provider install` the matching ADO.NET provider (required after phase 109g;
+     skipped while it is still a hard reference). Open a test connection before continuing.
 4. **Common drivers** — *"Which database engines will you replicate?"* Multi-choice: SQL Server,
    PostgreSQL, DuckDB (built-in — no action), MySQL / MariaDB, Oracle, "something else". For each
-   non-built-in choice, run `provider install` for the known package and drop a `driver.yaml` from a
-   template (`driver install --from <engine>`, once phase 109d lands). Until then this step is
-   informational.
+   non-built-in choice, run `config provider install` for the known package and drop a `driver.yaml`
+   from a template (`config driver install --from <engine>`, once phase 109d lands). Until then this
+   step is informational.
 5. **Authentication** —
    - **Passkeys** (default) — confirm the relying-party id: `localhost` for a local install, else
      the step-2 hostname. Set `RelyingPartyId` / `Origins`, require the console URL to be HTTPS, run
@@ -168,9 +168,9 @@ Ordered, every step defaulted so `Enter` accepts:
    account — note that an integrated-auth DB connection connects **as that account**). If `setup` is
    not elevated, finish everything else and print the single `service install` command to run from an
    elevated prompt rather than relaunching through UAC mid-session.
-7. **Windows only — certificate** — *"Set up the TLS certificate Kestrel serves?"* → the `cert`
-   path: a self-signed certificate for a quick start, or enroll from a template / bind an existing
-   thumbprint. Bind it to the console URL's port.
+7. **Windows only — certificate** — *"Set up the TLS certificate Kestrel serves?"* → the
+   `config cert` path: a self-signed certificate for a quick start, or enroll from a template / bind
+   an existing thumbprint. Bind it to the console URL's port.
 8. **Write and finish** — commit `dbdatasync.config.yaml`; confirm the stored secret, the installed
    providers, the service, the certificate. Print the first-run invite URL, noting it is also in
    `<repo>/FIRST-RUN.txt`. Offer to **start DbDataSync now**.
@@ -182,7 +182,7 @@ by a one-paragraph pointer to the reverse-proxy section of `getting-started.md`.
 image `setup` is not the path at all — the image is configured by environment and the mounted
 volume, and `getting-started.md`'s container section says so.
 
-### 2. `dbdatasync doctor` — the checks `setup` and CI share
+### 2. `dbdatasync config check` — the checks `setup` and CI share
 
 A read-only inspection, exit 0 if ready, 1 with a numbered report otherwise. Each check is a green
 line or a problem with its exact fix:
@@ -195,12 +195,12 @@ line or a problem with its exact fix:
   or not); every `driverType` referenced by a `connection.yaml` resolves to a registered driver.
 - **Auth** — a method is configured (passkeys, Windows, or `Disabled` stated); `PasskeyOptions.Problem()`
   is null; the bound URL's host matches `RelyingPartyId`; if any URL is HTTPS the certificate is
-  valid and not near expiry (reuse `CertificateOptions` / the `cert status` logic).
+  valid and not near expiry (reuse `CertificateOptions` / the `config cert status` logic).
 - **Binding** — the console URL is reachable from this host; a warning if it is HTTP and not
   loopback.
 - **First admin** — whether a user exists; if not, print the current bootstrap invite.
 
-`doctor` is what `getting-started.md` ends every section with, what `service install` prints a
+`config check` is what `getting-started.md` ends every section with, what `service install` prints a
 reminder to run, and the check engine `setup`'s review screen renders interactively.
 
 ### 3. First-run experience
@@ -224,7 +224,7 @@ then `dbdatasync setup`. The container section is env + volume (setup does not a
 reverse-proxy section is new material `setup` points at: an nginx/Caddy snippet terminating TLS,
 forwarding `/`, `/api`, `/hubs` (SignalR needs the upgrade headers), and the
 `Passkeys:RelyingPartyId` / `Origins` / `DbDataSync:Url` values that must match the public hostname.
-Every section ends in `dbdatasync doctor` → sign in. Links to `CONFIG.md` for the full surface; does
+Every section ends in `dbdatasync config check` → sign in. Links to `CONFIG.md` for the full surface; does
 not duplicate it.
 
 ### 5. Provider/driver setup, designed with phase 109
@@ -237,13 +237,13 @@ not duplicate it.
   state backends keep working with zero manual steps after 109g.
 - A `--source` flag on `sync` and a short "air-gapped install" section in getting-started: restore
   once against an internal feed or a folder of `.nupkg`s, commit the closure (the Q2 opt-in), deploy.
-- `doctor` covers the "provider missing / out of sync" cases named above; `setup`'s drivers step
+- `config check` covers the "provider missing / out of sync" cases named above; `setup`'s drivers step
   installs them in the first place.
 
 ### 6. Windows service and upgrades — smaller items
 
 - `setup` offers the service registration and cert; `service install` run directly still prints its
-  paths, and gains a "run `dbdatasync doctor` next" line.
+  paths, and gains a "run `dbdatasync config check` next" line.
 - Document the upgrade flow: stop the service / container, `dotnet tool update` or repull, start —
   migrations self-apply; keep a state-DB backup first. A `--dry-run` on migration (log what would
   run, apply nothing) is worth considering for MsSql/Postgres state backends.
@@ -284,15 +284,17 @@ not duplicate it.
 4. **Elevation on Windows.** Detect non-elevated up front and defer steps 6–7 with printed
    commands, or offer to relaunch elevated? Leaning: defer and print — a UAC relaunch of an
    interactive session mid-flow loses the console state.
-5. **Is `doctor` a separate command or `serve --check`?** Leaning: separate, so CI and a service
-   wrapper call it without starting Kestrel. `setup`'s review screen calls the same check code
-   in-process.
-6. **Should `serve` block on `doctor` failing**, or start degraded and surface problems in the admin
+5. **Is the check engine a separate command or `serve --check`?** Resolved (phase 110, revised by
+   phase 115): separate — `dbdatasync config check` — so CI and a service wrapper call it without
+   starting Kestrel. `setup`'s review screen calls the same check code in-process. (Originally built
+   as its own top-level `doctor` command in phase 110; phase 115 nested it under `config` alongside
+   `cert`/`secret`/`provider`/`driver` to trim the top-level command count.)
+6. **Should `serve` block on `config check` failing**, or start degraded and surface problems in the admin
    UI? Leaning: block only on genuinely non-functional states (no auth method and not `Disabled`;
    state store unreachable); warn-and-continue on the rest.
 7. **First-run invite file** — git-tracked repo root (committed) or a sibling non-repo path? Leaning:
    repo root, `.gitignore`d by a starter `.gitignore` the bootstrap writes.
 8. **Container first-run** has no interactive console — is `FIRST-RUN.txt` in the volume enough, or
    does getting-started also show `docker exec … dbdatasync invite`? Both, probably.
-9. How much of the check engine reuses existing code (`PasskeyOptions.Problem`, `cert status`,
+9. How much of the check engine reuses existing code (`PasskeyOptions.Problem`, `config cert status`,
    `StateDatabase` version read, the connection factory) vs. needs new probes.

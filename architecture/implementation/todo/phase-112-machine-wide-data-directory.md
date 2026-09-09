@@ -17,9 +17,9 @@ which it partly supersedes (see below).
   path only, leaving interactive `serve` on `~/.local/share`.
 
 There is no reason for the default operating mode to differ by platform or by launch method. Give
-every major platform **one documented, machine-wide data directory**, so `serve`, `setup`, `doctor`
-and the service all resolve the same repo with no `--repo`, and give every *other* platform the
-existing repo-root environment variable to point at one of its own.
+every major platform **one documented, machine-wide data directory**, so `serve`, `setup`,
+`config check` and the service all resolve the same repo with no `--repo`, and give every *other*
+platform the existing repo-root environment variable to point at one of its own.
 
 ## What this builds
 
@@ -83,8 +83,8 @@ The default location is no longer guaranteed writable by the running user:
 ### 3. Migration for existing installs
 
 An upgrade must not silently strand a working `%LOCALAPPDATA%\DbDataSync` / `~/.local/share/DbDataSync`
-repo. `serve`, `setup` and `doctor`, when they resolve the *new* default and find **nothing there**,
-check the *old* per-user location:
+repo. `serve`, `setup` and `config check`, when they resolve the *new* default and find **nothing
+there**, check the *old* per-user location:
 
 - old location has a real configuration (the `ExistingSetup.DetectedAt` predicate phase 110 added)
   → print, do not act:
@@ -137,7 +137,7 @@ check the *old* per-user location:
   `--repo` and to a walk-up hit; unset behaves as today.
 - **`ServiceCommandTests`** — Windows `install --account CONTOSO\svc` emits an `icacls` grant for
   the data directory; Linux `install --user dbdatasync` creates and `chown`s it (fake runners).
-- **`SetupCommandTests` / `DoctorCommandTests`** — with a config only at the old per-user location
+- **`SetupCommandTests` / `ReadinessChecksTests`** — with a config only at the old per-user location
   and nothing at the new default, the migration message is printed and names both paths; with a
   config at the new default, no message.
 - Manual: fresh Windows install → `serve` with no args → repo at `C:\ProgramData\DbDataSync`;
