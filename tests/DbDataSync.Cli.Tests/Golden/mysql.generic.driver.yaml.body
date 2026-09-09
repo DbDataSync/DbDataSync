@@ -1,0 +1,36 @@
+dialect:
+  quoteIdentifier: backtick        # backtick | doubleQuote | bracket
+  parameterPrefix: "@"             # "@" -> @p , ":" -> :p , "?" -> positional
+  rowLimit: limitOffset            # LIMIT n OFFSET m   (vs. offsetFetch for OFFSET..FETCH)
+  catalog: informationSchema       # informationSchema is the only strategy supported today
+  supportsChangeDatabase: true     # false -> a mapping naming another database is a config error
+  defaultDatabase: ""              # what to connect to before a mapping names one
+  # connectionStringKeys:          # uncomment and edit if this library's key names differ
+  #   host: Server
+  #   port: Port
+  #   database: Database
+  #   username: User Id
+  #   password: Password
+  #   connectTimeout: Connection Timeout
+
+# Native type name (with its (p,s) args) -> canonical. Anything unlisted -> Unmappable,
+# which provisioning reports as unsupported rather than guessing a rendering.
+typeMap:
+  tinyint:        Int8
+  smallint:       Int16
+  int:            Int32
+  bigint:         Int64
+  "decimal(p,s)": { kind: Decimal, precision: p, scale: s }
+  double:         Double
+  "varchar(n)":   { kind: String, length: n, unicode: true }
+  text:           { kind: String, max: true }
+  datetime:       Timestamp
+  date:           Date
+  json:           Json
+  blob:           { kind: Binary, max: true }
+
+# Engine-neutral strategies to offer. All already exist in DbDataSync.Drivers.Generic.
+capabilities:
+  readers: [Watermark, BatchReload]
+  staging: [StagingTable]
+  writers: [DeleteInsert]

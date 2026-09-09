@@ -302,7 +302,8 @@ public static class SetupCommand
         }
 
         Directory.CreateDirectory(driverDir);
-        var yaml = DriverTemplates.Render("mysql", "mysql", "MySQL / MariaDB", packageId);
+        var knownDriver = KnownDrivers.TryGetById("mysql.generic")!;
+        var yaml = KnownDrivers.Render(knownDriver, "mysql", "MySQL / MariaDB", packageId);
         await File.WriteAllTextAsync(yamlPath, yaml);
         io.WriteLine($"Installed '{packageId}' and wrote '{yamlPath}'. Review the type map before relying on it.");
     }

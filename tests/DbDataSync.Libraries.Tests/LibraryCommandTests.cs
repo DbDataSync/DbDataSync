@@ -77,4 +77,17 @@ public sealed class LibraryCommandTests : IAsyncLifetime
         Assert.Equal(1, exitCode);
         Assert.Contains("--factory-type", _error.ToString());
     }
+
+    [Fact]
+    public async Task InstallByCatalogId_FillsPackageIdAndFactoryTypeFromTheCatalog()
+    {
+        Assert.Equal(0, await RunAsync("install", "mysql-connector", "--version", "2.4.0"));
+
+        var manifest = LibraryManifest.Read(LibraryPaths.ManifestPath(LibraryPaths.LibraryDir(_repoRoot, "mysql-connector")));
+        Assert.Equal("mysql-connector", manifest.Id);
+        var package = Assert.Single(manifest.Packages);
+        Assert.Equal("MySqlConnector", package.Id);
+        Assert.Equal("2.4.0", package.Version);
+        Assert.Equal("MySqlConnector.MySqlConnectorFactory, MySqlConnector", manifest.FactoryType);
+    }
 }

@@ -33,10 +33,14 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-09 (later than the note below): 116 is done and removed — `DbDataSync.Providers` is
-`DbDataSync.Libraries` throughout, and a `driver.yaml` descriptor now references its library by id
-(`library: <id>`) instead of carrying its own `factoryType`/`packages` block. 117–120 build on it in
-order, same as before.
+Updated 2026-09-09 (later than the note below): 117 is done and removed — `KnownLibraries` is a
+7-entry catalog now (a stable id, a real package id, a factory type, a display name and description),
+and `KnownDrivers` (new, one `mysql.generic` entry) supplies `config driver install --from`'s bodies as
+embedded YAML instead of a hardcoded CLI switch. 118–120 build on it in order, same as before.
+
+Updated 2026-09-09: 116 is done and removed — `DbDataSync.Providers` is `DbDataSync.Libraries`
+throughout, and a `driver.yaml` descriptor now references its library by id (`library: <id>`) instead
+of carrying its own `factoryType`/`packages` block. 117–120 build on it in order, same as before.
 
 Updated 2026-09-09: phases **116–120** join `todo/` as one arc — drivers and libraries visible and
 manageable from the web console (`architecture/planning/done/drivers-and-libraries-in-the-web-ui.md`).

@@ -36,6 +36,12 @@ public static class LibraryCommand
     /// [--factory-type type] [--source feed]</c>. The first package id is the library's own id unless
     /// <c>--as</c> names a different one (a multi-package library whose primary assembly isn't first,
     /// or an id an operator wants to spell differently from the package).
+    /// <para>
+    /// A single argument naming a <see cref="KnownLibraries"/> catalog id (<c>mysql-connector</c>) is
+    /// shorthand for that entry's real package id and factory type — <c>--version</c> is still
+    /// required (the "pinned, never latest" rule holds for a catalog install too), but
+    /// <c>--factory-type</c> is not.
+    /// </para>
     /// </summary>
     private static async Task<int> InstallAsync(string repoRoot, string[] args)
     {
@@ -56,7 +62,9 @@ public static class LibraryCommand
         var id = CliOptions.Read(args, "--as") ?? packageIds[0];
         var version = CliOptions.Read(args, "--version");
         var source = CliOptions.Read(args, "--source");
-        var factoryType = CliOptions.Read(args, "--factory-type") ?? KnownLibraries.TryGet(packageIds[0]);
+
+        var catalogEntry = packageIds.Count == 1 ? KnownLibraries.TryGetById(packageIds[0]) : null;
+        var factoryType = CliOptions.Read(args, "--factory-type") ?? catalogEntry?.FactoryType ?? KnownLibraries.TryGet(packageIds[0]);
         if (factoryType is null)
         {
             Console.Error.WriteLine(
@@ -71,7 +79,9 @@ public static class LibraryCommand
             return 1;
         }
 
-        var packages = packageIds.Select(pid => new PackageRef(pid, version ?? "")).ToList();
+        var packages = catalogEntry is not null
+            ? [new PackageRef(catalogEntry.PackageId, version ?? "")]
+            : packageIds.Select(pid => new PackageRef(pid, version ?? "")).ToList();
         if (packages.Any(p => string.IsNullOrEmpty(p.Version)))
         {
             Console.Error.WriteLine("Every package needs a version; pass --version for a single-package install.");

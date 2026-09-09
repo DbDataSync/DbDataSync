@@ -11,6 +11,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Resources\*.yaml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Generic\DbDataSync.Drivers.Generic.csproj" />

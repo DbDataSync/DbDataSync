@@ -93,16 +93,17 @@ public static class DriverCommand
     }
 
     /// <summary>
-    /// <c>driver install &lt;id&gt; --library &lt;name&gt; --version &lt;v&gt;
-    /// [--factory-type type] [--from mysql] [--display-name name]</c>. Installs the named library
-    /// exactly as <c>library install</c> would — or, when <paramref name="args"/>' <c>--library</c>
-    /// name already resolves in <see cref="LibraryRegistry"/>, reuses it rather than reinstalling
-    /// (trusting the already-installed library's own <c>factoryType</c> over a mismatched
+    /// <c>driver install &lt;id&gt; [--library &lt;name&gt;] --version &lt;v&gt;
+    /// [--factory-type type] [--from &lt;knownDriverId&gt;] [--display-name name]</c>. Installs the
+    /// named library exactly as <c>library install</c> would (a <c>--library</c> naming a
+    /// <see cref="KnownLibraries"/> catalog id resolves to that entry's real package id and factory
+    /// type, same shorthand <c>LibraryCommand</c> accepts) — or, when the name already resolves in
+    /// <see cref="LibraryRegistry"/>, reuses it rather than reinstalling (trusting the
+    /// already-installed library's own <c>factoryType</c> over a mismatched
     /// <c>--factory-type</c>/<see cref="KnownLibraries"/> guess) — then writes a <c>driver.yaml</c>
-    /// skeleton naming it, filled in from a known starting template when <c>--from</c> names one,
-    /// otherwise a minimal shell the operator fills in themselves (an empty <c>typeMap</c> maps every
-    /// native type to <c>Unmappable</c>, which provisioning reports rather than guesses at, so an
-    /// incomplete descriptor fails loud, not silently).
+    /// skeleton naming it: a <see cref="KnownDrivers"/> entry's own body when <c>--from</c> names one
+    /// (whose bound library id also becomes <c>--library</c>'s default when it's omitted), otherwise a
+    /// minimal shell the operator fills in themselves.
     /// </summary>
     private static async Task<int> InstallDescriptorAsync(string repoRoot, string[] args)
     {
@@ -112,17 +113,34 @@ public static class DriverCommand
         if (ids.Count != 1)
         {
             Console.Error.WriteLine(
-                "Usage: dbdatasync config driver install <id> --library <name> --version <v> " +
-                "[--factory-type type] [--from mysql] [--display-name name]");
+                "Usage: dbdatasync config driver install <id> [--library <name>] --version <v> " +
+                "[--factory-type type] [--from <knownDriverId>] [--display-name name]");
             return 1;
         }
 
         var id = ids[0];
-        var libraryName = CliOptions.Read(args, "--library");
+
+        KnownDriverEntry? knownDriver = null;
+        var template = CliOptions.Read(args, "--from");
+        if (template is not null)
+        {
+            knownDriver = KnownDrivers.TryGetById(template);
+            if (knownDriver is null)
+            {
+                Console.Error.WriteLine(
+                    $"No starter template named '{template}'. Known templates: " +
+                    $"{string.Join(", ", KnownDrivers.All.Select(d => d.Id))}. Omit --from for a minimal shell.");
+                return 1;
+            }
+        }
+
+        var libraryName = CliOptions.Read(args, "--library") ?? knownDriver?.BoundLibraryId;
         var version = CliOptions.Read(args, "--version");
         if (libraryName is null || version is null)
         {
-            Console.Error.WriteLine("Both --library <name> and --version <v> are required.");
+            Console.Error.WriteLine(
+                "--version <v> is required, and so is --library <name> unless --from names a catalog " +
+                "entry (its bound library is then the default).");
             return 1;
         }
 
@@ -135,7 +153,8 @@ public static class DriverCommand
         }
         else
         {
-            var factoryType = CliOptions.Read(args, "--factory-type") ?? KnownLibraries.TryGet(libraryName);
+            var catalogLibrary = KnownLibraries.TryGetById(libraryName);
+            var factoryType = CliOptions.Read(args, "--factory-type") ?? catalogLibrary?.FactoryType ?? KnownLibraries.TryGet(libraryName);
             if (factoryType is null)
             {
                 Console.Error.WriteLine(
@@ -144,7 +163,8 @@ public static class DriverCommand
                 return 1;
             }
 
-            var package = new PackageRef(libraryName, version);
+            var packageId = catalogLibrary?.PackageId ?? libraryName;
+            var package = new PackageRef(packageId, version);
             try
             {
                 await LibraryInstaller.InstallAsync(repoRoot, libraryName, [package], factoryType);
@@ -165,15 +185,16 @@ public static class DriverCommand
             return 1;
         }
 
-        var template = CliOptions.Read(args, "--from");
-        var yaml = DriverTemplates.Render(template, id, displayName, libraryName);
+        var yaml = knownDriver is not null
+            ? KnownDrivers.Render(knownDriver, id, displayName, libraryName)
+            : DriverTemplates.Minimal(id, displayName, libraryName);
         await File.WriteAllTextAsync(yamlPath, yaml);
 
         Console.WriteLine($"Installed library '{libraryName}' and wrote '{yamlPath}'.");
         Console.WriteLine(
-            template is null
+            knownDriver is null
                 ? "Fill in dialect and typeMap before this driver will do anything useful."
-                : $"Seeded from the '{template}' template — review before relying on it.");
+                : $"Seeded from the '{knownDriver.Id}' template — review before relying on it.");
         return 0;
     }
 
@@ -273,7 +294,7 @@ public static class DriverCommand
     {
         Console.Error.WriteLine("""
             Usage:
-              dbdatasync config driver install <id> --library <name> --version <v> [--factory-type type] [--from mysql] [--display-name name]
+              dbdatasync config driver install <id> [--library <name>] --version <v> [--factory-type type] [--from <knownDriverId>] [--display-name name]
               dbdatasync config driver install <id> --kind compiled --package <packageId> --version <v> --assembly <name.dll> --driver-type <FQTypeName> [--source feed]
               dbdatasync config driver list
               dbdatasync config driver uninstall <id>
