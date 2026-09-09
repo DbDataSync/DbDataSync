@@ -29,11 +29,11 @@ public static class Help
                   Exits 0 if a running DbDataSync answers, 1 if it does not. What the container's
                   health check runs.
 
-              dbdatasync config check|cert|secret|provider|driver
+              dbdatasync config check|cert|secret|library|driver
                   Every configuration-related command, grouped under one root:
 
                     check     [--repo <path>] [--json]
-                        Non-interactive readiness check — repo, state store, providers/drivers,
+                        Non-interactive readiness check — repo, state store, libraries/drivers,
                         auth, binding, first admin. Exits 1 if anything fails; what `setup`'s
                         review screen runs.
 
@@ -52,18 +52,18 @@ public static class Help
                         state database's password:
                         dbdatasync config secret set dbdatasync:config:stateConnectionString "Password=..."
 
-                    provider  install <packageId>[ <packageId>...] [--as <id>] --version <v> [--factory-type type] [--source feed]
-                    provider  sync [<id>] | list | uninstall <id>
-                        Restores an ADO.NET provider package (Microsoft.Data.SqlClient, Npgsql,
-                        MySqlConnector, ...) into <repo>/providers/<id>/, so it can be swapped by
+                    library   install <packageId>[ <packageId>...] [--as <id>] --version <v> [--factory-type type] [--source feed]
+                    library   sync [<id>] | list | uninstall <id>
+                        Restores an ADO.NET library package (Microsoft.Data.SqlClient, Npgsql,
+                        MySqlConnector, ...) into <repo>/libraries/<id>/, so it can be swapped by
                         installing a new version rather than by rebuilding DbDataSync. Runs
                         `dotnet publish` under the hood — no network access from the running host
                         itself.
 
-                    driver    install <id> --provider <packageId> --version <v> [--factory-type type] [--from mysql] [--display-name name]
+                    driver    install <id> --library <name> --version <v> [--factory-type type] [--from mysql] [--display-name name]
                     driver    list | uninstall <id>
                         Adds a whole new SQL engine — a driver.yaml descriptor plus its restored
-                        provider — without a DbDataSync rebuild. Watermark and batch-reload
+                        library — without a DbDataSync rebuild. Watermark and batch-reload
                         replication only; see architecture/planning/todo/nuget-loaded-drivers.md
                         for what a descriptor can and can't do.
 

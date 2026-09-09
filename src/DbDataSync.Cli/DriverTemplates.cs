@@ -1,5 +1,3 @@
-using DbDataSync.Providers;
-
 namespace DbDataSync.Cli;
 
 /// <summary>Known starting <c>driver.yaml</c> shapes for <c>driver install --from &lt;template&gt;</c> —
@@ -8,11 +6,11 @@ namespace DbDataSync.Cli;
 /// minimal shell instead of a guess.</summary>
 public static class DriverTemplates
 {
-    public static string Render(string? template, string id, string displayName, string factoryType, ProviderPackageRef package) =>
+    public static string Render(string? template, string id, string displayName, string libraryId) =>
         template?.ToLowerInvariant() switch
         {
-            "mysql" => MySql(id, displayName, factoryType, package),
-            null => Minimal(id, displayName, factoryType, package),
+            "mysql" => MySql(id, displayName, libraryId),
+            null => Minimal(id, displayName, libraryId),
             _ => throw new InvalidOperationException(
                 $"No starter template named '{template}'. Known templates: mysql. Omit --from for a minimal shell."),
         };
@@ -22,14 +20,11 @@ public static class DriverTemplates
     /// column types. Placeholder tokens rather than string interpolation: the template's own YAML uses
     /// <c>{ }</c> flow-mapping syntax throughout, which would otherwise fight an interpolated string's
     /// own brace-escaping.</summary>
-    private static string MySql(string id, string displayName, string factoryType, ProviderPackageRef package) =>
+    private static string MySql(string id, string displayName, string libraryId) =>
         Fill("""
             id: __ID__
             displayName: __DISPLAY_NAME__
-            provider:
-              factoryType: "__FACTORY_TYPE__"
-              packages:
-                - { id: __PACKAGE_ID__, version: "__PACKAGE_VERSION__" }
+            library: __LIBRARY_ID__
             dialect:
               quoteIdentifier: backtick        # backtick | doubleQuote | bracket
               parameterPrefix: "@"             # "@" -> @p , ":" -> :p , "?" -> positional
@@ -37,7 +32,7 @@ public static class DriverTemplates
               catalog: informationSchema       # informationSchema is the only strategy supported today
               supportsChangeDatabase: true     # false -> a mapping naming another database is a config error
               defaultDatabase: ""              # what to connect to before a mapping names one
-              # connectionStringKeys:          # uncomment and edit if this provider's key names differ
+              # connectionStringKeys:          # uncomment and edit if this library's key names differ
               #   host: Server
               #   port: Port
               #   database: Database
@@ -66,16 +61,13 @@ public static class DriverTemplates
               readers: [Watermark, BatchReload]
               staging: [StagingTable]
               writers: [DeleteInsert]
-            """, id, displayName, factoryType, package);
+            """, id, displayName, libraryId);
 
-    private static string Minimal(string id, string displayName, string factoryType, ProviderPackageRef package) =>
+    private static string Minimal(string id, string displayName, string libraryId) =>
         Fill("""
             id: __ID__
             displayName: __DISPLAY_NAME__
-            provider:
-              factoryType: "__FACTORY_TYPE__"
-              packages:
-                - { id: __PACKAGE_ID__, version: "__PACKAGE_VERSION__" }
+            library: __LIBRARY_ID__
             dialect:
               quoteIdentifier: doubleQuote      # backtick | doubleQuote | bracket
               parameterPrefix: "@"              # "@" -> @p , ":" -> :p , "?" -> positional
@@ -92,13 +84,11 @@ public static class DriverTemplates
               readers: [Watermark]
               staging: [StagingTable]
               writers: [DeleteInsert]
-            """, id, displayName, factoryType, package);
+            """, id, displayName, libraryId);
 
-    private static string Fill(string template, string id, string displayName, string factoryType, ProviderPackageRef package) =>
+    private static string Fill(string template, string id, string displayName, string libraryId) =>
         template
             .Replace("__ID__", id)
             .Replace("__DISPLAY_NAME__", displayName)
-            .Replace("__FACTORY_TYPE__", factoryType)
-            .Replace("__PACKAGE_ID__", package.Id)
-            .Replace("__PACKAGE_VERSION__", package.Version);
+            .Replace("__LIBRARY_ID__", libraryId);
 }

@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace DbDataSync.Providers;
+namespace DbDataSync.Libraries;
 
 /// <summary>
-/// Restores a provider package (and its full transitive closure — managed dependencies and any
-/// <c>runtimes/&lt;rid&gt;/native/</c> assets) into <c>&lt;repo&gt;/providers/&lt;id&gt;/lib/</c>, using
+/// Restores a library package (and its full transitive closure — managed dependencies and any
+/// <c>runtimes/&lt;rid&gt;/native/</c> assets) into <c>&lt;repo&gt;/libraries/&lt;id&gt;/lib/</c>, using
 /// nothing but the <c>dotnet</c> muxer <see cref="System.Diagnostics.ProcessStartInfo"/> already runs
 /// everywhere else in this solution — no NuGet client library in the host.
 /// <para>
@@ -15,22 +15,22 @@ namespace DbDataSync.Providers;
 /// directory, which is copied verbatim into <c>lib/</c>.
 /// </para>
 /// </summary>
-public static class ProviderInstaller
+public static class LibraryInstaller
 {
     /// <summary>
-    /// Installs (or reinstalls) one provider. <paramref name="factoryType"/> defaults to
-    /// <see cref="KnownProviderFactories"/>'s guess for <paramref name="packages"/>'s first entry when
+    /// Installs (or reinstalls) one library. <paramref name="factoryType"/> defaults to
+    /// <see cref="KnownLibraries"/>'s guess for <paramref name="packages"/>'s first entry when
     /// not given explicitly — the CLI is what requires one or the other.
     /// </summary>
-    public static async Task<ProviderManifest> InstallAsync(
-        string repoRoot, string id, IReadOnlyList<ProviderPackageRef> packages, string factoryType,
+    public static async Task<LibraryManifest> InstallAsync(
+        string repoRoot, string id, IReadOnlyList<PackageRef> packages, string factoryType,
         string? nugetSource = null, CancellationToken cancellationToken = default)
     {
-        var providerDir = ProviderPaths.ProviderDir(repoRoot, id);
-        await RestorePackagesAsync(ProviderPaths.LibDir(providerDir), packages, nugetSource, cancellationToken);
+        var libraryDir = LibraryPaths.LibraryDir(repoRoot, id);
+        await RestorePackagesAsync(LibraryPaths.LibDir(libraryDir), packages, nugetSource, cancellationToken);
 
-        var manifest = new ProviderManifest(id, factoryType, packages);
-        manifest.Write(ProviderPaths.ManifestPath(providerDir));
+        var manifest = new LibraryManifest(id, factoryType, packages);
+        manifest.Write(LibraryPaths.ManifestPath(libraryDir));
         return manifest;
     }
 
@@ -38,14 +38,14 @@ public static class ProviderInstaller
     /// The restore-then-copy half of <see cref="InstallAsync"/>, without a manifest — for a caller
     /// that writes a different manifest shape into the same directory layout. A compiled driver plugin
     /// (phase 109e) is exactly this: its package restores into <c>&lt;repo&gt;/drivers/&lt;id&gt;/lib/</c>
-    /// rather than <c>providers/&lt;id&gt;/lib/</c>, and its manifest is a <c>driver.json</c>, not a
-    /// <c>provider.json</c> — but the restore mechanics (publish, flatten, replace) are identical.
+    /// rather than <c>libraries/&lt;id&gt;/lib/</c>, and its manifest is a <c>driver.json</c>, not a
+    /// <c>library.json</c> — but the restore mechanics (publish, flatten, replace) are identical.
     /// </summary>
     public static async Task RestorePackagesAsync(
-        string targetLibDir, IReadOnlyList<ProviderPackageRef> packages, string? nugetSource = null,
+        string targetLibDir, IReadOnlyList<PackageRef> packages, string? nugetSource = null,
         CancellationToken cancellationToken = default)
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"dbdatasync-provider-{Guid.NewGuid():N}");
+        var tempDir = Path.Combine(Path.GetTempPath(), $"dbdatasync-library-{Guid.NewGuid():N}");
         var outDir = Path.Combine(tempDir, "out");
         Directory.CreateDirectory(tempDir);
         try
@@ -66,19 +66,19 @@ public static class ProviderInstaller
     }
 
     /// <summary>Re-runs the restore for an already-written manifest — a fresh deployment, or after
-    /// hand-editing a package version in <c>provider.json</c>.</summary>
+    /// hand-editing a package version in <c>library.json</c>.</summary>
     public static async Task SyncAsync(string repoRoot, string id, CancellationToken cancellationToken = default)
     {
-        var providerDir = ProviderPaths.ProviderDir(repoRoot, id);
-        var manifest = ProviderManifest.Read(ProviderPaths.ManifestPath(providerDir));
+        var libraryDir = LibraryPaths.LibraryDir(repoRoot, id);
+        var manifest = LibraryManifest.Read(LibraryPaths.ManifestPath(libraryDir));
         await InstallAsync(repoRoot, id, manifest.Packages, manifest.FactoryType, cancellationToken: cancellationToken);
     }
 
     private static async Task PublishAsync(
-        string tempDir, string outDir, IReadOnlyList<ProviderPackageRef> packages, string? nugetSource,
+        string tempDir, string outDir, IReadOnlyList<PackageRef> packages, string? nugetSource,
         CancellationToken cancellationToken)
     {
-        var csprojPath = Path.Combine(tempDir, "provider.csproj");
+        var csprojPath = Path.Combine(tempDir, "library.csproj");
         var packageRefs = string.Join(
             Environment.NewLine, packages.Select(p => $"""    <PackageReference Include="{p.Id}" Version="{p.Version}" />"""));
         // A RuntimeIdentifier (framework-dependent, not self-contained) so a package with

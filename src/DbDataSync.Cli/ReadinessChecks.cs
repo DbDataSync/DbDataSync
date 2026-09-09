@@ -9,7 +9,7 @@ using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Core.Secrets;
 using DbDataSync.Drivers.Descriptor;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 using DbDataSync.State;
 using Microsoft.Extensions.Configuration;
 using LibGit2Sharp;
@@ -73,7 +73,7 @@ internal static class ReadinessChecks
     [
         new RepoCheck(),
         new StateStoreCheck(),
-        new ProvidersAndDriversCheck(),
+        new LibrariesAndDriversCheck(),
         new AuthCheck(),
         new CertificateCheck(),
         new BindingCheck(),
@@ -197,9 +197,9 @@ internal sealed class StateStoreCheck : IReadinessCheck
     }
 }
 
-/// <summary>Every restored provider's <c>lib/</c> closure is present, every driver manifest on disk
+/// <summary>Every restored library's <c>lib/</c> closure is present, every driver manifest on disk
 /// parses, and every connection's driver id resolves to a built-in or a driver found on disk.</summary>
-internal sealed class ProvidersAndDriversCheck : IReadinessCheck
+internal sealed class LibrariesAndDriversCheck : IReadinessCheck
 {
     private static readonly HashSet<string> BuiltInDriverIds = [DriverIds.MsSql, DriverIds.Postgres, DriverIds.DuckDb];
 
@@ -208,18 +208,18 @@ internal sealed class ProvidersAndDriversCheck : IReadinessCheck
         var problems = new List<string>();
         var driverIds = new HashSet<string>(BuiltInDriverIds, StringComparer.Ordinal);
 
-        var providersRoot = ProviderPaths.ProvidersDir(context.Root);
-        if (Directory.Exists(providersRoot))
+        var librariesRoot = LibraryPaths.LibrariesDir(context.Root);
+        if (Directory.Exists(librariesRoot))
         {
-            foreach (var dir in Directory.EnumerateDirectories(providersRoot))
+            foreach (var dir in Directory.EnumerateDirectories(librariesRoot))
             {
-                var manifestPath = ProviderPaths.ManifestPath(dir);
+                var manifestPath = LibraryPaths.ManifestPath(dir);
                 if (!File.Exists(manifestPath))
                     continue;
 
-                var libDir = ProviderPaths.LibDir(dir);
+                var libDir = LibraryPaths.LibDir(dir);
                 if (!Directory.Exists(libDir) || !Directory.EnumerateFileSystemEntries(libDir).Any())
-                    problems.Add($"provider '{Path.GetFileName(dir)}' has no restored lib/ — run `dbdatasync config provider sync`.");
+                    problems.Add($"library '{Path.GetFileName(dir)}' has no restored lib/ — run `dbdatasync config library sync`.");
             }
         }
 
@@ -267,8 +267,8 @@ internal sealed class ProvidersAndDriversCheck : IReadinessCheck
         }
 
         return Task.FromResult(problems.Count == 0
-            ? new CheckResult("Providers / drivers", CheckStatus.Ok, "Every connection's driver resolves.")
-            : new CheckResult("Providers / drivers", CheckStatus.Fail, string.Join(" ", problems)));
+            ? new CheckResult("Libraries / drivers", CheckStatus.Ok, "Every connection's driver resolves.")
+            : new CheckResult("Libraries / drivers", CheckStatus.Fail, string.Join(" ", problems)));
     }
 }
 

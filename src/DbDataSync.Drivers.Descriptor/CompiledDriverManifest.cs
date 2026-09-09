@@ -1,12 +1,12 @@
 using System.Text.Json;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 
 namespace DbDataSync.Drivers.Descriptor;
 
 /// <summary>
 /// <c>&lt;repo&gt;/drivers/&lt;id&gt;/driver.json</c> — the compiled-plugin counterpart to
 /// <c>driver.yaml</c>. Same directory, different manifest: <see cref="DriverLoader"/> tells the two
-/// apart by which file is present, exactly the way <c>provider.json</c> and this file both live under
+/// apart by which file is present, exactly the way <c>library.json</c> and this file both live under
 /// one <c>lib/</c>-bearing directory layout without conflicting.
 /// </summary>
 /// <param name="Kind">Always <c>"compiled"</c> today — stated rather than assumed, so a future second
@@ -17,7 +17,7 @@ namespace DbDataSync.Drivers.Descriptor;
 /// <param name="DriverType">An assembly-qualified type name implementing <see cref="Abstractions.IDriver"/>,
 /// resolved via <see cref="Type.GetType(string)"/> against the plugin's own
 /// <see cref="System.Runtime.Loader.AssemblyLoadContext"/> once its assembly is loaded.</param>
-public sealed record CompiledDriverManifest(string Id, string Kind, string Assembly, string DriverType, IReadOnlyList<ProviderPackageRef> Packages)
+public sealed record CompiledDriverManifest(string Id, string Kind, string Assembly, string DriverType, IReadOnlyList<PackageRef> Packages)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

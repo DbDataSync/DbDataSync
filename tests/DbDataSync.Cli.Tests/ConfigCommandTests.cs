@@ -1,10 +1,10 @@
 namespace DbDataSync.Cli.Tests;
 
 /// <summary>
-/// <c>dbdatasync config check|cert|secret|provider|driver</c> — phase 115's dispatcher, forwarding
+/// <c>dbdatasync config check|cert|secret|library|driver</c> — phase 115's dispatcher, forwarding
 /// "everything after my own verb" to the existing command classes unchanged. These are thin routing
 /// tests: full behavior for each nested group is already covered by its own suite
-/// (<see cref="SecretCommandTests"/> here; <c>DbDataSync.Providers.Tests</c> /
+/// (<see cref="SecretCommandTests"/> here; <c>DbDataSync.Libraries.Tests</c> /
 /// <c>DbDataSync.Drivers.*.Tests</c> elsewhere) — <c>cert</c> has no CLI test at all, Windows-only and
 /// untestable in this environment, so there is nothing to route-test beyond the platform gate.
 /// </summary>
@@ -66,12 +66,12 @@ public sealed class ConfigCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Provider_ForwardsToProviderCommand()
+    public async Task Library_ForwardsToLibraryCommand()
     {
-        var (exitCode, output) = await Run(["provider", "list", "--repo", _root]);
+        var (exitCode, output) = await Run(["library", "list", "--repo", _root]);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("No providers installed.", output);
+        Assert.Contains("No libraries installed.", output);
     }
 
     [Fact]

@@ -1,15 +1,15 @@
 using DbDataSync.Cli;
 using Xunit;
 
-namespace DbDataSync.Providers.Tests;
+namespace DbDataSync.Libraries.Tests;
 
-/// <summary>Drives <c>dbdatasync config provider ...</c> exactly as an operator would, through
-/// <see cref="ProviderCommand.RunAsync"/> rather than the lower-level <see cref="ProviderInstaller"/>
+/// <summary>Drives <c>dbdatasync config library ...</c> exactly as an operator would, through
+/// <see cref="LibraryCommand.RunAsync"/> rather than the lower-level <see cref="LibraryInstaller"/>
 /// this exercises indirectly.</summary>
 [Trait("Category", "Integration")]
-public sealed class ProviderCommandTests : IAsyncLifetime
+public sealed class LibraryCommandTests : IAsyncLifetime
 {
-    private readonly string _repoRoot = Path.Combine(Path.GetTempPath(), $"dbdatasync-provider-cmd-test-{Guid.NewGuid():N}");
+    private readonly string _repoRoot = Path.Combine(Path.GetTempPath(), $"dbdatasync-library-cmd-test-{Guid.NewGuid():N}");
     private readonly StringWriter _output = new();
     private readonly StringWriter _error = new();
 
@@ -30,10 +30,10 @@ public sealed class ProviderCommandTests : IAsyncLifetime
     }
 
     private Task<int> RunAsync(params string[] args) =>
-        ProviderCommand.RunAsync([.. args, "--repo", _repoRoot]);
+        LibraryCommand.RunAsync([.. args, "--repo", _repoRoot]);
 
     [Fact]
-    public async Task InstallThenList_ReportsTheInstalledProvider()
+    public async Task InstallThenList_ReportsTheInstalledLibrary()
     {
         Assert.Equal(0, await RunAsync("install", "MySqlConnector", "--version", "2.4.0"));
 
@@ -45,22 +45,22 @@ public sealed class ProviderCommandTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Uninstall_RemovesTheProviderDirectory()
+    public async Task Uninstall_RemovesTheLibraryDirectory()
     {
         await RunAsync("install", "MySqlConnector", "--version", "2.4.0");
-        var providerDir = ProviderPaths.ProviderDir(_repoRoot, "MySqlConnector");
-        Assert.True(Directory.Exists(providerDir));
+        var libraryDir = LibraryPaths.LibraryDir(_repoRoot, "MySqlConnector");
+        Assert.True(Directory.Exists(libraryDir));
 
         Assert.Equal(0, await RunAsync("uninstall", "MySqlConnector"));
 
-        Assert.False(Directory.Exists(providerDir));
+        Assert.False(Directory.Exists(libraryDir));
     }
 
     [Fact]
     public async Task Sync_RebuildsLibFromTheManifestAlone()
     {
         await RunAsync("install", "MySqlConnector", "--version", "2.4.0");
-        var libDir = ProviderPaths.LibDir(ProviderPaths.ProviderDir(_repoRoot, "MySqlConnector"));
+        var libDir = LibraryPaths.LibDir(LibraryPaths.LibraryDir(_repoRoot, "MySqlConnector"));
         Directory.Delete(libDir, recursive: true);
         Assert.False(Directory.Exists(libDir));
 

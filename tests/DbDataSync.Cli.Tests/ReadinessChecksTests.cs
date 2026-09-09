@@ -31,12 +31,12 @@ public sealed class ReadinessChecksTests : IDisposable
 
         Assert.Equal(CheckStatus.Ok, Find(results, "Repo").Status);
         Assert.Equal(CheckStatus.Ok, Find(results, "State store").Status);
-        Assert.Equal(CheckStatus.Ok, Find(results, "Providers / drivers").Status);
+        Assert.Equal(CheckStatus.Ok, Find(results, "Libraries / drivers").Status);
         Assert.Equal(CheckStatus.Ok, Find(results, "Auth").Status);
     }
 
     [Fact]
-    public async Task ConnectionNamingAnUninstalledDriver_ProvidersAndDriversCheckFails()
+    public async Task ConnectionNamingAnUninstalledDriver_LibrariesAndDriversCheckFails()
     {
         ServeCommand.Prepare(_root);
         var configRoot = Path.Combine(_root, "config");
@@ -55,7 +55,7 @@ public sealed class ReadinessChecksTests : IDisposable
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
         var results = await ReadinessChecks.RunChecksAsync(context);
 
-        var check = Find(results, "Providers / drivers");
+        var check = Find(results, "Libraries / drivers");
         Assert.Equal(CheckStatus.Fail, check.Status);
         Assert.Contains("dbdatasync config driver install", check.Detail);
     }
@@ -165,7 +165,7 @@ public sealed class ReadinessChecksTests : IDisposable
         var names = document.RootElement.EnumerateArray().Select(e => e.GetProperty("Name").GetString()).ToList();
         Assert.Contains("Repo", names);
         Assert.Contains("State store", names);
-        Assert.Contains("Providers / drivers", names);
+        Assert.Contains("Libraries / drivers", names);
         Assert.Contains("Auth", names);
         Assert.Contains("Certificate", names);
         Assert.Contains("Binding", names);

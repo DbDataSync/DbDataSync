@@ -3,7 +3,7 @@
   <!--
     Deliberately NOT referenced by any other project in this repo, and NOT part of DbDataSync.slnx's
     build — DbDataSync.Drivers.Loader.Tests publishes it on the fly (dotnet publish, same mechanism
-    ProviderInstaller uses) and loads the result through DriverLoader.LoadCompiledDrivers exactly as an
+    LibraryInstaller uses) and loads the result through DriverLoader.LoadCompiledDrivers exactly as an
     operator's own driver.json would point at it. Referencing it directly from the test project would
     load it into the test process's own default AssemblyLoadContext before the loader ever got a
     chance to, which would defeat the isolation this fixture exists to prove.

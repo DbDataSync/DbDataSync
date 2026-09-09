@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Data.SqlClient;
@@ -18,7 +18,7 @@ namespace DbDataSync.Api.Tests;
 /// <summary>
 /// **The milestone phase 109d exists for**: MySQL — an engine no project in this solution
 /// references — replicating into SQL Server, driven entirely through the real API and a real spawned
-/// TaskRunner process, with the MySQL side coming from nothing but a restored provider and a
+/// TaskRunner process, with the MySQL side coming from nothing but a restored library and a
 /// <c>driver.yaml</c> <see cref="DescriptorDriverApiFactory"/> wrote to disk before the host started.
 /// "First new engine, no rebuild" is the plan doc's own words for this test.
 /// </summary>
@@ -56,12 +56,12 @@ public sealed class DescriptorDriverTests : IClassFixture<DescriptorDriverApiFac
     {
         _factory = factory;
         _client = factory.CreateClient(); // first touch — builds the host, which is when both
-                                           // ProviderRegistry and DriverRegistry (via DriverLoader) load.
+                                           // LibraryRegistry and DriverRegistry (via DriverLoader) load.
         _secrets = factory.Services.GetRequiredService<SecretStore>();
         // Resolved through the same registry the API itself loaded at startup — proof this test seeds
         // its scratch database through the identical runtime-loaded factory the driver uses, not a
         // MySqlConnector type this project references directly (it references none).
-        _mySqlFactory = factory.Services.GetRequiredService<ProviderRegistry>().GetFactory("MySqlConnector");
+        _mySqlFactory = factory.Services.GetRequiredService<LibraryRegistry>().GetFactory("MySqlConnector");
     }
 
     public async Task InitializeAsync()

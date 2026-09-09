@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DbDataSync.Providers\DbDataSync.Providers.csproj" />
+    <ProjectReference Include="..\..\src\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
     <ProjectReference Include="..\..\src\DbDataSync.Cli\DbDataSync.Cli.csproj" />
   </ItemGroup>
 

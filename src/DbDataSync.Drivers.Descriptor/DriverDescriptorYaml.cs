@@ -9,7 +9,13 @@ public sealed class DriverDescriptorYaml
 {
     public required string Id { get; set; }
     public required string DisplayName { get; set; }
-    public required DescriptorProviderYaml Provider { get; set; }
+
+    /// <summary>The id of the <c>&lt;repo&gt;/libraries/&lt;id&gt;/library.json</c> this descriptor
+    /// resolves its <see cref="System.Data.Common.DbProviderFactory"/> through — the library carries
+    /// its own <c>factoryType</c> and package list, so the descriptor names it rather than repeating
+    /// them.</summary>
+    public required string Library { get; set; }
+
     public required DescriptorDialectYaml Dialect { get; set; }
 
     /// <summary>Native type name (with its own <c>(p,s)</c>-style placeholder args, e.g.
@@ -18,18 +24,6 @@ public sealed class DriverDescriptorYaml
     public Dictionary<string, TypeMapEntryYaml> TypeMap { get; set; } = new();
 
     public required DescriptorCapabilitiesYaml Capabilities { get; set; }
-}
-
-public sealed class DescriptorProviderYaml
-{
-    public required string FactoryType { get; set; }
-    public required List<DescriptorPackageYaml> Packages { get; set; }
-}
-
-public sealed class DescriptorPackageYaml
-{
-    public required string Id { get; set; }
-    public required string Version { get; set; }
 }
 
 /// <param name="QuoteIdentifier">backtick | doubleQuote | bracket</param>

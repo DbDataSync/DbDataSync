@@ -1,11 +1,11 @@
-namespace DbDataSync.Providers;
+namespace DbDataSync.Libraries;
 
 /// <summary>
 /// A starter guess for a package's <see cref="System.Data.Common.DbProviderFactory"/> type, keyed by
-/// the primary NuGet package id an operator would type. Editable after install — <c>provider.json</c>
+/// the primary NuGet package id an operator would type. Editable after install — <c>library.json</c>
 /// is a plain file — so a wrong or unlisted guess is a one-line fix, never a blocker.
 /// </summary>
-public static class KnownProviderFactories
+public static class KnownLibraries
 {
     private static readonly Dictionary<string, string> ById = new(StringComparer.OrdinalIgnoreCase)
     {

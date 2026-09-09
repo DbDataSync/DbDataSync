@@ -1,7 +1,7 @@
 using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Descriptor;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 using Xunit;
 
 namespace DbDataSync.Drivers.Loader.Tests;
@@ -45,7 +45,7 @@ public sealed class CompiledDriverLoaderTests : IDisposable
 
         new CompiledDriverManifest(
             id, CompiledDriverManifest.CompiledKind, "DbDataSync.Drivers.LoaderTestFixture.dll", driverType,
-            [new ProviderPackageRef("DbDataSync.Drivers.LoaderTestFixture", "1.0.0")])
+            [new PackageRef("DbDataSync.Drivers.LoaderTestFixture", "1.0.0")])
             .Write(Path.Combine(driverDir, CompiledDriverManifest.FileName));
     }
 
@@ -113,7 +113,7 @@ public sealed class CompiledDriverLoaderTests : IDisposable
         Directory.CreateDirectory(driverDir);
         new CompiledDriverManifest(
             "fixture-missing-lib", CompiledDriverManifest.CompiledKind, "DoesNotExist.dll", "Some.Type",
-            [new ProviderPackageRef("DoesNotExist", "1.0.0")])
+            [new PackageRef("DoesNotExist", "1.0.0")])
             .Write(Path.Combine(driverDir, CompiledDriverManifest.FileName));
         var registry = new DriverRegistry();
         var errors = new List<(string Message, Exception Exception)>();

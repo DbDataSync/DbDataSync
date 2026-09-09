@@ -1,7 +1,7 @@
 using System.Reflection;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Generic;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 
 namespace DbDataSync.Drivers.Descriptor;
 
@@ -24,7 +24,7 @@ public static class DriverLoader
     /// not take down every other replication.
     /// </summary>
     public static void LoadDescriptorDrivers(
-        string repoRoot, ProviderRegistry providerRegistry, DriverRegistry driverRegistry,
+        string repoRoot, LibraryRegistry libraryRegistry, DriverRegistry driverRegistry,
         Action<string, Exception>? onError = null)
     {
         onError ??= (message, ex) => Console.Error.WriteLine($"{message}: {ex.Message}");
@@ -42,8 +42,7 @@ public static class DriverLoader
             try
             {
                 var descriptor = DriverDescriptorReader.Read(yamlPath);
-                var providerId = descriptor.Provider.Packages[0].Id;
-                var factory = providerRegistry.GetFactory(providerId);
+                var factory = libraryRegistry.GetFactory(descriptor.Library);
                 var spec = DriverDescriptorReader.ToSpec(descriptor, factory);
                 driverRegistry.Register(new GenericDriver(spec));
             }

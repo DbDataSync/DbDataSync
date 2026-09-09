@@ -9,10 +9,7 @@ public sealed class DescriptorDialectTests
     private const string MySqlGenericYaml = """
         id: mysql.generic
         displayName: MySQL / MariaDB (generic)
-        provider:
-          factoryType: "MySqlConnector.MySqlConnectorFactory, MySqlConnector"
-          packages:
-            - { id: MySqlConnector, version: "2.4.0" }
+        library: mysql-connector
         dialect:
           quoteIdentifier: backtick
           parameterPrefix: "@"
@@ -51,9 +48,7 @@ public sealed class DescriptorDialectTests
 
         Assert.Equal("mysql.generic", descriptor.Id);
         Assert.Equal("MySQL / MariaDB (generic)", descriptor.DisplayName);
-        Assert.Equal("MySqlConnector.MySqlConnectorFactory, MySqlConnector", descriptor.Provider.FactoryType);
-        Assert.Equal("MySqlConnector", Assert.Single(descriptor.Provider.Packages).Id);
-        Assert.Equal("2.4.0", Assert.Single(descriptor.Provider.Packages).Version);
+        Assert.Equal("mysql-connector", descriptor.Library);
         Assert.Equal(["Watermark", "BatchReload"], descriptor.Capabilities.Readers);
         Assert.Equal(["StagingTable"], descriptor.Capabilities.Staging);
         Assert.Equal(["DeleteInsert"], descriptor.Capabilities.Writers);
@@ -158,10 +153,7 @@ public sealed class DescriptorDialectTests
         const string yaml = """
             id: firebird.generic
             displayName: Firebird (generic)
-            provider:
-              factoryType: "FirebirdSql.Data.FirebirdClient.FirebirdClientFactory, FirebirdSql.Data.FirebirdClient"
-              packages:
-                - { id: FirebirdSql.Data.FirebirdClient, version: "10.3.1" }
+            library: firebird-client
             dialect:
               quoteIdentifier: doubleQuote
               parameterPrefix: "@"
@@ -194,10 +186,7 @@ public sealed class DescriptorDialectTests
         const string yaml = """
             id: oracle.generic
             displayName: Oracle (generic)
-            provider:
-              factoryType: "Oracle.ManagedDataAccess.Client.OracleClientFactory, Oracle.ManagedDataAccess"
-              packages:
-                - { id: Oracle.ManagedDataAccess.Core, version: "23.4.0" }
+            library: oracle-managed-data-access
             dialect:
               quoteIdentifier: doubleQuote
               parameterPrefix: ":"

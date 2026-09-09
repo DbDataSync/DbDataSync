@@ -14,7 +14,7 @@
     <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Generic\DbDataSync.Drivers.Generic.csproj" />
-    <ProjectReference Include="..\DbDataSync.Providers\DbDataSync.Providers.csproj" />
+    <ProjectReference Include="..\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
   </ItemGroup>
 
 </Project>

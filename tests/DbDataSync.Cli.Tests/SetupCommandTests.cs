@@ -1,14 +1,14 @@
 using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 using LibGit2Sharp;
 
 namespace DbDataSync.Cli.Tests;
 
 /// <summary>
 /// Drives <c>dbdatasync setup</c> end to end against a real temp repo, exactly the way an operator's
-/// own typing would — only <see cref="ProviderInstaller.InstallAsync"/> is faked, since the real one
+/// own typing would — only <see cref="LibraryInstaller.InstallAsync"/> is faked, since the real one
 /// shells out to <c>dotnet publish</c> and would make the driver-step tests a network call.
 /// </summary>
 public sealed class SetupCommandTests : IDisposable
@@ -34,7 +34,7 @@ public sealed class SetupCommandTests : IDisposable
                 "n",  // start DbDataSync now? -> no
             ]);
 
-        var exitCode = await SetupCommand.RunAsync(["--repo", _root], io, FailingInstallProvider);
+        var exitCode = await SetupCommand.RunAsync(["--repo", _root], io, FailingInstallLibrary);
 
         Assert.Equal(0, exitCode);
 
@@ -55,10 +55,10 @@ public sealed class SetupCommandTests : IDisposable
     public async Task ExistingSetup_GoesStraightToTheReviewScreenAndPrintsEffectiveConfiguration()
     {
         await SetupCommand.RunAsync(
-            ["--repo", _root], ScriptFor(SqliteWalkthroughWithNoStart), FailingInstallProvider);
+            ["--repo", _root], ScriptFor(SqliteWalkthroughWithNoStart), FailingInstallLibrary);
 
         var reviewIo = new ScriptedPromptIo(["1", "4"]); // print effective configuration, then exit
-        var exitCode = await SetupCommand.RunAsync(["--repo", _root], reviewIo, FailingInstallProvider);
+        var exitCode = await SetupCommand.RunAsync(["--repo", _root], reviewIo, FailingInstallLibrary);
 
         Assert.Equal(0, exitCode);
         Assert.Contains(reviewIo.Written, line => line.Contains("DbDataSync:Url = http://localhost:5080"));
@@ -72,7 +72,7 @@ public sealed class SetupCommandTests : IDisposable
     {
         var io = new NonInteractivePromptIo();
 
-        var exitCode = await SetupCommand.RunAsync(["--repo", _root], io, FailingInstallProvider);
+        var exitCode = await SetupCommand.RunAsync(["--repo", _root], io, FailingInstallLibrary);
 
         Assert.Equal(1, exitCode);
         Assert.Contains(io.Written, line => line.Contains("dbdatasync config check"));
@@ -81,13 +81,13 @@ public sealed class SetupCommandTests : IDisposable
     [Fact]
     public async Task ServerStateEngine_StoresTheSecretAndInstallsTheChosenDriverThroughTheFakeInstaller()
     {
-        var calls = new List<(string RepoRoot, string Id, IReadOnlyList<ProviderPackageRef> Packages, string FactoryType)>();
-        Task<ProviderManifest> FakeInstall(
-            string repoRoot, string id, IReadOnlyList<ProviderPackageRef> packages, string factoryType,
+        var calls = new List<(string RepoRoot, string Id, IReadOnlyList<PackageRef> Packages, string FactoryType)>();
+        Task<LibraryManifest> FakeInstall(
+            string repoRoot, string id, IReadOnlyList<PackageRef> packages, string factoryType,
             string? source, CancellationToken cancellationToken)
         {
             calls.Add((repoRoot, id, packages, factoryType));
-            return Task.FromResult(new ProviderManifest(id, factoryType, packages));
+            return Task.FromResult(new LibraryManifest(id, factoryType, packages));
         }
 
         var io = new ScriptedPromptIo(
@@ -138,7 +138,7 @@ public sealed class SetupCommandTests : IDisposable
 
     private static ScriptedPromptIo ScriptFor(string?[] lines) => new(lines);
 
-    private static readonly Func<string, string, IReadOnlyList<ProviderPackageRef>, string, string?, CancellationToken, Task<ProviderManifest>>
-        FailingInstallProvider = (_, _, _, _, _, _) =>
-            throw new InvalidOperationException("This test's walkthrough should never need to install a provider.");
+    private static readonly Func<string, string, IReadOnlyList<PackageRef>, string, string?, CancellationToken, Task<LibraryManifest>>
+        FailingInstallLibrary = (_, _, _, _, _, _) =>
+            throw new InvalidOperationException("This test's walkthrough should never need to install a library.");
 }

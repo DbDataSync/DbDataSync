@@ -6,7 +6,7 @@ using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.Postgres;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 using DbDataSync.Scripting;
 using DbDataSync.State;
 using DbDataSync.State.Remote;
@@ -30,10 +30,10 @@ var scriptHost = new ScriptHost(
     configRepository, new ScriptCompiler(ScriptCacheDirectory.BesideStateDatabase(options.StateDbPath)));
 
 // Loaded before DriverRegistry for the same reason the API loads it first: a descriptor or compiled
-// driver registered from 109d/109e on resolves its provider through this. The worker is a separate
+// driver registered from 109d/109e on resolves its library through this. The worker is a separate
 // process per the plan doc's "two composition roots" note, so it repeats this rather than sharing the
 // API's in-memory registry.
-var providerRegistry = new ProviderRegistry(options.RepoRoot).LoadAll();
+var libraryRegistry = new LibraryRegistry(options.RepoRoot).LoadAll();
 
 var driverRegistry = new DriverRegistry();
 // The scripted reader is composed here rather than inside a driver, because it needs the script host
@@ -41,7 +41,7 @@ var driverRegistry = new DriverRegistry();
 driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
-DriverLoader.LoadDescriptorDrivers(options.RepoRoot, providerRegistry, driverRegistry);
+DriverLoader.LoadDescriptorDrivers(options.RepoRoot, libraryRegistry, driverRegistry);
 DriverLoader.LoadCompiledDrivers(options.RepoRoot, driverRegistry);
 
 // Phase 39: a runner spawned by the API never opens the state file. It applies its changes over

@@ -6,7 +6,7 @@ namespace DbDataSync.Drivers.Loader.Tests;
 /// <summary>
 /// Publishes <c>tests/fixtures/DbDataSync.Drivers.LoaderTestFixture</c> once per test run and hands
 /// back its output directory — the same "throwaway project → <c>dotnet publish</c> → flat output"
-/// shape <c>DbDataSync.Providers.ProviderInstaller</c> uses for a restored provider, except this
+/// shape <c>DbDataSync.Libraries.LibraryInstaller</c> uses for a restored library, except this
 /// project already exists in the repo rather than being written on the fly.
 /// </summary>
 public static class FixturePublisher
@@ -33,7 +33,7 @@ public static class FixturePublisher
         // An explicit RuntimeIdentifier (framework-dependent, not self-contained) is what makes
         // `dotnet publish` flatten Microsoft.Data.Sqlite's runtimes/<rid>/native/ asset into the
         // output at all — a portable, RID-less publish skips native assets entirely. Same lesson
-        // ProviderInstaller already learned for a restored provider's own native assets.
+        // LibraryInstaller already learned for a restored library's own native assets.
         var rid = RuntimeInformation.RuntimeIdentifier;
         foreach (var arg in new[]
         {

@@ -33,6 +33,19 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
+Updated 2026-09-09 (later than the note below): 116 is done and removed — `DbDataSync.Providers` is
+`DbDataSync.Libraries` throughout, and a `driver.yaml` descriptor now references its library by id
+(`library: <id>`) instead of carrying its own `factoryType`/`packages` block. 117–120 build on it in
+order, same as before.
+
+Updated 2026-09-09: phases **116–120** join `todo/` as one arc — drivers and libraries visible and
+manageable from the web console (`architecture/planning/done/drivers-and-libraries-in-the-web-ui.md`).
+They are internally sequential (116 → 120) and must be built in order; **116** (the `provider` →
+`library` rename plus the descriptor's `library:` reference) is the gate for the rest. The arc is
+independent of the 034/035/038 queue above and of the phase-109g–109i dependency-removal series —
+relative priority against those is an open call. **121** and **122** are follow-ons, deferred until
+116–120 are in production.
+
 Updated 2026-09-04 (latest of all): 105 is done and removed — the Overview → Provisioning tab (retitled
 from "Target provisioning") now aggregates every table mapping's plan, grouped by connection and
 database, deduplicated by statement, ordered database-scope before table-scope, individually selectable,

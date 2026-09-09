@@ -4,7 +4,7 @@ using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Core.Secrets;
 using DbDataSync.Drivers.Descriptor;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 using DbDataSync.State;
 using Microsoft.Extensions.Configuration;
 
@@ -20,16 +20,16 @@ namespace DbDataSync.Cli;
 public static class SetupCommand
 {
     public static Task<int> RunAsync(string[] args, IPromptIo io) =>
-        RunAsync(args, io, ProviderInstaller.InstallAsync);
+        RunAsync(args, io, LibraryInstaller.InstallAsync);
 
     /// <summary>
-    /// The <paramref name="installProvider"/> seam exists only for <c>SetupCommandTests</c> — a real
-    /// run always passes <see cref="ProviderInstaller.InstallAsync"/>, which shells out to
+    /// The <paramref name="installLibrary"/> seam exists only for <c>SetupCommandTests</c> — a real
+    /// run always passes <see cref="LibraryInstaller.InstallAsync"/>, which shells out to
     /// <c>dotnet publish</c> and would make every driver-step test a network call.
     /// </summary>
     internal static async Task<int> RunAsync(
         string[] args, IPromptIo io,
-        Func<string, string, IReadOnlyList<ProviderPackageRef>, string, string?, CancellationToken, Task<ProviderManifest>> installProvider)
+        Func<string, string, IReadOnlyList<PackageRef>, string, string?, CancellationToken, Task<LibraryManifest>> installLibrary)
     {
         if (!io.IsInteractive)
         {
@@ -60,7 +60,7 @@ public static class SetupCommand
             if (ExistingSetup.DetectedAt(root))
                 io.WriteLine("That folder already has a DbDataSync configuration.");
             else
-                return await WalkThroughAsync(root, prompt, io, installProvider);
+                return await WalkThroughAsync(root, prompt, io, installLibrary);
         }
 
         return await ReviewAsync(root, prompt, io);
@@ -68,7 +68,7 @@ public static class SetupCommand
 
     private static async Task<int> WalkThroughAsync(
         string root, Prompt prompt, IPromptIo io,
-        Func<string, string, IReadOnlyList<ProviderPackageRef>, string, string?, CancellationToken, Task<ProviderManifest>> installProvider)
+        Func<string, string, IReadOnlyList<PackageRef>, string, string?, CancellationToken, Task<LibraryManifest>> installLibrary)
     {
         io.WriteLine($"Setting up DbDataSync at '{root}'.");
 
@@ -109,7 +109,7 @@ public static class SetupCommand
             DbDataSyncConfigFile.SetValue(root, "DbDataSync", "StateConnectionString", stateConnectionString);
             new SecretStore("DbDataSync", true).Store(SecretRefs.ForAppSetting("stateConnectionString"), password);
 
-            // Installing the provider itself is skipped here — before phase 109g lands,
+            // Installing the library itself is skipped here — before phase 109g lands,
             // Microsoft.Data.SqlClient and Npgsql are still hard references, so there is nothing this
             // step would need to restore. `dbdatasync config check` still reports whether the
             // connection opens.
@@ -143,10 +143,10 @@ public static class SetupCommand
         foreach (var driver in selected)
         {
             if (driver == "mysql")
-                await InstallMySqlDriverAsync(root, prompt, io, installProvider);
+                await InstallMySqlDriverAsync(root, prompt, io, installLibrary);
             else if (driver == "other")
                 io.WriteLine(
-                    "For any other engine, run `dbdatasync config driver install <id> --provider <packageId> " +
+                    "For any other engine, run `dbdatasync config driver install <id> --library <name> " +
                     "--version <v> [--from mysql]` once this finishes.");
         }
 
@@ -276,16 +276,16 @@ public static class SetupCommand
 
     private static async Task InstallMySqlDriverAsync(
         string root, Prompt prompt, IPromptIo io,
-        Func<string, string, IReadOnlyList<ProviderPackageRef>, string, string?, CancellationToken, Task<ProviderManifest>> installProvider)
+        Func<string, string, IReadOnlyList<PackageRef>, string, string?, CancellationToken, Task<LibraryManifest>> installLibrary)
     {
         const string packageId = "MySqlConnector";
         var version = prompt.Text($"{packageId} version");
-        var factoryType = KnownProviderFactories.TryGet(packageId)!;
-        var package = new ProviderPackageRef(packageId, version);
+        var factoryType = KnownLibraries.TryGet(packageId)!;
+        var package = new PackageRef(packageId, version);
 
         try
         {
-            await installProvider(root, packageId, [package], factoryType, null, CancellationToken.None);
+            await installLibrary(root, packageId, [package], factoryType, null, CancellationToken.None);
         }
         catch (InvalidOperationException ex)
         {
@@ -302,7 +302,7 @@ public static class SetupCommand
         }
 
         Directory.CreateDirectory(driverDir);
-        var yaml = DriverTemplates.Render("mysql", "mysql", "MySQL / MariaDB", factoryType, package);
+        var yaml = DriverTemplates.Render("mysql", "mysql", "MySQL / MariaDB", packageId);
         await File.WriteAllTextAsync(yamlPath, yaml);
         io.WriteLine($"Installed '{packageId}' and wrote '{yamlPath}'. Review the type map before relying on it.");
     }

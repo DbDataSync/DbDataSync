@@ -5,7 +5,7 @@ using YamlDotNet.Serialization.NamingConventions;
 namespace DbDataSync.Drivers.Descriptor;
 
 /// <summary>Parses <c>driver.yaml</c> and stands up the <see cref="GenericDriverSpec"/> it describes —
-/// everything except resolving the provider factory, which needs a <c>ProviderRegistry</c> this
+/// everything except resolving the library's factory, which needs a <c>LibraryRegistry</c> this
 /// project deliberately does not depend on (see <see cref="DriverLoader"/>, which does both).</summary>
 public static class DriverDescriptorReader
 {
@@ -18,7 +18,7 @@ public static class DriverDescriptorReader
 
     public static DriverDescriptorYaml Deserialize(string yaml) => Deserializer.Deserialize<DriverDescriptorYaml>(yaml);
 
-    /// <summary>Everything a <see cref="GenericDriver"/> needs except the provider factory itself.</summary>
+    /// <summary>Everything a <see cref="GenericDriver"/> needs except the library's factory itself.</summary>
     public static GenericDriverSpec ToSpec(DriverDescriptorYaml descriptor, System.Data.Common.DbProviderFactory factory)
     {
         if (descriptor.Dialect.Catalog != "informationSchema")

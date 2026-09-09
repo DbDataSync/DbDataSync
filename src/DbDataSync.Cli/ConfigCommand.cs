@@ -3,10 +3,10 @@ using System.Text.Json;
 namespace DbDataSync.Cli;
 
 /// <summary>
-/// <c>dbdatasync config check|cert|secret|provider|driver</c> — every configuration-related command
+/// <c>dbdatasync config check|cert|secret|library|driver</c> — every configuration-related command
 /// grouped under one root, phase 115's answer to the CLI having grown one verb per feature
-/// (<c>doctor</c>, <c>cert</c>, <c>secret</c>, <c>provider</c>, <c>driver</c> were all separately
-/// top-level before this). <c>cert</c>/<c>secret</c>/<c>provider</c>/<c>driver</c> keep their own
+/// (<c>doctor</c>, <c>cert</c>, <c>secret</c>, <c>library</c>, <c>driver</c> were all separately
+/// top-level before this). <c>cert</c>/<c>secret</c>/<c>library</c>/<c>driver</c> keep their own
 /// existing implementations untouched — this only changes how they're reached, forwarding
 /// "everything after my own verb" to each exactly as <c>Program.cs</c> used to.
 /// <para>
@@ -32,7 +32,7 @@ public static class ConfigCommand
             "check" => await CheckAsync(rest),
             "cert" => CertCommand.Run(rest),
             "secret" => SecretCommand.Run(rest),
-            "provider" => await ProviderCommand.RunAsync(rest),
+            "library" => await LibraryCommand.RunAsync(rest),
             "driver" => await DriverCommand.RunAsync(rest),
             var other => Unknown(other),
         };
@@ -81,7 +81,7 @@ public static class ConfigCommand
               dbdatasync config check [--repo <path>] [--json]
               dbdatasync config cert status|list|new-self-signed|enroll|renew|retrieve|templates|bind
               dbdatasync config secret set <ref> <value>|list [<ref> ...]|remove <ref>
-              dbdatasync config provider install|sync|list|uninstall
+              dbdatasync config library install|sync|list|uninstall
               dbdatasync config driver install|list|uninstall
             Run `dbdatasync config <name>` with no further arguments to see that group's own flags.
             """);

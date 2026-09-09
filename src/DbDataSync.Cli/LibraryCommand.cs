@@ -1,14 +1,14 @@
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 
 namespace DbDataSync.Cli;
 
 /// <summary>
-/// <c>dbdatasync config provider install|sync|list|uninstall</c> — restores an ADO.NET provider package
-/// DbDataSync does not reference at compile time into <c>&lt;repo&gt;/providers/&lt;id&gt;/</c>, so a
+/// <c>dbdatasync config library install|sync|list|uninstall</c> — restores an ADO.NET library package
+/// DbDataSync does not reference at compile time into <c>&lt;repo&gt;/libraries/&lt;id&gt;/</c>, so a
 /// vendor's fix is a package swap, not a DbDataSync build. See
 /// <c>architecture/planning/todo/nuget-loaded-drivers.md</c> §*The provider layer*.
 /// </summary>
-public static class ProviderCommand
+public static class LibraryCommand
 {
     public static async Task<int> RunAsync(string[] args)
     {
@@ -32,9 +32,9 @@ public static class ProviderCommand
     }
 
     /// <summary>
-    /// <c>provider install &lt;packageId&gt;[ &lt;packageId&gt;...] [--as &lt;id&gt;] [--version v]
-    /// [--factory-type type] [--source feed]</c>. The first package id is the provider's own id unless
-    /// <c>--as</c> names a different one (a multi-package provider whose primary assembly isn't first,
+    /// <c>library install &lt;packageId&gt;[ &lt;packageId&gt;...] [--as &lt;id&gt;] [--version v]
+    /// [--factory-type type] [--source feed]</c>. The first package id is the library's own id unless
+    /// <c>--as</c> names a different one (a multi-package library whose primary assembly isn't first,
     /// or an id an operator wants to spell differently from the package).
     /// </summary>
     private static async Task<int> InstallAsync(string repoRoot, string[] args)
@@ -48,7 +48,7 @@ public static class ProviderCommand
         if (packageIds.Count == 0)
         {
             Console.Error.WriteLine(
-                "Usage: dbdatasync config provider install <packageId>[ <packageId>...] [--as <id>] " +
+                "Usage: dbdatasync config library install <packageId>[ <packageId>...] [--as <id>] " +
                 "[--version v] [--factory-type type] [--source feed]");
             return 1;
         }
@@ -56,7 +56,7 @@ public static class ProviderCommand
         var id = CliOptions.Read(args, "--as") ?? packageIds[0];
         var version = CliOptions.Read(args, "--version");
         var source = CliOptions.Read(args, "--source");
-        var factoryType = CliOptions.Read(args, "--factory-type") ?? KnownProviderFactories.TryGet(packageIds[0]);
+        var factoryType = CliOptions.Read(args, "--factory-type") ?? KnownLibraries.TryGet(packageIds[0]);
         if (factoryType is null)
         {
             Console.Error.WriteLine(
@@ -67,11 +67,11 @@ public static class ProviderCommand
 
         if (version is null && packageIds.Count == 1)
         {
-            Console.Error.WriteLine("Pass --version <version> — a provider install is pinned, never \"latest\".");
+            Console.Error.WriteLine("Pass --version <version> — a library install is pinned, never \"latest\".");
             return 1;
         }
 
-        var packages = packageIds.Select(pid => new ProviderPackageRef(pid, version ?? "")).ToList();
+        var packages = packageIds.Select(pid => new PackageRef(pid, version ?? "")).ToList();
         if (packages.Any(p => string.IsNullOrEmpty(p.Version)))
         {
             Console.Error.WriteLine("Every package needs a version; pass --version for a single-package install.");
@@ -80,8 +80,8 @@ public static class ProviderCommand
 
         try
         {
-            var manifest = await ProviderInstaller.InstallAsync(repoRoot, id, packages, factoryType, source);
-            Console.WriteLine($"Installed provider '{manifest.Id}' ({string.Join(", ", packages.Select(p => $"{p.Id} {p.Version}"))}).");
+            var manifest = await LibraryInstaller.InstallAsync(repoRoot, id, packages, factoryType, source);
+            Console.WriteLine($"Installed library '{manifest.Id}' ({string.Join(", ", packages.Select(p => $"{p.Id} {p.Version}"))}).");
             Console.WriteLine($"Factory: {manifest.FactoryType}");
             return 0;
         }
@@ -94,25 +94,25 @@ public static class ProviderCommand
 
     private static async Task<int> SyncAsync(string repoRoot, string[] args)
     {
-        var providersRoot = ProviderPaths.ProvidersDir(repoRoot);
-        if (!Directory.Exists(providersRoot))
+        var librariesRoot = LibraryPaths.LibrariesDir(repoRoot);
+        if (!Directory.Exists(librariesRoot))
         {
-            Console.WriteLine("No providers installed.");
+            Console.WriteLine("No libraries installed.");
             return 0;
         }
 
         var ids = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal)
             ? [args[0]]
-            : Directory.EnumerateDirectories(providersRoot)
-                .Where(d => File.Exists(ProviderPaths.ManifestPath(d)))
+            : Directory.EnumerateDirectories(librariesRoot)
+                .Where(d => File.Exists(LibraryPaths.ManifestPath(d)))
                 .Select(Path.GetFileName)
                 .Cast<string>()
                 .ToList();
 
         foreach (var id in ids)
         {
-            await ProviderInstaller.SyncAsync(repoRoot, id);
-            Console.WriteLine($"Synced provider '{id}'.");
+            await LibraryInstaller.SyncAsync(repoRoot, id);
+            Console.WriteLine($"Synced library '{id}'.");
         }
 
         return 0;
@@ -120,10 +120,10 @@ public static class ProviderCommand
 
     private static int List(string repoRoot)
     {
-        var registry = new ProviderRegistry(repoRoot).LoadAll();
+        var registry = new LibraryRegistry(repoRoot).LoadAll();
         if (registry.Installed.Count == 0)
         {
-            Console.WriteLine("No providers installed.");
+            Console.WriteLine("No libraries installed.");
             return 0;
         }
 
@@ -137,7 +137,7 @@ public static class ProviderCommand
         return 0;
     }
 
-    private static bool TryResolves(ProviderRegistry registry, string id)
+    private static bool TryResolves(LibraryRegistry registry, string id)
     {
         try
         {
@@ -154,19 +154,19 @@ public static class ProviderCommand
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("Usage: dbdatasync config provider uninstall <id>");
+            Console.Error.WriteLine("Usage: dbdatasync config library uninstall <id>");
             return 1;
         }
 
-        var providerDir = ProviderPaths.ProviderDir(repoRoot, args[0]);
-        if (!Directory.Exists(providerDir))
+        var libraryDir = LibraryPaths.LibraryDir(repoRoot, args[0]);
+        if (!Directory.Exists(libraryDir))
         {
-            Console.Error.WriteLine($"Provider '{args[0]}' is not installed.");
+            Console.Error.WriteLine($"Library '{args[0]}' is not installed.");
             return 1;
         }
 
-        Directory.Delete(providerDir, recursive: true);
-        Console.WriteLine($"Uninstalled provider '{args[0]}'.");
+        Directory.Delete(libraryDir, recursive: true);
+        Console.WriteLine($"Uninstalled library '{args[0]}'.");
         return 0;
     }
 
@@ -187,7 +187,7 @@ public static class ProviderCommand
 
     private static int Unknown(string sub)
     {
-        Console.Error.WriteLine($"Unknown provider subcommand '{sub}'.");
+        Console.Error.WriteLine($"Unknown library subcommand '{sub}'.");
         PrintUsage();
         return 1;
     }
@@ -196,10 +196,10 @@ public static class ProviderCommand
     {
         Console.Error.WriteLine("""
             Usage:
-              dbdatasync config provider install <packageId>[ <packageId>...] [--as <id>] --version <v> [--factory-type type] [--source feed]
-              dbdatasync config provider sync [<id>]
-              dbdatasync config provider list
-              dbdatasync config provider uninstall <id>
+              dbdatasync config library install <packageId>[ <packageId>...] [--as <id>] --version <v> [--factory-type type] [--source feed]
+              dbdatasync config library sync [<id>]
+              dbdatasync config library list
+              dbdatasync config library uninstall <id>
             """);
     }
 }

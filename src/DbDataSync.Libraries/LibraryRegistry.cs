@@ -3,10 +3,10 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 
-namespace DbDataSync.Providers;
+namespace DbDataSync.Libraries;
 
 /// <summary>
-/// Loads every <c>&lt;repo&gt;/providers/*/provider.json</c> manifest and registers its
+/// Loads every <c>&lt;repo&gt;/libraries/*/library.json</c> manifest and registers its
 /// <see cref="DbProviderFactory"/> by name, so any consumer — the state store, a driver, a script —
 /// gets one without the solution ever referencing the underlying NuGet package. See
 /// <c>architecture/planning/todo/nuget-loaded-drivers.md</c> §*The provider layer*.
@@ -19,48 +19,48 @@ namespace DbDataSync.Providers;
 /// <para>
 /// **Loadable** means: this registers one <see cref="AssemblyLoadContext.Default"/>
 /// <see cref="AssemblyLoadContext.Resolving"/> handler per process (see <see cref="EnsureResolverArmed"/>)
-/// backed by an <see cref="AssemblyDependencyResolver"/> per installed provider directory, so a
-/// provider's own managed dependencies and <c>runtimes/&lt;rid&gt;/native/</c> assets resolve. Providers
-/// load into the *default* context deliberately, not a per-provider isolated one — a <c>SqlConnection</c>
-/// from a provider and one from a future built-in driver must be the same <c>Type</c>, which an isolated
+/// backed by an <see cref="AssemblyDependencyResolver"/> per installed library directory, so a
+/// library's own managed dependencies and <c>runtimes/&lt;rid&gt;/native/</c> assets resolve. Libraries
+/// load into the *default* context deliberately, not a per-library isolated one — a <c>SqlConnection</c>
+/// from a library and one from a future built-in driver must be the same <c>Type</c>, which an isolated
 /// context would break.
 /// </para>
 /// </summary>
-public sealed class ProviderRegistry
+public sealed class LibraryRegistry
 {
     private static readonly List<AssemblyDependencyResolver> Resolvers = [];
     private static bool _resolverArmed;
     private static readonly object ResolverLock = new();
 
-    private readonly string _providersRoot;
+    private readonly string _librariesRoot;
 
-    public ProviderRegistry(string repoRoot) => _providersRoot = ProviderPaths.ProvidersDir(repoRoot);
+    public LibraryRegistry(string repoRoot) => _librariesRoot = LibraryPaths.LibrariesDir(repoRoot);
 
-    /// <summary>Every installed provider's manifest, id-keyed. Populated by <see cref="LoadAll"/>;
-    /// empty (not an error) for a repo with no <c>providers/</c> directory at all.</summary>
-    public IReadOnlyDictionary<string, ProviderManifest> Installed { get; private set; } =
-        new Dictionary<string, ProviderManifest>(StringComparer.Ordinal);
+    /// <summary>Every installed library's manifest, id-keyed. Populated by <see cref="LoadAll"/>;
+    /// empty (not an error) for a repo with no <c>libraries/</c> directory at all.</summary>
+    public IReadOnlyDictionary<string, LibraryManifest> Installed { get; private set; } =
+        new Dictionary<string, LibraryManifest>(StringComparer.Ordinal);
 
     /// <summary>
-    /// Scans <c>providers/*/provider.json</c>, arms assembly resolution for each one found, and
-    /// registers every factory. An absent or empty <c>providers/</c> directory is a silent no-op — most
+    /// Scans <c>libraries/*/library.json</c>, arms assembly resolution for each one found, and
+    /// registers every factory. An absent or empty <c>libraries/</c> directory is a silent no-op — most
     /// deployments have none.
     /// </summary>
-    public ProviderRegistry LoadAll()
+    public LibraryRegistry LoadAll()
     {
-        var installed = new Dictionary<string, ProviderManifest>(StringComparer.Ordinal);
-        if (Directory.Exists(_providersRoot))
+        var installed = new Dictionary<string, LibraryManifest>(StringComparer.Ordinal);
+        if (Directory.Exists(_librariesRoot))
         {
-            foreach (var dir in Directory.EnumerateDirectories(_providersRoot))
+            foreach (var dir in Directory.EnumerateDirectories(_librariesRoot))
             {
-                var manifestPath = ProviderPaths.ManifestPath(dir);
+                var manifestPath = LibraryPaths.ManifestPath(dir);
                 if (!File.Exists(manifestPath))
                     continue;
 
-                var manifest = ProviderManifest.Read(manifestPath);
+                var manifest = LibraryManifest.Read(manifestPath);
                 installed[manifest.Id] = manifest;
 
-                var libDir = ProviderPaths.LibDir(dir);
+                var libDir = LibraryPaths.LibDir(dir);
                 if (Directory.Exists(libDir))
                     ArmResolver(libDir);
 
@@ -74,13 +74,13 @@ public sealed class ProviderRegistry
 
     /// <summary>
     /// <see cref="DbProviderFactories.GetFactory(string)"/>, with a message that names the fix
-    /// (<c>dbdatasync config provider install</c>) instead of the BCL's generic "no factory registered".
+    /// (<c>dbdatasync config library install</c>) instead of the BCL's generic "no factory registered".
     /// </summary>
     public DbProviderFactory GetFactory(string id)
     {
         if (!Installed.ContainsKey(id))
             throw new InvalidOperationException(
-                $"Provider '{id}' is not installed. Install it with `dbdatasync config provider install {id}`.");
+                $"Library '{id}' is not installed. Install it with `dbdatasync config library install {id}`.");
 
         return DbProviderFactories.GetFactory(id);
     }
@@ -103,7 +103,7 @@ public sealed class ProviderRegistry
 
     /// <summary>
     /// One <see cref="AssemblyLoadContext.Resolving"/> handler for the process's lifetime, trying every
-    /// armed provider's resolver in turn. Registered once — a second <see cref="ProviderRegistry"/>
+    /// armed library's resolver in turn. Registered once — a second <see cref="LibraryRegistry"/>
     /// instance (a test standing up its own repo root, say) adds to <see cref="Resolvers"/> rather than
     /// double-subscribing.
     /// </summary>
@@ -143,15 +143,15 @@ public sealed class ProviderRegistry
     }
 }
 
-/// <summary>The on-disk layout every provider (and, from 109d/109e on, every driver) shares — one
+/// <summary>The on-disk layout every library (and, from 109d/109e on, every driver) shares — one
 /// place both the installer and the registry agree on it.</summary>
-public static class ProviderPaths
+public static class LibraryPaths
 {
-    public const string ManifestFileName = "provider.json";
+    public const string ManifestFileName = "library.json";
     public const string LibDirName = "lib";
 
-    public static string ProvidersDir(string repoRoot) => Path.Combine(repoRoot, "providers");
-    public static string ProviderDir(string repoRoot, string id) => Path.Combine(ProvidersDir(repoRoot), id);
-    public static string ManifestPath(string providerDir) => Path.Combine(providerDir, ManifestFileName);
-    public static string LibDir(string providerDir) => Path.Combine(providerDir, LibDirName);
+    public static string LibrariesDir(string repoRoot) => Path.Combine(repoRoot, "libraries");
+    public static string LibraryDir(string repoRoot, string id) => Path.Combine(LibrariesDir(repoRoot), id);
+    public static string ManifestPath(string libraryDir) => Path.Combine(libraryDir, ManifestFileName);
+    public static string LibDir(string libraryDir) => Path.Combine(libraryDir, LibDirName);
 }

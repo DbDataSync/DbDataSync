@@ -16,7 +16,7 @@ using DbDataSync.Drivers.MsSql;
 using DbDataSync.Scripting;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.Postgres;
-using DbDataSync.Providers;
+using DbDataSync.Libraries;
 using DbDataSync.State;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
 
@@ -150,10 +150,10 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<ScriptHost>();
 
         // Loaded before DriverRegistry: a descriptor or a compiled driver registered from 109d/109e
-        // on resolves its provider through this, so the provider closure has to be loadable first.
-        // An absent or empty providers/ directory is a silent no-op — most deployments have none.
+        // on resolves its library through this, so the library closure has to be loadable first.
+        // An absent or empty libraries/ directory is a silent no-op — most deployments have none.
         builder.Services.AddSingleton(sp =>
-            new ProviderRegistry(sp.GetRequiredService<ApiOptions>().RepoRoot).LoadAll());
+            new LibraryRegistry(sp.GetRequiredService<ApiOptions>().RepoRoot).LoadAll());
 
         builder.Services.AddSingleton(sp =>
         {
@@ -170,13 +170,13 @@ public static class DbDataSyncHost
             // registration shape rather than a special case to keep in step.
             registry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
 
-            // A descriptor-defined driver's provider (resolved above) is already loadable; this is
+            // A descriptor-defined driver's library (resolved above) is already loadable; this is
             // what actually stands one up and puts it beside the three built-ins.
-            var providerRegistry = sp.GetRequiredService<ProviderRegistry>();
+            var libraryRegistry = sp.GetRequiredService<LibraryRegistry>();
             var repoRoot = sp.GetRequiredService<ApiOptions>().RepoRoot;
             var driverErrorLogger = (string message, Exception ex) =>
                 sp.GetRequiredService<ILogger<DriverRegistry>>().LogError(ex, "{Message}", message);
-            DriverLoader.LoadDescriptorDrivers(repoRoot, providerRegistry, registry, driverErrorLogger);
+            DriverLoader.LoadDescriptorDrivers(repoRoot, libraryRegistry, registry, driverErrorLogger);
             // Compiled plugins (109e) load after descriptors — neither ordering matters for
             // correctness (they don't reference each other), but this matches both manifest kinds
             // being enumerated in the same pass conceptually.
