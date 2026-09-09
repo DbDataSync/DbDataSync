@@ -1,6 +1,14 @@
 # Phase 114 — automatic TLS certificates (ACME) (planned)
 
-**Status**: Planned, not started. **Starts with a spike** (Open questions 1).
+**Status**: Planned, not started — **deliberately deferred** (2026-09-09). Phases 115, 112, 113 are
+done; this phase was scoped and then explicitly held back rather than implemented, because it is
+qualitatively larger and riskier than those three: it means integrating a real ACME v2 client
+(account registration, order/challenge/finalize, renewal), a new challenge-listening endpoint, and a
+Kestrel certificate-swap wiring that only a real ACME server round trip actually proves — unlike
+115/112/113, which each extended a pattern this codebase already had working examples of.
+**Confirmed scope for whenever this phase is picked up**: the full build, verified against a real
+**Pebble** ACME test server added to `docker-compose.yml` (not unit/fake-only verification) — see
+"How to verify when built," unchanged below. **Starts with a spike** (Open questions 1).
 **Plan reference**: `architecture/planning/todo/linux-tls-without-a-reverse-proxy.md`, tier 3.
 Builds on phase 113's cert-swap seam; independent of it otherwise. Cross-refs phase 111 (systemd
 capabilities) and phase 115 (`config check`, née phase 110's `doctor`).
