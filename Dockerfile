@@ -26,7 +26,15 @@ COPY --from=web /src/DbDataSync.Web/dist/ /app/wwwroot/
 # ── The image ──────────────────────────────────────────────────────────────────
 # Debian, not Alpine. LibGit2Sharp, Microsoft.Data.Sqlite and DuckDB.NET all ship glibc natives, and
 # a musl base finds that out as a DllNotFoundException at run time — the worst place to learn it.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+#
+# The SDK, not just the ASP.NET runtime (phase 120) — LibraryInstaller shells out to `dotnet publish`
+# to restore a library an operator installs from the web console, and `publish` (not `restore`) is
+# what produces the flat lib/ with native assets and a .deps.json (phase 109c). Every non-container
+# deployment already has the SDK (`dbdatasync` is a `dotnet tool`, which requires it); the container
+# was the only place a web-triggered install could not run `dotnet publish` at all. Bigger
+# (~250MB → ~750MB uncompressed base) — accepted for now; phase 121 adds a slim runtime-only image
+# with a pre-built catalog cache for a shop that needs one back.
+FROM mcr.microsoft.com/dotnet/sdk:10.0
 
 # One mount is a complete deployment: the config repository and the state database live together, so
 # a backup of this directory is a backup of everything that is not the image.

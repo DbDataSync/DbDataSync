@@ -16,7 +16,22 @@ namespace DbDataSync.Api.Tests;
 /// </summary>
 public class TestApiFactory : WebApplicationFactory<Program>
 {
-    public string RepoRoot { get; } = Directory.CreateTempSubdirectory("dbdatasync-api-tests-").FullName;
+    private readonly bool _ownsRepoRoot;
+
+    public string RepoRoot { get; }
+
+    public TestApiFactory() : this(null) { }
+
+    /// <summary>
+    /// <paramref name="existingRepoRoot"/> is for a test standing up a *second* host over a repo root
+    /// another factory already created and still owns — simulating a restart's "read whatever is on
+    /// disk right now" without this instance deleting a directory it doesn't own when it disposes.
+    /// </summary>
+    protected TestApiFactory(string? existingRepoRoot)
+    {
+        _ownsRepoRoot = existingRepoRoot is null;
+        RepoRoot = existingRepoRoot ?? Directory.CreateTempSubdirectory("dbdatasync-api-tests-").FullName;
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -57,7 +72,7 @@ public class TestApiFactory : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing && Directory.Exists(RepoRoot))
+        if (disposing && _ownsRepoRoot && Directory.Exists(RepoRoot))
             Directory.Delete(RepoRoot, recursive: true);
     }
 
@@ -85,3 +100,8 @@ public class TestApiFactory : WebApplicationFactory<Program>
         return Path.Combine(repoRoot.FullName, "src", "DbDataSync.TaskRunner", "bin", configuration, tfm, "DbDataSync.TaskRunner.dll");
     }
 }
+
+/// <summary>A second host over a repo root an existing factory (of any kind — this doesn't care which)
+/// already owns — for a test simulating "restart the API and see what it reads off disk now" without
+/// standing up a real process restart.</summary>
+public sealed class TestApiFactoryOnRepo(string existingRepoRoot) : TestApiFactory(existingRepoRoot);

@@ -33,7 +33,16 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-09 (later than the note below): 119 is done and removed — `GET
+Updated 2026-09-09 (later than the note below): 120 is done and removed — the whole 116–120 arc is
+now shipped. The container's default image moved to the .NET SDK base (`LibraryInstaller` shells out to
+`dotnet publish`), `POST /api/libraries`/`DELETE /api/libraries/{id}`/`POST
+/api/drivers/from-catalog` install and remove for real (both endpoints update the live in-process
+registries immediately, not just on disk), and a real server-side restart-required flag replaced the
+Configuration screen's old client-only one. **121** (a slim runtime-only image) and **122**
+(`factoryType` reflection-assist) are the two follow-ons this arc always deferred; nothing currently
+depends on either landing.
+
+Updated 2026-09-09 (earlier): 119 is done and removed — `GET
 /api/libraries/search` proxies the public NuGet index (a new `DbDataSync:NuGetSearchEnabled` key
 gates it), and the Libraries screen's search box, quick-add chips, and copyable install command all
 build on it. 120 (the actual Install/Add buttons) is what's left of this arc.

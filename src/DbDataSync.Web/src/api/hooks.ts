@@ -14,6 +14,7 @@ const keys = {
   libraries: ['libraries'] as const,
   knownLibraries: ['known-libraries'] as const,
   knownDrivers: ['known-drivers'] as const,
+  restartRequired: ['admin', 'restart-required'] as const,
   connections: ['connections'] as const,
   connection: (name: string) => ['connections', name] as const,
   capabilities: (name: string) => ['connections', name, 'capabilities'] as const,
@@ -145,6 +146,54 @@ export function useKnownDrivers() {
  * typed twice should still hit the (possibly-changed) live index. */
 export function useSearchLibraries() {
   return useMutation({ mutationFn: (q: string) => api.libraries.search(q) })
+}
+
+/** Installs a library from the Libraries screen (phase 120) — synchronous on the server, so this
+ * resolves only once the restore actually finishes. */
+export function useInstallLibrary() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { packageId: string; version: string; factoryType?: string; source?: string }) =>
+      api.libraries.create(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.libraries })
+      queryClient.invalidateQueries({ queryKey: keys.restartRequired })
+    },
+  })
+}
+
+/** Removes a library — `force: true` overrides the 409 a still-in-use one otherwise answers with. */
+export function useRemoveLibrary() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, force }: { id: string; force?: boolean }) => api.libraries.remove(id, force),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.libraries })
+      queryClient.invalidateQueries({ queryKey: keys.restartRequired })
+    },
+  })
+}
+
+/** The Drivers screen's one-click "Add" from a bundled catalog entry (phase 120). */
+export function useInstallDriverFromCatalog() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ knownDriverId, version }: { knownDriverId: string; version: string }) =>
+      api.drivers.installFromCatalog(knownDriverId, version),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.drivers })
+      queryClient.invalidateQueries({ queryKey: keys.libraries })
+      queryClient.invalidateQueries({ queryKey: keys.restartRequired })
+    },
+  })
+}
+
+/** Whether this process needs a restart to pick up a change — a config value (phase 81), or (phase
+ * 120) a library or driver installed/removed through the web console. Not polled: the mutations above
+ * (and useSetAdminConfig/useSetAdminConfigSecret) invalidate this explicitly, the same caution every
+ * other host-state query here already takes. */
+export function useRestartRequired() {
+  return useQuery({ queryKey: keys.restartRequired, queryFn: api.admin.restartRequired.get })
 }
 
 export function useConnections() {
@@ -955,7 +1004,10 @@ export function useSetAdminConfig() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) => api.admin.config.set(key, value),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.adminConfig }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.adminConfig })
+      queryClient.invalidateQueries({ queryKey: keys.restartRequired })
+    },
   })
 }
 
@@ -965,7 +1017,10 @@ export function useSetAdminConfigSecret() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) => api.admin.config.setSecret(key, value),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.adminConfig }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.adminConfig })
+      queryClient.invalidateQueries({ queryKey: keys.restartRequired })
+    },
   })
 }
 

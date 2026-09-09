@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { AdminTabs } from '../components/AdminTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
+import { RestartRequiredBanner } from '../components/RestartRequiredBanner'
 import { useIsAdmin } from '../components/useIsAdmin'
-import { useDrivers, useKnownDrivers } from '../api/hooks'
+import { useDrivers, useInstallDriverFromCatalog, useKnownDrivers, useRestartRequired } from '../api/hooks'
 import type { DriverSummary, KnownDriverSummary } from '../api/types'
 
 const COLUMNS = '1.1fr 1.6fr 0.9fr 1.1fr 1.8fr'
@@ -16,13 +18,17 @@ const SOURCE_LABEL: Record<DriverSummary['source'], string> = {
 /**
  * Every registered driver — the three built-ins plus whatever `driver.yaml` descriptors (phase 109d)
  * or compiled plugins (109e) an operator has added — and the bundled catalog (117) an "Add" affordance
- * offers. Read-only in this phase: install lands in phase 120, so "Add" is disabled and the copyable
- * CLI command is the only way to act on a catalog entry today.
+ * offers. A catalog install (120) is always a curated pick, so it never opens the trust dialog the
+ * Libraries screen's non-curated path does.
  */
 export function AdminDriversPage() {
   const isAdmin = useIsAdmin()
   const { data: drivers, isLoading, error } = useDrivers()
   const { data: knownDrivers, error: knownError } = useKnownDrivers()
+  const { data: restartRequired } = useRestartRequired()
+  const install = useInstallDriverFromCatalog()
+  const [installError, setInstallError] = useState<unknown>(null)
+  const [justInstalled, setJustInstalled] = useState<string | null>(null)
 
   // The API enforces this for real (Policies.Admin on the new endpoints) — this is only about not
   // showing a Viewer a screen of "Add" affordances that would 403 the moment they were used.
@@ -36,6 +42,19 @@ export function AdminDriversPage() {
     )
   }
 
+  const addFromCatalog = async (knownDriverId: string, version: string) => {
+    setInstallError(null)
+    setJustInstalled(null)
+    try {
+      const result = await install.mutateAsync({ knownDriverId, version })
+      setJustInstalled(result.id)
+    } catch (err) {
+      setInstallError(err)
+    }
+  }
+
+  const installedIds = new Set((drivers ?? []).map((d) => d.id))
+
   return (
     <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
       <div className="pane">
@@ -47,7 +66,8 @@ export function AdminDriversPage() {
           </span>
         </div>
 
-        <ErrorBanner error={error ?? knownError} />
+        <RestartRequiredBanner show={!!restartRequired?.required} />
+        <ErrorBanner error={error ?? knownError ?? installError} />
 
         <div className="card flush" data-testid="admin-drivers-table">
           <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
@@ -63,11 +83,20 @@ export function AdminDriversPage() {
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <span className="hint">
-              Installing from here lands in a later phase — for now, copy the command below and run it
-              on the host. See architecture/planning/todo/nuget-loaded-drivers.md for what a descriptor
-              can and can't do.
+              Every entry here is a curated, bundled descriptor — no trust confirmation needed. See
+              architecture/planning/todo/nuget-loaded-drivers.md for what a descriptor can and can't do.
             </span>
-            {(knownDrivers ?? []).map((entry) => <KnownDriverRow key={entry.id} entry={entry} />)}
+            {(knownDrivers ?? [])
+              .filter((entry) => !installedIds.has(entry.id))
+              .map((entry) => (
+                <KnownDriverRow
+                  key={entry.id}
+                  entry={entry}
+                  installing={install.isPending}
+                  justInstalled={justInstalled === entry.id}
+                  onAdd={(version) => addFromCatalog(entry.id, version)}
+                />
+              ))}
             {knownDrivers?.length === 0 && <div className="empty">No bundled drivers yet.</div>}
           </div>
         </div>
@@ -98,9 +127,15 @@ function DriverRow({ driver }: { driver: DriverSummary }) {
   )
 }
 
-function KnownDriverRow({ entry }: { entry: KnownDriverSummary }) {
+function KnownDriverRow({ entry, installing, justInstalled, onAdd }: {
+  entry: KnownDriverSummary
+  installing: boolean
+  justInstalled: boolean
+  onAdd: (version: string) => void
+}) {
+  const [version, setVersion] = useState('')
   const command =
-    `dbdatasync config driver install <id> --library ${entry.boundLibrary} --version <v> --from ${entry.id}`
+    `dbdatasync config driver install <id> --library ${entry.boundLibrary} --version ${version || '<v>'} --from ${entry.id}`
 
   const copy = async () => {
     try {
@@ -123,8 +158,17 @@ function KnownDriverRow({ entry }: { entry: KnownDriverSummary }) {
         </div>
         <div className="hint">{entry.description}</div>
         <div className="mono hint" style={{ marginTop: 4 }}>{command}</div>
+        {justInstalled && <div className="hint" style={{ color: 'var(--ok)' }}>Installed.</div>}
       </div>
       <div className="row" style={{ gap: 8, flexShrink: 0 }}>
+        <input
+          type="text"
+          className="input sm"
+          placeholder="Version"
+          value={version}
+          onChange={(e) => setVersion(e.target.value)}
+          data-testid={`admin-known-driver-version-${entry.id}`}
+        />
         <button
           type="button"
           className="btn-link quiet"
@@ -136,11 +180,11 @@ function KnownDriverRow({ entry }: { entry: KnownDriverSummary }) {
         <button
           type="button"
           className="btn btn-sm"
-          disabled
-          title="Installing from the console lands in a later phase"
+          disabled={!version || installing}
+          onClick={() => onAdd(version)}
           data-testid={`admin-known-driver-add-${entry.id}`}
         >
-          Add
+          {installing ? 'Adding…' : 'Add'}
         </button>
       </div>
     </div>

@@ -1,4 +1,5 @@
 using DbDataSync.Api.Auth;
+using DbDataSync.Api.Configuration;
 using DbDataSync.Api.Services;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Libraries;
@@ -8,17 +9,19 @@ using Microsoft.AspNetCore.Mvc;
 namespace DbDataSync.Api.Controllers;
 
 /// <summary>
-/// Installed libraries, and the bundled catalogs (phase 117's <c>KnownLibraries</c>/<c>KnownDrivers</c>)
-/// an "add" affordance offers. Read-only in this phase — install/remove is phase 120.
+/// Installed libraries, the bundled catalogs (phase 117's <c>KnownLibraries</c>/<c>KnownDrivers</c>) an
+/// "add" affordance offers, NuGet search (119), and (120) installing or removing one.
 /// <para>
 /// <c>[Authorize(Policies.Admin)]</c> stated explicitly on every action, per the
-/// <see cref="AdminConfigController"/> precedent: this screen reveals what's installed on the host,
-/// which is an admin-only bar, like the config screen.
+/// <see cref="AdminConfigController"/> precedent: this screen reveals — and, from phase 120, changes —
+/// what's installed on the host, an admin-only bar, like the config screen.
 /// </para>
 /// </summary>
 [ApiController]
 [Route("api")]
-public sealed class LibrariesController(LibrariesService service, LibrarySearchService searchService) : ControllerBase
+public sealed class LibrariesController(
+    LibrariesService service, LibrarySearchService searchService, LibraryRegistry libraryRegistry,
+    ApiOptions apiOptions, RestartRequiredState restartRequired) : ControllerBase
 {
     [Authorize(Policies.Admin)]
     [HttpGet("libraries")]
@@ -54,7 +57,80 @@ public sealed class LibrariesController(LibrariesService service, LibrarySearchS
         Ok(KnownDrivers.All
             .Select(e => new KnownDriverSummary(e.Id, e.DisplayName, e.Description, e.BoundLibraryId))
             .ToList());
+
+    /// <summary>
+    /// Installs a library — synchronously, in-process. The container's default image moved to the SDK
+    /// base for exactly this (phase 120): <c>LibraryInstaller</c> shells out to <c>dotnet publish</c>,
+    /// which every non-container deployment already has (the tool itself needs the SDK), so there is no
+    /// probe and no "pending" state, just a request that holds until the restore finishes.
+    /// </summary>
+    [Authorize(Policies.Admin)]
+    [HttpPost("libraries")]
+    public async Task<ActionResult<LibraryManifest>> Create([FromBody] CreateLibraryRequest body)
+    {
+        if (string.IsNullOrWhiteSpace(body.PackageId) || string.IsNullOrWhiteSpace(body.Version))
+            return BadRequest(new { error = "packageId and version are required." });
+
+        var factoryType = body.FactoryType ?? KnownLibraries.TryGet(body.PackageId);
+        if (factoryType is null)
+        {
+            return BadRequest(new
+            {
+                error = $"'{body.PackageId}' has no known DbProviderFactory type. Pass factoryType explicitly.",
+            });
+        }
+
+        try
+        {
+            var manifest = await LibraryInstaller.InstallAsync(
+                apiOptions.RepoRoot, body.PackageId, [new PackageRef(body.PackageId, body.Version)],
+                factoryType, body.Source);
+            // So GET /api/libraries reflects this immediately — the driver/state-store side of "load
+            // once at startup" still needs a restart, but there's no reason the admin screen's own
+            // listing has to lie about what's on disk in the meantime.
+            libraryRegistry.RegisterInstalled(manifest.Id);
+            restartRequired.Touch();
+            return Ok(manifest);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = InstallErrorFormatting.TailOf(ex.Message) });
+        }
+    }
+
+    /// <summary>Refused (409) when a driver on disk still names this library, unless
+    /// <paramref name="force"/> — in-use is in-use regardless of whether the library currently
+    /// resolves.</summary>
+    [Authorize(Policies.Admin)]
+    [HttpDelete("libraries/{id}")]
+    public ActionResult Delete(string id, [FromQuery] bool force = false)
+    {
+        var libraryDir = LibraryPaths.LibraryDir(apiOptions.RepoRoot, id);
+        if (!Directory.Exists(libraryDir))
+            return NotFound(new { error = $"Library '{id}' is not installed." });
+
+        var usedBy = service.UsedBy(id);
+        if (usedBy.Count > 0 && !force)
+        {
+            return Conflict(new
+            {
+                error = $"'{id}' is still named by {usedBy.Count} driver(s): {string.Join(", ", usedBy)}. " +
+                         "Pass force=true to remove it anyway.",
+                usedBy,
+            });
+        }
+
+        Directory.Delete(libraryDir, recursive: true);
+        libraryRegistry.Remove(id);
+        restartRequired.Touch();
+        return NoContent();
+    }
 }
+
+/// <param name="FactoryType">Required only when <paramref name="PackageId"/> isn't in
+/// <see cref="KnownLibraries"/>.</param>
+/// <param name="Source">An alternate NuGet feed, or null for the default.</param>
+public sealed record CreateLibraryRequest(string PackageId, string Version, string? FactoryType, string? Source);
 
 public sealed record KnownLibrarySummary(string Id, string DisplayName, string Description, string PackageId);
 

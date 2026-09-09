@@ -2,21 +2,26 @@ import { useEffect, useState } from 'react'
 import { AdminTabs } from '../components/AdminTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
+import { RestartRequiredBanner } from '../components/RestartRequiredBanner'
 import { useIsAdmin } from '../components/useIsAdmin'
-import { useKnownLibraries, useLibraries, useSearchLibraries } from '../api/hooks'
+import {
+  useInstallLibrary, useKnownLibraries, useLibraries, useRemoveLibrary, useRestartRequired, useSearchLibraries,
+} from '../api/hooks'
 import type { KnownLibrarySummary, LibrarySearchResult, LibrarySummary } from '../api/types'
 
-const COLUMNS = '1.2fr 1.7fr 1fr 1.3fr'
+const COLUMNS = '1.2fr 1.7fr 1fr 1.3fr 1fr'
 
 /**
  * Every installed library — what a `driver.yaml` descriptor (or, once 109g lands, the state store)
- * resolves its `DbProviderFactory` through — plus (phase 119) a NuGet search box for finding one to
- * add. Read-only in this phase: there is no Install button yet, only a copyable CLI command; the
- * one-click install itself is phase 120.
+ * resolves its `DbProviderFactory` through — plus (119) a NuGet search box and (120) installing or
+ * removing one directly from here.
  */
 export function AdminLibrariesPage() {
   const isAdmin = useIsAdmin()
   const { data: libraries, isLoading, error } = useLibraries()
+  const { data: restartRequired } = useRestartRequired()
+  const remove = useRemoveLibrary()
+  const [removeError, setRemoveError] = useState<unknown>(null)
 
   // The API enforces this for real (Policies.Admin) — this is only about not showing a Viewer a
   // screen of affordances that would 403 the moment they were used.
@@ -30,6 +35,15 @@ export function AdminLibrariesPage() {
     )
   }
 
+  const doRemove = async (id: string, force: boolean) => {
+    setRemoveError(null)
+    try {
+      await remove.mutateAsync({ id, force })
+    } catch (err) {
+      setRemoveError(err)
+    }
+  }
+
   return (
     <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
       <div className="pane">
@@ -41,15 +55,18 @@ export function AdminLibrariesPage() {
           </span>
         </div>
 
-        <ErrorBanner error={error} />
+        <RestartRequiredBanner show={!!restartRequired?.required} />
+        <ErrorBanner error={error ?? removeError} />
 
         <div className="card flush" data-testid="admin-libraries-table">
           <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
-            <span>Id</span><span>Packages</span><span>Status</span><span>Used by</span>
+            <span>Id</span><span>Packages</span><span>Status</span><span>Used by</span><span></span>
           </div>
           {isLoading && <div className="empty">Loading…</div>}
           {!isLoading && (libraries ?? []).length === 0 && <div className="empty">No libraries installed.</div>}
-          {(libraries ?? []).map((library) => <LibraryRow key={library.id} library={library} />)}
+          {(libraries ?? []).map((library) => (
+            <LibraryRow key={library.id} library={library} onRemove={doRemove} busy={remove.isPending} />
+          ))}
         </div>
 
         <LibraryFindPanel installedIds={new Set((libraries ?? []).map((l) => l.id))} />
@@ -58,7 +75,27 @@ export function AdminLibrariesPage() {
   )
 }
 
-function LibraryRow({ library }: { library: LibrarySummary }) {
+function LibraryRow({ library, onRemove, busy }: {
+  library: LibrarySummary
+  onRemove: (id: string, force: boolean) => void
+  busy: boolean
+}) {
+  const inUse = library.usedBy.length > 0
+
+  const removeDirectly = () => {
+    if (window.confirm(`Remove library '${library.id}'? This takes effect after a restart.`))
+      onRemove(library.id, false)
+  }
+
+  const forceRemove = () => {
+    if (window.confirm(
+      `'${library.id}' is still named by: ${library.usedBy.join(', ')}. Removing it anyway will make ` +
+      `${library.usedBy.length === 1 ? 'that driver' : 'those drivers'} fail to load on the next restart. Continue?`,
+    )) {
+      onRemove(library.id, true)
+    }
+  }
+
   return (
     <div
       className="grid-row"
@@ -77,7 +114,30 @@ function LibraryRow({ library }: { library: LibrarySummary }) {
         {library.resolves ? 'resolves' : 'does not resolve'}
       </span>
       <span className="hint">
-        {library.usedBy.length > 0 ? library.usedBy.join(', ') : <span className="faint">unused</span>}
+        {inUse ? library.usedBy.join(', ') : <span className="faint">unused</span>}
+      </span>
+      <span className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          className="btn-link quiet"
+          disabled={inUse || busy}
+          title={inUse ? `Still named by: ${library.usedBy.join(', ')}` : undefined}
+          onClick={removeDirectly}
+          data-testid={`admin-library-remove-${library.id}`}
+        >
+          Remove
+        </button>
+        {inUse && (
+          <button
+            type="button"
+            className="btn-link quiet"
+            disabled={busy}
+            onClick={forceRemove}
+            data-testid={`admin-library-force-remove-${library.id}`}
+          >
+            Force
+          </button>
+        )}
       </span>
     </div>
   )
@@ -89,25 +149,28 @@ function formatDownloads(n: number): string {
   return String(n)
 }
 
+type Selection = { id: string; version: string; versionLocked: boolean; factoryType: string }
+
 /**
  * Finding a library to install — a NuGet search box when the server says it's enabled and reachable,
  * curated quick-add chips above it either way, and a manual package-id/version entry as the fallback
  * (disabled search, a failed call, or a package the search box didn't turn up). Every path ends the
- * same way: a package id + version yields a copyable `config library install` command — there is no
- * Install button here, that's phase 120.
+ * same way: a package id + version (+ factory type, for a non-curated one) either installs directly
+ * (a curated pick) or opens a trust confirmation first (anything else) — install.mutateAsync either
+ * way, so the copyable CLI command is a fallback for a failed install, not the only option.
  */
 function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
   const { data: knownLibraries } = useKnownLibraries()
   const search = useSearchLibraries()
+  const install = useInstallLibrary()
   const [query, setQuery] = useState('')
   const [probed, setProbed] = useState(false)
   const [manualId, setManualId] = useState('')
   const [manualVersion, setManualVersion] = useState('')
-  // versionLocked distinguishes a version already chosen from a definite list (a search result's
-  // <select>, or manual entry's own version field before "Use" is clicked) from one still needing
-  // typed input — InstallCommand only renders an editable version box in the latter case, so the box
-  // doesn't vanish out from under the operator mid-keystroke once it stops being empty.
-  const [selected, setSelected] = useState<{ id: string; version: string; versionLocked: boolean } | null>(null)
+  const [selected, setSelected] = useState<Selection | null>(null)
+  const [confirmTrust, setConfirmTrust] = useState(false)
+  const [installError, setInstallError] = useState<unknown>(null)
+  const [installedOk, setInstalledOk] = useState(false)
 
   // One silent probe on mount — an operator shouldn't have to type something and get refused just to
   // learn the box doesn't work in this deployment.
@@ -126,6 +189,32 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
 
   const isCurated = (id: string) => (knownLibraries ?? []).some((k) => k.packageId === id)
 
+  const pick = (next: Selection) => {
+    setSelected(next)
+    setInstalledOk(false)
+    setInstallError(null)
+  }
+
+  const doInstall = async (target: Selection) => {
+    setInstallError(null)
+    try {
+      await install.mutateAsync({
+        packageId: target.id,
+        version: target.version,
+        factoryType: target.factoryType || undefined,
+      })
+      setInstalledOk(true)
+    } catch (err) {
+      setInstallError(err)
+    }
+  }
+
+  const requestInstall = () => {
+    if (!selected) return
+    if (isCurated(selected.id)) void doInstall(selected)
+    else setConfirmTrust(true)
+  }
+
   return (
     <div className="card" data-testid="admin-libraries-find-panel" style={{ marginTop: 20 }}>
       <div className="card-head">
@@ -140,7 +229,7 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
                 <QuickAddChip
                   key={entry.id}
                   entry={entry}
-                  onPick={() => setSelected({ id: entry.packageId, version: '', versionLocked: false })}
+                  onPick={() => pick({ id: entry.packageId, version: '', versionLocked: false, factoryType: '' })}
                 />
               ))}
           </div>
@@ -173,7 +262,7 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
                 key={result.id}
                 result={result}
                 curated={isCurated(result.id)}
-                onSelect={(version) => setSelected({ id: result.id, version, versionLocked: true })}
+                onSelect={(version) => pick({ id: result.id, version, versionLocked: true, factoryType: '' })}
               />
             ))}
           </>
@@ -203,7 +292,7 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
                 type="button"
                 className="btn btn-sm"
                 disabled={!manualId || !manualVersion}
-                onClick={() => setSelected({ id: manualId, version: manualVersion, versionLocked: true })}
+                onClick={() => pick({ id: manualId, version: manualVersion, versionLocked: true, factoryType: '' })}
                 data-testid="admin-libraries-manual-use"
               >
                 Use
@@ -214,14 +303,30 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
 
         {selected && (
           <InstallCommand
-            id={selected.id}
-            version={selected.version}
-            versionLocked={selected.versionLocked}
+            selection={selected}
             curated={isCurated(selected.id)}
-            onChangeVersion={(version) => setSelected({ ...selected, version })}
+            installing={install.isPending}
+            installedOk={installedOk}
+            onChangeVersion={(version) => pick({ ...selected, version })}
+            onChangeFactoryType={(factoryType) => setSelected({ ...selected, factoryType })}
+            onInstall={requestInstall}
           />
         )}
+
+        <ErrorBanner error={installError} />
       </div>
+
+      {confirmTrust && selected && (
+        <TrustInstallDialog
+          id={selected.id}
+          busy={install.isPending}
+          onCancel={() => setConfirmTrust(false)}
+          onConfirm={() => {
+            setConfirmTrust(false)
+            void doInstall(selected)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -280,17 +385,19 @@ function SearchResultRow({ result, curated, onSelect }: {
   )
 }
 
-function InstallCommand({ id, version, versionLocked, curated, onChangeVersion }: {
-  id: string
-  version: string
-  /** True once a version came from a definite list (a search result, or manual entry's own field) —
-   * only false still needs an editable box, so it doesn't disappear mid-keystroke the moment
-   * `version` stops being empty. */
-  versionLocked: boolean
+function InstallCommand({ selection, curated, installing, installedOk, onChangeVersion, onChangeFactoryType, onInstall }: {
+  selection: Selection
   curated: boolean
+  installing: boolean
+  installedOk: boolean
   onChangeVersion: (version: string) => void
+  onChangeFactoryType: (factoryType: string) => void
+  onInstall: () => void
 }) {
-  const ready = !!version
+  const { id, version, versionLocked, factoryType } = selection
+  const hasVersion = !!version
+  const needsFactoryType = !curated
+  const canInstall = hasVersion && (!needsFactoryType || !!factoryType) && !installing
   const command = `dbdatasync config library install ${id} --version ${version || '<v>'}`
 
   const copy = async () => {
@@ -316,6 +423,19 @@ function InstallCommand({ id, version, versionLocked, curated, onChangeVersion }
           />
         </div>
       )}
+      {needsFactoryType && (
+        <div className="row" style={{ gap: 8 }}>
+          <span>Factory type:</span>
+          <input
+            type="text"
+            className="input"
+            value={factoryType}
+            onChange={(e) => onChangeFactoryType(e.target.value)}
+            placeholder='"Namespace.FactoryClass, AssemblyName"'
+            data-testid="admin-libraries-command-factory-type"
+          />
+        </div>
+      )}
       <div className="mono">{command}</div>
       {!curated && (
         <div className="hint">
@@ -324,16 +444,78 @@ function InstallCommand({ id, version, versionLocked, curated, onChangeVersion }
           install a package you've vetted yourself.
         </div>
       )}
-      <div>
+      {installedOk && <div className="hint" style={{ color: 'var(--ok)' }}>Installed.</div>}
+      <div className="row" style={{ gap: 8 }}>
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={!canInstall}
+          onClick={onInstall}
+          data-testid="admin-libraries-install-button"
+        >
+          {installing ? 'Installing…' : 'Install'}
+        </button>
         <button
           type="button"
           className="btn-link quiet"
-          disabled={!ready}
+          disabled={!hasVersion}
           onClick={copy}
           data-testid="admin-libraries-command-copy"
         >
           Copy command
         </button>
+      </div>
+    </div>
+  )
+}
+
+/** The one non-curated-install gate: installing a package DbDataSync didn't vet runs its code inside
+ * this host with the host's own privileges — a catalog pick never shows this. */
+function TrustInstallDialog({ id, busy, onConfirm, onCancel }: {
+  id: string
+  busy: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Confirm installing an unvetted package"
+        data-testid="admin-libraries-trust-dialog"
+      >
+        <div className="card-head">
+          <span className="card-title">Install "{id}"?</span>
+        </div>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <span className="hint">
+            Installing this package runs its code inside the DbDataSync host, with the host's own
+            privileges — the same trust as a hook or a script. Only continue for a package you have
+            vetted yourself.
+          </span>
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn" onClick={onCancel} data-testid="admin-libraries-trust-cancel">
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              onClick={onConfirm}
+              data-testid="admin-libraries-trust-confirm"
+            >
+              {busy ? 'Installing…' : 'Install anyway'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

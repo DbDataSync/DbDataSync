@@ -36,6 +36,16 @@ public sealed class LibrariesService(LibraryRegistry libraryRegistry, ApiOptions
             .ToList();
     }
 
+    /// <summary>Every descriptor driver on disk whose <c>library:</c> names <paramref name="libraryId"/>
+    /// — what <c>DELETE /api/libraries/{id}</c> (phase 120) checks before refusing to remove one still
+    /// in use.</summary>
+    public IReadOnlyList<string> UsedBy(string libraryId) =>
+        DriverDescriptorScanner.Scan(apiOptions.RepoRoot)
+            .Where(e => e.LibraryId == libraryId)
+            .Select(e => e.DriverId)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToList();
+
     private bool Resolves(string id)
     {
         try

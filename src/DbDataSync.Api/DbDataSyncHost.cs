@@ -99,6 +99,7 @@ public static class DbDataSyncHost
                 sp.GetRequiredService<GitCommitService>(),
                 sp.GetRequiredService<SecretStore>());
         });
+        builder.Services.AddSingleton<RestartRequiredState>();
         builder.Services.AddSingleton<AdminConfigService>();
         builder.Services.AddSingleton<AdminCertificateService>();
         builder.Services.AddSingleton<LibrariesService>();
@@ -271,6 +272,9 @@ public static class DbDataSyncHost
                 .Build());
 
         var app = builder.Build();
+
+        // A fresh process has, by construction, already picked up whatever the marker was recording.
+        app.Services.GetRequiredService<RestartRequiredState>().Clear();
 
         // At startup, so a deployment whose passkeys cannot possibly work says so now rather than
         // failing inside a browser API with a message that names nothing. A warning and not a refusal:

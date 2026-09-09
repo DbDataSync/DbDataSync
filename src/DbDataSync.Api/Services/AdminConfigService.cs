@@ -31,7 +31,8 @@ public sealed class AdminConfigService(
     AuthOptions authOptions,
     PasskeyOptions passkeyOptions,
     GitCommitService git,
-    SecretStore secrets)
+    SecretStore secrets,
+    RestartRequiredState restartRequired)
 {
     private sealed record KeyDefinition(
         string Key, string Description, bool SupportsWrite, bool IsSecret = false, string? Unit = null);
@@ -132,6 +133,7 @@ public sealed class AdminConfigService(
         DbDataSyncConfigFile.SetValue(apiOptions.RepoRoot, "DbDataSync", localKey, value);
         git.CommitChanges(
             [DbDataSyncConfigFile.PathIn(apiOptions.RepoRoot)], $"Set '{definition.Key}' in dbdatasync.config.yaml", author);
+        restartRequired.Touch();
 
         return ToEntry(definition);
     }
@@ -147,6 +149,7 @@ public sealed class AdminConfigService(
             return false;
 
         secrets.Store(SecretRefs.ForAppSetting("stateConnectionString"), value);
+        restartRequired.Touch();
         return true;
     }
 

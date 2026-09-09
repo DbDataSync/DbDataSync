@@ -73,6 +73,46 @@ public sealed class LibraryRegistry
     }
 
     /// <summary>
+    /// Loads and registers exactly one library already on disk (by id) into this same instance's
+    /// <see cref="Installed"/>, without rescanning — for a caller (phase 120's <c>POST /api/libraries</c>)
+    /// that just wrote it and wants this process's own view of "is it installed" to reflect that
+    /// immediately, without a restart. Deliberately not "call <see cref="LoadAll"/> again": that would
+    /// re-arm a resolver for every already-installed library a second time, unboundedly, if this were
+    /// ever called more than once per process — which, unlike <see cref="LoadAll"/>'s one call at
+    /// startup, this now can be. A silent no-op if <paramref name="id"/> isn't actually on disk.
+    /// </summary>
+    public void RegisterInstalled(string id)
+    {
+        var libraryDir = Path.Combine(_librariesRoot, id);
+        var manifestPath = LibraryPaths.ManifestPath(libraryDir);
+        if (!File.Exists(manifestPath))
+            return;
+
+        var manifest = LibraryManifest.Read(manifestPath);
+
+        var libDir = LibraryPaths.LibDir(libraryDir);
+        if (Directory.Exists(libDir))
+            ArmResolver(libDir);
+
+        DbProviderFactories.RegisterFactory(manifest.Id, manifest.FactoryType);
+        Installed = new Dictionary<string, LibraryManifest>(Installed, StringComparer.Ordinal) { [manifest.Id] = manifest };
+    }
+
+    /// <summary>Drops <paramref name="id"/> from <see cref="Installed"/> — for
+    /// <c>DELETE /api/libraries/{id}</c> (phase 120), so this process's own view stops claiming a
+    /// removed library is installed. Does not (cannot) un-arm its resolver or un-register its factory
+    /// name; an orphaned resolver pointing at a deleted directory is harmless dead weight, not a
+    /// correctness problem — <see cref="GetFactory"/> refuses by <see cref="Installed"/> membership
+    /// first, before ever reaching <see cref="DbProviderFactories.GetFactory(string)"/>.</summary>
+    public void Remove(string id)
+    {
+        if (!Installed.ContainsKey(id))
+            return;
+
+        Installed = Installed.Where(kv => kv.Key != id).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+    }
+
+    /// <summary>
     /// <see cref="DbProviderFactories.GetFactory(string)"/>, with a message that names the fix
     /// (<c>dbdatasync config library install</c>) instead of the BCL's generic "no factory registered".
     /// </summary>

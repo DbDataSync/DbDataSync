@@ -779,6 +779,25 @@ export interface LibrarySearchResponse {
   results: LibrarySearchResult[] | null
 }
 
+/** `POST /api/libraries` (phase 120) response — the manifest `LibraryInstaller` wrote. */
+export interface LibraryManifest {
+  id: string
+  factoryType: string
+  packages: { id: string; version: string }[]
+}
+
+/** `POST /api/drivers/from-catalog` (phase 120) response. */
+export interface FromCatalogResult {
+  id: string
+  library: string
+}
+
+/** `GET /api/admin/restart-required` (phase 120) — whether this process has a config value, library,
+ * or driver change on disk it hasn't picked up yet. */
+export interface RestartRequiredStatus {
+  required: boolean
+}
+
 // The Setup card — see architecture/implementation/todo/phase-025-database-provisioning.md.
 export type ProvisioningState = 'Satisfied' | 'Missing' | 'Unsupported' | 'Unknown'
 export type ProvisioningStepScope = 'Database' | 'Table'

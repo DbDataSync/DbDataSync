@@ -14,10 +14,13 @@ import type {
   CredentialSource,
   DriverCapabilities,
   DriverSummary,
+  FromCatalogResult,
   KnownDriverSummary,
   KnownLibrarySummary,
+  LibraryManifest,
   LibrarySearchResponse,
   LibrarySummary,
+  RestartRequiredStatus,
   BulkCreateRequest,
   BulkCreateResult,
   MappingLag,
@@ -326,6 +329,12 @@ export const api = {
           method: 'POST', body: JSON.stringify({ thumbprint, allowInvalid }),
         }),
     },
+    /** Whether this process has a config value, library, or driver change on disk it hasn't picked up
+     * yet (phase 120) — a server-side flag, not just this tab's own session state, so a different
+     * admin's tab (or this one after a reload) still learns about a change another request made. */
+    restartRequired: {
+      get: () => request<RestartRequiredStatus>('/api/admin/restart-required'),
+    },
   },
   users: {
     list: () => request<UserSummary[]>('/api/users'),
@@ -348,6 +357,13 @@ export const api = {
      * `status: "unavailable"` body (a 200 the call still resolved with), both meaning "fall back to
      * manual entry". */
     search: (q: string) => request<LibrarySearchResponse>(`/api/libraries/search?q=${encodeURIComponent(q)}`),
+    /** Installs synchronously — the request holds until `dotnet publish` finishes restoring the
+     * package (phase 120). `factoryType` is required only when `packageId` isn't a curated one. */
+    create: (body: { packageId: string; version: string; factoryType?: string; source?: string }) =>
+      request<LibraryManifest>('/api/libraries', { method: 'POST', body: JSON.stringify(body) }),
+    /** Refused (409) while a driver still names this library, unless `force`. */
+    remove: (id: string, force?: boolean) =>
+      request<void>(`/api/libraries/${encodeURIComponent(id)}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
   },
   drivers: {
     /** Every registered driver — the three built-ins plus any `driver.yaml` descriptor an operator has
@@ -361,6 +377,12 @@ export const api = {
         `/api/drivers/${encodeURIComponent(driverType)}/connection-parameters`,
         { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(values) },
       ),
+    /** The one-click "add" from a bundled `KnownDrivers` catalog entry (phase 120) — installs its
+     * bound library (reusing it if already installed) and writes the descriptor. */
+    installFromCatalog: (knownDriverId: string, version: string) =>
+      request<FromCatalogResult>('/api/drivers/from-catalog', {
+        method: 'POST', body: JSON.stringify({ knownDriverId, version }),
+      }),
   },
   preview: {
     get: (replicationName: string, mappingName: string) =>

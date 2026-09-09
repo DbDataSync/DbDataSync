@@ -6,7 +6,7 @@ import { EditableValue } from '../components/EditableValue'
 import { RestartRequiredBanner } from '../components/RestartRequiredBanner'
 import { CheckIcon, HelpIcon } from '../components/icons'
 import { useIsAdmin } from '../components/useIsAdmin'
-import { useAdminConfig, useSetAdminConfig, useSetAdminConfigSecret } from '../api/hooks'
+import { useAdminConfig, useRestartRequired, useSetAdminConfig, useSetAdminConfigSecret } from '../api/hooks'
 import type { AdminConfigEntry } from '../api/types'
 
 const COLUMNS = '1.3fr 1.6fr 1.3fr 1.3fr'
@@ -46,7 +46,11 @@ export function AdminConfigPage() {
   const { data: entries, isLoading, error } = useAdminConfig()
   const setValue = useSetAdminConfig()
   const setSecret = useSetAdminConfigSecret()
+  // The server flag (below) is what actually persists across a reload or a different admin's tab —
+  // this local flag only saves waiting on that query's own invalidate-triggered refetch to show the
+  // banner the instant *this* tab's own save finishes.
   const [restartNeeded, setRestartNeeded] = useState(false)
+  const { data: restartRequired } = useRestartRequired()
   const [mutationError, setMutationError] = useState<unknown>(null)
 
   // The API enforces this for real (every endpoint here is Policies.Admin) — this is only about not
@@ -92,7 +96,7 @@ export function AdminConfigPage() {
           </span>
         </div>
 
-        <RestartRequiredBanner show={restartNeeded} />
+        <RestartRequiredBanner show={restartNeeded || !!restartRequired?.required} />
 
         <ErrorBanner error={error ?? mutationError} />
 

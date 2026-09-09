@@ -3,8 +3,12 @@ using DbDataSync.Api.Configuration;
 using DbDataSync.Api.Services;
 using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Descriptor;
+using DbDataSync.Drivers.Generic;
+using DbDataSync.Libraries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace DbDataSync.Api.Controllers;
 
@@ -13,14 +17,16 @@ namespace DbDataSync.Api.Controllers;
 /// picker reads from instead of a hard-coded list (phase 109d), and — from phase 118 on — what the
 /// admin Drivers screen renders.
 /// <para>
-/// <c>[Authorize(Policies.Viewer)]</c>, unchanged from before this phase — the connection editor's
-/// picker is reachable by a Viewer (golden-path test 31 relies on this), so this endpoint stays at
-/// that bar even though the new Libraries/known-* endpoints (118) sit at <c>Admin</c>.
+/// <c>[Authorize(Policies.Viewer)]</c> on <see cref="List"/>, unchanged from before phase 118 — the
+/// connection editor's picker is reachable by a Viewer (golden-path test 31 relies on this). The
+/// mutating action phase 120 adds sits at <c>Admin</c>, like every Libraries endpoint.
 /// </para>
 /// </summary>
 [ApiController]
 [Route("api/drivers")]
-public sealed class DriversController(DriverRegistry driverRegistry, ApiOptions apiOptions) : ControllerBase
+public sealed class DriversController(
+    DriverRegistry driverRegistry, LibraryRegistry libraryRegistry, ApiOptions apiOptions,
+    RestartRequiredState restartRequired, ILogger<DriversController> logger) : ControllerBase
 {
     private static readonly HashSet<string> BuiltIn = [DriverIds.MsSql, DriverIds.Postgres, DriverIds.DuckDb];
 
@@ -48,6 +54,71 @@ public sealed class DriversController(DriverRegistry driverRegistry, ApiOptions 
             .OrderBy(d => d.Id, StringComparer.Ordinal)
             .ToList());
     }
+
+    /// <summary>
+    /// The one-click "add" from a <see cref="KnownDrivers"/> catalog entry (phase 120): installs the
+    /// entry's bound library at <paramref name="body"/>'s version (reusing it if already installed,
+    /// same as <c>config driver install</c>'s CLI behaviour), then writes the bundled descriptor with
+    /// its id/displayName/library filled in. Refuses (409) if a driver with this id already exists,
+    /// rather than re-pointing it.
+    /// </summary>
+    [Authorize(Policies.Admin)]
+    [HttpPost("from-catalog")]
+    public async Task<ActionResult<FromCatalogResult>> InstallFromCatalog([FromBody] InstallFromCatalogRequest body)
+    {
+        var entry = KnownDrivers.TryGetById(body.KnownDriverId);
+        if (entry is null)
+            return BadRequest(new { error = $"Unknown catalog driver id '{body.KnownDriverId}'." });
+        if (string.IsNullOrWhiteSpace(body.Version))
+            return BadRequest(new { error = "version is required." });
+
+        var driverDir = Path.Combine(apiOptions.RepoRoot, "drivers", entry.Id);
+        if (Directory.Exists(driverDir))
+            return Conflict(new { error = $"A driver named '{entry.Id}' already exists." });
+
+        if (!libraryRegistry.Installed.ContainsKey(entry.BoundLibraryId))
+        {
+            var catalogLibrary = KnownLibraries.TryGetById(entry.BoundLibraryId)!;
+            try
+            {
+                await LibraryInstaller.InstallAsync(
+                    apiOptions.RepoRoot, entry.BoundLibraryId,
+                    [new PackageRef(catalogLibrary.PackageId, body.Version)], catalogLibrary.FactoryType);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = InstallErrorFormatting.TailOf(ex.Message) });
+            }
+
+            libraryRegistry.RegisterInstalled(entry.BoundLibraryId);
+        }
+
+        Directory.CreateDirectory(driverDir);
+        var yaml = KnownDrivers.Render(entry, entry.Id, entry.DisplayName, entry.BoundLibraryId);
+        var yamlPath = Path.Combine(driverDir, DriverLoader.DescriptorFileName);
+        await System.IO.File.WriteAllTextAsync(yamlPath, yaml);
+
+        // Registered into the live DriverRegistry immediately, not left for a restart to discover —
+        // the same read-the-descriptor-and-register-it step DriverLoader.LoadDescriptorDrivers does at
+        // startup, just for this one new entry. A failure here is logged and skipped exactly as
+        // DriverLoader's own onError contract does (a bad descriptor doesn't take the request down);
+        // the descriptor is still on disk and will be retried the same way on the next real restart.
+        try
+        {
+            var descriptor = DriverDescriptorReader.Read(yamlPath);
+            var factory = libraryRegistry.GetFactory(descriptor.Library);
+            var spec = DriverDescriptorReader.ToSpec(descriptor, factory);
+            driverRegistry.Register(new GenericDriver(spec));
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException
+            or YamlDotNet.Core.YamlException)
+        {
+            logger.LogError(ex, "Failed to load the driver descriptor just written to '{Path}'", yamlPath);
+        }
+
+        restartRequired.Touch();
+        return Ok(new FromCatalogResult(entry.Id, entry.BoundLibraryId));
+    }
 }
 
 /// <param name="Source">"builtin" for the three compiled-in drivers; "descriptor" for one loaded from
@@ -65,3 +136,7 @@ public sealed record DriverSummary(
 /// <c>GET /api/connections/{name}/capabilities</c>, not this driver-level summary.</summary>
 public sealed record DriverCapabilitySummary(
     IReadOnlyList<string> Readers, IReadOnlyList<string> Staging, IReadOnlyList<string> Writers);
+
+public sealed record InstallFromCatalogRequest(string KnownDriverId, string Version);
+
+public sealed record FromCatalogResult(string Id, string Library);
