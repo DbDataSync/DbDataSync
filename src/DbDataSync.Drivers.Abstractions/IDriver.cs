@@ -20,6 +20,17 @@ public interface IDriver
     string DisplayName => DriverType;
 
     /// <summary>
+    /// Which version of this interface's contract a driver was built against. Every existing built-in
+    /// (and every descriptor-defined <c>GenericDriver</c>, 109d) is version 1 by this default — the
+    /// default exists so none of them needed a change the day this was added. A compiled plugin loaded
+    /// from a package (phase 109e) is the one thing that ever states a different value: the loader
+    /// refuses one outside <c>[MinSupportedContractVersion, CurrentContractVersion]</c> with a message
+    /// naming which DbDataSync version to target, rather than letting a stale plugin fail cryptically
+    /// the first time it is actually used.
+    /// </summary>
+    int ContractVersion => 1;
+
+    /// <summary>
     /// Everything this driver's connections take — addressing, authentication, database, and the
     /// free-form properties bag — with each parameter's visibility already decided from
     /// <paramref name="values"/>.

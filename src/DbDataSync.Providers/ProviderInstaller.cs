@@ -27,9 +27,24 @@ public static class ProviderInstaller
         string? nugetSource = null, CancellationToken cancellationToken = default)
     {
         var providerDir = ProviderPaths.ProviderDir(repoRoot, id);
-        var libDir = ProviderPaths.LibDir(providerDir);
-        Directory.CreateDirectory(providerDir);
+        await RestorePackagesAsync(ProviderPaths.LibDir(providerDir), packages, nugetSource, cancellationToken);
 
+        var manifest = new ProviderManifest(id, factoryType, packages);
+        manifest.Write(ProviderPaths.ManifestPath(providerDir));
+        return manifest;
+    }
+
+    /// <summary>
+    /// The restore-then-copy half of <see cref="InstallAsync"/>, without a manifest — for a caller
+    /// that writes a different manifest shape into the same directory layout. A compiled driver plugin
+    /// (phase 109e) is exactly this: its package restores into <c>&lt;repo&gt;/drivers/&lt;id&gt;/lib/</c>
+    /// rather than <c>providers/&lt;id&gt;/lib/</c>, and its manifest is a <c>driver.json</c>, not a
+    /// <c>provider.json</c> — but the restore mechanics (publish, flatten, replace) are identical.
+    /// </summary>
+    public static async Task RestorePackagesAsync(
+        string targetLibDir, IReadOnlyList<ProviderPackageRef> packages, string? nugetSource = null,
+        CancellationToken cancellationToken = default)
+    {
         var tempDir = Path.Combine(Path.GetTempPath(), $"dbdatasync-provider-{Guid.NewGuid():N}");
         var outDir = Path.Combine(tempDir, "out");
         Directory.CreateDirectory(tempDir);
@@ -39,14 +54,10 @@ public static class ProviderInstaller
 
             // A fresh lib/ each install — a version downgrade or a dropped transitive dependency must
             // not leave a stale DLL from the previous version behind for the loader to pick up instead.
-            if (Directory.Exists(libDir))
-                Directory.Delete(libDir, recursive: true);
-            Directory.CreateDirectory(libDir);
-            CopyAll(outDir, libDir);
-
-            var manifest = new ProviderManifest(id, factoryType, packages);
-            manifest.Write(ProviderPaths.ManifestPath(providerDir));
-            return manifest;
+            if (Directory.Exists(targetLibDir))
+                Directory.Delete(targetLibDir, recursive: true);
+            Directory.CreateDirectory(targetLibDir);
+            CopyAll(outDir, targetLibDir);
         }
         finally
         {
@@ -120,10 +131,14 @@ public static class ProviderInstaller
 
         using var process = new Process { StartInfo = startInfo };
         process.Start();
-        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+        // Both streams awaited concurrently, not one after the other: a large enough dependency
+        // closure can write enough to stderr (warnings) to fill the OS pipe buffer while this is still
+        // reading stdout to completion, which deadlocks the child against the parent.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await Task.WhenAll(stdoutTask, stderrTask);
         await process.WaitForExitAsync(cancellationToken);
-        return (process.ExitCode, stdout + stderr);
+        return (process.ExitCode, stdoutTask.Result + stderrTask.Result);
     }
 
     private static void CopyAll(string sourceDir, string destDir)

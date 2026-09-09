@@ -33,13 +33,74 @@ public static class DriverCommand
 
     /// <summary>
     /// <c>driver install &lt;id&gt; --provider &lt;packageId&gt; --version &lt;v&gt;
+    /// [--factory-type type] [--from mysql] [--display-name name]</c> for a YAML descriptor (109d), or
+    /// <c>driver install &lt;id&gt; --kind compiled --package &lt;packageId&gt; --version &lt;v&gt;
+    /// --assembly &lt;name.dll&gt; --driver-type &lt;FQTypeName&gt; [--source feed]</c> for a compiled
+    /// plugin (109e) — restores the package into this driver's own <c>lib/</c> (not
+    /// <c>providers/&lt;id&gt;/</c>: a compiled driver's package is private to it, not a shared
+    /// provider another driver or the state store might also resolve) and writes a <c>driver.json</c>
+    /// naming the assembly and the <see cref="Abstractions.IDriver"/> type to load from it.
+    /// </summary>
+    private static async Task<int> InstallAsync(string repoRoot, string[] args) =>
+        string.Equals(CliOptions.Read(args, "--kind"), CompiledDriverManifest.CompiledKind, StringComparison.OrdinalIgnoreCase)
+            ? await InstallCompiledAsync(repoRoot, args)
+            : await InstallDescriptorAsync(repoRoot, args);
+
+    private static async Task<int> InstallCompiledAsync(string repoRoot, string[] args)
+    {
+        var ids = StripFlagValues(args, "--kind", "--package", "--version", "--assembly", "--driver-type", "--source", "--repo")
+            .Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
+        var packageId = CliOptions.Read(args, "--package");
+        var version = CliOptions.Read(args, "--version");
+        var assembly = CliOptions.Read(args, "--assembly");
+        var driverType = CliOptions.Read(args, "--driver-type");
+        var source = CliOptions.Read(args, "--source");
+
+        if (ids.Count != 1 || packageId is null || version is null || assembly is null || driverType is null)
+        {
+            Console.Error.WriteLine(
+                "Usage: dbdatasync driver install <id> --kind compiled --package <packageId> --version <v> " +
+                "--assembly <name.dll> --driver-type <FQTypeName> [--source feed]");
+            return 1;
+        }
+
+        var id = ids[0];
+        var driverDir = Path.Combine(repoRoot, "drivers", id);
+        var manifestPath = Path.Combine(driverDir, CompiledDriverManifest.FileName);
+        if (File.Exists(manifestPath))
+        {
+            Console.Error.WriteLine($"'{manifestPath}' already exists — `driver uninstall {id}` first to reinstall.");
+            return 1;
+        }
+
+        Directory.CreateDirectory(driverDir);
+        var package = new ProviderPackageRef(packageId, version);
+        try
+        {
+            await ProviderInstaller.RestorePackagesAsync(Path.Combine(driverDir, "lib"), [package], source);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+
+        new CompiledDriverManifest(id, CompiledDriverManifest.CompiledKind, assembly, driverType, [package])
+            .Write(manifestPath);
+
+        Console.WriteLine($"Installed compiled driver '{id}' ({packageId} {version}) and wrote '{manifestPath}'.");
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>driver install &lt;id&gt; --provider &lt;packageId&gt; --version &lt;v&gt;
     /// [--factory-type type] [--from mysql] [--display-name name]</c>. Restores the provider exactly
     /// as <c>provider install</c> does, then writes a <c>driver.yaml</c> skeleton — filled in from a
     /// known starting template when <c>--from</c> names one, otherwise a minimal shell the operator
     /// fills in themselves (an empty <c>typeMap</c> maps every native type to <c>Unmappable</c>, which
     /// provisioning reports rather than guesses at, so an incomplete descriptor fails loud, not silently).
     /// </summary>
-    private static async Task<int> InstallAsync(string repoRoot, string[] args)
+    private static async Task<int> InstallDescriptorAsync(string repoRoot, string[] args)
     {
         var ids = StripFlagValues(args, "--provider", "--version", "--factory-type", "--from", "--display-name", "--source", "--repo")
             .Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
@@ -117,18 +178,33 @@ public static class DriverCommand
         foreach (var dir in Directory.EnumerateDirectories(driversRoot).OrderBy(d => d, StringComparer.Ordinal))
         {
             var yamlPath = Path.Combine(dir, DriverLoader.DescriptorFileName);
-            if (!File.Exists(yamlPath))
-                continue;
+            var jsonPath = Path.Combine(dir, CompiledDriverManifest.FileName);
 
-            any = true;
-            try
+            if (File.Exists(yamlPath))
             {
-                var descriptor = DriverDescriptorReader.Read(yamlPath);
-                Console.WriteLine($"{descriptor.Id}  \"{descriptor.DisplayName}\"  provider: {descriptor.Provider.Packages[0].Id}");
+                any = true;
+                try
+                {
+                    var descriptor = DriverDescriptorReader.Read(yamlPath);
+                    Console.WriteLine($"{descriptor.Id}  \"{descriptor.DisplayName}\"  [descriptor]  provider: {descriptor.Provider.Packages[0].Id}");
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or YamlDotNet.Core.YamlException)
+                {
+                    Console.WriteLine($"{Path.GetFileName(dir)}  [FAILED TO PARSE: {ex.Message}]");
+                }
             }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException or YamlDotNet.Core.YamlException)
+            else if (File.Exists(jsonPath))
             {
-                Console.WriteLine($"{Path.GetFileName(dir)}  [FAILED TO PARSE: {ex.Message}]");
+                any = true;
+                try
+                {
+                    var manifest = CompiledDriverManifest.Read(jsonPath);
+                    Console.WriteLine($"{manifest.Id}  [compiled]  assembly: {manifest.Assembly}  type: {manifest.DriverType}");
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or System.Text.Json.JsonException)
+                {
+                    Console.WriteLine($"{Path.GetFileName(dir)}  [FAILED TO PARSE: {ex.Message}]");
+                }
             }
         }
 
@@ -186,6 +262,7 @@ public static class DriverCommand
         Console.Error.WriteLine("""
             Usage:
               dbdatasync driver install <id> --provider <packageId> --version <v> [--factory-type type] [--from mysql] [--display-name name]
+              dbdatasync driver install <id> --kind compiled --package <packageId> --version <v> --assembly <name.dll> --driver-type <FQTypeName> [--source feed]
               dbdatasync driver list
               dbdatasync driver uninstall <id>
             """);

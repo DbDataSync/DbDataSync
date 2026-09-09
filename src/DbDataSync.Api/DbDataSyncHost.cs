@@ -168,8 +168,13 @@ public static class DbDataSyncHost
             // what actually stands one up and puts it beside the three built-ins.
             var providerRegistry = sp.GetRequiredService<ProviderRegistry>();
             var repoRoot = sp.GetRequiredService<ApiOptions>().RepoRoot;
-            DriverLoader.LoadDescriptorDrivers(repoRoot, providerRegistry, registry,
-                (message, ex) => sp.GetRequiredService<ILogger<DriverRegistry>>().LogError(ex, "{Message}", message));
+            var driverErrorLogger = (string message, Exception ex) =>
+                sp.GetRequiredService<ILogger<DriverRegistry>>().LogError(ex, "{Message}", message);
+            DriverLoader.LoadDescriptorDrivers(repoRoot, providerRegistry, registry, driverErrorLogger);
+            // Compiled plugins (109e) load after descriptors — neither ordering matters for
+            // correctness (they don't reference each other), but this matches both manifest kinds
+            // being enumerated in the same pass conceptually.
+            DriverLoader.LoadCompiledDrivers(repoRoot, registry, driverErrorLogger);
 
             return registry;
         });

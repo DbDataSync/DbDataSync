@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Deliberately NOT referenced by any other project in this repo, and NOT part of DbDataSync.slnx's
+    build — DbDataSync.Drivers.Loader.Tests publishes it on the fly (dotnet publish, same mechanism
+    ProviderInstaller uses) and loads the result through DriverLoader.LoadCompiledDrivers exactly as an
+    operator's own driver.json would point at it. Referencing it directly from the test project would
+    load it into the test process's own default AssemblyLoadContext before the loader ever got a
+    chance to, which would defeat the isolation this fixture exists to prove.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <ProjectReference Include="..\..\..\src\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -8,6 +8,18 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!--
+      The public, semver-committed contract a compiled driver plugin (phase 109e) references instead
+      of the whole solution. GeneratePackageOnBuild just produces a local .nupkg beside every build —
+      nothing pushes it anywhere; CI decides separately whether and where to publish one. Matches
+      DbDataSync.Cli's own Version convention: 0.1.0 for every local/CI build, overridden by
+      -p:Version=YYYY.MM.DD.HHmm on an actual release.
+    -->
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>DbDataSync.Drivers.Abstractions</PackageId>
+    <Version>0.1.0</Version>
+    <Description>The IDriver contract a compiled DbDataSync driver plugin implements. See architecture/planning/todo/nuget-loaded-drivers.md.</Description>
   </PropertyGroup>
 
 </Project>

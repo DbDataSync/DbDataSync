@@ -42,6 +42,7 @@ driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
 DriverLoader.LoadDescriptorDrivers(options.RepoRoot, providerRegistry, driverRegistry);
+DriverLoader.LoadCompiledDrivers(options.RepoRoot, driverRegistry);
 
 // Phase 39: a runner spawned by the API never opens the state file. It applies its changes over
 // loopback to the process that owns it, and journals to disk if that process goes away mid-run.

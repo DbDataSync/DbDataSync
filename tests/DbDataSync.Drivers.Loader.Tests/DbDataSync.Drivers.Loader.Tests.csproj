@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The loader itself, and DriverRegistry to register into — deliberately NOT a reference to the
+         fixture project (tests/fixtures/DbDataSync.Drivers.LoaderTestFixture), which this project
+         publishes and loads at runtime instead. See that project's own csproj comment. -->
+    <ProjectReference Include="..\..\src\DbDataSync.Drivers.Descriptor\DbDataSync.Drivers.Descriptor.csproj" />
+  </ItemGroup>
+
+</Project>
