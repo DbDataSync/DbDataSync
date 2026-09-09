@@ -3,7 +3,7 @@ using Xunit;
 
 namespace DbDataSync.Providers.Tests;
 
-/// <summary>Drives <c>dbdatasync provider ...</c> exactly as an operator would, through
+/// <summary>Drives <c>dbdatasync config provider ...</c> exactly as an operator would, through
 /// <see cref="ProviderCommand.RunAsync"/> rather than the lower-level <see cref="ProviderInstaller"/>
 /// this exercises indirectly.</summary>
 [Trait("Category", "Integration")]

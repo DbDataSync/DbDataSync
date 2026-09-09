@@ -24,7 +24,7 @@ public sealed class ServeCommandPrepareTests : IDisposable
 
         var path = DbDataSyncConfigFile.PathIn(_root);
         Assert.True(File.Exists(path));
-        Assert.Contains("dbdatasync secret set dbdatasync:config:stateConnectionString", File.ReadAllText(path));
+        Assert.Contains("dbdatasync config secret set dbdatasync:config:stateConnectionString", File.ReadAllText(path));
     }
 
     [Fact]

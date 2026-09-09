@@ -9,7 +9,7 @@ namespace DbDataSync.Cli;
 /// already makes for a connection's own credential, reachable here without going through a
 /// connection's save flow. This is what "easily settable using the CLI tool" means concretely for
 /// phase 79's one standardized ref:
-/// <code>dbdatasync secret set dbdatasync:config:stateConnectionString "Password=..."</code>
+/// <code>dbdatasync config secret set dbdatasync:config:stateConnectionString "Password=..."</code>
 /// </summary>
 public static class SecretCommand
 {
@@ -40,7 +40,7 @@ public static class SecretCommand
     {
         if (args.Length != 3)
         {
-            Console.Error.WriteLine("Usage: dbdatasync secret set <ref> <value>");
+            Console.Error.WriteLine("Usage: dbdatasync config secret set <ref> <value>");
             return 1;
         }
 
@@ -74,7 +74,7 @@ public static class SecretCommand
     {
         if (args.Length != 2)
         {
-            Console.Error.WriteLine("Usage: dbdatasync secret remove <ref>");
+            Console.Error.WriteLine("Usage: dbdatasync config secret remove <ref>");
             return 1;
         }
 
@@ -92,8 +92,8 @@ public static class SecretCommand
     private static void PrintUsage() =>
         Console.Error.WriteLine(
             """
-            Usage: dbdatasync secret set <ref> <value>
-                   dbdatasync secret list [<ref> ...]
-                   dbdatasync secret remove <ref>
+            Usage: dbdatasync config secret set <ref> <value>
+                   dbdatasync config secret list [<ref> ...]
+                   dbdatasync config secret remove <ref>
             """);
 }

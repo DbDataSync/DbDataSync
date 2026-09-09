@@ -3,7 +3,7 @@ using ClrKernel.Core.Secrets;
 namespace DbDataSync.Cli.Tests;
 
 /// <summary>
-/// <c>dbdatasync secret set|list|remove</c> — thin wrappers over <see cref="SecretStore"/>, reachable
+/// <c>dbdatasync config secret set|list|remove</c> — thin wrappers over <see cref="SecretStore"/>, reachable
 /// without going through a connection's own save flow (phase 79). <c>SecretCommand</c> constructs its
 /// own <c>new SecretStore("DbDataSync", true)</c> per call rather than taking one as a parameter, the
 /// same shape every other CLI command in this file uses for its own dependencies — so these tests

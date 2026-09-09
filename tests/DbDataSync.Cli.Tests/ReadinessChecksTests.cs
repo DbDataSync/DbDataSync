@@ -7,15 +7,15 @@ using DbDataSync.Core.Secrets;
 namespace DbDataSync.Cli.Tests;
 
 /// <summary>
-/// <c>dbdatasync doctor</c>'s check list, run against real temp repos rather than mocked contexts —
-/// the same reasoning <c>ServeCommandPrepareTests</c> uses. <see cref="BindingCheck"/> is left out of
-/// every assertion here: none of these tests run a real DbDataSync host, so it always reports "did not
-/// answer" regardless of the rest of the configuration, and asserting around it would only be
-/// asserting that nothing is listening on port 5080.
+/// <c>dbdatasync config check</c>'s check list, run against real temp repos rather than mocked
+/// contexts — the same reasoning <c>ServeCommandPrepareTests</c> uses. <see cref="BindingCheck"/> is
+/// left out of every assertion here: none of these tests run a real DbDataSync host, so it always
+/// reports "did not answer" regardless of the rest of the configuration, and asserting around it
+/// would only be asserting that nothing is listening on port 5080.
 /// </summary>
-public sealed class DoctorCommandTests : IDisposable
+public sealed class ReadinessChecksTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("dbdatasync-doctor-tests-").FullName;
+    private readonly string _root = Directory.CreateTempSubdirectory("dbdatasync-readiness-tests-").FullName;
 
     public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
@@ -24,8 +24,8 @@ public sealed class DoctorCommandTests : IDisposable
     {
         ServeCommand.Prepare(_root);
 
-        var context = DoctorCommand.BuildContext(["--repo", _root]);
-        var results = await DoctorCommand.RunChecksAsync(context);
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
 
         Assert.Equal(CheckStatus.Ok, Find(results, "Repo").Status);
         Assert.Equal(CheckStatus.Ok, Find(results, "State store").Status);
@@ -50,12 +50,12 @@ public sealed class DoctorCommandTests : IDisposable
             },
             CurrentUserForTests.Author);
 
-        var context = DoctorCommand.BuildContext(["--repo", _root]);
-        var results = await DoctorCommand.RunChecksAsync(context);
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
 
         var check = Find(results, "Providers / drivers");
         Assert.Equal(CheckStatus.Fail, check.Status);
-        Assert.Contains("dbdatasync driver install", check.Detail);
+        Assert.Contains("dbdatasync config driver install", check.Detail);
     }
 
     [Fact]
@@ -64,20 +64,23 @@ public sealed class DoctorCommandTests : IDisposable
         ServeCommand.Prepare(_root);
         DbDataSyncConfigFile.SetValue(_root, "DbDataSync:Auth:Passkeys", "RelyingPartyId", "https://example.com");
 
-        var context = DoctorCommand.BuildContext(["--repo", _root]);
-        var results = await DoctorCommand.RunChecksAsync(context);
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
 
         var check = Find(results, "Auth");
         Assert.Equal(CheckStatus.Fail, check.Status);
         Assert.Contains("looks like a URL", check.Detail);
     }
 
+    /// <summary>Drives the real CLI path (<c>dbdatasync config check --json</c>) rather than the
+    /// engine directly, so this one test also proves <see cref="ConfigCommand"/>'s own dispatch and
+    /// exit-code plumbing, not just the check list.</summary>
     [Fact]
     public async Task JsonOutput_IsValidAndNamesEveryCheck()
     {
         ServeCommand.Prepare(_root);
 
-        var (exitCode, output) = RunDoctor(["--repo", _root, "--json"]);
+        var (exitCode, output) = RunConfigCheck(["check", "--repo", _root, "--json"]);
 
         Assert.Equal(1, exitCode); // BindingCheck fails — nothing is listening.
         using var document = JsonDocument.Parse(output);
@@ -93,14 +96,14 @@ public sealed class DoctorCommandTests : IDisposable
     private static CheckResult Find(IReadOnlyList<CheckResult> results, string name) =>
         results.Single(r => r.Name == name);
 
-    private static (int ExitCode, string Output) RunDoctor(string[] args)
+    private static (int ExitCode, string Output) RunConfigCheck(string[] args)
     {
         var originalOut = Console.Out;
         using var output = new StringWriter();
         Console.SetOut(output);
         try
         {
-            var exitCode = DoctorCommand.RunAsync(args).GetAwaiter().GetResult();
+            var exitCode = ConfigCommand.RunAsync(args).GetAwaiter().GetResult();
             return (exitCode, output.ToString());
         }
         finally

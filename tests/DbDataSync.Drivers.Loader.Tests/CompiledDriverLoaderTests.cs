@@ -8,7 +8,7 @@ namespace DbDataSync.Drivers.Loader.Tests;
 
 /// <summary>
 /// Loads a real compiled <see cref="IDriver"/> plugin — <c>tests/fixtures/DbDataSync.Drivers.LoaderTestFixture</c>,
-/// published and installed exactly the way <c>dbdatasync driver install --kind compiled</c> would leave
+/// published and installed exactly the way <c>dbdatasync config driver install --kind compiled</c> would leave
 /// it on disk — through <see cref="DriverLoader.LoadCompiledDrivers"/>, and proves the isolation
 /// property that makes the whole mechanism safe: the plugin's <c>IDriver</c> is the *same* <c>Type</c>
 /// as the host's, not a second incompatible one from a redundant copy of

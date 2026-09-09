@@ -66,14 +66,14 @@ public sealed class SetupCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task NonInteractive_RefusesAndPointsAtDoctor()
+    public async Task NonInteractive_RefusesAndPointsAtConfigCheck()
     {
         var io = new NonInteractivePromptIo();
 
         var exitCode = await SetupCommand.RunAsync(["--repo", _root], io, FailingInstallProvider);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains(io.Written, line => line.Contains("dbdatasync doctor"));
+        Assert.Contains(io.Written, line => line.Contains("dbdatasync config check"));
     }
 
     [Fact]

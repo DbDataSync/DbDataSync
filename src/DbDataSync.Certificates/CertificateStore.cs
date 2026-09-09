@@ -52,7 +52,7 @@ public static class CertificateStore
     }
 
     /// <summary>Every certificate in <c>&lt;location&gt;\My</c> whose Enhanced Key Usage includes
-    /// server authentication — the ones <c>dbdatasync cert list</c> shows, since a certificate without
+    /// server authentication — the ones <c>dbdatasync config cert list</c> shows, since a certificate without
     /// this EKU cannot be bound for TLS regardless of what else is in the store.</summary>
     public static IReadOnlyList<X509Certificate2> ListServerAuthCertificates(StoreLocation location)
     {
@@ -73,7 +73,7 @@ public static class CertificateStore
 
     /// <summary>
     /// The certificate a subject-name lookup finds — how Kestrel itself resolves
-    /// <c>Kestrel:Certificates:Default:Subject</c>, and so how <c>dbdatasync cert status</c> and
+    /// <c>Kestrel:Certificates:Default:Subject</c>, and so how <c>dbdatasync config cert status</c> and
     /// <see cref="CertificateExpiryService"/> find the certificate that is actually bound. When more
     /// than one certificate shares the subject (a renewal that has not yet replaced the old one in
     /// config), the one with the latest <c>NotAfter</c> wins — the same "prefer the newest" rule

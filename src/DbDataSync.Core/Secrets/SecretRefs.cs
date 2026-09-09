@@ -14,7 +14,7 @@ public static class SecretRefs
     /// one. Fixed and non-overridable: unlike <see cref="ForConnection"/>, this is not a name an
     /// operator chooses per connection, it is the one ref phase 79's starter file documents, so there
     /// is exactly one thing to remember and exactly one command that sets it
-    /// (<c>dbdatasync secret set dbdatasync:config:&lt;key&gt; "..."</c>).
+    /// (<c>dbdatasync config secret set dbdatasync:config:&lt;key&gt; "..."</c>).
     /// </summary>
     public static string ForAppSetting(string key) => $"dbdatasync:config:{key}";
 }

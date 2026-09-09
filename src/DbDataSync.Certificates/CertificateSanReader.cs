@@ -12,7 +12,7 @@ namespace DbDataSync.Certificates;
 /// SAN") needs exactly this to assert against.
 /// <para>
 /// **Cross-platform, deliberately.** ASN.1 decoding is not an OS API; the only reason this lives beside
-/// Windows-only code is that every caller of it (<c>dbdatasync cert status</c>/<c>list</c>, the daily
+/// Windows-only code is that every caller of it (<c>dbdatasync config cert status</c>/<c>list</c>, the daily
 /// expiry check) happens to be working with a certificate that came from the Windows store.
 /// </para>
 /// </summary>

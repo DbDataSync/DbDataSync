@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace DbDataSync.Cli.Tests;
 
 /// <summary>
-/// These tests exercise <c>dbdatasync secret set|list|remove</c> (and <c>invite</c>, which reads a
+/// These tests exercise <c>dbdatasync config secret set|list|remove</c> (and <c>invite</c>, which reads a
 /// secret back) through the real <c>SecretCommand</c>, which builds
 /// <c>new SecretStore("DbDataSync", true)</c>. On a machine with no OS credential store — every CI
 /// runner, and this repo's own dev container — <c>SecretStore.Store</c> writes to the chain's

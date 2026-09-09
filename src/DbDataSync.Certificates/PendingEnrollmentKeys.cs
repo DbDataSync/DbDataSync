@@ -6,7 +6,7 @@ namespace DbDataSync.Certificates;
 /// <summary>
 /// Named, persisted, non-exportable CNG keys for a CSR that might come back
 /// <c>CR_DISP_UNDER_SUBMISSION</c> — the piece the phase 82 doc's own text does not spell out, and
-/// which <c>dbdatasync cert retrieve</c> cannot work at all without.
+/// which <c>dbdatasync config cert retrieve</c> cannot work at all without.
 /// <para>
 /// **Why a named key, and not the ephemeral one <see cref="CertificateBuilder"/> would otherwise
 /// create.** An AD CS submission's CSR carries only the *public* key; the CA never hands the private

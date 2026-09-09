@@ -7,7 +7,7 @@ namespace DbDataSync.Api.Configuration;
 /// reads from.
 /// <para>
 /// <c>CaConfig</c> and <c>Template</c> (the AD CS enrollment settings the phase 82 doc names) are
-/// deliberately **not** here — they are read by <c>dbdatasync cert enroll</c>/<c>templates</c>/<c>renew</c>
+/// deliberately **not** here — they are read by <c>dbdatasync config cert enroll</c>/<c>templates</c>/<c>renew</c>
 /// directly off <c>dbdatasync.config.yaml</c> (<see cref="DbDataSync.Core.Config.DbDataSyncConfigFile.Read"/>),
 /// a CLI-process concern the same way <c>DbDataSync:Url</c> is (see <c>ServeCommand</c>) — the running API
 /// process never needs to know which CA a certificate came from, only which one is bound.

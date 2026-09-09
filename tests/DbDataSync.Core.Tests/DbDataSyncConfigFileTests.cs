@@ -134,7 +134,7 @@ public sealed class DbDataSyncConfigFileTests : IDisposable
         DbDataSyncConfigFile.WriteStarter(_repoRoot);
 
         var text = File.ReadAllText(Path_);
-        Assert.Contains("dbdatasync secret set dbdatasync:config:stateConnectionString", text);
+        Assert.Contains("dbdatasync config secret set dbdatasync:config:stateConnectionString", text);
         // Every key is commented out — this is a reference, not a default configuration silently in effect.
         Assert.Empty(DbDataSyncConfigFile.Read(_repoRoot));
     }

@@ -8,7 +8,7 @@ using DbDataSync.Core.Git;
 namespace DbDataSync.Cli;
 
 /// <summary>
-/// <c>dbdatasync cert …</c> — issuance, installation, binding, and renewal of the certificate Kestrel
+/// <c>dbdatasync config cert …</c> — issuance, installation, binding, and renewal of the certificate Kestrel
 /// serves TLS with, entirely from the CLI. See the phase 82 doc's "Why the CLI, and why it must be
 /// self-sufficient": the admin screen is served over the connection the certificate secures, so
 /// bootstrapping it cannot depend on a browser reaching it first, the same reasoning phase 51 applied to
@@ -59,8 +59,8 @@ public static class CertCommand
         if (bound.Subject is null)
         {
             Console.WriteLine(
-                "No certificate is bound. Run 'dbdatasync cert new-self-signed' or 'dbdatasync cert enroll', " +
-                "then 'dbdatasync cert bind'.");
+                "No certificate is bound. Run 'dbdatasync config cert new-self-signed' or 'dbdatasync config cert enroll', " +
+                "then 'dbdatasync config cert bind'.");
             return 0;
         }
 
@@ -238,7 +238,7 @@ public static class CertCommand
         var requestId = CliOptions.Read(args, "--request-id");
         if (requestId is null)
         {
-            Console.Error.WriteLine("Usage: dbdatasync cert retrieve --request-id <id>");
+            Console.Error.WriteLine("Usage: dbdatasync config cert retrieve --request-id <id>");
             return 1;
         }
 
@@ -277,7 +277,7 @@ public static class CertCommand
         if (result.Reason != TemplateListReason.Available)
         {
             Console.WriteLine($"Could not list templates ({result.Reason}): {result.Detail}");
-            Console.WriteLine("You can still pass --template with a known template name to 'dbdatasync cert enroll'.");
+            Console.WriteLine("You can still pass --template with a known template name to 'dbdatasync config cert enroll'.");
             return 0;
         }
 
@@ -300,7 +300,7 @@ public static class CertCommand
         if (thumbprint is null)
         {
             Console.Error.WriteLine(
-                "Usage: dbdatasync cert bind --thumbprint <thumbprint> [--location LocalMachine|CurrentUser] " +
+                "Usage: dbdatasync config cert bind --thumbprint <thumbprint> [--location LocalMachine|CurrentUser] " +
                 "[--allow-invalid|--no-allow-invalid]");
             return 1;
         }
@@ -465,7 +465,7 @@ public static class CertCommand
         Console.WriteLine($"  DNS names   {string.Join(", ", info.DnsNames)}");
         Console.WriteLine($"  not after   {info.NotAfter:u}");
         Console.WriteLine();
-        Console.WriteLine($"  Run 'dbdatasync cert bind --thumbprint {info.Thumbprint}' to put it into service.");
+        Console.WriteLine($"  Run 'dbdatasync config cert bind --thumbprint {info.Thumbprint}' to put it into service.");
     }
 
     private static IReadOnlyList<string>? ReadDnsNames(string[] args)
@@ -511,13 +511,13 @@ public static class CertCommand
     private static void PrintUsage() =>
         Console.Error.WriteLine(
             """
-            Usage: dbdatasync cert status [--account <account>]
-                   dbdatasync cert list [--location LocalMachine|CurrentUser]
-                   dbdatasync cert new-self-signed --dns <names> [--days <n>] [--account <account>]
-                   dbdatasync cert enroll --dns <names> [--ca <config>] [--template <name>] [--account <account>]
-                   dbdatasync cert renew [--ca <config>] [--template <name>] [--account <account>] [--days <n>]
-                   dbdatasync cert retrieve --request-id <id> [--account <account>]
-                   dbdatasync cert templates [--ca <config>]
-                   dbdatasync cert bind --thumbprint <thumbprint> [--location LocalMachine|CurrentUser] [--allow-invalid|--no-allow-invalid]
+            Usage: dbdatasync config cert status [--account <account>]
+                   dbdatasync config cert list [--location LocalMachine|CurrentUser]
+                   dbdatasync config cert new-self-signed --dns <names> [--days <n>] [--account <account>]
+                   dbdatasync config cert enroll --dns <names> [--ca <config>] [--template <name>] [--account <account>]
+                   dbdatasync config cert renew [--ca <config>] [--template <name>] [--account <account>] [--days <n>]
+                   dbdatasync config cert retrieve --request-id <id> [--account <account>]
+                   dbdatasync config cert templates [--ca <config>]
+                   dbdatasync config cert bind --thumbprint <thumbprint> [--location LocalMachine|CurrentUser] [--allow-invalid|--no-allow-invalid]
             """);
 }

@@ -6,7 +6,7 @@ namespace DbDataSync.Api.Tests;
 /// <summary>
 /// A <see cref="TestApiFactory"/> whose repo root already has <c>MySqlConnector</c> restored and a
 /// <c>mysql.generic</c> descriptor written, before the host ever starts — exactly the state an
-/// operator would leave a repo in after <c>dbdatasync driver install mysql.generic --provider
+/// operator would leave a repo in after <c>dbdatasync config driver install mysql.generic --provider
 /// MySqlConnector --version 2.4.0 --from mysql</c>. What <see cref="DescriptorDriverTests"/> proves is
 /// that the API (and, per the "two composition roots" note, the TaskRunner it spawns) picks this up
 /// with no rebuild.

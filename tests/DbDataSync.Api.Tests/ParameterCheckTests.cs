@@ -79,7 +79,7 @@ public sealed class ParameterCheckTests(TestApiFactory factory) : IClassFixture<
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("oracle", body);
-        Assert.Contains("dbdatasync driver install", body);
+        Assert.Contains("dbdatasync config driver install", body);
     }
 
     [Fact]

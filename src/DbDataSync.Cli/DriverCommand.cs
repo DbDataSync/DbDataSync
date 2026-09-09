@@ -4,7 +4,7 @@ using DbDataSync.Providers;
 namespace DbDataSync.Cli;
 
 /// <summary>
-/// <c>dbdatasync driver install|list|uninstall</c> — seeds a <c>driver.yaml</c> descriptor
+/// <c>dbdatasync config driver install|list|uninstall</c> — seeds a <c>driver.yaml</c> descriptor
 /// (phase 109d) for a new SQL engine, restoring its provider along the way via
 /// <see cref="ProviderInstaller"/>. See <c>architecture/planning/todo/nuget-loaded-drivers.md</c>
 /// §*The descriptor*.
@@ -59,7 +59,7 @@ public static class DriverCommand
         if (ids.Count != 1 || packageId is null || version is null || assembly is null || driverType is null)
         {
             Console.Error.WriteLine(
-                "Usage: dbdatasync driver install <id> --kind compiled --package <packageId> --version <v> " +
+                "Usage: dbdatasync config driver install <id> --kind compiled --package <packageId> --version <v> " +
                 "--assembly <name.dll> --driver-type <FQTypeName> [--source feed]");
             return 1;
         }
@@ -108,7 +108,7 @@ public static class DriverCommand
         if (ids.Count != 1)
         {
             Console.Error.WriteLine(
-                "Usage: dbdatasync driver install <id> --provider <packageId> --version <v> " +
+                "Usage: dbdatasync config driver install <id> --provider <packageId> --version <v> " +
                 "[--factory-type type] [--from mysql] [--display-name name]");
             return 1;
         }
@@ -217,7 +217,7 @@ public static class DriverCommand
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("Usage: dbdatasync driver uninstall <id>");
+            Console.Error.WriteLine("Usage: dbdatasync config driver uninstall <id>");
             return 1;
         }
 
@@ -231,7 +231,7 @@ public static class DriverCommand
         Directory.Delete(driverDir, recursive: true);
         Console.WriteLine(
             $"Uninstalled driver '{args[0]}'. Its provider is untouched — " +
-            "`dbdatasync provider uninstall` separately if nothing else needs it.");
+            "`dbdatasync config provider uninstall` separately if nothing else needs it.");
         return 0;
     }
 
@@ -261,10 +261,10 @@ public static class DriverCommand
     {
         Console.Error.WriteLine("""
             Usage:
-              dbdatasync driver install <id> --provider <packageId> --version <v> [--factory-type type] [--from mysql] [--display-name name]
-              dbdatasync driver install <id> --kind compiled --package <packageId> --version <v> --assembly <name.dll> --driver-type <FQTypeName> [--source feed]
-              dbdatasync driver list
-              dbdatasync driver uninstall <id>
+              dbdatasync config driver install <id> --provider <packageId> --version <v> [--factory-type type] [--from mysql] [--display-name name]
+              dbdatasync config driver install <id> --kind compiled --package <packageId> --version <v> --assembly <name.dll> --driver-type <FQTypeName> [--source feed]
+              dbdatasync config driver list
+              dbdatasync config driver uninstall <id>
             """);
     }
 }

@@ -22,7 +22,7 @@ public enum TemplateListReason
 /// name="Templates"/> is a real (possibly still empty — a CA can legitimately have zero templates
 /// published) answer from the directory.</param>
 /// <param name="Detail">A human-readable reason, always present when <paramref name="Reason"/> is not
-/// <see cref="TemplateListReason.Available"/> — what <c>dbdatasync cert templates</c> prints instead of a
+/// <see cref="TemplateListReason.Available"/> — what <c>dbdatasync config cert templates</c> prints instead of a
 /// list.</param>
 public sealed record TemplateListResult(
     IReadOnlyList<string> Templates, TemplateListReason Reason, string? Detail)

@@ -10,7 +10,7 @@ namespace DbDataSync.Cli.Tests;
 /// anything but SQLite — so an admin locked out of an MsSql-backed deployment had no way to mint a
 /// recovery invite. This proves <c>dbdatasync invite</c> now works end to end against a
 /// <c>StateEngine: MsSql</c>-configured repo, secret included, and that the secret it uses is the one
-/// <c>dbdatasync secret set</c> — the same command an admin would actually run — just wrote.
+/// <c>dbdatasync config secret set</c> — the same command an admin would actually run — just wrote.
 /// <para>
 /// Needs a real SQL Server reachable at <c>DBDATASYNC_TEST_MSSQL_SERVER</c> (default: the same local
 /// Docker container every other MsSql-backed test in this repo uses) — the constructor issues

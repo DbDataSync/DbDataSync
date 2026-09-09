@@ -92,7 +92,7 @@ public sealed class CertificateExpiryService(
         var section = configuration.GetSection(CertificateBinding.Section);
         var subject = section["Subject"];
         if (string.IsNullOrWhiteSpace(subject))
-            return; // Nothing bound yet — dbdatasync cert bind hasn't run, or config sets no certificate.
+            return; // Nothing bound yet — dbdatasync config cert bind hasn't run, or config sets no certificate.
 
         var location = Enum.TryParse<StoreLocation>(section["Location"], ignoreCase: true, out var parsedLocation)
             ? parsedLocation
@@ -125,7 +125,7 @@ public sealed class CertificateExpiryService(
                     NotificationKinds.CertificateExpiring,
                     $"The bound TLS certificate ('{certificate.Subject}', thumbprint {certificate.Thumbprint}) " +
                     $"expires in {daysRemaining} day(s), on {certificate.NotAfter:yyyy-MM-dd}. Renew it with " +
-                    "'dbdatasync cert renew'.");
+                    "'dbdatasync config cert renew'.");
                 _lastRaisedExpiringUtc = today;
                 break;
 
@@ -134,7 +134,7 @@ public sealed class CertificateExpiryService(
                     NotificationKinds.CertificateExpired,
                     $"The bound TLS certificate ('{certificate.Subject}', thumbprint {certificate.Thumbprint}) " +
                     $"expired on {certificate.NotAfter:yyyy-MM-dd}. Every browser will now refuse it. Renew it " +
-                    "with 'dbdatasync cert renew'.");
+                    "with 'dbdatasync config cert renew'.");
                 _lastRaisedExpiredUtc = today;
                 break;
 
@@ -168,7 +168,7 @@ public sealed class CertificateExpiryService(
             logger.LogWarning(
                 "The service account '{Account}' cannot read the private key of the bound certificate " +
                 "(subject '{Subject}', thumbprint {Thumbprint}). The next service restart will fail its TLS " +
-                "handshake. Run 'dbdatasync cert status' for details, or re-grant access.",
+                "handshake. Run 'dbdatasync config cert status' for details, or re-grant access.",
                 account, subject, certificate.Thumbprint);
         }
     }

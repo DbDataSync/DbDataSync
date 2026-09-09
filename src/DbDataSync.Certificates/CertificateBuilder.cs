@@ -53,7 +53,7 @@ public static class CertificateBuilder
     /// <para>
     /// **Takes the key rather than creating one**, unlike <see cref="CreateSelfSigned"/> — a CSR that
     /// might come back <c>CR_DISP_UNDER_SUBMISSION</c> (pending) needs its key to still exist, unchanged,
-    /// whenever <c>dbdatasync cert retrieve</c> eventually collects it, which could be minutes or days and
+    /// whenever <c>dbdatasync config cert retrieve</c> eventually collects it, which could be minutes or days and
     /// a different process invocation later. An ephemeral in-memory key (what this method used before)
     /// cannot survive that; <c>CertCommand.Enroll</c> is the real caller and passes a named, persisted
     /// CNG key (see <c>PendingEnrollmentKeys</c>) for exactly that reason. Tests pass an ordinary

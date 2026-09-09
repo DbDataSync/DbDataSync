@@ -13,7 +13,7 @@ namespace DbDataSync.Drivers.Descriptor;
 /// for a discriminated union — this is the same shape of problem, one level simpler since there is no
 /// discriminator to read, just two literal node kinds.
 /// <para>Write-only in the other direction is not needed: <c>driver.yaml</c> is authored by
-/// <c>dbdatasync driver install</c> writing a skeleton (109d's own scope, hand-edited after) or by an
+/// <c>dbdatasync config driver install</c> writing a skeleton (109d's own scope, hand-edited after) or by an
 /// operator directly — this repo never re-serialises a descriptor it read.</para>
 /// </summary>
 public sealed class TypeMapEntryYamlConverter : IYamlTypeConverter

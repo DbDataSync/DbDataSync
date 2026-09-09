@@ -31,7 +31,7 @@ public sealed record EnrollmentResult(
 /// that actually distinguishes issued, denied, and — the case that matters most — pending.
 /// <para>
 /// **Pending is a real state, not an error.** A template requiring certificate-manager approval returns
-/// <c>CR_DISP_UNDER_SUBMISSION</c> with a request id; that id is what <c>dbdatasync cert retrieve</c>
+/// <c>CR_DISP_UNDER_SUBMISSION</c> with a request id; that id is what <c>dbdatasync config cert retrieve</c>
 /// later feeds to <see cref="Retrieve"/>. Treating pending as a failure would make this feature unusable
 /// in exactly the environments strict enough to require approval — the ones most likely to want an
 /// enterprise CA in the first place.
@@ -72,7 +72,7 @@ public static class AdcsEnrollment
     }
 
     /// <summary>Collects a request that came back <see cref="EnrollmentOutcome.Pending"/> earlier —
-    /// <c>dbdatasync cert retrieve --request-id</c>.</summary>
+    /// <c>dbdatasync config cert retrieve --request-id</c>.</summary>
     public static EnrollmentResult Retrieve(string caConfig, string requestId)
     {
         if (!int.TryParse(requestId, out var id))
@@ -100,7 +100,7 @@ public static class AdcsEnrollment
                 return new EnrollmentResult(
                     EnrollmentOutcome.Pending, pendingRequestId, null,
                     $"Enrollment is pending approval (request id {pendingRequestId}). Collect it later with " +
-                    $"'dbdatasync cert retrieve --request-id {pendingRequestId}'.");
+                    $"'dbdatasync config cert retrieve --request-id {pendingRequestId}'.");
 
             case CrDispDenied:
                 return new EnrollmentResult(

@@ -34,8 +34,8 @@ public static class SetupCommand
         if (!io.IsInteractive)
         {
             io.WriteLine(
-                "setup is interactive — run `dbdatasync doctor` to check a configuration, or edit " +
-                $"{DbDataSyncConfigFile.FileName} directly (see CONFIG.md).");
+                "setup is interactive — run `dbdatasync config check` to check a configuration, or " +
+                $"edit {DbDataSyncConfigFile.FileName} directly (see CONFIG.md).");
             return 1;
         }
 
@@ -100,8 +100,8 @@ public static class SetupCommand
 
             // Installing the provider itself is skipped here — before phase 109g lands,
             // Microsoft.Data.SqlClient and Npgsql are still hard references, so there is nothing this
-            // step would need to restore. `dbdatasync doctor` still reports whether the connection
-            // opens.
+            // step would need to restore. `dbdatasync config check` still reports whether the
+            // connection opens.
             try
             {
                 StateDatabase.FromOptions(
@@ -112,7 +112,7 @@ public static class SetupCommand
                 or System.Data.Common.DbException)
             {
                 io.WriteLine($"Could not connect yet: {ex.Message}");
-                io.WriteLine("You can fix this and re-check with `dbdatasync doctor`.");
+                io.WriteLine("You can fix this and re-check with `dbdatasync config check`.");
             }
         }
 
@@ -135,7 +135,7 @@ public static class SetupCommand
                 await InstallMySqlDriverAsync(root, prompt, io, installProvider);
             else if (driver == "other")
                 io.WriteLine(
-                    "For any other engine, run `dbdatasync driver install <id> --provider <packageId> " +
+                    "For any other engine, run `dbdatasync config driver install <id> --provider <packageId> " +
                     "--version <v> [--from mysql]` once this finishes.");
         }
 
@@ -214,9 +214,9 @@ public static class SetupCommand
                 io.WriteLine("Run the matching command, then bind the thumbprint it prints:");
                 io.WriteLine(certChoice switch
                 {
-                    "self-signed" => $"    dbdatasync cert new-self-signed --dns {host ?? "localhost"}",
-                    "enroll" => "    dbdatasync cert enroll --template <template>",
-                    _ => "    dbdatasync cert bind --thumbprint <thumbprint>",
+                    "self-signed" => $"    dbdatasync config cert new-self-signed --dns {host ?? "localhost"}",
+                    "enroll" => "    dbdatasync config cert enroll --template <template>",
+                    _ => "    dbdatasync config cert bind --thumbprint <thumbprint>",
                 });
             }
         }
@@ -276,10 +276,10 @@ public static class SetupCommand
     {
         while (true)
         {
-            var context = DoctorCommand.BuildContext(["--repo", root]);
-            var results = await DoctorCommand.RunChecksAsync(context);
+            var context = ReadinessChecks.BuildContext(["--repo", root]);
+            var results = await ReadinessChecks.RunChecksAsync(context);
             foreach (var result in results)
-            foreach (var line in DoctorCommand.FormatResult(result))
+            foreach (var line in ReadinessChecks.FormatResult(result))
                 io.WriteLine(line);
 
             var firstAdminOutstanding = results.Any(r => r.Name == "First admin" && r.Status != CheckStatus.Ok);
@@ -308,7 +308,7 @@ public static class SetupCommand
 
     /// <summary>
     /// Every <c>DbDataSync:*</c> key the merged configuration resolves to — file, then environment,
-    /// then command line, the same precedence <c>doctor</c> and the running host use. Nothing here can
+    /// then command line, the same precedence <c>config check</c> and the running host use. Nothing here can
     /// embed a real credential (<see cref="DbDataSyncConfigFile.SetValue"/> refuses one, and the state
     /// password lives only in <see cref="SecretStore"/>), but an operator can still set one through an
     /// environment variable this command has no say over, so a value that looks like it carries one is

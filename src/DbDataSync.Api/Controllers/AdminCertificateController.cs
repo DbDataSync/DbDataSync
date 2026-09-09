@@ -7,7 +7,7 @@ namespace DbDataSync.Api.Controllers;
 
 /// <summary>
 /// The Certificates section of the Admin screen (phase 83) — a second door onto every operation phase
-/// 82's <c>dbdatasync cert …</c> already exposes (<see cref="AdminCertificateService"/> does the actual
+/// 82's <c>dbdatasync config cert …</c> already exposes (<see cref="AdminCertificateService"/> does the actual
 /// work; this is deliberately thin, matching <see cref="AdminConfigController"/>'s own shape).
 /// <para>
 /// <c>[Authorize(Policies.Admin)]</c> stated explicitly on every action, including the read — the same

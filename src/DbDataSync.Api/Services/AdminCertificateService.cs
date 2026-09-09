@@ -9,7 +9,7 @@ namespace DbDataSync.Api.Services;
 
 /// <summary>
 /// The Certificates section of the Admin screen's backend (phase 83) — a second door onto every
-/// operation phase 82's <c>dbdatasync cert …</c> already exposes, not a wider one. See that phase's own
+/// operation phase 82's <c>dbdatasync config cert …</c> already exposes, not a wider one. See that phase's own
 /// doc comments (<see cref="DbDataSync.Certificates"/>) for what each underlying call actually does; this
 /// class only sequences them the way <c>CertCommand</c> already does, and translates the result into
 /// JSON a browser can read.
@@ -392,7 +392,7 @@ public sealed record CurrentCertificateInfo(
 /// <param name="Subject">Null when nothing has ever been bound.</param>
 /// <param name="CertificateFound">False when <paramref name="Subject"/> names a certificate that is no
 /// longer in the store — the same "binds a subject, but nothing matches it there" case
-/// <c>dbdatasync cert status</c> reports as an error.</param>
+/// <c>dbdatasync config cert status</c> reports as an error.</param>
 public sealed record BindingInfo(string? Subject, string Store, string Location, bool AllowInvalid, bool CertificateFound);
 
 public enum KeyAccessState { Ok, Warning, Unknown }

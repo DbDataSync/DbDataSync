@@ -54,7 +54,7 @@ public static class PrivateKeyAccess
 
     /// <summary>
     /// Whether <paramref name="account"/> already has an explicit read (or broader) allow rule on the
-    /// private key — what <c>dbdatasync cert status</c> and the daily expiry check both report, so a
+    /// private key — what <c>dbdatasync config cert status</c> and the daily expiry check both report, so a
     /// grant silently removed by a certificate re-issue or a group policy shows up before the next
     /// restart discovers it as a handshake failure instead.
     /// <para>

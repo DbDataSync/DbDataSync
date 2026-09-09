@@ -74,13 +74,13 @@ public sealed class ProviderRegistry
 
     /// <summary>
     /// <see cref="DbProviderFactories.GetFactory(string)"/>, with a message that names the fix
-    /// (<c>dbdatasync provider install</c>) instead of the BCL's generic "no factory registered".
+    /// (<c>dbdatasync config provider install</c>) instead of the BCL's generic "no factory registered".
     /// </summary>
     public DbProviderFactory GetFactory(string id)
     {
         if (!Installed.ContainsKey(id))
             throw new InvalidOperationException(
-                $"Provider '{id}' is not installed. Install it with `dbdatasync provider install {id}`.");
+                $"Provider '{id}' is not installed. Install it with `dbdatasync config provider install {id}`.");
 
         return DbProviderFactories.GetFactory(id);
     }

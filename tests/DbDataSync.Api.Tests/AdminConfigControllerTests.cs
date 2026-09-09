@@ -81,7 +81,7 @@ public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) 
     }
 
     /// <summary>The secret endpoint writes through SecretStore under the fixed ref, exactly like
-    /// `dbdatasync secret set` — never through dbdatasync.config.yaml.</summary>
+    /// `dbdatasync config secret set` — never through dbdatasync.config.yaml.</summary>
     [Fact]
     public async Task TheSecretEndpoint_StoresThroughSecretStore_NotTheFile()
     {

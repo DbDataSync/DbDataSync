@@ -85,7 +85,7 @@ public sealed class ProviderLoadTests : IAsyncLifetime
 
         var ex = Assert.Throws<InvalidOperationException>(() => registry.GetFactory("NotInstalled"));
 
-        Assert.Contains("dbdatasync provider install", ex.Message);
+        Assert.Contains("dbdatasync config provider install", ex.Message);
     }
 
     private static string FindRepoRoot()

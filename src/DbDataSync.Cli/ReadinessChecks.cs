@@ -13,15 +13,15 @@ using LibGit2Sharp;
 
 namespace DbDataSync.Cli;
 
-public enum CheckStatus { Ok, Warn, Fail }
+internal enum CheckStatus { Ok, Warn, Fail }
 
 /// <param name="Fix">A command or a one-line instruction that would resolve <see cref="Status"/>, or
 /// null for <see cref="CheckStatus.Ok"/> (nothing to fix) or where there is no single fix to name.</param>
-public sealed record CheckResult(string Name, CheckStatus Status, string Detail, string? Fix = null);
+internal sealed record CheckResult(string Name, CheckStatus Status, string Detail, string? Fix = null);
 
-/// <summary>What every check is handed — resolved once per <c>doctor</c> run (or once per
+/// <summary>What every check is handed — resolved once per <c>config check</c> run (or once per
 /// <c>setup</c> review screen render) rather than each check rebuilding its own configuration chain.</summary>
-public sealed class DoctorContext
+internal sealed class ReadinessContext
 {
     public required string Root { get; init; }
     public required IConfiguration Configuration { get; init; }
@@ -50,20 +50,22 @@ public sealed class DoctorContext
     }
 }
 
-public interface IReadinessCheck
+internal interface IReadinessCheck
 {
-    Task<CheckResult> RunAsync(DoctorContext context, CancellationToken cancellationToken);
+    Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken);
 }
 
 /// <summary>
-/// The non-interactive core of <c>setup</c>'s review screen: the same checks, one report, exit 0 when
-/// nothing is <see cref="CheckStatus.Fail"/>, 1 otherwise — for a CI smoke test or a service wrapper
-/// that cannot answer an interactive prompt.
+/// The shared check engine behind <c>dbdatasync config check</c> (the non-interactive CLI entry,
+/// <see cref="ConfigCommand"/>) and <c>setup</c>'s review screen (rendered for a human, in-process).
+/// Built as its own top-level <c>doctor</c> command in phase 110; phase 115 folded that entry point
+/// under <c>config</c> and pulled the engine itself out into this neutral file so it belongs to
+/// neither caller.
 /// </summary>
-public static class DoctorCommand
+internal static class ReadinessChecks
 {
-    /// <summary>Every check, in report order — <c>internal</c> so <c>SetupCommand</c>'s review screen
-    /// runs the identical list rather than a second one that could drift from this file's own.</summary>
+    /// <summary>Every check, in report order — shared by <see cref="ConfigCommand"/> and
+    /// <c>SetupCommand</c>'s review screen so the two never drift onto separate lists.</summary>
     internal static readonly IReadOnlyList<IReadinessCheck> Checks =
     [
         new RepoCheck(),
@@ -74,27 +76,7 @@ public static class DoctorCommand
         new FirstAdminCheck(),
     ];
 
-    public static async Task<int> RunAsync(string[] args)
-    {
-        var asJson = CliOptions.Has(args, "--json");
-        var context = BuildContext(args);
-        var results = await RunChecksAsync(context);
-
-        if (asJson)
-        {
-            Console.WriteLine(JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true }));
-        }
-        else
-        {
-            foreach (var result in results)
-            foreach (var line in FormatResult(result))
-                Console.WriteLine(line);
-        }
-
-        return results.Any(r => r.Status == CheckStatus.Fail) ? 1 : 0;
-    }
-
-    internal static async Task<IReadOnlyList<CheckResult>> RunChecksAsync(DoctorContext context)
+    internal static async Task<IReadOnlyList<CheckResult>> RunChecksAsync(ReadinessContext context)
     {
         var results = new List<CheckResult>();
         foreach (var check in Checks)
@@ -104,7 +86,8 @@ public static class DoctorCommand
 
     /// <summary>One or two lines of human-readable text for <paramref name="result"/> — a list, not a
     /// single string, so a caller writing through <see cref="IPromptIo"/> (<c>SetupCommand</c>'s review
-    /// screen) emits each line the same way this command's own <see cref="Console"/> output does.</summary>
+    /// screen) emits each line the same way <see cref="ConfigCommand"/>'s own <see cref="Console"/>
+    /// output does.</summary>
     internal static IReadOnlyList<string> FormatResult(CheckResult result)
     {
         var marker = result.Status switch
@@ -130,7 +113,7 @@ public static class DoctorCommand
     /// because <c>WebApplicationBuilder.CreateBuilder</c> pre-populates sources in a fixed order before
     /// customisation is possible.
     /// </summary>
-    internal static DoctorContext BuildContext(string[] args)
+    internal static ReadinessContext BuildContext(string[] args)
     {
         var root = DbDataSyncRoot.Resolve(args);
 
@@ -141,7 +124,7 @@ public static class DoctorCommand
         builder.AddCommandLine(args.Where(a => a.StartsWith("--DbDataSync:", StringComparison.Ordinal)).ToArray());
 
         var configuration = builder.Build();
-        return new DoctorContext
+        return new ReadinessContext
         {
             Root = root,
             Configuration = configuration,
@@ -155,9 +138,9 @@ public static class DoctorCommand
 
 /// <summary>Resolvable, a valid git repository, and <c>dbdatasync.config.yaml</c> parses — the three
 /// things every other check assumes already hold.</summary>
-public sealed class RepoCheck : IReadinessCheck
+internal sealed class RepoCheck : IReadinessCheck
 {
-    public Task<CheckResult> RunAsync(DoctorContext context, CancellationToken cancellationToken)
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(context.Root))
         {
@@ -190,9 +173,9 @@ public sealed class RepoCheck : IReadinessCheck
 /// <summary>SQLite's directory is writable, or a server engine's connection actually opens and its
 /// schema is current — <see cref="StateDatabase"/>'s own constructor runs the full migration set, so
 /// successfully opening one already proves "current or migrated".</summary>
-public sealed class StateStoreCheck : IReadinessCheck
+internal sealed class StateStoreCheck : IReadinessCheck
 {
-    public Task<CheckResult> RunAsync(DoctorContext context, CancellationToken cancellationToken)
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
         var (database, error) = context.TryOpenStateDatabase();
         if (database is not null)
@@ -206,17 +189,17 @@ public sealed class StateStoreCheck : IReadinessCheck
             context.ApiOptions.StateEngine == StateEngineIds.Sqlite
                 ? $"Check that '{Path.GetDirectoryName(context.ApiOptions.StateDbPath)}' is writable."
                 : "Check DbDataSync:StateConnectionString and the stored password " +
-                  "(`dbdatasync secret set dbdatasync:config:stateConnectionString ...`)."));
+                  "(`dbdatasync config secret set dbdatasync:config:stateConnectionString ...`)."));
     }
 }
 
 /// <summary>Every restored provider's <c>lib/</c> closure is present, every driver manifest on disk
 /// parses, and every connection's driver id resolves to a built-in or a driver found on disk.</summary>
-public sealed class ProvidersAndDriversCheck : IReadinessCheck
+internal sealed class ProvidersAndDriversCheck : IReadinessCheck
 {
     private static readonly HashSet<string> BuiltInDriverIds = [DriverIds.MsSql, DriverIds.Postgres, DriverIds.DuckDb];
 
-    public Task<CheckResult> RunAsync(DoctorContext context, CancellationToken cancellationToken)
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
         var problems = new List<string>();
         var driverIds = new HashSet<string>(BuiltInDriverIds, StringComparer.Ordinal);
@@ -232,7 +215,7 @@ public sealed class ProvidersAndDriversCheck : IReadinessCheck
 
                 var libDir = ProviderPaths.LibDir(dir);
                 if (!Directory.Exists(libDir) || !Directory.EnumerateFileSystemEntries(libDir).Any())
-                    problems.Add($"provider '{Path.GetFileName(dir)}' has no restored lib/ — run `dbdatasync provider sync`.");
+                    problems.Add($"provider '{Path.GetFileName(dir)}' has no restored lib/ — run `dbdatasync config provider sync`.");
             }
         }
 
@@ -270,7 +253,7 @@ public sealed class ProvidersAndDriversCheck : IReadinessCheck
                 {
                     problems.Add(
                         $"connection '{name}' names driver '{connection.DriverType}', which is not installed — " +
-                        $"run `dbdatasync driver install {connection.DriverType} ...`.");
+                        $"run `dbdatasync config driver install {connection.DriverType} ...`.");
                 }
             }
         }
@@ -287,9 +270,9 @@ public sealed class ProvidersAndDriversCheck : IReadinessCheck
 
 /// <summary>A method is configured or authentication is explicitly disabled; the passkey
 /// configuration (if any) is internally consistent.</summary>
-public sealed class AuthCheck : IReadinessCheck
+internal sealed class AuthCheck : IReadinessCheck
 {
-    public Task<CheckResult> RunAsync(DoctorContext context, CancellationToken cancellationToken)
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
         if (context.AuthOptions.Disabled)
         {
@@ -311,9 +294,9 @@ public sealed class AuthCheck : IReadinessCheck
 
 /// <summary>The console URL actually answers. Warns rather than fails on plain HTTP off loopback —
 /// passkeys need HTTPS there, but the console can still be reachable.</summary>
-public sealed class BindingCheck : IReadinessCheck
+internal sealed class BindingCheck : IReadinessCheck
 {
-    public async Task<CheckResult> RunAsync(DoctorContext context, CancellationToken cancellationToken)
+    public async Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
         var url = context.Configuration["DbDataSync:Url"] ?? "http://localhost:5080";
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
@@ -344,9 +327,9 @@ public sealed class BindingCheck : IReadinessCheck
 
 /// <summary>A user exists, or the bootstrap invite is still outstanding — a fresh install with
 /// neither is one nobody can sign into.</summary>
-public sealed class FirstAdminCheck : IReadinessCheck
+internal sealed class FirstAdminCheck : IReadinessCheck
 {
-    public Task<CheckResult> RunAsync(DoctorContext context, CancellationToken cancellationToken)
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
         if (context.AuthOptions.Disabled)
             return Task.FromResult(new CheckResult("First admin", CheckStatus.Ok, "Authentication is disabled."));

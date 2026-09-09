@@ -2,7 +2,7 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace DbDataSync.Certificates;
 
-/// <summary>The shape <c>dbdatasync cert status</c> and <c>dbdatasync cert list</c> both report —
+/// <summary>The shape <c>dbdatasync config cert status</c> and <c>dbdatasync config cert list</c> both report —
 /// everything about a certificate that matters to an operator deciding whether it's the right one or
 /// whether it's about to be a problem.</summary>
 public sealed record CertificateInfo(

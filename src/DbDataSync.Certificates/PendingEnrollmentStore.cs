@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace DbDataSync.Certificates;
 
-/// <param name="RequestId">The CA's own request id — what <c>dbdatasync cert retrieve --request-id</c> is
+/// <param name="RequestId">The CA's own request id — what <c>dbdatasync config cert retrieve --request-id</c> is
 /// given.</param>
 /// <param name="KeyName">The <see cref="PendingEnrollmentKeys"/> container holding the private key this
 /// request's CSR was built with.</param>
@@ -69,7 +69,7 @@ public static class PendingEnrollmentStore
     /// <summary>
     /// Every enrollment still awaiting collection — not in the original phase 82 doc, added for phase
     /// 83's admin screen, which needs to show (and hide) "Retrieve pending request" without already
-    /// knowing a request id to look for. <c>dbdatasync cert retrieve</c> never needed this: an operator
+    /// knowing a request id to look for. <c>dbdatasync config cert retrieve</c> never needed this: an operator
     /// running it already has the request id phase 82's own <c>enroll</c> printed to the console.
     /// </summary>
     public static IReadOnlyList<PendingEnrollment> List(string repoRoot) => ReadAll(repoRoot);

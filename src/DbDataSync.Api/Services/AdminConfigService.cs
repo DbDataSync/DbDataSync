@@ -133,7 +133,7 @@ public sealed class AdminConfigService(
     }
 
     /// <summary>
-    /// Sets StateConnectionString's password through the same store <c>dbdatasync secret set</c> writes
+    /// Sets StateConnectionString's password through the same store <c>dbdatasync config secret set</c> writes
     /// to — this screen and the CLI command are two doors onto the same store, not two stores. The only
     /// key this applies to today; see CONFIG.md's "Secrets" section.
     /// </summary>

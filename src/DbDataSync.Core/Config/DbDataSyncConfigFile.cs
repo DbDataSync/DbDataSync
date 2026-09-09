@@ -257,7 +257,7 @@ public static class DbDataSyncConfigFile
         #   Url: http://localhost:5080
         #   StateEngine: MsSql
         #   # Connection string only — never a password. Set the password with:
-        #   #   dbdatasync secret set dbdatasync:config:stateConnectionString "Password=..."
+        #   #   dbdatasync config secret set dbdatasync:config:stateConnectionString "Password=..."
         #   StateConnectionString: "Server=sql01;Database=DbDataSyncState;"
 
         """;

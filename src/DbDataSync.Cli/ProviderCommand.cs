@@ -3,7 +3,7 @@ using DbDataSync.Providers;
 namespace DbDataSync.Cli;
 
 /// <summary>
-/// <c>dbdatasync provider install|sync|list|uninstall</c> — restores an ADO.NET provider package
+/// <c>dbdatasync config provider install|sync|list|uninstall</c> — restores an ADO.NET provider package
 /// DbDataSync does not reference at compile time into <c>&lt;repo&gt;/providers/&lt;id&gt;/</c>, so a
 /// vendor's fix is a package swap, not a DbDataSync build. See
 /// <c>architecture/planning/todo/nuget-loaded-drivers.md</c> §*The provider layer*.
@@ -48,7 +48,7 @@ public static class ProviderCommand
         if (packageIds.Count == 0)
         {
             Console.Error.WriteLine(
-                "Usage: dbdatasync provider install <packageId>[ <packageId>...] [--as <id>] " +
+                "Usage: dbdatasync config provider install <packageId>[ <packageId>...] [--as <id>] " +
                 "[--version v] [--factory-type type] [--source feed]");
             return 1;
         }
@@ -154,7 +154,7 @@ public static class ProviderCommand
     {
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("Usage: dbdatasync provider uninstall <id>");
+            Console.Error.WriteLine("Usage: dbdatasync config provider uninstall <id>");
             return 1;
         }
 
@@ -196,10 +196,10 @@ public static class ProviderCommand
     {
         Console.Error.WriteLine("""
             Usage:
-              dbdatasync provider install <packageId>[ <packageId>...] [--as <id>] --version <v> [--factory-type type] [--source feed]
-              dbdatasync provider sync [<id>]
-              dbdatasync provider list
-              dbdatasync provider uninstall <id>
+              dbdatasync config provider install <packageId>[ <packageId>...] [--as <id>] --version <v> [--factory-type type] [--source feed]
+              dbdatasync config provider sync [<id>]
+              dbdatasync config provider list
+              dbdatasync config provider uninstall <id>
             """);
     }
 }
