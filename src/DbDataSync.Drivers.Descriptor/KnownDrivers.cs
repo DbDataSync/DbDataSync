@@ -5,6 +5,7 @@ namespace DbDataSync.Drivers.Descriptor;
 /// <c>knownDriverId</c>.</param>
 /// <param name="DisplayName">The descriptor's own <c>displayName</c> default when an install doesn't
 /// override it.</param>
+/// <param name="Description">One line, for a picker (phase 118's <c>GET /api/known-drivers</c>).</param>
 /// <param name="BoundLibraryId">The <c>DbDataSync.Libraries.KnownLibraries</c> id this entry's
 /// descriptor resolves its factory through — this project doesn't reference
 /// <c>DbDataSync.Libraries</c>'s types to render one (only a plain id string), keeping the two
@@ -14,7 +15,7 @@ namespace DbDataSync.Drivers.Descriptor;
 /// entry's <c>dialect</c>/<c>typeMap</c>/<c>capabilities</c> body — everything a <c>driver.yaml</c>
 /// needs except <c>id</c>/<c>displayName</c>/<c>library</c>, which <see cref="KnownDrivers.Render"/>
 /// fills in from the install itself.</param>
-public sealed record KnownDriverEntry(string Id, string DisplayName, string BoundLibraryId, string ResourceName);
+public sealed record KnownDriverEntry(string Id, string DisplayName, string Description, string BoundLibraryId, string ResourceName);
 
 /// <summary>
 /// Curated, ready-made <c>driver.yaml</c> bodies for <c>config driver install --from &lt;id&gt;</c> and
@@ -26,7 +27,10 @@ public static class KnownDrivers
 {
     public static readonly IReadOnlyList<KnownDriverEntry> All =
     [
-        new("mysql.generic", "MySQL / MariaDB (generic)", "mysql-connector", "mysql.generic.driver.yaml"),
+        new(
+            "mysql.generic", "MySQL / MariaDB (generic)",
+            "Watermark and batch-reload replication for MySQL or MariaDB, over MySqlConnector.",
+            "mysql-connector", "mysql.generic.driver.yaml"),
     ];
 
     public static KnownDriverEntry? TryGetById(string id) =>

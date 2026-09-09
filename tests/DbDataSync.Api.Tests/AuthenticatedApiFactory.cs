@@ -22,7 +22,7 @@ namespace DbDataSync.Api.Tests;
 /// here.
 /// </para>
 /// </summary>
-public sealed class AuthenticatedApiFactory : WebApplicationFactory<Program>
+public class AuthenticatedApiFactory : WebApplicationFactory<Program>
 {
     public string RepoRoot { get; } = Directory.CreateTempSubdirectory("dbdatasync-auth-tests-").FullName;
 

@@ -1,16 +1,11 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { DB_NAME, runSql, SOURCE_TABLE, TARGET_TABLE } from './test-db'
 
-// Kept in sync with playwright.config.ts's scratchRepoRoot.
-const scratchRepoRoot = path.join(os.tmpdir(), 'dbdatasync-web-e2e-scratch-repo')
+// The scratch repo itself — cleared, recreated, and seeded with the phase 118 descriptor driver and
+// its library — is prepared synchronously in playwright.config.ts, not here. See that file's comment
+// on why: it has to finish before the API's webServer command even launches, and global-setup.ts runs
+// concurrently with (not strictly before) webServer.
 
 export default async function globalSetup() {
-  // Fresh config repo for the API to auto-init and auto-commit into during the test run.
-  fs.rmSync(scratchRepoRoot, { recursive: true, force: true })
-  fs.mkdirSync(scratchRepoRoot, { recursive: true })
-
   // Fresh SQL Server database with source (Change Tracking enabled) + target tables, seeded with two
   // rows — the same shape used throughout Phase 3/4/5's manual and automated verification.
   runSql(`

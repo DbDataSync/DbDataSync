@@ -9,6 +9,8 @@ import { ScriptEditPage } from './pages/ScriptEditPage'
 import { ScriptsPage } from './pages/ScriptsPage'
 import { AdminCertificatePage } from './pages/AdminCertificatePage'
 import { AdminConfigPage } from './pages/AdminConfigPage'
+import { AdminDriversPage } from './pages/AdminDriversPage'
+import { AdminLibrariesPage } from './pages/AdminLibrariesPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, MonitoringTab, OverviewTab } from './pages/replication-detail/tabs'
 import {
@@ -146,6 +148,8 @@ export default function App() {
       <Route path="/admin" element={<Navigate to="/admin/config" replace />} />
       <Route path="/admin/config" element={<AdminConfigPage />} />
       <Route path="/admin/certificate" element={<AdminCertificatePage />} />
+      <Route path="/admin/drivers" element={<AdminDriversPage />} />
+      <Route path="/admin/libraries" element={<AdminLibrariesPage />} />
 
       {/* A mistyped or stale URL lands somewhere real rather than on an empty frame with chrome. */}
       <Route path="*" element={<Navigate to="/replications" replace />} />

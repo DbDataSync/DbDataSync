@@ -2,10 +2,9 @@ import { NavLink } from 'react-router-dom'
 import { tabClass } from './tabClass'
 
 /**
- * The Admin area's own tab strip — Configuration (phase 81) and Certificates (phase 83), side by side
- * the way the phase 83 doc describes this screen as living "alongside phase 81's config table." A
- * shared component rather than each page inlining its own two `NavLink`s, so adding a third Admin
- * destination later means one edit, not two pages staying in sync by hand.
+ * The Admin area's own tab strip — Configuration (phase 81), Certificate (phase 83), and (phase 118)
+ * Drivers and Libraries, side by side. A shared component rather than each page inlining its own
+ * `NavLink`s, so adding a destination later means one edit, not every page staying in sync by hand.
  */
 export function AdminTabs() {
   return (
@@ -15,6 +14,12 @@ export function AdminTabs() {
       </NavLink>
       <NavLink to="/admin/certificate" className={tabClass} data-testid="admin-tab-certificate">
         Certificate
+      </NavLink>
+      <NavLink to="/admin/drivers" className={tabClass} data-testid="admin-tab-drivers">
+        Drivers
+      </NavLink>
+      <NavLink to="/admin/libraries" className={tabClass} data-testid="admin-tab-libraries">
+        Libraries
       </NavLink>
     </>
   )

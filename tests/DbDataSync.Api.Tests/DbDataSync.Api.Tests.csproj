@@ -22,6 +22,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DbDataSync.Api\DbDataSync.Api.csproj" />
+    <!-- Reuses FixturePublisher (publishes tests/fixtures/DbDataSync.Drivers.LoaderTestFixture once)
+         for CompiledDriverApiFactory, rather than duplicating that dotnet-publish shell-out here. -->
+    <ProjectReference Include="..\DbDataSync.Drivers.Loader.Tests\DbDataSync.Drivers.Loader.Tests.csproj" />
   </ItemGroup>
 
 </Project>

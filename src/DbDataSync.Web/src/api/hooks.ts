@@ -11,6 +11,9 @@ import type {
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
   drivers: ['drivers'] as const,
+  libraries: ['libraries'] as const,
+  knownLibraries: ['known-libraries'] as const,
+  knownDrivers: ['known-drivers'] as const,
   connections: ['connections'] as const,
   connection: (name: string) => ['connections', name] as const,
   capabilities: (name: string) => ['connections', name, 'capabilities'] as const,
@@ -119,6 +122,22 @@ export function useSignOut() {
  * 109d) appears without a SPA change. Rarely if ever changes within a session, so no polling. */
 export function useDrivers() {
   return useQuery({ queryKey: keys.drivers, queryFn: api.drivers.list })
+}
+
+/** Every installed library (phase 118's admin Libraries screen). Same call `useDrivers` already makes
+ * in spirit — this list changes at most once per deployment, so no polling. */
+export function useLibraries() {
+  return useQuery({ queryKey: keys.libraries, queryFn: api.libraries.list })
+}
+
+/** The bundled, vetted libraries an "add" affordance offers (phase 117/118). */
+export function useKnownLibraries() {
+  return useQuery({ queryKey: keys.knownLibraries, queryFn: api.libraries.knownLibraries })
+}
+
+/** The bundled, ready-made driver descriptors an "add" affordance offers (phase 117/118). */
+export function useKnownDrivers() {
+  return useQuery({ queryKey: keys.knownDrivers, queryFn: api.libraries.knownDrivers })
 }
 
 export function useConnections() {

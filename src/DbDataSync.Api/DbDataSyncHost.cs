@@ -101,6 +101,7 @@ public static class DbDataSyncHost
         });
         builder.Services.AddSingleton<AdminConfigService>();
         builder.Services.AddSingleton<AdminCertificateService>();
+        builder.Services.AddSingleton<LibrariesService>();
 
         builder.Services.AddSingleton(sp =>
         {

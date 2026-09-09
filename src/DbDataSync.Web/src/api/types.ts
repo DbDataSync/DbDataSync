@@ -705,13 +705,57 @@ export interface DriverCapabilities {
   supportedProvisioningActions: string[]
 }
 
-/** One entry from `GET /api/drivers` — every driver currently registered, built-in or added from a
- * `driver.yaml` descriptor (phase 109d). */
+/** Kind-name-only view of a driver's capabilities for a catalogue listing (phase 118, the admin
+ * Drivers screen) — the full per-Kind parameter detail lives on `DriverCapabilities` instead, which is
+ * connection-scoped. */
+export interface DriverCapabilitySummary {
+  readers: string[]
+  staging: string[]
+  writers: string[]
+}
+
+/** One entry from `GET /api/drivers` — every driver currently registered: built-in, added from a
+ * `driver.yaml` descriptor (phase 109d), or a compiled plugin (phase 109e). */
 export interface DriverSummary {
   id: DriverType
   displayName: string
   builtIn: boolean
-  source: 'builtin' | 'descriptor'
+  source: 'builtin' | 'descriptor' | 'compiled'
+  /** The bound `DbDataSync.Libraries` id for a descriptor driver; null for a built-in or a compiled
+   * plugin (phase 118). */
+  library: string | null
+  capabilities: DriverCapabilitySummary
+}
+
+/** One installed library — `GET /api/libraries` (phase 118). */
+export interface LibrarySummary {
+  id: string
+  packages: { id: string; version: string }[]
+  factoryType: string
+  /** A real `DbProviderFactory` resolution probe, not just "the manifest parsed". */
+  resolves: boolean
+  /** Every descriptor driver on disk whose `library:` names this id. */
+  usedBy: string[]
+  /** Whether this id matches a bundled `KnownLibraries` entry. */
+  curated: boolean
+}
+
+/** One bundled, vetted library — `GET /api/known-libraries` (phase 117/118), the "available to add"
+ * list for the Libraries screen. */
+export interface KnownLibrarySummary {
+  id: string
+  displayName: string
+  description: string
+  packageId: string
+}
+
+/** One bundled, ready-made driver descriptor — `GET /api/known-drivers` (phase 117/118), the
+ * "available to add" list for the Drivers screen. */
+export interface KnownDriverSummary {
+  id: string
+  displayName: string
+  description: string
+  boundLibrary: string
 }
 
 // The Setup card — see architecture/implementation/todo/phase-025-database-provisioning.md.

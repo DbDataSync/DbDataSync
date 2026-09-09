@@ -1,4 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +12,28 @@ const repoRoot = path.resolve(__dirname, '../..')
 // "already a valid repo" (the parent one) by code that (unlike GitCommitService, see its
 // IsRepositoryAt XML doc) uses that discovery-based check.
 const scratchRepoRoot = path.join(os.tmpdir(), 'dbdatasync-web-e2e-scratch-repo')
+
+// admin-drivers-libraries.spec.ts (phase 118) needs a descriptor driver and its library already on
+// disk before the API's webServer entry below ever launches `dotnet exec .../DbDataSync.Api.dll` —
+// libraries and drivers load once at composition-root startup and never hot-reload mid-session (same
+// as production; installing one always needs a restart), so seeding this from global-setup.ts (which
+// Playwright runs *concurrently with*, not strictly before, webServer) is too late: empirically, the
+// API's own hosted services (SchedulerService et al.) already resolve an empty LibraryRegistry/
+// DriverRegistry well before global-setup's own code gets a turn to run. This block is synchronous,
+// top-level code in the config file Playwright must fully evaluate before it can even read `webServer`
+// out of the object below, which is what actually guarantees the ordering global-setup.ts's timing
+// could not.
+export const KNOWN_DRIVER_ID = 'mysql.generic'
+export const KNOWN_DRIVER_LIBRARY = 'mysql-connector'
+
+fs.rmSync(scratchRepoRoot, { recursive: true, force: true })
+fs.mkdirSync(scratchRepoRoot, { recursive: true })
+execFileSync('dotnet', [
+  'exec', path.join(repoRoot, 'src', 'DbDataSync.Cli', 'bin', 'Debug', 'net10.0', 'DbDataSync.Cli.dll'),
+  'config', 'driver', 'install', KNOWN_DRIVER_ID,
+  '--library', KNOWN_DRIVER_LIBRARY, '--version', '2.4.0', '--from', KNOWN_DRIVER_ID,
+  '--repo', scratchRepoRoot,
+], { stdio: 'inherit' })
 
 // The password used for the real SQL Server test database (started via docker-compose.yml's mssql-source service —
 // see architecture/implementation/done/phase-003-mssql-driver.md). This sandbox has no OS keychain, so the

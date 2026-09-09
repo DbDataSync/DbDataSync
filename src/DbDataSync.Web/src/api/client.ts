@@ -14,6 +14,9 @@ import type {
   CredentialSource,
   DriverCapabilities,
   DriverSummary,
+  KnownDriverSummary,
+  KnownLibrarySummary,
+  LibrarySummary,
   BulkCreateRequest,
   BulkCreateResult,
   MappingLag,
@@ -332,6 +335,13 @@ export const api = {
         `/api/users/${encodeURIComponent(id)}/credentials/${encodeURIComponent(credentialId)}`,
         { method: 'DELETE' },
       ),
+  },
+  libraries: {
+    /** Every installed library (phase 118's admin Libraries screen). Admin-only, unlike `drivers.list`
+     * below — this reveals what's on disk, not just what a connection editor picker offers. */
+    list: () => request<LibrarySummary[]>('/api/libraries'),
+    knownLibraries: () => request<KnownLibrarySummary[]>('/api/known-libraries'),
+    knownDrivers: () => request<KnownDriverSummary[]>('/api/known-drivers'),
   },
   drivers: {
     /** Every registered driver — the three built-ins plus any `driver.yaml` descriptor an operator has
