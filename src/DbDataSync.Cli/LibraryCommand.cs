@@ -42,6 +42,11 @@ public static class LibraryCommand
     /// required (the "pinned, never latest" rule holds for a catalog install too), but
     /// <c>--factory-type</c> is not.
     /// </para>
+    /// <para>
+    /// Neither is it required for a non-catalog package: with no <c>--factory-type</c> and no catalog
+    /// match, <see cref="LibraryInstaller.InstallAsync"/> restores the package first and then tries
+    /// phase 122's reflection-assist against the result before giving up and requiring one explicitly.
+    /// </para>
     /// </summary>
     private static async Task<int> InstallAsync(string repoRoot, string[] args)
     {
@@ -64,14 +69,9 @@ public static class LibraryCommand
         var source = CliOptions.Read(args, "--source");
 
         var catalogEntry = packageIds.Count == 1 ? KnownLibraries.TryGetById(packageIds[0]) : null;
+        // Null is fine here — LibraryInstaller.InstallAsync tries phase 122's reflection-assist against
+        // the restored closure before it requires --factory-type explicitly.
         var factoryType = CliOptions.Read(args, "--factory-type") ?? catalogEntry?.FactoryType ?? KnownLibraries.TryGet(packageIds[0]);
-        if (factoryType is null)
-        {
-            Console.Error.WriteLine(
-                $"'{packageIds[0]}' has no known DbProviderFactory type. Pass one explicitly with --factory-type " +
-                "\"Namespace.FactoryClass, AssemblyName\".");
-            return 1;
-        }
 
         if (version is null && packageIds.Count == 1)
         {

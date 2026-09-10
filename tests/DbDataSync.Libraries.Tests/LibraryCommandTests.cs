@@ -69,13 +69,30 @@ public sealed class LibraryCommandTests : IAsyncLifetime
         Assert.True(File.Exists(Path.Combine(libDir, "MySqlConnector.dll")));
     }
 
+    /// <summary>A real, restorable package with no <c>DbProviderFactory</c> subclass at all — phase
+    /// 122's reflection-assist restores it, finds nothing, and only then falls back to requiring
+    /// <c>--factory-type</c>, so this no longer fails before the restore even runs.</summary>
     [Fact]
-    public async Task Install_WithoutAKnownFactoryType_RequiresOneExplicitly()
+    public async Task Install_WithoutAKnownFactoryType_TriesReflectionFirst_ThenRequiresOneExplicitly()
     {
-        var exitCode = await RunAsync("install", "SomeUnknownPackage", "--version", "1.0.0");
+        var exitCode = await RunAsync("install", "Newtonsoft.Json", "--version", "13.0.3");
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("--factory-type", _error.ToString());
+        Assert.Contains("DbProviderFactory", _error.ToString());
+    }
+
+    /// <summary>A real ADO.NET provider that is deliberately not one of <see cref="KnownLibraries"/>'s
+    /// seven bundled entries — <c>config library install</c>'s own version of phase 122's acceptance
+    /// criterion: no <c>--factory-type</c>, no catalog match, and it still installs correctly.</summary>
+    [Fact]
+    public async Task Install_ANonCatalogPackage_WithNoFactoryType_DiscoversItByReflection()
+    {
+        Assert.Equal(0, await RunAsync("install", "System.Data.SqlClient", "--version", "4.9.0"));
+
+        var manifest = LibraryManifest.Read(
+            LibraryPaths.ManifestPath(LibraryPaths.LibraryDir(_repoRoot, "System.Data.SqlClient")));
+        Assert.Equal("System.Data.SqlClient.SqlClientFactory, System.Data.SqlClient", manifest.FactoryType);
+        Assert.Contains("System.Data.SqlClient.SqlClientFactory, System.Data.SqlClient", _output.ToString());
     }
 
     [Fact]

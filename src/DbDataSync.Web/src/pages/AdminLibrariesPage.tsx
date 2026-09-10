@@ -171,6 +171,7 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
   const [confirmTrust, setConfirmTrust] = useState(false)
   const [installError, setInstallError] = useState<unknown>(null)
   const [installedOk, setInstalledOk] = useState(false)
+  const [installedFactoryType, setInstalledFactoryType] = useState<string | null>(null)
 
   // One silent probe on mount — an operator shouldn't have to type something and get refused just to
   // learn the box doesn't work in this deployment.
@@ -192,18 +193,20 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
   const pick = (next: Selection) => {
     setSelected(next)
     setInstalledOk(false)
+    setInstalledFactoryType(null)
     setInstallError(null)
   }
 
   const doInstall = async (target: Selection) => {
     setInstallError(null)
     try {
-      await install.mutateAsync({
+      const manifest = await install.mutateAsync({
         packageId: target.id,
         version: target.version,
         factoryType: target.factoryType || undefined,
       })
       setInstalledOk(true)
+      setInstalledFactoryType(manifest.factoryType)
     } catch (err) {
       setInstallError(err)
     }
@@ -307,6 +310,7 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
             curated={isCurated(selected.id)}
             installing={install.isPending}
             installedOk={installedOk}
+            installedFactoryType={installedFactoryType}
             onChangeVersion={(version) => pick({ ...selected, version })}
             onChangeFactoryType={(factoryType) => setSelected({ ...selected, factoryType })}
             onInstall={requestInstall}
@@ -385,19 +389,25 @@ function SearchResultRow({ result, curated, onSelect }: {
   )
 }
 
-function InstallCommand({ selection, curated, installing, installedOk, onChangeVersion, onChangeFactoryType, onInstall }: {
+function InstallCommand({
+  selection, curated, installing, installedOk, installedFactoryType, onChangeVersion, onChangeFactoryType, onInstall,
+}: {
   selection: Selection
   curated: boolean
   installing: boolean
   installedOk: boolean
+  installedFactoryType: string | null
   onChangeVersion: (version: string) => void
   onChangeFactoryType: (factoryType: string) => void
   onInstall: () => void
 }) {
   const { id, version, versionLocked, factoryType } = selection
   const hasVersion = !!version
+  // A non-curated package no longer needs factoryType typed in before Install enables — leaving it
+  // blank lets the server's reflection-assist (phase 122) try first, against the restored package
+  // itself, before falling back to requiring one explicitly.
   const needsFactoryType = !curated
-  const canInstall = hasVersion && (!needsFactoryType || !!factoryType) && !installing
+  const canInstall = hasVersion && !installing
   const command = `dbdatasync config library install ${id} --version ${version || '<v>'}`
 
   const copy = async () => {
@@ -431,7 +441,7 @@ function InstallCommand({ selection, curated, installing, installedOk, onChangeV
             className="input"
             value={factoryType}
             onChange={(e) => onChangeFactoryType(e.target.value)}
-            placeholder='"Namespace.FactoryClass, AssemblyName"'
+            placeholder='Optional — leave blank to try auto-detect, or "Namespace.FactoryClass, AssemblyName"'
             data-testid="admin-libraries-command-factory-type"
           />
         </div>
@@ -444,7 +454,11 @@ function InstallCommand({ selection, curated, installing, installedOk, onChangeV
           install a package you've vetted yourself.
         </div>
       )}
-      {installedOk && <div className="hint" style={{ color: 'var(--ok)' }}>Installed.</div>}
+      {installedOk && (
+        <div className="hint" style={{ color: 'var(--ok)' }}>
+          Installed{installedFactoryType && !factoryType ? ` — detected factory: ${installedFactoryType}` : ''}.
+        </div>
+      )}
       <div className="row" style={{ gap: 8 }}>
         <button
           type="button"

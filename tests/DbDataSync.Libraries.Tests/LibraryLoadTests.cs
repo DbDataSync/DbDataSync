@@ -78,6 +78,47 @@ public sealed class LibraryLoadTests : IAsyncLifetime
         Assert.Equal(1L, Convert.ToInt64(result));
     }
 
+    /// <summary>
+    /// Phase 122's acceptance criterion, at the layer that actually owns it: <see cref="LibraryInstaller"/>
+    /// itself never consults <see cref="KnownLibraries"/> — only its callers (the CLI, the API) do — so
+    /// calling it directly with <c>factoryType: null</c> is exactly "MySqlConnector, as if it were not in
+    /// the catalog". Reflection-assist finds it, and the resulting factory really opens the container.
+    /// </summary>
+    [Fact]
+    public async Task Install_WithoutAFactoryType_DiscoversItByReflection_AndTheFactoryResolves()
+    {
+        var manifest = await LibraryInstaller.InstallAsync(
+            _repoRoot, "MySqlConnector", [new PackageRef("MySqlConnector", "2.4.0")], factoryType: null);
+
+        Assert.Equal("MySqlConnector.MySqlConnectorFactory, MySqlConnector", manifest.FactoryType);
+
+        var registry = new LibraryRegistry(_repoRoot).LoadAll();
+        var factory = registry.GetFactory("MySqlConnector");
+        await using DbConnection connection = factory.CreateConnection()!;
+        connection.ConnectionString =
+            "Server=localhost;Port=13306;User ID=root;Password=DbDataSync_Test_Pw1;Database=dbdatasync;";
+        await connection.OpenAsync();
+
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1;";
+        var result = await command.ExecuteScalarAsync();
+
+        Assert.Equal(1L, Convert.ToInt64(result));
+    }
+
+    /// <summary>A real, restorable package with no <see cref="DbProviderFactory"/> subclass at all —
+    /// proves the "zero matches" branch of reflection-assist ends in the same clear failure a caller
+    /// gets today, and that nothing is left half-installed on disk afterward.</summary>
+    [Fact]
+    public async Task Install_WithoutAFactoryType_WhenNothingIsFound_FailsAndLeavesNothingInstalled()
+    {
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => LibraryInstaller.InstallAsync(
+            _repoRoot, "Newtonsoft.Json", [new PackageRef("Newtonsoft.Json", "13.0.3")], factoryType: null));
+
+        Assert.Contains("DbProviderFactory", ex.Message);
+        Assert.False(Directory.Exists(LibraryPaths.LibraryDir(_repoRoot, "Newtonsoft.Json")));
+    }
+
     [Fact]
     public void GetFactory_ForAnUninstalledLibrary_NamesTheInstallCommand()
     {

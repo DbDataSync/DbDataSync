@@ -48,6 +48,11 @@ public sealed class LibraryInstallTests : IDisposable
         Assert.DoesNotContain(afterDelete!, l => l.Id == "Microsoft.Data.Sqlite");
     }
 
+    /// <summary>A real, restorable package with no <c>DbProviderFactory</c> subclass at all — phase
+    /// 122's reflection-assist restores it, finds nothing, and only then answers 400. Previously this
+    /// package id did not even exist on NuGet, so the 400 came from a pre-restore check that no longer
+    /// runs; this proves the *post-restore* failure path still ends in a clear 400 instead of a 500
+    /// from the restore itself succeeding with nothing to show for it.</summary>
     [Fact]
     public async Task InstallWithNoFactoryTypeAndNoneKnown_Returns400NamingTheField()
     {
@@ -55,13 +60,40 @@ public sealed class LibraryInstallTests : IDisposable
 
         var response = await client.PostAsJsonAsync("/api/libraries", new
         {
-            packageId = "Some.Totally.Unknown.Package",
-            version = "1.0.0",
+            packageId = "Newtonsoft.Json",
+            version = "13.0.3",
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("factoryType", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DbProviderFactory", body);
+
+        var libraries = await client.GetFromJsonAsync<List<LibraryDto>>("/api/libraries");
+        Assert.DoesNotContain(libraries!, l => l.Id == "Newtonsoft.Json");
+    }
+
+    /// <summary>A real ADO.NET provider deliberately not one of the bundled catalog's entries — phase
+    /// 122's acceptance criterion: no <c>factoryType</c>, no catalog match, and the install still
+    /// completes because reflection-assist found the one candidate in the restored closure.</summary>
+    [Fact]
+    public async Task InstallWithNoFactoryTypeForANonCatalogPackage_DiscoversItByReflection()
+    {
+        var client = await _factory.SignedInAsAsync(UserRole.Admin);
+
+        var response = await client.PostAsJsonAsync("/api/libraries", new
+        {
+            packageId = "System.Data.SqlClient",
+            version = "4.9.0",
+        });
+
+        response.EnsureSuccessStatusCode();
+        var manifest = await response.Content.ReadFromJsonAsync<LibraryDto>();
+        Assert.Equal("System.Data.SqlClient.SqlClientFactory, System.Data.SqlClient", manifest!.FactoryType);
+
+        var libraries = await client.GetFromJsonAsync<List<LibraryDto>>("/api/libraries");
+        var library = libraries!.Single(l => l.Id == "System.Data.SqlClient");
+        Assert.True(library.Resolves);
+        Assert.False(library.Curated);
     }
 
     [Fact]

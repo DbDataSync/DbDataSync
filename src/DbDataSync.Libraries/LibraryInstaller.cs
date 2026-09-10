@@ -18,18 +18,38 @@ namespace DbDataSync.Libraries;
 public static class LibraryInstaller
 {
     /// <summary>
-    /// Installs (or reinstalls) one library. <paramref name="factoryType"/> defaults to
-    /// <see cref="KnownLibraries"/>'s guess for <paramref name="packages"/>'s first entry when
-    /// not given explicitly — the CLI is what requires one or the other.
+    /// Installs (or reinstalls) one library. <paramref name="factoryType"/> null means neither the
+    /// caller nor <see cref="KnownLibraries"/> could name one up front — phase 122's reflection-assist
+    /// then scans the freshly-restored closure for a single public
+    /// <see cref="System.Data.Common.DbProviderFactory"/> subclass (see
+    /// <see cref="FactoryTypeReflector"/>) before giving up. Restore always runs regardless: the
+    /// closure has to exist on disk before there is anything to scan.
     /// </summary>
     public static async Task<LibraryManifest> InstallAsync(
-        string repoRoot, string id, IReadOnlyList<PackageRef> packages, string factoryType,
+        string repoRoot, string id, IReadOnlyList<PackageRef> packages, string? factoryType,
         string? nugetSource = null, CancellationToken cancellationToken = default)
     {
         var libraryDir = LibraryPaths.LibraryDir(repoRoot, id);
-        await RestorePackagesAsync(LibraryPaths.LibDir(libraryDir), packages, nugetSource, cancellationToken);
+        var libDir = LibraryPaths.LibDir(libraryDir);
+        await RestorePackagesAsync(libDir, packages, nugetSource, cancellationToken);
 
-        var manifest = new LibraryManifest(id, factoryType, packages);
+        if (factoryType is null)
+        {
+            var discovery = FactoryTypeReflector.Discover(libDir);
+            if (discovery.Status != FactoryTypeDiscoveryStatus.Found)
+            {
+                // Nothing usable under this id — clean up rather than leave a lib/ with no manifest,
+                // the same "nothing installed" outcome any other failed install leaves behind.
+                Directory.Delete(libraryDir, recursive: true);
+                throw new InvalidOperationException(discovery.Status == FactoryTypeDiscoveryStatus.Ambiguous
+                    ? $"'{id}' has more than one DbProviderFactory — pass factoryType explicitly."
+                    : $"Could not find a DbProviderFactory in '{id}'. Pass factoryType explicitly.");
+            }
+
+            factoryType = discovery.FactoryType;
+        }
+
+        var manifest = new LibraryManifest(id, factoryType!, packages);
         manifest.Write(LibraryPaths.ManifestPath(libraryDir));
         return manifest;
     }

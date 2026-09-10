@@ -63,6 +63,11 @@ public sealed class LibrariesController(
     /// base for exactly this (phase 120): <c>LibraryInstaller</c> shells out to <c>dotnet publish</c>,
     /// which every non-container deployment already has (the tool itself needs the SDK), so there is no
     /// probe and no "pending" state, just a request that holds until the restore finishes.
+    /// <para>
+    /// <c>factoryType</c> may be null here: neither an explicit value nor a <see cref="KnownLibraries"/>
+    /// guess is required up front any more — phase 122's reflection-assist gets a chance to find one
+    /// in the restored closure before <see cref="LibraryInstaller.InstallAsync"/> gives up.
+    /// </para>
     /// </summary>
     [Authorize(Policies.Admin)]
     [HttpPost("libraries")]
@@ -72,13 +77,6 @@ public sealed class LibrariesController(
             return BadRequest(new { error = "packageId and version are required." });
 
         var factoryType = body.FactoryType ?? KnownLibraries.TryGet(body.PackageId);
-        if (factoryType is null)
-        {
-            return BadRequest(new
-            {
-                error = $"'{body.PackageId}' has no known DbProviderFactory type. Pass factoryType explicitly.",
-            });
-        }
 
         try
         {

@@ -33,7 +33,13 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-09 (latest): 123 is done and removed — `dbdatasync tool install`/`tool uninstall`
+Updated 2026-09-09 (latest): 122 is done and removed — a non-catalog `config library install`/`POST
+/api/libraries` no longer requires `--factory-type`/`factoryType` up front: after the package restores,
+`FactoryTypeReflector` scans the closure (inspection-only, via `MetadataLoadContext`) for a single public
+`DbProviderFactory` subclass and uses it if found, only requiring one explicitly when the scan is
+ambiguous or finds nothing. Independent of 121; nothing else changes as a result.
+
+Updated 2026-09-09 (earlier): 123 is done and removed — `dbdatasync tool install`/`tool uninstall`
 wire a `dotnet tool install --tool-path` copy of the CLI into the system `PATH` (a `/usr/local/bin`
 symlink on Linux, an `/etc/paths.d` entry on macOS, the Machine `PATH` on Windows), and
 `service install` now warns (or, Linux with the hardened default root, hard-refuses) when its own
@@ -47,8 +53,8 @@ now shipped. The container's default image moved to the .NET SDK base (`LibraryI
 /api/drivers/from-catalog` install and remove for real (both endpoints update the live in-process
 registries immediately, not just on disk), and a real server-side restart-required flag replaced the
 Configuration screen's old client-only one. **121** (a slim runtime-only image) and **122**
-(`factoryType` reflection-assist) are the two follow-ons this arc always deferred; nothing currently
-depends on either landing.
+(`factoryType` reflection-assist, done — see above) were the two follow-ons this arc always deferred;
+nothing currently depends on 121 landing.
 
 Updated 2026-09-09 (earlier): 119 is done and removed — `GET
 /api/libraries/search` proxies the public NuGet index (a new `DbDataSync:NuGetSearchEnabled` key
@@ -75,7 +81,7 @@ They are internally sequential (116 → 120) and must be built in order; **116**
 `library` rename plus the descriptor's `library:` reference) is the gate for the rest. The arc is
 independent of the 034/035/038 queue above and of the phase-109g–109i dependency-removal series —
 relative priority against those is an open call. **121** and **122** are follow-ons, deferred until
-116–120 are in production.
+116–120 are in production. (122 is now also done — see above.)
 
 Updated 2026-09-04 (latest of all): 105 is done and removed — the Overview → Provisioning tab (retitled
 from "Target provisioning") now aggregates every table mapping's plan, grouped by connection and
