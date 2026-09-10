@@ -738,6 +738,11 @@ export interface LibrarySummary {
   usedBy: string[]
   /** Whether this id matches a bundled `KnownLibraries` entry. */
   curated: boolean
+  /** Phase 121: true when this library was written with no SDK available to restore it (the
+   * runtime-only image) and no in-image catalog cache hit for it — `config library sync` on a host
+   * with the SDK finishes it. Distinct from `resolves` being false, which also covers a library whose
+   * files are just broken. */
+  pendingRestore: boolean
 }
 
 /** One bundled, vetted library — `GET /api/known-libraries` (phase 117/118), the "available to add"

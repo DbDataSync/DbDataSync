@@ -59,14 +59,18 @@ public sealed class LibrariesController(
             .ToList());
 
     /// <summary>
-    /// Installs a library — synchronously, in-process. The container's default image moved to the SDK
-    /// base for exactly this (phase 120): <c>LibraryInstaller</c> shells out to <c>dotnet publish</c>,
-    /// which every non-container deployment already has (the tool itself needs the SDK), so there is no
-    /// probe and no "pending" state, just a request that holds until the restore finishes.
+    /// Installs a library — synchronously, in-process. The container's default (SDK-based, phase 120)
+    /// image restores it for real via <c>dotnet publish</c>. Phase 121's runtime-only image has no SDK:
+    /// there, <see cref="LibraryInstaller.InstallOrDeferAsync"/> instead copies a catalog id at its
+    /// pinned version from the in-image cache, or — for anything else — writes the manifest only and
+    /// leaves the library <c>PendingRestore</c> (see <see cref="LibrariesService.List"/>) until
+    /// <c>config library sync</c> runs somewhere with an SDK. Either way this call still returns as
+    /// soon as it can — there is no separate "pending" polling state to ask about.
     /// <para>
     /// <c>factoryType</c> may be null here: neither an explicit value nor a <see cref="KnownLibraries"/>
     /// guess is required up front any more — phase 122's reflection-assist gets a chance to find one
-    /// in the restored closure before <see cref="LibraryInstaller.InstallAsync"/> gives up.
+    /// in the restored closure before this gives up (only reachable on the SDK path; the no-SDK paths
+    /// require <c>factoryType</c> to already be known, since there is no restore to scan).
     /// </para>
     /// </summary>
     [Authorize(Policies.Admin)]
@@ -80,15 +84,15 @@ public sealed class LibrariesController(
 
         try
         {
-            var manifest = await LibraryInstaller.InstallAsync(
+            var result = await LibraryInstaller.InstallOrDeferAsync(
                 apiOptions.RepoRoot, body.PackageId, [new PackageRef(body.PackageId, body.Version)],
-                factoryType, body.Source);
+                factoryType, nugetSource: body.Source);
             // So GET /api/libraries reflects this immediately — the driver/state-store side of "load
             // once at startup" still needs a restart, but there's no reason the admin screen's own
             // listing has to lie about what's on disk in the meantime.
-            libraryRegistry.RegisterInstalled(manifest.Id);
+            libraryRegistry.RegisterInstalled(result.Manifest.Id);
             restartRequired.Touch();
-            return Ok(manifest);
+            return Ok(result.Manifest);
         }
         catch (InvalidOperationException ex)
         {

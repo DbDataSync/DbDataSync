@@ -110,8 +110,19 @@ function LibraryRow({ library, onRemove, busy }: {
       </span>
       <span className="hint">{library.packages.map((p) => `${p.id} ${p.version}`).join(', ')}</span>
       <span className="status" data-testid={`admin-library-resolves-${library.id}`}>
-        <span className={`dot ${library.resolves ? 'dot-ok' : 'dot-bad'}`} />
-        {library.resolves ? 'resolves' : 'does not resolve'}
+        {library.pendingRestore ? (
+          <>
+            <span className="dot dot-bad" />
+            <span title={`No SDK was available to restore this — run \`dbdatasync config library sync ${library.id}\` on a host with the SDK.`}>
+              pending restore
+            </span>
+          </>
+        ) : (
+          <>
+            <span className={`dot ${library.resolves ? 'dot-ok' : 'dot-bad'}`} />
+            {library.resolves ? 'resolves' : 'does not resolve'}
+          </>
+        )}
       </span>
       <span className="hint">
         {inUse ? library.usedBy.join(', ') : <span className="faint">unused</span>}

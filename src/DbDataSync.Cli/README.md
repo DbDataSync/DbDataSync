@@ -64,3 +64,10 @@ docker compose -f docker-compose.app.yml up
 One volume at `/var/lib/dbdatasync` holds both the config repository and the state database, so a
 backup of that directory is a backup of everything that is not the image. There is no `PATH` question
 in a container — it runs an absolute `dotnet /app/...`, so `tool install` has nothing to do here.
+
+The default image ships the .NET SDK so `POST /api/libraries`/`config library install` can restore any
+library on the fly. `docker build --target runtime -t dbdatasync:<v>-runtime .` builds a smaller,
+SDK-less alternative for a deployment that only ever installs the seven bundled `KnownLibraries`
+catalog entries — those still install with no SDK and no network, copied from a cache baked into the
+image at build time; anything else is written and left "pending restore" (see the Libraries admin
+screen) until `config library sync` runs somewhere with the SDK.

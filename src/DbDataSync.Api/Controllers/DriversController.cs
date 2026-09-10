@@ -79,9 +79,10 @@ public sealed class DriversController(
         if (!libraryRegistry.Installed.ContainsKey(entry.BoundLibraryId))
         {
             var catalogLibrary = KnownLibraries.TryGetById(entry.BoundLibraryId)!;
+            LibraryInstaller.LibraryInstallResult result;
             try
             {
-                await LibraryInstaller.InstallAsync(
+                result = await LibraryInstaller.InstallOrDeferAsync(
                     apiOptions.RepoRoot, entry.BoundLibraryId,
                     [new PackageRef(catalogLibrary.PackageId, body.Version)], catalogLibrary.FactoryType);
             }
@@ -91,6 +92,24 @@ public sealed class DriversController(
             }
 
             libraryRegistry.RegisterInstalled(entry.BoundLibraryId);
+
+            // On the runtime-only image (phase 121), the in-image cache only ever matches the catalog
+            // entry's own pinned version — a from-catalog request for any other version can't be
+            // satisfied here at all. The library's manifest is still written and registered (so it
+            // shows up "pending restore" on the Libraries screen, the same as a direct
+            // POST /api/libraries would leave it), but writing a driver descriptor pointing at a
+            // library that cannot resolve yet would just be a second thing to notice was broken.
+            if (result.Outcome == LibraryInstaller.LibraryInstallOutcome.PendingRestore)
+            {
+                restartRequired.Touch();
+                return BadRequest(new
+                {
+                    error = $"No SDK is available here to restore '{catalogLibrary.PackageId}' {body.Version}, and " +
+                             $"it doesn't match the in-image catalog cache's pinned version ({catalogLibrary.PinnedVersion}). " +
+                             $"'{entry.BoundLibraryId}' was written but is pending restore — pass the pinned version, " +
+                             "or run `config library sync` on a host with the SDK, then retry.",
+                });
+            }
         }
 
         Directory.CreateDirectory(driverDir);

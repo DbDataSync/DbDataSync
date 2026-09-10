@@ -23,7 +23,40 @@ RUN dotnet publish src/DbDataSync.Cli/DbDataSync.Cli.csproj \
 
 COPY --from=web /src/DbDataSync.Web/dist/ /app/wwwroot/
 
-# ── The image ──────────────────────────────────────────────────────────────────
+# Phase 121: every KnownLibraries entry, restored once at its pinned version, while this stage still
+# has both the SDK and the just-published CLI (the "internal" command exists only for this — see
+# InternalCommand.cs). Shipped into *both* final images below: it's a few megabytes for all seven
+# entries (measured, not guessed — Oracle's the largest at ~6MB), so there's no real cost to giving
+# the default (SDK) image the same no-network fast path for a catalog install that the runtime-only
+# image needs to have at all.
+RUN dotnet /app/DbDataSync.Cli.dll internal build-catalog-cache /app/library-cache
+
+# ── The runtime-only image (phase 121) ─────────────────────────────────────────
+# mcr.microsoft.com/dotnet/aspnet:10.0 — no SDK, so LibraryInstaller can never shell out to
+# `dotnet publish`. LibraryInstaller.InstallOrDeferAsync (via SdkAvailability.HasSdk) notices and
+# falls back to copying a catalog id at its pinned version from /app/library-cache above; anything
+# else is written and left "pending restore" until `config library sync` runs somewhere with an SDK —
+# see docs/install.md and the Libraries admin screen's own pending-restore state.
+#
+# This stage is deliberately NOT the last one in this file (see the final stage below) — `docker
+# build .` with no --target must keep resolving to the SDK-based image, exactly as phase 120 decided.
+# Build this one explicitly: `docker build --target runtime -t dbdatasync:<v>-runtime .`
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+
+ENV DbDataSync__RepoRoot=/var/lib/dbdatasync
+VOLUME ["/var/lib/dbdatasync"]
+
+WORKDIR /app
+COPY --from=build /app/ ./
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD ["dotnet", "/app/DbDataSync.Cli.dll", "health", "--url", "http://127.0.0.1:8080"]
+
+ENTRYPOINT ["dotnet", "/app/DbDataSync.Cli.dll", "serve", "--url", "http://0.0.0.0:8080"]
+
+# ── The default image ───────────────────────────────────────────────────────────
 # Debian, not Alpine. LibGit2Sharp, Microsoft.Data.Sqlite and DuckDB.NET all ship glibc natives, and
 # a musl base finds that out as a DllNotFoundException at run time — the worst place to learn it.
 #
@@ -32,8 +65,14 @@ COPY --from=web /src/DbDataSync.Web/dist/ /app/wwwroot/
 # what produces the flat lib/ with native assets and a .deps.json (phase 109c). Every non-container
 # deployment already has the SDK (`dbdatasync` is a `dotnet tool`, which requires it); the container
 # was the only place a web-triggered install could not run `dotnet publish` at all. Bigger
-# (~250MB → ~750MB uncompressed base) — accepted for now; phase 121 adds a slim runtime-only image
-# with a pre-built catalog cache for a shop that needs one back.
+# (~250MB → ~750MB uncompressed base) — accepted; the `runtime` stage above is the alternative for a
+# shop that only ever installs catalog drivers and wants the smaller, SDK-less footprint back.
+#
+# This is the true last stage in the file on purpose: `docker build .` / `docker compose -f
+# docker-compose.app.yml build` with no --target picks whichever stage is positionally last, and
+# phase 120 already decided the SDK image stays the default — moving it earlier and leaving `runtime`
+# last would silently flip that default the next time someone edits this file without noticing the
+# ordering was load-bearing.
 FROM mcr.microsoft.com/dotnet/sdk:10.0
 
 # One mount is a complete deployment: the config repository and the state database live together, so

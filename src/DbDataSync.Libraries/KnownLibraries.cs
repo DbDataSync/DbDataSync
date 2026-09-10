@@ -14,8 +14,15 @@ namespace DbDataSync.Libraries;
 /// <param name="Vetted">Always <c>true</c> for a bundled entry — the field exists so a caller (the web
 /// UI, phase 118) can render "vetted" vs. "you found this" without special-casing every bundled
 /// entry as a separate case.</param>
+/// <param name="PinnedVersion">The exact version phase 121's <c>internal build-catalog-cache</c>
+/// restores into the runtime-only image's in-image cache, and the only version
+/// <see cref="LibraryInstaller.InstallOrDeferAsync"/> can serve from that cache with no SDK present.
+/// An operator asking for a different version of a curated package on that image still needs an SDK
+/// somewhere to satisfy it (<c>config library sync</c>) — the cache is a fast path for the common
+/// case, not a second source of truth for "whatever version someone wants."</param>
 public sealed record LibraryCatalogEntry(
-    string Id, string PackageId, string FactoryType, string DisplayName, string Description, bool Vetted = true);
+    string Id, string PackageId, string FactoryType, string DisplayName, string Description,
+    string PinnedVersion, bool Vetted = true);
 
 /// <summary>
 /// The curated, bundled set of libraries DbDataSync knows how to identify by a short id or a package
@@ -30,25 +37,32 @@ public static class KnownLibraries
     [
         new(
             "mysql-connector", "MySqlConnector", "MySqlConnector.MySqlConnectorFactory, MySqlConnector",
-            "MySQL / MariaDB (MySqlConnector)", "The MySqlConnector ADO.NET provider for MySQL and MariaDB."),
+            "MySQL / MariaDB (MySqlConnector)", "The MySqlConnector ADO.NET provider for MySQL and MariaDB.",
+            PinnedVersion: "2.4.0"),
         new(
             "microsoft-data-sqlclient", "Microsoft.Data.SqlClient", "Microsoft.Data.SqlClient.SqlClientFactory, Microsoft.Data.SqlClient",
-            "SQL Server (Microsoft.Data.SqlClient)", "Microsoft's own ADO.NET provider for SQL Server and Azure SQL."),
+            "SQL Server (Microsoft.Data.SqlClient)", "Microsoft's own ADO.NET provider for SQL Server and Azure SQL.",
+            PinnedVersion: "7.0.2"),
         new(
             "npgsql", "Npgsql", "Npgsql.NpgsqlFactory, Npgsql",
-            "PostgreSQL (Npgsql)", "The Npgsql ADO.NET provider for PostgreSQL."),
+            "PostgreSQL (Npgsql)", "The Npgsql ADO.NET provider for PostgreSQL.",
+            PinnedVersion: "9.0.3"),
         new(
             "microsoft-data-sqlite", "Microsoft.Data.Sqlite", "Microsoft.Data.Sqlite.SqliteFactory, Microsoft.Data.Sqlite",
-            "SQLite (Microsoft.Data.Sqlite)", "Microsoft's ADO.NET provider for SQLite."),
+            "SQLite (Microsoft.Data.Sqlite)", "Microsoft's ADO.NET provider for SQLite.",
+            PinnedVersion: "10.0.11"),
         new(
             "oracle-managed-data-access", "Oracle.ManagedDataAccess.Core", "Oracle.ManagedDataAccess.Client.OracleClientFactory, Oracle.ManagedDataAccess",
-            "Oracle (Oracle.ManagedDataAccess.Core)", "Oracle's own managed ADO.NET provider."),
+            "Oracle (Oracle.ManagedDataAccess.Core)", "Oracle's own managed ADO.NET provider.",
+            PinnedVersion: "23.9.1"),
         new(
             "system-data-odbc", "System.Data.Odbc", "System.Data.Odbc.OdbcFactory, System.Data.Odbc",
-            "ODBC (System.Data.Odbc)", "Generic access to any engine through an installed ODBC driver."),
+            "ODBC (System.Data.Odbc)", "Generic access to any engine through an installed ODBC driver.",
+            PinnedVersion: "10.0.0"),
         new(
             "firebird-client", "FirebirdSql.Data.FirebirdClient", "FirebirdSql.Data.FirebirdClient.FirebirdClientFactory, FirebirdSql.Data.FirebirdClient",
-            "Firebird (FirebirdSql.Data.FirebirdClient)", "The community ADO.NET provider for Firebird."),
+            "Firebird (FirebirdSql.Data.FirebirdClient)", "The community ADO.NET provider for Firebird.",
+            PinnedVersion: "10.3.1"),
     ];
 
     /// <summary>Null when the package isn't in the starter table — the caller (the CLI) then requires

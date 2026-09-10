@@ -90,9 +90,25 @@ public static class LibraryCommand
 
         try
         {
-            var manifest = await LibraryInstaller.InstallAsync(repoRoot, id, packages, factoryType, source);
-            Console.WriteLine($"Installed library '{manifest.Id}' ({string.Join(", ", packages.Select(p => $"{p.Id} {p.Version}"))}).");
-            Console.WriteLine($"Factory: {manifest.FactoryType}");
+            var result = await LibraryInstaller.InstallOrDeferAsync(repoRoot, id, packages, factoryType, nugetSource: source);
+            var manifest = result.Manifest;
+            var packageList = string.Join(", ", packages.Select(p => $"{p.Id} {p.Version}"));
+            switch (result.Outcome)
+            {
+                case LibraryInstaller.LibraryInstallOutcome.InstalledFromCache:
+                    Console.WriteLine($"Installed library '{manifest.Id}' ({packageList}) from the in-image catalog cache — no SDK, no network.");
+                    Console.WriteLine($"Factory: {manifest.FactoryType}");
+                    break;
+                case LibraryInstaller.LibraryInstallOutcome.PendingRestore:
+                    Console.WriteLine($"Wrote library '{manifest.Id}' ({packageList}), but there is no SDK here to restore it.");
+                    Console.WriteLine($"Factory: {manifest.FactoryType}");
+                    Console.WriteLine($"Run `dbdatasync config library sync {manifest.Id}` on a host with the SDK to finish it.");
+                    break;
+                default:
+                    Console.WriteLine($"Installed library '{manifest.Id}' ({packageList}).");
+                    Console.WriteLine($"Factory: {manifest.FactoryType}");
+                    break;
+            }
             return 0;
         }
         catch (InvalidOperationException ex)
@@ -139,9 +155,12 @@ public static class LibraryCommand
 
         foreach (var manifest in registry.Installed.Values.OrderBy(m => m.Id, StringComparer.Ordinal))
         {
-            var resolves = TryResolves(registry, manifest.Id);
             var packages = string.Join(", ", manifest.Packages.Select(p => $"{p.Id} {p.Version}"));
-            Console.WriteLine($"{manifest.Id}  [{packages}]  factory: {manifest.FactoryType}  {(resolves ? "resolves" : "DOES NOT RESOLVE")}");
+            var libDir = LibraryPaths.LibDir(LibraryPaths.LibraryDir(repoRoot, manifest.Id));
+            var status = !Directory.Exists(libDir)
+                ? "PENDING RESTORE — run `dbdatasync config library sync " + manifest.Id + "`"
+                : TryResolves(registry, manifest.Id) ? "resolves" : "DOES NOT RESOLVE";
+            Console.WriteLine($"{manifest.Id}  [{packages}]  factory: {manifest.FactoryType}  {status}");
         }
 
         return 0;

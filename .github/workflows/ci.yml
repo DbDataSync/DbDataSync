@@ -252,6 +252,29 @@ jobs:
           echo "the container never became healthy"
           docker logs dbdatasync-ci
           exit 1
+      # Phase 121: the slim alternative to the default (SDK-based) image above. Built with the same
+      # single `docker build` this repo's own Dockerfile already defines — --target just picks a
+      # different one of its stages, so there is no second Dockerfile to keep in sync.
+      - name: Build the runtime-only image
+        run: docker build --target runtime -t dbdatasync:ci-runtime .
+      - name: The runtime-only image has no SDK
+        run: |
+          if docker run --rm --entrypoint dotnet dbdatasync:ci-runtime --list-sdks | grep -q .; then
+            echo "the runtime-only image still has an SDK installed"
+            exit 1
+          fi
+      - name: Start the runtime-only image and check it answers
+        run: |
+          docker run -d --name dbdatasync-ci-runtime -p 18082:8080 dbdatasync:ci-runtime
+          for i in $(seq 1 30); do
+            if docker exec dbdatasync-ci-runtime dotnet /app/DbDataSync.Cli.dll health --url http://127.0.0.1:8080; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the runtime-only container never became healthy"
+          docker logs dbdatasync-ci-runtime
+          exit 1
       - name: Upload the tool package
         # ~150MB every time: it's a framework-dependent, RID-agnostic package (see the csproj comment)
         # that bundles DuckDB/LibGit2Sharp/SQLite/SqlClient's native binaries for every platform in one

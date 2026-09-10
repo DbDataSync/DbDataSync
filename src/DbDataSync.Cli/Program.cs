@@ -18,6 +18,7 @@ return command switch
     "invite" => InviteCommand.Run(rest),
     "config" => await ConfigCommand.RunAsync(rest),
     "setup" => await SetupCommand.RunAsync(rest, new ConsolePromptIo()),
+    "internal" => await InternalCommand.RunAsync(rest),
     "version" => Version(),
     _ => Unknown(command),
 };

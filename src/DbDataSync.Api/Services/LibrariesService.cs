@@ -11,9 +11,14 @@ public sealed record PackageRefSummary(string Id, string Version);
 /// whose <c>library:</c> names this id. A compiled plugin never appears here — its package restores
 /// privately, not through a shared library.</param>
 /// <param name="Curated">Whether this id matches a bundled <see cref="KnownLibraries"/> entry.</param>
+/// <param name="PendingRestore">Phase 121: true when <c>library.json</c> exists but <c>lib/</c> does
+/// not — an install that ran with no SDK available and no in-image catalog cache hit for it. Distinct
+/// from <paramref name="Resolves"/> being false: that also covers a library whose <c>lib/</c> is
+/// present but broken, which <c>config library sync</c> fixes the same way, but which isn't "waiting
+/// on an SDK" the way this is.</param>
 public sealed record LibrarySummary(
     string Id, IReadOnlyList<PackageRefSummary> Packages, string FactoryType, bool Resolves,
-    IReadOnlyList<string> UsedBy, bool Curated);
+    IReadOnlyList<string> UsedBy, bool Curated, bool PendingRestore);
 
 public sealed class LibrariesService(LibraryRegistry libraryRegistry, ApiOptions apiOptions)
 {
@@ -32,7 +37,8 @@ public sealed class LibrariesService(LibraryRegistry libraryRegistry, ApiOptions
                 m.FactoryType,
                 Resolves(m.Id),
                 usedBy.GetValueOrDefault(m.Id, []),
-                KnownLibraries.TryGetById(m.Id) is not null))
+                KnownLibraries.TryGetById(m.Id) is not null,
+                !Directory.Exists(LibraryPaths.LibDir(LibraryPaths.LibraryDir(apiOptions.RepoRoot, m.Id)))))
             .ToList();
     }
 
