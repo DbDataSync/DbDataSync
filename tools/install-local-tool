@@ -1,0 +1,79 @@
+#!/usr/bin/env sh
+# Packs this repo's own DbDataSync.Cli and installs/updates it as a local dotnet tool — the fast-iteration
+# loop for working on the CLI itself. See docs/install.md for a real machine-wide install; this is the
+# dev-loop shortcut, not that.
+#
+# Usage:
+#   tools/install-local-tool [--global|--machine-wide|--tool-path <dir>] [--no-spa] [--uninstall]
+#
+#   --global        (default) installs on this developer's own PATH — `dotnet tool update --global`,
+#                   no elevation needed. Confirm this is what you expect: it is NOT an isolated
+#                   install, it replaces whatever `dbdatasync` this account's PATH already resolves to.
+#   --machine-wide  `dotnet tool update --tool-path <DefaultToolDir>` (elevated), then runs
+#                   `<DefaultToolDir>/dbdatasync tool install` to (re)link PATH — the real thing phase
+#                   123 built, exercised against a local build instead of a published NuGet package.
+#   --tool-path DIR passes DIR straight through to `--tool-path`, no PATH wiring done for you.
+#   --no-spa        skips the SPA build (`-p:SkipWebBuild=true`) — faster, but `serve` has no web
+#                   console until a build without this flag runs at least once.
+#   --uninstall     reverses whichever target the same flags select.
+#
+# Packs every run, with no staleness check of its own — see tools/dev-harness's own comment for why:
+# MSBuild already decides what needs rebuilding, including changes in referenced projects, correctly.
+# The pack version is a timestamp, which is what makes `dotnet tool update` see each run as new.
+set -e
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(dirname "$script_dir")
+project="$repo_root/src/DbDataSync.Cli/DbDataSync.Cli.csproj"
+feed="$repo_root/bin/local-tool-feed"
+
+# Mirrors CliOptions.DefaultToolDir's own OperatingSystem.Is*() branching — this script only ever runs
+# on Linux or macOS (see install-local-tool.cmd for Windows).
+if [ "$(uname)" = "Darwin" ]; then
+    default_tool_dir="/usr/local/dbdatasync"
+else
+    default_tool_dir="/opt/dbdatasync"
+fi
+
+target=global
+tool_path=""
+pack_args=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --global) target=global; shift ;;
+        --machine-wide) target=machine-wide; tool_path="$default_tool_dir"; shift ;;
+        --tool-path) target=tool-path; tool_path="$2"; shift 2 ;;
+        --no-spa) pack_args="-p:SkipWebBuild=true"; shift ;;
+        --uninstall) uninstall=1; shift ;;
+        *) echo "Unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+
+if [ -n "$uninstall" ]; then
+    case "$target" in
+        global) exec dotnet tool uninstall --global DbDataSync ;;
+        machine-wide)
+            "$default_tool_dir/dbdatasync" tool uninstall
+            exec sudo dotnet tool uninstall --tool-path "$default_tool_dir" DbDataSync
+            ;;
+        tool-path) exec dotnet tool uninstall --tool-path "$tool_path" DbDataSync ;;
+    esac
+fi
+
+version="0.1.0-local.$(date +%Y%m%d%H%M%S)"
+echo "Packing DbDataSync.Cli $version..." >&2
+dotnet pack "$project" -c Release -o "$feed" -p:Version="$version" $pack_args >&2
+
+case "$target" in
+    global)
+        dotnet tool update --global --add-source "$feed" --version "$version" DbDataSync
+        ;;
+    machine-wide)
+        sudo dotnet tool update --tool-path "$default_tool_dir" --add-source "$feed" --version "$version" DbDataSync
+        sudo "$default_tool_dir/dbdatasync" tool install
+        ;;
+    tool-path)
+        dotnet tool update --tool-path "$tool_path" --add-source "$feed" --version "$version" DbDataSync
+        ;;
+esac

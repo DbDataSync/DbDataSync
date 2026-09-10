@@ -76,11 +76,15 @@ internal static class SystemdService
     /// </summary>
     private const string ManagedStateDirectoryRoot = "/var/lib/dbdatasync";
 
-    internal static int Install(string[] args, ISystemdEnvironment? environment = null)
+    /// <param name="executableOverride">Only for <c>SystemdServiceTests</c> — a real run always takes
+    /// <see cref="Environment.ProcessPath"/>, which cannot be pointed at an arbitrary path to prove
+    /// the user-profile/hardened-unit refusal below without actually installing this tool under
+    /// <c>/home</c> first.</param>
+    internal static int Install(string[] args, ISystemdEnvironment? environment = null, string? executableOverride = null)
     {
         var env = environment ?? new RealSystemdEnvironment();
 
-        var executable = Environment.ProcessPath;
+        var executable = executableOverride ?? Environment.ProcessPath;
         if (executable is null)
         {
             Console.Error.WriteLine("Could not determine this tool's own executable path.");
@@ -90,6 +94,33 @@ internal static class SystemdService
         var root = Path.GetFullPath(CliOptions.Read(args, "--repo") ?? CliOptions.DefaultRoot);
         var url = CliOptions.Read(args, "--url") ?? "http://localhost:5080";
         var user = CliOptions.Read(args, "--user") ?? "dbdatasync";
+        var isManagedRoot = string.Equals(root, ManagedStateDirectoryRoot, StringComparison.Ordinal);
+
+        // A hardened unit's own ProtectHome=yes (below) hides a user-profile ExecStart from the
+        // service — it would install cleanly and fail on first start, the exact bug phase 123 exists
+        // to catch before an operator hits it. A non-hardened unit still gets a warning: nothing stops
+        // it starting today, but the same profile-cleanup/re-registration risk applies.
+        if (CliOptions.IsUnderUserProfile(executable))
+        {
+            if (isManagedRoot)
+            {
+                Console.Error.WriteLine(
+                    $"'{executable}' is installed in a user profile, and this unit hardens with " +
+                    "ProtectHome=yes (the default --repo hides user-profile paths from the service) — " +
+                    "it would install but fail to start. Install dbdatasync machine-wide first:");
+                Console.Error.WriteLine($"    sudo dotnet tool install --tool-path {CliOptions.DefaultToolDir} DbDataSync");
+                Console.Error.WriteLine($"    sudo {CliOptions.DefaultToolDir}/dbdatasync tool install");
+                return 1;
+            }
+
+            Console.WriteLine(
+                $"Warning: '{executable}' is installed in a user profile — a service pointing here " +
+                "breaks if that profile is removed, or you re-register from another account. Install " +
+                "machine-wide first:");
+            Console.WriteLine($"    sudo dotnet tool install --tool-path {CliOptions.DefaultToolDir} DbDataSync");
+            Console.WriteLine($"    sudo {CliOptions.DefaultToolDir}/dbdatasync tool install");
+            Console.WriteLine();
+        }
 
         if (!env.UserExists(user))
         {
@@ -105,7 +136,7 @@ internal static class SystemdService
         try
         {
             Directory.CreateDirectory(root);
-            env.WriteUnitFile(UnitPath, RenderUnit(executable, root, url, user));
+            env.WriteUnitFile(UnitPath, RenderUnit(executable, root, url, user, ResolveDotnetRoot()));
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
@@ -142,6 +173,7 @@ internal static class SystemdService
         // output rather than it scrolling by during `install`.
         Console.WriteLine();
         Console.WriteLine($"Run `sudo systemctl start {UnitName}` to start it now.");
+        Console.WriteLine("Next: `dbdatasync config check`.");
         return 0;
     }
 
@@ -166,7 +198,14 @@ internal static class SystemdService
     /// the host has actually started, which is what lets <c>systemctl start</c> block until the
     /// process is really serving rather than merely existing.
     /// </summary>
-    internal static string RenderUnit(string executable, string root, string url, string user)
+    /// <param name="dotnetRoot">
+    /// Set as <c>DOTNET_ROOT</c> in the unit's own environment when not null (phase 123) — fixes the
+    /// case where <c>dotnet</c> was installed by <c>dotnet-install.sh</c> into a user's <c>~/.dotnet</c>
+    /// and so is invisible to a <c>nologin</c> service account's own <c>PATH</c>. Scoped to this one
+    /// unit; no machine-global side effect. Null omits the line entirely rather than emitting a wrong
+    /// one — see <see cref="ResolveDotnetRoot"/>.
+    /// </param>
+    internal static string RenderUnit(string executable, string root, string url, string user, string? dotnetRoot = null)
     {
         var execStart = $"{QuoteForSystemd(executable)} serve --repo {QuoteForSystemd(root)} --url {url}";
         var isManagedRoot = string.Equals(root, ManagedStateDirectoryRoot, StringComparison.Ordinal);
@@ -186,6 +225,8 @@ internal static class SystemdService
                ReadWritePaths={root}
                """;
 
+        var dotnetRootLine = dotnetRoot is null ? "" : $"Environment=DOTNET_ROOT={dotnetRoot}\n";
+
         return $"""
             [Unit]
             Description=DbDataSync — cross-database replication
@@ -194,7 +235,7 @@ internal static class SystemdService
 
             [Service]
             Type=notify
-            ExecStart={execStart}
+            {dotnetRootLine}ExecStart={execStart}
             User={user}
             Group={user}
             WorkingDirectory={root}
@@ -209,6 +250,32 @@ internal static class SystemdService
     }
 
     private static string QuoteForSystemd(string value) => $"\"{value}\"";
+
+    /// <summary>
+    /// <c>DOTNET_ROOT</c> from the environment first — an operator who already set it clearly meant
+    /// it. Otherwise, walked up from <see cref="System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory"/>
+    /// (<c>.../shared/Microsoft.NETCore.App/&lt;ver&gt;/</c>) three levels to the dotnet root every
+    /// layout this ships on shares (an apt/package-manager install, a tarball, <c>dotnet-install.sh</c>).
+    /// Verified against an actual <c>dotnet</c>/<c>dotnet.exe</c> at that root before trusting it —
+    /// null (omitting the line) rather than a confidently wrong path if the walk-up ever doesn't land
+    /// where expected.
+    /// </summary>
+    internal static string? ResolveDotnetRoot()
+    {
+        var fromEnvironment = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+        if (!string.IsNullOrEmpty(fromEnvironment))
+            return fromEnvironment;
+
+        var dir = new DirectoryInfo(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory());
+        for (var i = 0; i < 3 && dir?.Parent is not null; i++)
+            dir = dir.Parent;
+
+        if (dir is null)
+            return null;
+
+        var dotnetExecutable = Path.Combine(dir.FullName, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        return File.Exists(dotnetExecutable) ? dir.FullName : null;
+    }
 
     /// <summary>The Linux counterpart of the Windows path's <c>ERROR_ACCESS_DENIED</c> (5) → sentence
     /// — writing under <c>/etc/systemd/system</c>, creating a system user, and <c>daemon-reload</c>

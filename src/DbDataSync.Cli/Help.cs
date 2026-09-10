@@ -21,6 +21,12 @@ public static class Help
                   On Linux: registers a systemd unit (default user: dbdatasync). Needs root
                   (`sudo`); enables but does not start it — run `systemctl start dbdatasync` next.
 
+              dbdatasync tool install|uninstall [--dir <path>]
+                  Puts a `dotnet tool install --tool-path <dir>` copy of this CLI on the machine's
+                  PATH — a /usr/local/bin symlink (Linux/other Unix), an /etc/paths.d entry (macOS),
+                  or the Machine PATH (Windows). Needs root/an elevated prompt. Defaults --dir to
+                  this executable's own directory; see docs/install.md for the full sequence.
+
               dbdatasync invite [--role Admin|Viewer] [--repo <path>] [--url <url>]
                   Prints a fresh single-use invitation URL. For when the first-run one has scrolled
                   away, or the process is a service with nowhere to print it.

@@ -77,6 +77,21 @@ public static class ServiceCommand
         var url = CliOptions.Read(args, "--url") ?? "http://localhost:5080";
         var account = CliOptions.Read(args, "--account");
 
+        // A warning, not a refusal — sc.exe has no equivalent of systemd's ProtectHome, so a
+        // user-profile executable does not fail the service the way it can on Linux (SystemdService's
+        // own hard error). It still breaks the moment that profile is cleaned up or the service is
+        // re-registered from another account.
+        if (CliOptions.IsUnderUserProfile(executable))
+        {
+            Console.WriteLine(
+                $"Warning: '{executable}' is installed in a user profile — a service pointing here " +
+                "breaks if that profile is removed, or you re-register from another account. Install " +
+                "machine-wide first:");
+            Console.WriteLine($"    dotnet tool install --tool-path \"{CliOptions.DefaultToolDir}\" DbDataSync");
+            Console.WriteLine($"    \"{CliOptions.DefaultToolDir}\\dbdatasync.exe\" tool install");
+            Console.WriteLine();
+        }
+
         // Quoted as one binPath value, which is what sc.exe takes — and the space after `binPath=` is
         // load-bearing in sc.exe's own argument syntax, which is a thing it will not tell you.
         var binPath = $"\"{executable}\" serve --repo \"{root}\" --url {url}";
@@ -104,7 +119,10 @@ public static class ServiceCommand
 
         GrantDataDirectoryAccess(root, account);
 
-        return Sc([.. arguments]);
+        var exitCode = Sc([.. arguments]);
+        if (exitCode == 0)
+            Console.WriteLine("Next: `dbdatasync config check`.");
+        return exitCode;
     }
 
     /// <summary>

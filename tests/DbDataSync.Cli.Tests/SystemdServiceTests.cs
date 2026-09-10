@@ -50,6 +50,70 @@ public sealed class SystemdServiceTests : IDisposable
     }
 
     [Fact]
+    public void RenderUnit_WithADotnetRoot_EmitsItAsAScopedEnvironmentLine()
+    {
+        var unit = SystemdService.RenderUnit(
+            "/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", "/usr/lib/dotnet");
+
+        Assert.Contains("Environment=DOTNET_ROOT=/usr/lib/dotnet", unit);
+    }
+
+    [Fact]
+    public void RenderUnit_WithNoDotnetRoot_OmitsTheLineEntirely()
+    {
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync");
+
+        Assert.DoesNotContain("DOTNET_ROOT", unit);
+    }
+
+    [Fact]
+    public void ResolveDotnetRoot_OnThisRealSandbox_FindsARealDotnetExecutable()
+    {
+        // Read-only and side-effect-free — proves the RuntimeEnvironment-walk-up half of phase 123's
+        // "fall back to omitting the line rather than emitting a wrong one" promise actually lands on
+        // a directory that really does contain dotnet, on the one environment this can be checked for
+        // real (whatever CI/dev box happens to run this).
+        var root = SystemdService.ResolveDotnetRoot();
+
+        Assert.NotNull(root);
+        Assert.True(
+            File.Exists(Path.Combine(root!, "dotnet")) || File.Exists(Path.Combine(root!, "dotnet.exe")));
+    }
+
+    [Fact]
+    public void Install_ExecutableUnderHomeWithTheHardenedDefaultRoot_RefusesRatherThanRegisteringABrokenUnit()
+    {
+        var env = new FakeSystemdEnvironment();
+        var homeExecutable = Path.Combine(
+            Environment.GetEnvironmentVariable("HOME") ?? "/home/someone", "dbdatasync");
+
+        var (exitCode, output) = RunCaptured(() => SystemdService.Install(
+            ["--user", "testsvc"], env, executableOverride: homeExecutable));
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("ProtectHome=yes", output);
+        Assert.Contains("tool install", output);
+        Assert.Null(env.WrittenUnit);
+        Assert.Empty(env.CreatedUsers);
+    }
+
+    [Fact]
+    public void Install_ExecutableUnderHomeWithANonHardenedRoot_WarnsButStillRegisters()
+    {
+        var env = new FakeSystemdEnvironment();
+        var homeExecutable = Path.Combine(
+            Environment.GetEnvironmentVariable("HOME") ?? "/home/someone", "dbdatasync");
+
+        var (exitCode, output) = RunCaptured(() => SystemdService.Install(
+            ["--repo", _root, "--user", "testsvc"], env, executableOverride: homeExecutable));
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Warning:", output);
+        Assert.Contains("user profile", output);
+        Assert.NotNull(env.WrittenUnit);
+    }
+
+    [Fact]
     public void Install_UserDoesNotExist_CreatesItThenWritesEnablesAndReloads()
     {
         var env = new FakeSystemdEnvironment();

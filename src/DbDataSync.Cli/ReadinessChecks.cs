@@ -74,6 +74,7 @@ internal static class ReadinessChecks
         new RepoCheck(),
         new StateStoreCheck(),
         new LibrariesAndDriversCheck(),
+        new RuntimeDiscoverabilityCheck(),
         new AuthCheck(),
         new CertificateCheck(),
         new BindingCheck(),
@@ -269,6 +270,58 @@ internal sealed class LibrariesAndDriversCheck : IReadinessCheck
         return Task.FromResult(problems.Count == 0
             ? new CheckResult("Libraries / drivers", CheckStatus.Ok, "Every connection's driver resolves.")
             : new CheckResult("Libraries / drivers", CheckStatus.Fail, string.Join(" ", problems)));
+    }
+}
+
+/// <summary>
+/// Whether the .NET runtime is discoverable *machine-wide*, not just by this process — which already
+/// found it, so checking that would prove nothing. What breaks silently otherwise (phase 123): a
+/// systemd unit's <c>nologin</c> service account has no login shell to source <c>PATH</c> from, so a
+/// <c>dotnet</c> installed by <c>dotnet-install.sh</c> into an interactive user's own <c>~/.dotnet</c>
+/// is invisible to it — the service fails to start with "You must install the .NET runtime", a message
+/// that names nothing about why. A warning, not a failure — every check here is a heuristic, and a
+/// genuinely unusual layout this doesn't recognize is not proof the service would actually fail.
+/// </summary>
+internal sealed class RuntimeDiscoverabilityCheck : IReadinessCheck
+{
+    // Covers an apt/dnf/package-manager install (Debian/Ubuntu's dotnet-host puts it here; RHEL/Fedora
+    // under lib64), a tarball extracted to the conventional location, and Snap's own confined path.
+    private static readonly string[] WellKnownDotnetPaths =
+    [
+        "/usr/lib/dotnet/dotnet",
+        "/usr/lib64/dotnet/dotnet",
+        "/usr/share/dotnet/dotnet",
+        "/usr/local/share/dotnet/dotnet",
+        "/snap/bin/dotnet",
+    ];
+
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
+    {
+        if (OperatingSystem.IsWindows())
+            return Task.FromResult(new CheckResult("Runtime", CheckStatus.Ok, "The .NET runtime installs machine-wide on Windows."));
+
+        var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+        if (!string.IsNullOrEmpty(dotnetRoot))
+            return Task.FromResult(new CheckResult("Runtime", CheckStatus.Ok, $"DOTNET_ROOT={dotnetRoot}"));
+
+        // Written by the official install script and every major package manager's dotnet-host
+        // package — the one signal that doesn't depend on guessing a specific install path right.
+        const string installLocationFile = "/etc/dotnet/install_location";
+        if (File.Exists(installLocationFile))
+        {
+            return Task.FromResult(new CheckResult(
+                "Runtime", CheckStatus.Ok, $"Found '{installLocationFile}' ({File.ReadAllText(installLocationFile).Trim()})."));
+        }
+
+        var found = WellKnownDotnetPaths.FirstOrDefault(File.Exists);
+        if (found is not null)
+            return Task.FromResult(new CheckResult("Runtime", CheckStatus.Ok, $"Found '{found}'."));
+
+        return Task.FromResult(new CheckResult(
+            "Runtime", CheckStatus.Warn,
+            "Could not confirm the .NET runtime is discoverable machine-wide — a nologin service " +
+            "account's own environment may not see it.",
+            "Install .NET via your package manager, or set DOTNET_ROOT system-wide."));
     }
 }
 

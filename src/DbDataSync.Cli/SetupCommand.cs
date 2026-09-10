@@ -208,6 +208,7 @@ public static class SetupCommand
             {
                 var account = prompt.Text("Service account", "LocalSystem");
                 io.WriteLine("Run this in an elevated prompt to finish:");
+                WriteMachineWideToolInstallBlockIfNeeded(io);
                 io.WriteLine($"    dbdatasync service install --repo \"{root}\" --url {url} --account {account}");
             }
         }
@@ -217,6 +218,7 @@ public static class SetupCommand
             {
                 var user = prompt.Text("Service user", "dbdatasync");
                 io.WriteLine("Run this as root to finish:");
+                WriteMachineWideToolInstallBlockIfNeeded(io);
                 io.WriteLine($"    sudo dbdatasync service install --repo \"{root}\" --url {url} --user {user}");
             }
         }
@@ -272,6 +274,33 @@ public static class SetupCommand
             return await ServeCommand.RunAsync(["--repo", root, "--url", url]);
 
         return 0;
+    }
+
+    /// <summary>
+    /// Printed above the service-install line whenever <see cref="Environment.ProcessPath"/> is under
+    /// the user profile (phase 123) — the same warning <c>ServiceCommand</c>/<c>SystemdService</c>
+    /// print at actual install time, surfaced here first since this is where an operator decides to
+    /// register a service at all, not just where it would otherwise fail (Linux) or quietly become
+    /// fragile (Windows).
+    /// </summary>
+    private static void WriteMachineWideToolInstallBlockIfNeeded(IPromptIo io) =>
+        WriteMachineWideToolInstallBlockIfNeeded(io, CliOptions.IsUnderUserProfile(Environment.ProcessPath));
+
+    /// <param name="isUnderUserProfile">Split out from <see cref="Environment.ProcessPath"/> so
+    /// <c>SetupCommandTests</c> can drive this without needing this test process's own executable to
+    /// actually live under a user profile.</param>
+    internal static void WriteMachineWideToolInstallBlockIfNeeded(IPromptIo io, bool isUnderUserProfile)
+    {
+        if (!isUnderUserProfile)
+            return;
+
+        io.WriteLine("This tool is installed in a user profile — install it machine-wide first:");
+        io.WriteLine(OperatingSystem.IsWindows()
+            ? $"    dotnet tool install --tool-path \"{CliOptions.DefaultToolDir}\" DbDataSync"
+            : $"    sudo dotnet tool install --tool-path {CliOptions.DefaultToolDir} DbDataSync");
+        io.WriteLine(OperatingSystem.IsWindows()
+            ? $"    \"{CliOptions.DefaultToolDir}\\dbdatasync.exe\" tool install"
+            : $"    sudo {CliOptions.DefaultToolDir}/dbdatasync tool install");
     }
 
     private static async Task InstallMySqlDriverAsync(

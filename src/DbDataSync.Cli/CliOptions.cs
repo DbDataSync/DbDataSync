@@ -50,6 +50,56 @@ public static class CliOptions
                 Environment.SpecialFolderOption.Create),
             "DbDataSync");
 
+    /// <summary>
+    /// One documented, machine-wide directory per platform for the *binary* — <see cref="DefaultRoot"/>
+    /// is this phase's analog for the *data* (phase 112). `/opt`/`%ProgramFiles%` for a binary,
+    /// `/var/lib`/`%ProgramData%` for data is the idiomatic split on each platform this project targets.
+    /// Not read by <c>serve</c>/<c>service</c> — those still resolve the running executable from
+    /// <see cref="Environment.ProcessPath"/>; this is only where <c>tool install</c> (phase 123) expects
+    /// to find it by default, and what the docs point a machine-wide install at.
+    /// </summary>
+    public static string DefaultToolDir =>
+        OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "DbDataSync")
+            : OperatingSystem.IsMacOS() ? "/usr/local/dbdatasync"
+            : "/opt/dbdatasync";
+
+    /// <summary>
+    /// Whether <paramref name="path"/> sits under the current user's own profile — the wrong place
+    /// for a service or a machine-wide install to point at, because it stops working the moment that
+    /// profile is cleaned up or the tool is re-registered from a different account. Checked against
+    /// <see cref="Environment.SpecialFolder.UserProfile"/> on Windows and <c>$HOME</c> elsewhere, plus
+    /// a literal <c>/home/</c>/<c>/root</c> fallback for the case a service account's own <c>$HOME</c>
+    /// differs from the profile the tool actually lives under.
+    /// </summary>
+    public static bool IsUnderUserProfile(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        var profile = OperatingSystem.IsWindows()
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : Environment.GetEnvironmentVariable("HOME");
+
+        if (!string.IsNullOrEmpty(profile))
+        {
+            var profileFull = Path.GetFullPath(profile).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (full.StartsWith(profileFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(full, profileFull, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        if (OperatingSystem.IsWindows())
+            return false;
+
+        return full.StartsWith("/home/", StringComparison.Ordinal) || full.StartsWith("/root/", StringComparison.Ordinal)
+            || string.Equals(full, "/root", StringComparison.Ordinal);
+    }
+
     /// <summary>Reads <c>--name value</c> from an argument list, or null.</summary>
     public static string? Read(string[] args, string name)
     {

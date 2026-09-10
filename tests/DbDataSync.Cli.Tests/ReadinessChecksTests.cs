@@ -35,6 +35,20 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Equal(CheckStatus.Ok, Find(results, "Auth").Status);
     }
 
+    /// <summary>Phase 123's own "passes on the dev/CI box" requirement, against the real environment
+    /// (no faking) — this Linux sandbox has a real <c>/etc/dotnet/install_location</c>, which is
+    /// exactly the common case this check exists to recognize.</summary>
+    [Fact]
+    public async Task RuntimeDiscoverabilityCheck_PassesOnThisBox()
+    {
+        ServeCommand.Prepare(_root);
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        Assert.Equal(CheckStatus.Ok, Find(results, "Runtime").Status);
+    }
+
     [Fact]
     public async Task ConnectionNamingAnUninstalledDriver_LibrariesAndDriversCheckFails()
     {
@@ -166,6 +180,7 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Contains("Repo", names);
         Assert.Contains("State store", names);
         Assert.Contains("Libraries / drivers", names);
+        Assert.Contains("Runtime", names);
         Assert.Contains("Auth", names);
         Assert.Contains("Certificate", names);
         Assert.Contains("Binding", names);

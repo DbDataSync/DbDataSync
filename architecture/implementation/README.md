@@ -33,13 +33,13 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-09 (latest): **123** joins `todo/` — `dbdatasync tool install` / `tool uninstall`,
-which wire a `dotnet tool install --tool-path` copy of the CLI into the system `PATH` (a
-`/usr/local/bin` symlink on Linux, the Machine `PATH` on Windows), plus `service install` awareness
-of a user-profile executable (a warning, and a hard error in the hardened-systemd + home-directory
-case that would otherwise install a service that cannot start). One self-contained phase, depends on
-112/111/110; independent of everything else in `todo/`. Plan:
-`architecture/planning/done/machine-wide-dotnet-tool-install.md`.
+Updated 2026-09-09 (latest): 123 is done and removed — `dbdatasync tool install`/`tool uninstall`
+wire a `dotnet tool install --tool-path` copy of the CLI into the system `PATH` (a `/usr/local/bin`
+symlink on Linux, an `/etc/paths.d` entry on macOS, the Machine `PATH` on Windows), and
+`service install` now warns (or, Linux with the hardened default root, hard-refuses) when its own
+executable is still sitting in a user profile. New `docs/install.md`; `tools/install-local-tool` for
+CLI dev-loop iteration. Was independent of everything else in `todo/`; nothing else changes as a
+result.
 
 Updated 2026-09-09 (later than the note below): 120 is done and removed — the whole 116–120 arc is
 now shipped. The container's default image moved to the .NET SDK base (`LibraryInstaller` shells out to

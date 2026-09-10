@@ -51,6 +51,31 @@ public sealed class SetupCommandTests : IDisposable
         Assert.Contains(io.Written, line => line.Contains("FIRST-RUN.txt"));
     }
 
+    /// <summary>Split from <c>Environment.ProcessPath</c> so this doesn't need this test process's own
+    /// executable to actually live under a user profile — see
+    /// <c>SetupCommand.WriteMachineWideToolInstallBlockIfNeeded</c>'s own doc comment.</summary>
+    [Fact]
+    public void WriteMachineWideToolInstallBlockIfNeeded_UnderAUserProfile_PrintsTheTwoLineBlock()
+    {
+        var io = new ScriptedPromptIo([]);
+
+        SetupCommand.WriteMachineWideToolInstallBlockIfNeeded(io, isUnderUserProfile: true);
+
+        Assert.Contains(io.Written, line => line.Contains("user profile"));
+        Assert.Contains(io.Written, line => line.Contains("dotnet tool install --tool-path"));
+        Assert.Contains(io.Written, line => line.Contains("tool install") && line.Contains(CliOptions.DefaultToolDir));
+    }
+
+    [Fact]
+    public void WriteMachineWideToolInstallBlockIfNeeded_NotUnderAUserProfile_PrintsNothing()
+    {
+        var io = new ScriptedPromptIo([]);
+
+        SetupCommand.WriteMachineWideToolInstallBlockIfNeeded(io, isUnderUserProfile: false);
+
+        Assert.Empty(io.Written);
+    }
+
     [Fact]
     public async Task ExistingSetup_GoesStraightToTheReviewScreenAndPrintsEffectiveConfiguration()
     {
