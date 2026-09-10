@@ -353,6 +353,27 @@ public sealed class WorkQueueStore(StateDatabase database)
             return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
         });
 
+    /// <summary>Whether this mapping already has a <see cref="RunKind.ReconcileDeletes"/> item
+    /// in flight — phase 125's scheduler dedup, mapping-scoped rather than lane-scoped like
+    /// <see cref="HasOutstandingWork"/> (which cannot distinguish "some other mapping's backfill is
+    /// running" from "this mapping's own sweep already is"). A dedicated method rather than reusing
+    /// <see cref="HasOutstandingWork"/>: the scheduler needs to know about *this* mapping specifically,
+    /// and stretching that method with an optional mapping parameter would make its one existing
+    /// caller (the worker's per-lane drain loop) carry a parameter it never uses.</summary>
+    public bool HasPendingReconcile(string taskName, string mappingName) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, $"""
+                SELECT COUNT(*) FROM WorkQueue
+                WHERE TaskName = $task AND RunKind = $kind AND MappingName = $mapping AND {InFlightStatuses};
+                """);
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "kind", RunKind.ReconcileDeletes.ToString());
+            cmd.Bind(database, "mapping", mappingName);
+            return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+        });
+
     /// <summary>The <c>RunKind IN (…)</c> fragment for a lane — from <see cref="RunLanes.KindsFor"/>,
     /// which is the single definition of which kinds a lane owns. Enum names, never user input, so
     /// inlining them is safe and keeps the claim query one string.</summary>

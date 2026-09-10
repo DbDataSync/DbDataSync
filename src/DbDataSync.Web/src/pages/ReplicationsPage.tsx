@@ -105,6 +105,9 @@ export function ReplicationsPage() {
         degreeOfParallelism: 4,
         backfillDegreeOfParallelism: 4,
       },
+      // Disabled by default, same reasoning as `enabled` above — delete reconciliation (phase 125) is
+      // an opt-in an operator turns on once mappings are actually configured.
+      reconcile: { enabled: false, every: null, afterChange: { mode: 'none' }, deleteGuard: { mode: 'ratio', maxRatio: 0.5 } },
       // Set on the replication's Overview; a mapping created before they are inherits nothing and
       // has to state its own, which the editor's override toggle covers.
       endpoints: { source: null, target: null },

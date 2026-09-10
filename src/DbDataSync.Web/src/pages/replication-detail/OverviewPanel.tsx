@@ -8,6 +8,7 @@ import { EndpointsCard } from './EndpointsCard'
 import { InheritableToggle } from '../../components/InheritableToggle'
 import { ReadIntentSetting } from '../../components/ReadIntentSetting'
 import { ScheduleCard } from './ScheduleCard'
+import { ReconcileConfigCard } from './ReconcileConfigCard'
 import { ScriptBindingsCard } from '../../components/ScriptBindings'
 import { SegmentingStrategiesCard } from './SegmentingStrategiesCard'
 import { NotesPanel } from '../../components/NotesPanel'
@@ -293,6 +294,11 @@ export function PipelineTab() {
           />
         </div>
       </div>
+
+      <ReconcileConfigCard
+        reconcile={draft.reconcile}
+        onChange={(next) => setDraft({ ...draft, reconcile: next })}
+      />
     </>
   )
 }

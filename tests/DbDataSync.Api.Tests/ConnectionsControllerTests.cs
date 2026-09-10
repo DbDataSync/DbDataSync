@@ -57,10 +57,10 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
         Assert.NotNull(capabilities);
         Assert.Equal(DriverIds.MsSql, capabilities!.DriverType);
 
-        // Only the reload readers can expand an Auto segment into concrete ranges — this driver's own
-        // and the portable one it registers alongside it.
+        // Only the reload readers — plus the key-diff sweep, which expands Auto segments the same way —
+        // can expand an Auto segment into concrete ranges.
         Assert.Equal(
-            ["BatchReload", "MsSqlBatchReload"],
+            ["BatchReload", "KeyReconcile", "MsSqlBatchReload"],
             capabilities.Readers.Where(r => r.SupportsSegmentation).Select(r => r.Kind).Order());
 
         // The change-feed readers report a source delete as one; the scanning readers cannot see a
@@ -73,9 +73,10 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
         // The SPA decides whether to offer a Test action from this flag alone.
         Assert.True(capabilities.SupportsConnectionTest);
 
-        // The reload writers reconcile; the incremental MERGE writer is upsert-only.
+        // The reload writers reconcile, as does the key-diff delete sweep; the incremental MERGE writer
+        // is upsert-only.
         Assert.Equal(
-            ["DeleteInsert", "MsSqlDeleteInsert", "MsSqlMergeReconcile"],
+            ["DeleteInsert", "KeyReconcileDelete", "MsSqlDeleteInsert", "MsSqlMergeReconcile"],
             capabilities.Writers.Where(w => w.SupportsReconciliation).Select(w => w.Kind).Order());
         Assert.False(capabilities.Writers.Single(w => w.Kind == "MsSqlMerge").SupportsReconciliation);
 

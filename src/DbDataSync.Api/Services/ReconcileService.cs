@@ -62,7 +62,77 @@ public sealed class ReconcileService(
         }
 
         var kinds = new WorkItemKinds(ReaderKind, CacheKind, WriterKind);
-        var guardJson = request.OverrideGuard ? DeleteGuardOption.Serialize(new NoneDeleteGuard()) : null;
+        // The mapping's own configured guard (phase 125's ReconcileConfig.DeleteGuard, or its default —
+        // a fresh ReconcileConfig always has one) unless the operator explicitly overrides it for this
+        // request. Always serialized, never left for the writer's own hardcoded fallback to resolve —
+        // that fallback exists only for a work item nothing here wrote (there is none any more).
+        var guard = request.OverrideGuard ? new NoneDeleteGuard() : PipelineResolution.Reconcile(task, mapping).DeleteGuard;
+        var guardJson = DeleteGuardOption.Serialize(guard);
+
+        var runIds = segments
+            .Select(segment => workQueueStore.Enqueue(
+                replicationName,
+                RunKind.ReconcileDeletes,
+                mappingName,
+                segment.Describe(),
+                SegmentSerializer.Serialize(segment),
+                kinds,
+                backfillBatchId: null,
+                deleteGuardJson: guardJson))
+            .ToList();
+
+        var ensureResult = supervisor.EnsureWorkerRunning(replicationName);
+        return ensureResult.Outcome == TriggerOutcome.FailedToStart ? ensureResult : TriggerResult.Started(runIds);
+    }
+
+    /// <summary>
+    /// Phase 125's scheduled path: <see cref="SchedulerService"/> found this mapping due (by cadence,
+    /// by after-change, or both) and calls this instead of an operator's own request. Segmented exactly
+    /// like an on-demand sweep, except the segments come from the mapping's own
+    /// <see cref="TableMappingConfig.DefaultSegmenting"/> — "segmenting stays on the mapping" is the
+    /// same rule a standalone reload replication's own configured segments already follow — and the
+    /// guard comes from the resolved <see cref="ReconcileConfig.DeleteGuard"/>, never an operator
+    /// override (there is no operator in this path to ask for one).
+    /// </summary>
+    public async Task<TriggerResult> EnqueueScheduledAsync(
+        string replicationName, string mappingName, CancellationToken cancellationToken)
+    {
+        ReplicationTaskConfig task;
+        TableMappingConfig mapping;
+        try
+        {
+            task = configRepository.LoadReplicationTask(replicationName);
+            mapping = configRepository.LoadTableMapping(replicationName, mappingName);
+        }
+        catch (FileNotFoundException)
+        {
+            return TriggerResult.NotFound();
+        }
+
+        if (mapping.Sources.Count != 1 || mapping.Targets.Count != 1)
+            return TriggerResult.Invalid(
+                $"Table mapping '{mappingName}' has {mapping.Sources.Count} source(s) and " +
+                $"{mapping.Targets.Count} target(s); reconcile-deletes supports 1:1 mappings.");
+
+        // Empty means Full — the same convention DefaultSegmenting already has for a standalone
+        // reload's own configured segments.
+        var requested = mapping.DefaultSegmenting.Count == 0
+            ? [new FullSegment()]
+            : mapping.DefaultSegmenting;
+
+        IReadOnlyList<BatchReloadSegment> segments;
+        try
+        {
+            segments = await ExpandAsync(task, mapping, requested, cancellationToken);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException)
+        {
+            return TriggerResult.Invalid(ex.Message);
+        }
+
+        var guard = PipelineResolution.Reconcile(task, mapping).DeleteGuard;
+        var kinds = new WorkItemKinds(ReaderKind, CacheKind, WriterKind);
+        var guardJson = DeleteGuardOption.Serialize(guard);
 
         var runIds = segments
             .Select(segment => workQueueStore.Enqueue(

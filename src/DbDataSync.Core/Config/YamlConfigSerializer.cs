@@ -10,15 +10,23 @@ internal static class YamlConfigSerializer
     // configuration.
     private static readonly BatchReloadSegmentYamlConverter Segments = new();
 
+    // Phase 125's own abstract hierarchies, same reasoning as Segments above.
+    private static readonly DeleteGuardYamlConverter DeleteGuards = new();
+    private static readonly AfterChangeStrategyYamlConverter AfterChangeStrategies = new();
+
     private static readonly ISerializer Serializer = new SerializerBuilder()
         .WithNamingConvention(CamelCaseNamingConvention.Instance)
         .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitDefaults)
         .WithTypeConverter(Segments)
+        .WithTypeConverter(DeleteGuards)
+        .WithTypeConverter(AfterChangeStrategies)
         .Build();
 
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(CamelCaseNamingConvention.Instance)
         .WithTypeConverter(Segments)
+        .WithTypeConverter(DeleteGuards)
+        .WithTypeConverter(AfterChangeStrategies)
         // A key a past build wrote but this one no longer models (e.g. the per-stage `parallelism`
         // that `ChangeProcessingConfig.DegreeOfParallelism` replaced) must not stop an existing
         // task.yaml from loading — it is dropped here and disappears on the next save. This is not

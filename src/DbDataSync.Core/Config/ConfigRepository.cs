@@ -263,6 +263,10 @@ public sealed class ConfigRepository
         ConfigValidation.ValidateKeyReconcilePairing(
             PipelineResolution.Reader(task, mapping).Kind, PipelineResolution.Writer(task, mapping).Kind, mapping);
 
+        ConfigValidation.ValidateReconcile(
+            PipelineResolution.Reconcile(task, mapping), mapping,
+            PipelineResolution.ReconcileReaderKind(task, mapping), PipelineResolution.ReconcileWriterKind(task, mapping));
+
         var path = ConfigPaths.TableMappingFile(_configRoot, replicationName, mapping.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         WriteAtomically(path, YamlConfigSerializer.Serialize(mapping));

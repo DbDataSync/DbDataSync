@@ -53,6 +53,14 @@ public sealed class ReplicationTaskConfig
     public ProvisioningConfig Provisioning { get; set; } = new();
 
     /// <summary>
+    /// Automated delete reconciliation for every mapping under this replication, unless a mapping
+    /// overrides it (<see cref="TableMappingConfig.ReconcileOverride"/>) — phase 125, built on phase
+    /// 124's on-demand sweep. Disabled by default: <see cref="ReconcileConfig.Enabled"/> is false on a
+    /// fresh <see cref="ReconcileConfig"/>, so a replication that says nothing here sweeps nothing.
+    /// </summary>
+    public ReconcileConfig Reconcile { get; set; } = new();
+
+    /// <summary>
     /// Named ways of dividing a table for reload, referenced by name from any of this replication's
     /// mappings — see phase 58 and <c>CustomSegment</c>.
     /// <para>

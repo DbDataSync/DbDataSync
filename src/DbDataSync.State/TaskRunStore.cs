@@ -48,6 +48,76 @@ public sealed class TaskRunStore(StateDatabase database)
             return (IReadOnlyDictionary<string, DateTimeOffset>)results;
         });
 
+    /// <summary>Sibling of <see cref="GetLastPrimaryEnqueueByMapping"/>, filtered to
+    /// <see cref="RunKind.ReconcileDeletes"/> — phase 125's scheduled cadence needs "when did this
+    /// mapping's sweep last get enqueued" the same way the Primary due-ness check needs its own.</summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> GetLastReconcileEnqueueByMapping(string taskName) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, """
+                SELECT MappingName, MAX(EnqueuedAtUtc)
+                FROM TaskRuns WHERE TaskName = $taskName AND RunKind = $runKind
+                GROUP BY MappingName;
+                """);
+            cmd.Bind(database, "taskName", taskName);
+            cmd.Bind(database, "runKind", RunKind.ReconcileDeletes.ToString());
+            using var reader = cmd.ExecuteReader();
+            var results = new Dictionary<string, DateTimeOffset>();
+            while (reader.Read())
+                results[reader.GetString(0)] = DateTimeOffset.Parse(reader.GetString(1));
+            return (IReadOnlyDictionary<string, DateTimeOffset>)results;
+        });
+
+    /// <summary>
+    /// Rows each mapping's successful <see cref="RunKind.Primary"/> passes have read since *that
+    /// mapping's own* cutoff — phase 125's after-change trigger input
+    /// (<see cref="AfterChangeEvaluator.ShouldReconcile"/>).
+    /// <para>
+    /// One bounded query, not one per mapping: each mapping's cutoff (its own last reconcile-sweep
+    /// enqueue) differs, so a single shared <c>WHERE EndedAtUtc &gt;</c> bound can only be a floor —
+    /// the earliest cutoff among the mappings asked about — with the per-mapping answer summed here in
+    /// memory against each mapping's own cutoff. Still one round trip per tick, same as
+    /// <see cref="GetLastPrimaryEnqueueByMapping"/>'s own reasoning for batching by replication.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<string, long> GetRowsReadSincePerMapping(
+        string taskName, IReadOnlyDictionary<string, DateTimeOffset> sinceByMapping)
+    {
+        if (sinceByMapping.Count == 0)
+            return new Dictionary<string, long>();
+
+        var floor = sinceByMapping.Values.Min();
+        return database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, """
+                SELECT MappingName, EndedAtUtc, RowsRead
+                FROM TaskRuns
+                WHERE TaskName = $taskName AND RunKind = $runKind AND Status = $status AND EndedAtUtc > $floor;
+                """);
+            cmd.Bind(database, "taskName", taskName);
+            cmd.Bind(database, "runKind", RunKind.Primary.ToString());
+            cmd.Bind(database, "status", RunStatus.Succeeded.ToString());
+            cmd.Bind(database, "floor", floor.ToString("O"));
+            using var reader = cmd.ExecuteReader();
+            var totals = new Dictionary<string, long>(StringComparer.Ordinal);
+            while (reader.Read())
+            {
+                var mappingName = reader.GetString(0);
+                if (!sinceByMapping.TryGetValue(mappingName, out var since))
+                    continue; // Not a mapping this call asked about.
+
+                var endedAt = DateTimeOffset.Parse(reader.GetString(1));
+                if (endedAt <= since)
+                    continue; // Older than this mapping's own cutoff — the shared floor is a lower bound, not the answer.
+
+                totals[mappingName] = totals.GetValueOrDefault(mappingName) + reader.Int64(2);
+            }
+            return (IReadOnlyDictionary<string, long>)totals;
+        });
+    }
+
     public void UpsertTask(string taskName, bool enabled) =>
         database.Retry(() =>
         {

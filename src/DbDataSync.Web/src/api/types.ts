@@ -139,6 +139,11 @@ export interface ReplicationTaskConfig {
   hooks?: Hooks
   /** What every mapping under this replication may do to its target, unless the mapping overrides. */
   provisioning?: ProvisioningConfig
+  /** Automated delete reconciliation for every mapping under this replication, unless a mapping
+   * overrides it (`TableMappingConfig.reconcileOverride`) — phase 125, built on phase 124's on-demand
+   * sweep. Always present (never optional) — a fresh replication gets a disabled one, the same way
+   * `provisioning` above always has a value even when nobody has touched it. */
+  reconcile: ReconcileConfig
   /**
    * Named segmenting strategies any of this replication's mappings may reference. At the replication
    * because a set of tables replicated together usually segments the same way.
@@ -236,6 +241,38 @@ export interface ProvisioningConfig {
   alterTargetTableColumnsIfMissingOrChanged: boolean | null
 }
 
+// Phase 125 — automated delete reconciliation, built on phase 124's on-demand KeyReconcile sweep.
+
+/** Whether a mapping's reconcile sweep should also fire in response to changes a Primary pass just
+ * found, rather than only on its own `every` cadence. The mode picker's whole option set — the next
+ * variant lands with its own use case, the same way `DeleteGuard`'s does. */
+export type AfterChangeStrategy =
+  | { mode: 'none' }
+  | { mode: 'any' }
+
+/** The sanity check a scheduled (or on-demand, via `overrideGuard`) sweep runs before committing a
+ * delete: how much of a segment's rows may be removed before the writer refuses instead. */
+export type DeleteGuard =
+  | { mode: 'none' }
+  | { mode: 'ratio'; maxRatio: number }
+
+export interface ReconcileConfig {
+  enabled: boolean
+  /** How often a sweep runs on its own, independent of any change activity — reuses `SchedulingConfig`
+   * wholesale, so the same editor and the same due-ness rules already used for a replication's own
+   * schedule apply here too. Null means no cadence at all — a sweep only runs from `afterChange`, or
+   * an operator's own on-demand trigger. */
+  every: SchedulingConfig | null
+  afterChange: AfterChangeStrategy
+  deleteGuard: DeleteGuard
+  /** Null means the only real answer for each — `KeyReconcile`/`StagingTable`/`KeyReconcileDelete` —
+   * present for the same structural reason `ChangeProcessingConfig`'s stages carry `options`, not
+   * because a different Kind is meaningful here. */
+  reader?: ReaderConfig | null
+  cache?: CacheConfig | null
+  writer?: WriterConfig | null
+}
+
 export interface TableMappingConfig {
   name: string
   sources: SourceTableSpec[]
@@ -244,6 +281,9 @@ export interface TableMappingConfig {
   scripts?: ScriptBindings
   hooks?: Hooks
   provisioning?: ProvisioningConfig
+  /** This mapping's own delete-reconciliation settings, in place of the replication's. Null inherits
+   * `ReplicationTaskConfig.reconcile` entirely — phase 125. */
+  reconcileOverride?: ReconcileConfig | null
   verification?: VerificationCheckConfig[]
   /** How this table divides for a reload. Empty means Full — the whole table, unsegmented. */
   defaultSegmenting?: BatchReloadSegment[]

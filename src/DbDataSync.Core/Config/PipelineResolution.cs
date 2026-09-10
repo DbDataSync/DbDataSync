@@ -51,4 +51,24 @@ public static class PipelineResolution
 
     public static BindingLevel LevelOfWriter(TableMappingConfig? mapping) =>
         mapping?.WriterOverride is null ? BindingLevel.Replication : BindingLevel.Mapping;
+
+    /// <summary>The resolved <see cref="ReconcileConfig"/> itself — phase 125's two-level override,
+    /// same rule as <see cref="Reader"/>/<see cref="Cache"/>/<see cref="Writer"/> above.</summary>
+    public static ReconcileConfig Reconcile(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        mapping?.ReconcileOverride ?? task.Reconcile;
+
+    /// <summary>"KeyReconcile" unless the resolved <see cref="ReconcileConfig.Reader"/> names something
+    /// else — null there means the only real answer, not "inherit", since there is nothing above a
+    /// mapping's own <see cref="ReconcileConfig"/> to inherit from.</summary>
+    public static string ReconcileReaderKind(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        Reconcile(task, mapping).Reader?.Kind ?? "KeyReconcile";
+
+    public static string ReconcileCacheKind(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        Reconcile(task, mapping).Cache?.Kind ?? "StagingTable";
+
+    public static string ReconcileWriterKind(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        Reconcile(task, mapping).Writer?.Kind ?? "KeyReconcileDelete";
+
+    public static BindingLevel LevelOfReconcile(TableMappingConfig? mapping) =>
+        mapping?.ReconcileOverride is null ? BindingLevel.Replication : BindingLevel.Mapping;
 }

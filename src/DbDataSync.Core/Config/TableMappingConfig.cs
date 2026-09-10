@@ -179,6 +179,10 @@ public sealed class TableMappingConfig
     /// </summary>
     public WriterConfig? WriterOverride { get; set; }
 
+    /// <summary>This mapping's own delete-reconciliation settings, in place of the replication's. Null
+    /// inherits <see cref="ReplicationTaskConfig.Reconcile"/> entirely — phase 125.</summary>
+    public ReconcileConfig? ReconcileOverride { get; set; }
+
     /// <summary>
     /// Comparisons between this mapping's source and target, run on demand rather than as part of a
     /// pass — see phase 43. Empty for a mapping nobody has asked to verify.

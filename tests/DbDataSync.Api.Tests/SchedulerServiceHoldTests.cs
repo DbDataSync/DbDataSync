@@ -114,6 +114,7 @@ public sealed class SchedulerServiceHoldTests(TestApiFactory factory) : IClassFi
         factory.Services.GetRequiredService<ChangePollingGate>(),
         factory.Services.GetRequiredService<ChangeWatermarkStore>(),
         factory.Services.GetRequiredService<DriverRegistry>(),
+        factory.Services.GetRequiredService<ReconcileService>(),
         NullLogger<SchedulerService>.Instance);
 
     private static readonly MethodInfo TickMethod = typeof(SchedulerService)

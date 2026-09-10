@@ -255,4 +255,32 @@ public static class ConfigValidation
                 $"key column(s) {string.Join(", ", unmapped)} are not in its column mappings. Every source " +
                 "key column must be mapped so the target side can be anti-joined on it.");
     }
+
+    /// <summary>
+    /// Phase 125: an enabled <see cref="ReconcileConfig"/> must resolve to the
+    /// <c>KeyReconcile</c>/<c>KeyReconcileDelete</c> pair (reusing <see cref="ValidateKeyReconcilePairing"/>
+    /// verbatim — a scheduled sweep needs exactly the same cached, fully-mapped primary key an on-demand
+    /// one does), and an <see cref="AfterChangeStrategy"/> other than <see cref="NoAfterChangeStrategy"/>
+    /// requires an explicit <see cref="ReconcileConfig.Every"/> cadence — resolved from the plan's own
+    /// open question: the after-change floor (never firing more often than the cadence allows) has to be
+    /// an explicit number, not an implied one.
+    /// </summary>
+    public static void ValidateReconcile(
+        ReconcileConfig reconcile, TableMappingConfig mapping, string readerKind, string writerKind)
+    {
+        if (!reconcile.Enabled)
+            return;
+
+        ValidateKeyReconcilePairing(readerKind, writerKind, mapping);
+
+        if (reconcile.Every is not null)
+            ValidateScheduling(reconcile.Every, $"{mapping.Name} (reconcile)");
+
+        if (reconcile.AfterChange is not NoAfterChangeStrategy && reconcile.Every is null)
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' enables delete reconciliation with an after-change " +
+                "strategy but no 'every' cadence. After-change never fires more often than the cadence " +
+                "allows, so a cadence has to be set even when the after-change trigger is the one that " +
+                "actually matters.");
+    }
 }

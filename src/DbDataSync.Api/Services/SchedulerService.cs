@@ -31,6 +31,7 @@ public sealed class SchedulerService(
     ChangePollingGate gate,
     ChangeWatermarkStore watermarks,
     DriverRegistry driverRegistry,
+    ReconcileService reconcileService,
     ILogger<SchedulerService> logger) : BackgroundService
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(5);
@@ -69,9 +70,15 @@ public sealed class SchedulerService(
                 ? await TickPeriodicAsync(name, task, mappingNames, cancellationToken)
                 : await TickContinuousAsync(name, task, mappingNames, cancellationToken);
 
+            // Phase 125: a mapping's delete-reconciliation cadence/after-change trigger, independent of
+            // the replication's own Scheduling.Mode — a sweep has its own SchedulingConfig
+            // (ReconcileConfig.Every) and is evaluated the same way regardless of whether the
+            // containing replication is Continuous or Periodic.
+            var reconcileEnqueuedAny = await TickReconcileAsync(name, task, mappingNames, cancellationToken);
+
             // Idempotent and cheap to skip when nothing changed — only worth spawning a worker to
             // check an empty queue when this tick actually put something new into it.
-            if (!enqueuedAny)
+            if (!enqueuedAny && !reconcileEnqueuedAny)
                 continue;
 
             var result = supervisor.EnsureWorkerRunning(name);
@@ -142,6 +149,96 @@ public sealed class SchedulerService(
             workQueueStore.Enqueue(name, RunKind.Primary, mappingName);
 
         return admitted.Count > 0;
+    }
+
+    /// <summary>
+    /// Phase 125: evaluates every mapping's <see cref="ReconcileConfig"/> for due-ness — its own
+    /// <see cref="ReconcileConfig.Every"/> cadence, or its <see cref="ReconcileConfig.AfterChange"/>
+    /// strategy against rows a Primary pass has read since the mapping's last sweep — and enqueues a
+    /// scheduled sweep for whichever mappings qualify.
+    /// <para>
+    /// **Sharing one enqueue path with the after-change trigger**, per the plan's own Q3: both ask the
+    /// same question ("is a sweep due for this mapping right now") and both go through
+    /// <see cref="ReconcileService.EnqueueScheduledAsync"/> — cadence-due and after-change-due are just
+    /// two different reasons to arrive at the same call.
+    /// </para>
+    /// <para>
+    /// After-change is floored by the cadence (never firing more often than <see cref="ReconcileConfig.Every"/>
+    /// allows) — enforced structurally rather than by a separate check, because
+    /// <see cref="ConfigValidation.ValidateReconcile"/> already requires <c>Every</c> to be set whenever
+    /// <c>AfterChange</c> is not <see cref="NoAfterChangeStrategy"/>, so the same <c>IsDue</c> check that
+    /// gates the cadence trigger gates the after-change one too.
+    /// </para>
+    /// </summary>
+    private async Task<bool> TickReconcileAsync(
+        string name, ReplicationTaskConfig task, List<string> mappingNames, CancellationToken cancellationToken)
+    {
+        var candidates = new List<(string MappingName, ReconcileConfig Config)>();
+        foreach (var mappingName in mappingNames)
+        {
+            TableMappingConfig mapping;
+            try
+            {
+                mapping = configRepository.LoadTableMapping(name, mappingName);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Skipping reconcile due-ness for '{Task}'/'{Mapping}': failed to load config.", name, mappingName);
+                continue;
+            }
+
+            var reconcile = PipelineResolution.Reconcile(task, mapping);
+            if (reconcile.Enabled)
+                candidates.Add((mappingName, reconcile));
+        }
+
+        if (candidates.Count == 0)
+            return false;
+
+        var lastReconcile = taskRunStore.GetLastReconcileEnqueueByMapping(name);
+        var now = DateTimeOffset.UtcNow;
+
+        // "Since forever" (DateTimeOffset.MinValue) for a mapping that has never been swept — the same
+        // "never run before, due immediately" posture SchedulingEvaluator.IsDue takes for a null last-run.
+        var sinceByMapping = candidates.ToDictionary(
+            c => c.MappingName,
+            c => lastReconcile.TryGetValue(c.MappingName, out var last) ? last : DateTimeOffset.MinValue);
+        var rowsReadSince = taskRunStore.GetRowsReadSincePerMapping(name, sinceByMapping);
+
+        var enqueuedAny = false;
+        foreach (var (mappingName, reconcile) in candidates)
+        {
+            var lastEnqueue = lastReconcile.TryGetValue(mappingName, out var last) ? (DateTimeOffset?)last : null;
+            var due = reconcile.Every is not null && SchedulingEvaluator.IsDue(reconcile.Every, lastEnqueue, now);
+
+            // NoAfterChangeStrategy: Every is the *only* trigger — a sweep fires on its own schedule
+            // regardless of whether anything changed. Any other strategy: Every stops being an
+            // unconditional trigger and becomes purely the after-change floor (never firing more often
+            // than it allows) — a sweep now needs *both* enough time elapsed *and* something to react
+            // to. Without that split, an after-change strategy would never differ observably from
+            // NoAfterChangeStrategy: `due` alone already fires every time Every's interval elapses, so
+            // OR-ing in a check that can only be true when `due` already is would be a no-op.
+            var cadenceDue = reconcile.AfterChange is NoAfterChangeStrategy && due;
+            var afterChangeDue = reconcile.AfterChange is not NoAfterChangeStrategy
+                && (reconcile.Every is null || due)
+                && AfterChangeEvaluator.ShouldReconcile(reconcile.AfterChange, rowsReadSince.GetValueOrDefault(mappingName));
+
+            if (!cadenceDue && !afterChangeDue)
+                continue;
+
+            if (workQueueStore.HasPendingReconcile(name, mappingName))
+                continue; // Already in flight — no second sweep queued behind it.
+
+            var result = await reconcileService.EnqueueScheduledAsync(name, mappingName, cancellationToken);
+            if (result.Outcome == TriggerOutcome.Started)
+                enqueuedAny = true;
+            else if (result.Outcome is TriggerOutcome.Invalid or TriggerOutcome.ReplicationNotFound)
+                logger.LogWarning(
+                    "Scheduled reconcile sweep for '{Task}'/'{Mapping}' could not be enqueued: {Reason}",
+                    name, mappingName, result.Reason);
+        }
+
+        return enqueuedAny;
     }
 
     /// <summary>

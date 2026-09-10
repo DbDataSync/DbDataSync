@@ -74,6 +74,10 @@ public sealed class ChangeReaderFirstPassContractTests
             + "branch for this reader to get wrong, and no intent for it to honestly declare.",
         [typeof(DuckDbQueryReader)] =
             "As ScriptedQueryReader: a query source, not a feed over a table with pre-existing rows.",
+        [typeof(KeyReconcileReader)] =
+            "A delete-diff key sweep reads every key in scope by definition, same as BatchReloadReader — "
+            + "it ignores the watermark rather than branching on it, so there is nothing honest to "
+            + "declare about Changes/ChangesFromEarliest/ChangesFromLatest.",
     };
 
     /// <summary>
