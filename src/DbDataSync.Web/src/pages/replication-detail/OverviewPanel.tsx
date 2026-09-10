@@ -18,6 +18,7 @@ import { offeredIntents } from './readIntent'
 import { versionsRows, withoutNaturalKey } from './naturalKey'
 import { useConnections, useReplication, useReplicationCapabilities, useScripts, useTableMappings } from '../../api/hooks'
 import type { ParameterDescriptor, ProvisioningConfig, ReplicationTaskConfig } from '../../api/types'
+import { RECONCILE_ONLY_KINDS } from '../../api/types'
 
 type Stage = 'reader' | 'cache' | 'writer'
 
@@ -121,9 +122,13 @@ export function PipelineTab() {
   const setStageValue = (id: Stage, patch: object) =>
     setDraft({ ...draft, changeProcessing: { ...draft.changeProcessing, [id]: { ...draft.changeProcessing[id], ...patch } } })
 
+  // KeyReconcile/KeyReconcileDelete (phase 124) exist only for the delete-diff sweep's own trigger —
+  // never a Kind an ordinary Change Processing pipeline picks.
   const kindsFor = (id: Stage) =>
-    id === 'reader' ? capabilities.readers.map((r) => ({ kind: r.kind, note: readerNotes(r).join(' · ') || undefined }))
-    : id === 'writer' ? capabilities.writers.map((w) => ({ kind: w.kind, note: w.supportsReconciliation ? 'reconciling' : 'upsert-only' }))
+    id === 'reader'
+      ? capabilities.readers.filter((r) => !RECONCILE_ONLY_KINDS.has(r.kind)).map((r) => ({ kind: r.kind, note: readerNotes(r).join(' · ') || undefined }))
+    : id === 'writer'
+      ? capabilities.writers.filter((w) => !RECONCILE_ONLY_KINDS.has(w.kind)).map((w) => ({ kind: w.kind, note: w.supportsReconciliation ? 'reconciling' : 'upsert-only' }))
     : capabilities.stagingProviders.map((p) => ({ kind: p.kind, note: undefined }))
 
   /** What the chosen Kind says it takes. Declared by the component that reads them, so choosing a

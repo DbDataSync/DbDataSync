@@ -29,6 +29,15 @@ public enum RunKind
     /// target.
     /// </summary>
     Verification,
+
+    /// <summary>
+    /// A key-diff delete sweep — see phase 124 (<c>architecture/planning/done/watermark-delete-detection.md</c>).
+    /// Reads only a segment's source primary-key values and deletes target rows whose key is absent
+    /// from that set; never inserts or updates and never advances the incremental watermark, the same
+    /// posture <see cref="Backfill"/> already has. On-demand in this phase, and — from phase 125 — also
+    /// scheduled.
+    /// </summary>
+    ReconcileDeletes,
 }
 
 /// <summary>
@@ -43,9 +52,10 @@ public enum RunLane
     /// lane: its passes are scheduled and an operator watching lag expects them to keep up.</summary>
     ChangeProcessing,
 
-    /// <summary>On-demand, non-incremental work — <see cref="RunKind.Backfill"/> and
-    /// <see cref="RunKind.Verification"/>. Both read whole tables and can run for a long time; keeping
-    /// them off the change-processing lane is the point of the split.</summary>
+    /// <summary>On-demand, non-incremental work — <see cref="RunKind.Backfill"/>,
+    /// <see cref="RunKind.Verification"/> and <see cref="RunKind.ReconcileDeletes"/>. All three read
+    /// whole tables (or a segment of one) and can run for a long time; keeping them off the
+    /// change-processing lane is the point of the split.</summary>
     Backfill,
 }
 
@@ -56,7 +66,7 @@ public static class RunLanes
     public static IReadOnlyList<RunKind> KindsFor(RunLane lane) => lane switch
     {
         RunLane.ChangeProcessing => [RunKind.Primary],
-        RunLane.Backfill => [RunKind.Backfill, RunKind.Verification],
+        RunLane.Backfill => [RunKind.Backfill, RunKind.Verification, RunKind.ReconcileDeletes],
         _ => throw new ArgumentOutOfRangeException(nameof(lane), lane, null),
     };
 

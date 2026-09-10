@@ -13,6 +13,7 @@ namespace DbDataSync.Api.Controllers;
 public sealed class RunsController(
     ProcessSupervisor supervisor,
     BackfillService backfillService,
+    ReconcileService reconcileService,
     TaskRunStore taskRunStore,
     BackfillBatchStore backfillBatchStore,
     ResyncService resyncService,
@@ -45,6 +46,26 @@ public sealed class RunsController(
         string name, string mappingName, [FromBody] BackfillRequest request, CancellationToken cancellationToken)
     {
         var result = await backfillService.EnqueueAsync(name, mappingName, request, cancellationToken);
+        return result.Outcome switch
+        {
+            TriggerOutcome.Started => Accepted(new { runIds = result.RunIds }),
+            TriggerOutcome.ReplicationNotFound => NotFound(new { error = "Replication or table mapping not found." }),
+            TriggerOutcome.Invalid => BadRequest(new { error = result.Reason }),
+            _ => StatusCode(500, new { error = result.Reason }),
+        };
+    }
+
+    /// <summary>
+    /// Queues a delete-diff sweep of one table mapping — phase 124. Same shape as <see cref="Backfill"/>
+    /// (a separate endpoint from the bodyless trigger, one RunId per segment, never touches the
+    /// incremental watermark), but always through the <c>KeyReconcile</c>/<c>KeyReconcileDelete</c>
+    /// pair rather than an operator-chosen reader/writer — there is nothing else this action means.
+    /// </summary>
+    [HttpPost("replications/{name}/mappings/{mappingName}/reconcile-deletes")]
+    public async Task<IActionResult> ReconcileDeletes(
+        string name, string mappingName, [FromBody] ReconcileDeletesRequest request, CancellationToken cancellationToken)
+    {
+        var result = await reconcileService.EnqueueAsync(name, mappingName, request, cancellationToken);
         return result.Outcome switch
         {
             TriggerOutcome.Started => Accepted(new { runIds = result.RunIds }),

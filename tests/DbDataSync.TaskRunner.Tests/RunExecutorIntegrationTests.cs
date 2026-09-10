@@ -1052,4 +1052,119 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     }
 
     #endregion
+
+    #region Phase 124 — KeyReconcile delete-diff sweep
+
+    /// <summary>Enqueues a <see cref="RunKind.ReconcileDeletes"/> item for the "main" mapping, over
+    /// <paramref name="segment"/> (a <see cref="FullSegment"/> when null), with an optional guard
+    /// override — the same shape <see cref="ReconcileService"/> enqueues from the API.</summary>
+    private async Task<TaskRunRecord> EnqueueAndDrainReconcileAsync(BatchReloadSegment? segment = null, DeleteGuard? overrideGuard = null)
+    {
+        var effective = segment ?? new FullSegment();
+        var runId = _workQueueStore.Enqueue(
+            "e2e-sync", RunKind.ReconcileDeletes, "main", effective.Describe(), SegmentSerializer.Serialize(effective),
+            new WorkItemKinds(GenericDriverKinds.KeyReconcile, GenericDriverKinds.StagingTable, GenericDriverKinds.KeyReconcileDelete),
+            deleteGuardJson: overrideGuard is null ? null : DeleteGuardOption.Serialize(overrideGuard));
+        await _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
+        return _taskRunStore.GetRun(runId)!;
+    }
+
+    /// <summary>
+    /// The core promise of phase 124: a sweep removes exactly the target rows whose key the source no
+    /// longer has, and does nothing else — an updated source value is not picked up (that is what an
+    /// ordinary Primary pass is for) and an untouched row stays untouched. Also proves the sweep never
+    /// touches the incremental watermark, the same posture a Backfill already has.
+    /// </summary>
+    [Fact]
+    public async Task ReconcileDeletes_RemovesAbsentKeys_ButNeverUpdatesOrTouchesTheWatermark()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (3, 'Three');");
+        Assert.Equal(RunStatus.Succeeded, (await EnqueueAndDrainAsync()).Status);
+        var watermarkBefore = WatermarkFor(_sourceTable);
+
+        // At the source: row 1 is deleted, row 2 is updated (never inserted/updated by a reconcile —
+        // only a Primary pass does that), row 3 is untouched.
+        await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 1;");
+        await ExecuteAsync(_adminConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'TwoUpdated' WHERE Id = 2;");
+
+        var run = await EnqueueAndDrainReconcileAsync();
+
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        var rows = await GetTargetRowsAsync();
+        Assert.False(rows.ContainsKey(1), "row 1 was deleted at the source and should be gone from the target");
+        Assert.Equal("Two", rows[2]); // the source's update never reached the target through a reconcile
+        Assert.Equal("Three", rows[3]);
+
+        Assert.Equal(watermarkBefore, WatermarkFor(_sourceTable));
+        Assert.Null(run.NewWatermark); // a non-Primary run advances no watermark at all
+    }
+
+    /// <summary>An <see cref="AutoSegment"/> in a reconcile request expands against the real source,
+    /// exactly like a Backfill's, and each resulting bucket's sweep only ever deletes within its own
+    /// range — a row outside every requested segment is never a candidate for removal.</summary>
+    [Fact]
+    public async Task ReconcileDeletes_ASegmentedSweep_OnlyDeletesWithinItsOwnRange()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (10, 'Ten');");
+        Assert.Equal(RunStatus.Succeeded, (await EnqueueAndDrainAsync()).Status);
+
+        // Delete rows 1 and 10 at the source. A sweep scoped to [1, 5) must remove only row 1 — row 10
+        // is outside the segment and stays, even though it too no longer exists at the source.
+        await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id IN (1, 10);");
+
+        var run = await EnqueueAndDrainReconcileAsync(new RangeSegment("Id", "1", "5"));
+
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        var rows = await GetTargetRowsAsync();
+        Assert.False(rows.ContainsKey(1));
+        Assert.Equal("Two", rows[2]);
+        Assert.True(rows.ContainsKey(10), "outside the requested segment — a sweep scoped to it must not touch row 10");
+    }
+
+    /// <summary>
+    /// The safety net a key-diff sweep exists to have: deleting more than the guard's ratio rolls the
+    /// whole transaction back, so a source pointed at the wrong database (or any other mistake that
+    /// looks identical to "everything is gone") fails loudly rather than emptying the target.
+    /// </summary>
+    [Fact]
+    public async Task ReconcileDeletes_ExceedingTheDefaultGuardsRatio_FailsAndDeletesNothing()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (3, 'Three');");
+        Assert.Equal(RunStatus.Succeeded, (await EnqueueAndDrainAsync()).Status);
+
+        // Every source row gone — a 100% delete against the default RatioDeleteGuard's 50% ceiling.
+        await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_sourceTable}];");
+
+        var run = await EnqueueAndDrainReconcileAsync();
+
+        Assert.Equal(RunStatus.Failed, run.Status);
+        Assert.Contains("guard", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        // Rolled back: every row from the earlier Primary pass is still there.
+        Assert.Equal(
+            new Dictionary<int, string> { [1] = "One", [2] = "Two", [3] = "Three" },
+            await GetTargetRowsAsync());
+    }
+
+    /// <summary>An operator's explicit override — the same <c>overrideGuard</c> the API's
+    /// <c>ReconcileDeletesRequest</c> turns into a <see cref="NoneDeleteGuard"/> — lets an otherwise-
+    /// refused sweep through.</summary>
+    [Fact]
+    public async Task ReconcileDeletes_WithAnOverrideGuard_DeletesEverythingWithoutRefusing()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (3, 'Three');");
+        Assert.Equal(RunStatus.Succeeded, (await EnqueueAndDrainAsync()).Status);
+
+        await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_sourceTable}];");
+
+        var run = await EnqueueAndDrainReconcileAsync(overrideGuard: new NoneDeleteGuard());
+
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        Assert.Empty(await GetTargetRowsAsync());
+    }
+
+    #endregion
 }

@@ -672,6 +672,19 @@ public sealed class RunExecutor(
             var columnMappings = ApplyScriptedTransforms(
                 task, mapping, sourceConnectionConfig, sourceScriptDialect, item.RunId);
 
+            // KeyReconcile (phase 124) projects only the source's primary-key columns — it filters
+            // this internally from whatever columnMappings it's handed (KeyReconcileReader.
+            // KeyColumnMappings), so the reader call below needs no change. The staging table it feeds
+            // does need to agree on that same subset, though, or it tries to bind columns the reader
+            // never selected into its result set — staging has no idea "KeyReconcile" exists, so this
+            // filters on its behalf rather than teaching it to. The writer still gets the mapping's
+            // full columns unfiltered (its own call, below): a reload's segment can scope on any
+            // column, not only a key one, so SegmentScope.Build there still needs the whole mapping.
+            var stagingColumnMappings = readerKind == GenericDriverKinds.KeyReconcile
+                ? KeyReconcileReader.KeyColumnMappings(
+                    mapping.ColumnMappings, mapping.SourceColumns.RequireAll(mapping.Name, "source"), mapping.Name)
+                : mapping.ColumnMappings;
+
             // The hierarchy's "connection" level is always the target's — see HookResolution's doc.
             var targetConnectionConfig = configRepository.LoadConnection(target.ConnectionName);
             var hooksByPoint = HookPoints.All.ToDictionary(
@@ -693,6 +706,9 @@ public sealed class RunExecutor(
             var passWriterOptions = await WithDerivedNaturalKeyAsync(
                 writerKind, effectiveWriter.Options, sourceDriver, sourceConnection, source, mapping,
                 item.RunId, cancellationToken);
+            // Phase 124: an operator's per-sweep guard override, carried on the work item itself
+            // exactly the way item.SegmentJson already is — see WithGuard.
+            passWriterOptions = WithGuard(passWriterOptions, item.DeleteGuardJson);
 
             var segments = await ResolveSegmentsAsync(
                 reader, sourceConnection, targetConnection, source, item, task, mapping, sourceScriptDialect,
@@ -822,7 +838,7 @@ public sealed class RunExecutor(
                 // provider's own work — which is the number worth having.
                 var stagingClock = trace ? Stopwatch.StartNew() : null;
                 var staged = await stagingProvider.StageAsync(
-                    targetConnection, target, rows, mapping.ColumnMappings, mapping.Name, mapping.TargetColumns,
+                    targetConnection, target, rows, stagingColumnMappings, mapping.Name, mapping.TargetColumns,
                     cacheOptions, cancellationToken);
                 if (stagingClock is not null)
                     stagingMs += stagingClock.ElapsedMilliseconds;
@@ -1445,6 +1461,20 @@ public sealed class RunExecutor(
             : new Dictionary<string, string>(options, StringComparer.Ordinal)
             {
                 [SegmentSerializer.SegmentOptionKey] = SegmentSerializer.Serialize(segment),
+            };
+
+    /// <summary>Phase 124: injects a work item's <c>DeleteGuard</c> override into a per-iteration copy
+    /// of the writer's options, mirroring <see cref="WithSegment"/> exactly — null (no override, the
+    /// overwhelming majority of items, including every Primary/Backfill/Verification one) leaves the
+    /// options untouched, so <see cref="DeleteGuardOption.Read"/> falls back to whatever the writer's
+    /// own configured/default guard is.</summary>
+    private static IReadOnlyDictionary<string, string> WithGuard(
+        IReadOnlyDictionary<string, string> options, string? deleteGuardJson) =>
+        deleteGuardJson is null
+            ? options
+            : new Dictionary<string, string>(options, StringComparer.Ordinal)
+            {
+                [DeleteGuardOption.OptionKey] = deleteGuardJson,
             };
 
     private async Task<(DbConnection Connection, IDriver Driver)> OpenConnectionAsync(

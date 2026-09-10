@@ -33,12 +33,17 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-09 (latest of all): **124** and **125** join `todo/` — delete detection for watermark
-change tracking (`architecture/planning/done/watermark-delete-detection.md`). A watermark reader never
-sees deletes; 124 builds a keys-only diff sweep (`KeyReconcile` reader + `KeyReconcileDelete` writer,
-`RunKind.ReconcileDeletes` on the backfill lane, a `DeleteGuard`, an on-demand trigger), 125 adds
-`ReconcileConfig` + a scheduled cadence + a pluggable after-change strategy. Sequential (124 → 125),
-independent of everything else in `todo/`.
+Updated 2026-09-10 (latest of all): 124 is done and removed — a keys-only delete-diff sweep
+(`KeyReconcile` reader + `KeyReconcileDelete` writer, both engine-neutral, registered on MsSql and
+Postgres), a `DeleteGuard` (`None`/`Ratio`, default 50%) protecting it, `RunKind.ReconcileDeletes` on the
+backfill lane, and an on-demand trigger (`POST .../reconcile-deletes` + a "Reconcile deletes…" chrome
+button). Two real gaps in the original plan resolved during implementation: `RunExecutor` needed a small
+Kind-gated (not RunKind-gated) fix so the staging table it builds agrees with what a keys-only reader
+actually projects, and a new `WorkQueue.DeleteGuardJson` column was needed as the channel the plan's own
+"WithGuard mirroring WithSegment" line presupposed but nothing had built yet. A real writer bug (reusing
+one `SegmentScope`'s parameters across two `DbCommand`s) was caught and fixed by the new segmented
+integration test. **125** builds on it — `ReconcileConfig`, a scheduled cadence, an after-change
+strategy — still in `todo/`, sequential, independent of everything else there.
 
 Updated 2026-09-09 (latest): 121 is done and removed — a second image, `docker build --target runtime`,
 on `mcr.microsoft.com/dotnet/aspnet:10.0` with no SDK. `KnownLibraries` entries now carry a

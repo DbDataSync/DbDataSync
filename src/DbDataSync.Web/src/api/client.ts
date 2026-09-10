@@ -4,6 +4,7 @@ import type {
   ApplyResult,
   BackfillBatchProgress,
   BackfillRequest,
+  ReconcileDeletesRequest,
   SegmentCandidate,
   SegmentingStrategyConfig,
   ColumnMetadata,
@@ -494,6 +495,13 @@ export const api = {
     backfill: (replicationName: string, mappingName: string, body: BackfillRequest) =>
       request<TriggerResponse>(
         `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}/backfill`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    /** Phase 124's delete-diff sweep trigger — same shape as `backfill` above (one RunId per segment),
+     * always through KeyReconcile/KeyReconcileDelete. */
+    reconcileDeletes: (replicationName: string, mappingName: string, body: ReconcileDeletesRequest) =>
+      request<TriggerResponse>(
+        `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}/reconcile-deletes`,
         { method: 'POST', body: JSON.stringify(body) },
       ),
   },

@@ -209,4 +209,50 @@ public static class ConfigValidation
                 "writer, which appends history rather than replacing rows. Each pass would grow the " +
                 "source and the next would read what the last one wrote. Point it at a different table.");
     }
+
+    /// <summary>
+    /// Phase 124's <c>KeyReconcile</c>/<c>KeyReconcileDelete</c> pair, save-time. Plain string literals
+    /// rather than <c>DbDataSync.Drivers.Generic.GenericDriverKinds</c> constants — Core cannot
+    /// reference the driver layer, which is what keeps config depending on drivers and not the other
+    /// way round; <see cref="ValidateHistorizedTarget"/> makes the same choice for "Snapshot"/"Scd2".
+    /// </summary>
+    public static void ValidateKeyReconcilePairing(string readerKind, string writerKind, TableMappingConfig mapping)
+    {
+        const string keyReconcileReader = "KeyReconcile";
+        const string keyReconcileWriter = "KeyReconcileDelete";
+
+        var readerIsKeyReconcile = readerKind == keyReconcileReader;
+        var writerIsKeyReconcileDelete = writerKind == keyReconcileWriter;
+
+        if (readerIsKeyReconcile != writerIsKeyReconcileDelete)
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' pairs reader '{readerKind}' with writer '{writerKind}'. " +
+                $"'{keyReconcileReader}' must always be paired with '{keyReconcileWriter}' — any other " +
+                "combination would re-insert or corrupt rows a delete-diff sweep only ever means to remove.");
+
+        if (!readerIsKeyReconcile)
+            return;
+
+        if (mapping.SourceColumns.Count == 0)
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' uses the '{keyReconcileReader}' reader, which needs the " +
+                "source's cached primary key. Use Refresh metadata on this mapping first.");
+
+        var keyColumns = mapping.SourceColumns.Where(c => c.IsPrimaryKey).ToList();
+        if (keyColumns.Count == 0)
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' uses the '{keyReconcileReader}' reader, but its source " +
+                "has no primary key. A keyless source can't be reconciled by key — use BatchReload + " +
+                "DeleteInsert instead.");
+
+        var mappedSourceColumns = mapping.ColumnMappings
+            .Select(m => m.SourceColumn)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unmapped = keyColumns.Where(c => !mappedSourceColumns.Contains(c.Name)).Select(c => c.Name).ToList();
+        if (unmapped.Count > 0)
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' uses the '{keyReconcileReader}' reader, but its primary " +
+                $"key column(s) {string.Join(", ", unmapped)} are not in its column mappings. Every source " +
+                "key column must be mapped so the target side can be anti-joined on it.");
+    }
 }

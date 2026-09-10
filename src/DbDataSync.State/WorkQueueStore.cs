@@ -21,7 +21,11 @@ public sealed record WorkItem(
     string? SegmentJson,
     Guid RunId,
     WorkItemStatus Status,
-    WorkItemKinds Kinds);
+    WorkItemKinds Kinds,
+    /// <summary>Phase 124: a serialized <c>DeleteGuard</c> override for this
+    /// <see cref="RunKind.ReconcileDeletes"/> item — null for every other kind, and null for a
+    /// reconcile item that didn't override the writer's configured/default guard.</summary>
+    string? DeleteGuardJson = null);
 
 /// <summary>
 /// Which reader/cache/writer this unit of work should use, when that isn't simply the replication's
@@ -72,7 +76,9 @@ public sealed class WorkQueueStore(StateDatabase database)
         string segmentLabel = NoSegment,
         string? segmentJson = null,
         WorkItemKinds? kinds = null,
-        string? backfillBatchId = null) =>
+        string? backfillBatchId = null,
+        // Phase 124: a serialized DeleteGuard override — see WorkItem.DeleteGuardJson.
+        string? deleteGuardJson = null) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
@@ -82,9 +88,9 @@ public sealed class WorkQueueStore(StateDatabase database)
             using (var cmd = database.Command(connection, transaction, database.Dialect.InsertOrIgnore(
                 "WorkQueue",
                 "TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status, " +
-                    "EnqueuedAtUtc, AvailableAtUtc, ReaderKind, CacheKind, WriterKind",
+                    "EnqueuedAtUtc, AvailableAtUtc, ReaderKind, CacheKind, WriterKind, DeleteGuardJson",
                 "$task, $kind, $mapping, $segment, $segmentJson, $runId, $status, $now, $now, " +
-                    "$readerKind, $cacheKind, $writerKind",
+                    "$readerKind, $cacheKind, $writerKind, $deleteGuardJson",
                 "TaskName, RunKind, MappingName, SegmentLabel",
                 InFlightStatuses)))
             {
@@ -103,6 +109,7 @@ public sealed class WorkQueueStore(StateDatabase database)
                 cmd.Bind(database, "readerKind", (object?)kinds?.ReaderKind ?? DBNull.Value);
                 cmd.Bind(database, "cacheKind", (object?)kinds?.CacheKind ?? DBNull.Value);
                 cmd.Bind(database, "writerKind", (object?)kinds?.WriterKind ?? DBNull.Value);
+                cmd.Bind(database, "deleteGuardJson", (object?)deleteGuardJson ?? DBNull.Value);
                 var inserted = cmd.ExecuteNonQuery() == 1;
 
                 if (!inserted)
@@ -175,7 +182,7 @@ public sealed class WorkQueueStore(StateDatabase database)
                 using var connection = database.OpenConnection();
                 using var cmd = database.Command(connection, $"""
                     SELECT Id, TaskName, RunKind, MappingName, SegmentLabel, SegmentJson, RunId, Status,
-                           ReaderKind, CacheKind, WriterKind
+                           ReaderKind, CacheKind, WriterKind, DeleteGuardJson
                     FROM WorkQueue w
                     WHERE TaskName = $task AND Status = 'Pending' AND AvailableAtUtc <= $now
                       {laneClause}
@@ -374,5 +381,6 @@ public sealed class WorkQueueStore(StateDatabase database)
         new WorkItemKinds(
             reader.IsDBNull(8) ? null : reader.GetString(8),
             reader.IsDBNull(9) ? null : reader.GetString(9),
-            reader.IsDBNull(10) ? null : reader.GetString(10)));
+            reader.IsDBNull(10) ? null : reader.GetString(10)),
+        reader.IsDBNull(11) ? null : reader.GetString(11));
 }

@@ -3,6 +3,7 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { RunDetailsDialog } from '../../components/RunDetailsDialog'
 import { RunKindBadge, StatusBadge } from '../../components/StatusBadge'
 import { BackfillForm } from './BackfillForm'
+import { ReconcileDeletesForm } from './ReconcileDeletesForm'
 import {
   MONITORING_REFRESH_MS, useCancelRun, useInvalidateRunHistory, useRunHistory,
   useRunWatermarkTimes, useTableMappings, useTriggerRun, useResyncRun,
@@ -13,15 +14,15 @@ import { TimingDetail, WatermarkCell } from '../../components/RunFigures'
 import { processingTime, queueTime } from '../../components/runTimes'
 import type { RunHistoryFilters, RunKind, RunStatus, TaskRunRecord } from '../../api/types'
 
-/** A command sent down from the chrome's Backfill…/Run Now buttons. */
+/** A command sent down from the chrome's Backfill…/Reconcile deletes…/Run Now buttons. */
 export interface RunsCommand {
-  kind: 'backfill' | 'run'
+  kind: 'backfill' | 'reconcile' | 'run'
   nonce: number
 }
 
 const COLUMNS = '1.05fr .65fr .85fr .7fr .5fr .55fr .6fr .7fr 1.15fr .85fr 78px'
 
-const KINDS: RunKind[] = ['Primary', 'Backfill']
+const KINDS: RunKind[] = ['Primary', 'Backfill', 'ReconcileDeletes']
 const STATUSES: RunStatus[] = ['Queued', 'Pending', 'Running', 'Succeeded', 'Failed', 'Cancelled']
 
 /**
@@ -56,6 +57,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
   // pass, and several expanded at once would push the rest of the history off the screen.
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
   const [showBackfill, setShowBackfill] = useState(false)
+  const [showReconcile, setShowReconcile] = useState(false)
 
   // The three server-side filters, phase 104's replacement for the old client-side `all | failed |
   // backfills` — '' means "no filter" (the endpoint's own default) in each of the three selects.
@@ -142,6 +144,10 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
       setShowBackfill(true)
       return
     }
+    if (command.kind === 'reconcile') {
+      setShowReconcile(true)
+      return
+    }
     let cancelled = false
     trigger.mutateAsync().then(
       (result) => { if (!cancelled) setActiveRunId(result.runIds[0]) },
@@ -159,7 +165,7 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
     <>
       <ErrorBanner error={historyError ?? trigger.error ?? cancel.error ?? resync.error} />
 
-      {(isWatching || showBackfill) && (
+      {(isWatching || showBackfill || showReconcile) && (
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
           {isWatching && (
             <div className="card flush" style={{ flex: 1, minWidth: 0 }} data-testid="live-run-panel">
@@ -199,6 +205,13 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
               replicationName={replicationName}
               onQueued={(runIds) => { setShowBackfill(false); setActiveRunId(runIds[0]) }}
               onClose={() => setShowBackfill(false)}
+            />
+          )}
+          {showReconcile && (
+            <ReconcileDeletesForm
+              replicationName={replicationName}
+              onQueued={(runIds) => { setShowReconcile(false); setActiveRunId(runIds[0]) }}
+              onClose={() => setShowReconcile(false)}
             />
           )}
         </div>

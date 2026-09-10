@@ -18,4 +18,9 @@ public static class MsSqlDriverKinds
     public const string Merge = "MsSqlMerge";
     public const string MergeReconcile = "MsSqlMergeReconcile";
     public const string DeleteInsert = "MsSqlDeleteInsert";
+
+    /// <summary>Re-exported from <see cref="GenericDriverKinds"/>, same reasoning as
+    /// <see cref="Watermark"/> — phase 124's delete-diff sweep is engine-neutral.</summary>
+    public const string KeyReconcile = GenericDriverKinds.KeyReconcile;
+    public const string KeyReconcileDelete = GenericDriverKinds.KeyReconcileDelete;
 }

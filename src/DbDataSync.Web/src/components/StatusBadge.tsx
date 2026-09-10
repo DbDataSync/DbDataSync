@@ -19,7 +19,15 @@ export function StatusBadge({ status }: { status: RunStatus }) {
   )
 }
 
-/** Primary and Backfill get distinct chips in the design — grey and violet respectively. */
+const badgeClassByKind: Record<RunKind, string> = {
+  Primary: 'badge-primary',
+  Backfill: 'badge-backfill',
+  // Phase 124: its own chip, distinct from Backfill — a delete-diff sweep is on-demand,
+  // non-incremental work like a Backfill, but a different action an operator should be able to
+  // tell apart in run history at a glance.
+  ReconcileDeletes: 'badge-reconcile',
+}
+
 export function RunKindBadge({ kind }: { kind: RunKind }) {
-  return <span className={`badge ${kind === 'Backfill' ? 'badge-backfill' : 'badge-primary'}`}>{kind.toUpperCase()}</span>
+  return <span className={`badge ${badgeClassByKind[kind]}`}>{kind.toUpperCase()}</span>
 }

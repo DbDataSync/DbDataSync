@@ -220,6 +220,7 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<SegmentingStrategyRunner>();
         builder.Services.AddSingleton<CustomSegmentExpansion>();
         builder.Services.AddSingleton<BackfillService>();
+        builder.Services.AddSingleton<ReconcileService>();
         builder.Services.AddSingleton<SegmentingPreviewService>();
         builder.Services.AddSingleton<ResyncService>();
 

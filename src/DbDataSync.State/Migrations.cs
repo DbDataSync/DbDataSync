@@ -777,5 +777,16 @@ internal static class Migrations
         ALTER TABLE TaskRuns {{addcolumn}} BackfillBatchId {{key}} NULL;
         CREATE INDEX IX_TaskRuns_BackfillBatchId ON TaskRuns(BackfillBatchId);
         """,
+
+        """
+        -- Phase 124: the delete guard a ReconcileDeletes work item's writer should run, serialized
+        -- (DeleteGuardOption.Serialize) the same way SegmentJson already carries a segment. Same
+        -- reasoning as ReaderKind/CacheKind/WriterKind above: which guard to run is a property of the
+        -- unit of work (an operator's override for one sweep), not of the replication's own config, so
+        -- it travels on the queue row rather than through ChangeProcessing options. NULL means "no
+        -- override" — RunExecutor.WithGuard leaves the writer's configured/default guard alone, which
+        -- is every row before this column existed and every Primary/Backfill/Verification item after.
+        ALTER TABLE WorkQueue {{addcolumn}} DeleteGuardJson {{text}} NULL;
+        """,
     ];
 }

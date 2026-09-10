@@ -54,6 +54,7 @@ public sealed class GenericDriver : IDriver, IConnectionTester, IDialectProvider
                 GenericDriverKinds.Watermark => new WatermarkReader(spec.Dialect, spec.Catalog, binder),
                 GenericDriverKinds.BatchReload => new BatchReloadReader(spec.Dialect, spec.Catalog, binder),
                 GenericDriverKinds.TriggerAudit => new TriggerAuditReader(spec.Dialect, spec.Catalog),
+                GenericDriverKinds.KeyReconcile => new KeyReconcileReader(spec.Dialect, spec.Catalog, binder),
                 _ => throw new ArgumentException($"'{kind}' is not a generic reader Kind.", nameof(spec)),
             });
         }
@@ -82,6 +83,7 @@ public sealed class GenericDriver : IDriver, IConnectionTester, IDialectProvider
             writers.Add(kind switch
             {
                 GenericDriverKinds.DeleteInsert => new DeleteInsertWriter(spec.Dialect, spec.Catalog, binder),
+                GenericDriverKinds.KeyReconcileDelete => new KeyReconcileDeleteWriter(spec.Dialect, spec.Catalog, binder),
                 GenericDriverKinds.Snapshot => new SnapshotWriter(spec.Dialect, spec.Catalog),
                 GenericDriverKinds.Scd2 => new Scd2Writer(spec.Dialect, spec.Catalog),
                 _ => throw new ArgumentException($"'{kind}' is not a generic writer Kind.", nameof(spec)),

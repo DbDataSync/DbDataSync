@@ -38,6 +38,7 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
         new WatermarkReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
         new TriggerAuditReader(PostgresDialect.Instance, PostgresCatalog.Instance),
         new BatchReloadReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
+        new KeyReconcileReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
     ];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =
@@ -46,6 +47,7 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
     public IReadOnlyList<IChangeWriter> Writers { get; } =
     [
         new DeleteInsertWriter(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
+        new KeyReconcileDeleteWriter(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
         new SnapshotWriter(PostgresDialect.Instance, PostgresCatalog.Instance),
         new Scd2Writer(PostgresDialect.Instance, PostgresCatalog.Instance),
     ];

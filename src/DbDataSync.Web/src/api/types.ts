@@ -948,8 +948,23 @@ export interface BackfillRequest {
   segments: BatchReloadSegment[]
 }
 
+/** `POST .../reconcile-deletes` (phase 124) — no reader/cache/writer Kinds, unlike `BackfillRequest`:
+ * a delete-diff sweep always runs KeyReconcile/StagingTable/KeyReconcileDelete, so there is nothing
+ * else to pick. */
+export interface ReconcileDeletesRequest {
+  segments: BatchReloadSegment[]
+  /** Replaces the configured/default delete guard with "none" for this request — an operator
+   * confirming "yes, delete this many rows" after a guarded attempt refused. */
+  overrideGuard?: boolean
+}
+
 export type RunStatus = 'Queued' | 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'
-export type RunKind = 'Primary' | 'Backfill'
+export type RunKind = 'Primary' | 'Backfill' | 'ReconcileDeletes'
+
+/** Phase 124's `KeyReconcile`/`KeyReconcileDelete` pair exists only for a delete-diff sweep — never
+ * offered in an ordinary Change Processing or Backfill reader/writer picker, which is what every
+ * `capabilities.readers`/`.writers` list gets filtered against before rendering one. */
+export const RECONCILE_ONLY_KINDS: ReadonlySet<string> = new Set(['KeyReconcile', 'KeyReconcileDelete'])
 
 export interface TaskRunRecord {
   runId: string

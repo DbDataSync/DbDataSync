@@ -35,6 +35,7 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         new WatermarkReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
         new MsSqlBatchReloadReader(),
         new BatchReloadReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
+        new KeyReconcileReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
     ];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =
@@ -49,6 +50,7 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         new MsSqlMergeReconcileWriter(),
         new MsSqlDeleteInsertWriter(),
         new DeleteInsertWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
+        new KeyReconcileDeleteWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
             new SnapshotWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance),
         new Scd2Writer(MsSqlDialect.Instance, MsSqlCatalog.Instance),
     ];

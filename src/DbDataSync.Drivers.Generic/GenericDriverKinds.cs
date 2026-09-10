@@ -16,6 +16,15 @@ public static class GenericDriverKinds
     public const string StagingTable = "StagingTable";
     public const string DeleteInsert = "DeleteInsert";
 
+    /// <summary>Reads only a source table's primary-key values — phase 124's cheap delete-diff sweep.
+    /// Always paired with <see cref="KeyReconcileDelete"/>; reconcile-only, never offered in the
+    /// ordinary Change Processing reader picker.</summary>
+    public const string KeyReconcile = "KeyReconcile";
+
+    /// <summary>Deletes target rows within a segment's scope whose key is absent from the staged key
+    /// set — never inserts or updates. Always paired with <see cref="KeyReconcile"/>.</summary>
+    public const string KeyReconcileDelete = "KeyReconcileDelete";
+
     /// <summary>Appends a complete copy per pass, marked with when it ran. Keeps history by keeping
     /// every copy.</summary>
     public const string Snapshot = "Snapshot";

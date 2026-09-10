@@ -4,7 +4,7 @@ import { api } from './client'
 import type {
   BulkCreateRequest,
   DriverType,
-  ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ConnectionInput, ReplicationTaskConfig,
+  ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ReconcileDeletesRequest, ConnectionInput, ReplicationTaskConfig,
   RunHistoryFilters,
   SegmentingStrategyConfig, SetMappingReadStateRequest, TableMappingConfig } from './types'
 
@@ -623,6 +623,16 @@ export function useBackfill(replicationName: string) {
   return useMutation({
     mutationFn: ({ mappingName, request }: { mappingName: string; request: BackfillRequest }) =>
       api.runs.backfill(replicationName, mappingName, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.runHistory(replicationName) }),
+  })
+}
+
+/** Phase 124's delete-diff sweep trigger — same shape as {@link useBackfill}. */
+export function useReconcileDeletes(replicationName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ mappingName, request }: { mappingName: string; request: ReconcileDeletesRequest }) =>
+      api.runs.reconcileDeletes(replicationName, mappingName, request),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.runHistory(replicationName) }),
   })
 }

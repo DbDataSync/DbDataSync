@@ -172,6 +172,15 @@ export function ReplicationDetailPage() {
             )}
             {isAdmin && (
               <button
+                className="btn btn-chrome"
+                onClick={() => send('reconcile')}
+                data-testid="reconcile-deletes-button"
+              >
+                Reconcile deletes…
+              </button>
+            )}
+            {isAdmin && (
+              <button
                 className="btn btn-primary btn-chrome"
                 onClick={() => send('run')}
                 data-testid="trigger-run-button"
