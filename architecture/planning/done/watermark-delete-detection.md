@@ -1,10 +1,15 @@
 # Delete detection for watermark change tracking — a key-diff sweep
 
-**Status: agreed in shape (2026-09-09). Four open questions below settle before the phase docs are
-written.**
+**Resolved 2026-09-09.** The four open questions were settled (see *Open questions* below, now
+answered inline). The design builds as two phases:
+
+| phase | what |
+| --- | --- |
+| **124** — `architecture/implementation/todo/phase-124-key-reconcile-delete-detection.md` | the `KeyReconcile` reader + `KeyReconcileDelete` writer, `DeleteGuard`, `RunKind.ReconcileDeletes`, an on-demand `ReconcileService` + endpoint |
+| **125** — `architecture/implementation/todo/phase-125-reconcile-config-and-scheduling.md` | `ReconcileConfig`, a scheduled cadence reusing `SchedulingConfig`, a pluggable `AfterChangeStrategy` evaluated in the scheduler |
 
 The cheap "snapshot diff" `change-tracking-strategies.md` named and left for "a document of its own".
-This is that document.
+This is that document; the rest of it is the thinking the phase docs carry forward.
 
 ---
 
@@ -167,20 +172,26 @@ generic pair the same way `DeleteInsert` is already shared. DuckDb is out of sco
 
 ---
 
-## Open questions — settle before the phase docs
+## Open questions — resolved 2026-09-09
 
-1. **Duration vs cron for `ReconcileConfig.Every`.** Match whatever `SchedulingEvaluator` already
-   accepts for a replication schedule rather than inventing a second grammar — confirm which that is
-   and that a per-mapping cadence fits it.
-2. **`BackfillBatchStore` reuse vs. a sibling.** Can it carry a `ReconcileDeletes` batch as-is, or
-   does it want a `kind` column / a parallel table so the Monitoring screen tells a reload batch
-   from a delete sweep.
-3. **After-change debounce location.** In `RunExecutor` right after the pass, or a dedup inside the
-   shared reconcile enqueuer that both the scheduler and the after-change hook call.
-4. **How much the `AfterChangeStrategy` / `DeleteGuard` evaluator signatures carry now.** Keep
-   `passOutcome` and `Check(scopeCount, deleted)` minimal, or pre-widen for the obvious next
-   strategies (row counts, durations, per-key delete hints) so adding one is purely a new arm.
-   Leaning minimal — widen when the second strategy actually lands.
+1. **Cadence grammar for `ReconcileConfig.Every`.** → **Reuse `SchedulingConfig` wholesale**
+   (`{ Mode: Continuous|Periodic, FrequencySeconds?, CronExpression? }`) and the existing
+   `SchedulingEvaluator.IsDue`. No new grammar, no new evaluator; the SPA scheduling editor is
+   reusable. The `IdleTimeoutSeconds` fields on that type are ignored here.
+2. **Batch rollup — reuse `BackfillBatchStore` or a sibling.** → **No batch rollup in phase 124.**
+   Per-segment `ReconcileDeletes` runs show in run history like any other run. Phase 125 adds a
+   sibling `ReconcileBatches` view *only if* the plain history reads unclearly for a multi-segment
+   sweep — never a `Kind` column on `BackfillBatches` (its "rows copied" / whole-table-denominator
+   vocabulary is reload-shaped and would force branching through every consumer).
+3. **After-change trigger location.** → **In `SchedulerService`**, sharing the enqueue + dedup path
+   with the scheduled cadence. Not `RunExecutor`: the enqueuer and `AutoSegment` expansion live in
+   the API, the scheduler already ticks doing exactly this kind of due-check, and ~5s latency is a
+   non-issue for a delete sweep.
+4. **Evaluator signature width.** → **Both minimal.** `DeleteGuardEvaluator.Check(guard, scopeCount,
+   deleted)` covers every row-arithmetic guard (a require-confirmation guard uses the run's override
+   flag, not row numbers). `AfterChangeEvaluator.ShouldReconcile(strategy, rowsReadSinceLastSweep)`
+   takes one scheduler-computed aggregate, which covers both `AfterAnyChange` (`> 0`) and a future
+   `AfterNChanges(n)` (`>= n`) with no signature change.
 
 ---
 
