@@ -1,5 +1,9 @@
+import path from 'node:path'
 import { test, expect } from '@playwright/test'
 import { KNOWN_DRIVER_ID, KNOWN_DRIVER_LIBRARY } from '../playwright.config'
+import { screenshotDir } from '../screenshots'
+
+const screenshotsDir = screenshotDir('admin-drivers-libraries')
 
 /**
  * Phase 118's read-only Drivers and Libraries admin screens, plus (phase 120) installing the one
@@ -44,6 +48,8 @@ test.describe.serial('admin: Drivers and Libraries', () => {
     await expect(descriptorRow).toBeVisible()
     await expect(descriptorRow.getByTestId(`admin-driver-source-${KNOWN_DRIVER_ID}`)).toHaveText('Descriptor')
     await expect(descriptorRow).toContainText(KNOWN_DRIVER_LIBRARY)
+
+    await page.screenshot({ path: path.join(screenshotsDir, '118-drivers-tab.png'), fullPage: true })
   })
 
   test('Libraries tab lists the installed library as resolving, curated, and used by the descriptor', async ({ page }) => {
@@ -60,5 +66,7 @@ test.describe.serial('admin: Drivers and Libraries', () => {
     // Still in use by the descriptor driver — Remove is disabled, only Force is offered.
     await expect(page.getByTestId(`admin-library-remove-${KNOWN_DRIVER_LIBRARY}`)).toBeDisabled()
     await expect(page.getByTestId(`admin-library-force-remove-${KNOWN_DRIVER_LIBRARY}`)).toBeVisible()
+
+    await page.screenshot({ path: path.join(screenshotsDir, '118-libraries-tab.png'), fullPage: true })
   })
 })

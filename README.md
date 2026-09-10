@@ -244,7 +244,8 @@ npx playwright install chromium
 npx playwright test
 ```
 
-Screenshots of each screen land in `tests/DbDataSync.Web.Tests/screenshots/`.
+Screenshots of each screen land in `screenshots/`, one sub-folder per spec (`screenshots/README.md`
+indexes them).
 
 ## Repository layout
 

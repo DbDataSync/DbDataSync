@@ -117,8 +117,9 @@ These are covered by an **operations reference** doc, not the tutorial.
 
 - **`first-replication.md`** — the linear tutorial above, MSSQL → MSSQL (what v1 supports), with
   screenshots. Generate them from the Playwright golden-path run rather than by hand — the suite
-  already shoots `06-table-mappings-list`, `07/08-live-run`, `24-create-table-plan`,
-  `25-mapping-preview`, `27-run-metrics`, etc. A small script copies the ones the doc references.
+  already shoots `screenshots/golden-path/06-table-mappings-list`, `07/08-live-run`,
+  `24-create-table-plan`, `25-mapping-preview`, `27-run-metrics`, etc. A small script copies the ones
+  the doc references.
 - **`connections.md`** — per driver: connection-string vs. host/port, auth modes, and the **exact
   `GRANT` statements** for a least-privilege source and target account. This is the single most
   reusable reference; support questions will land here.
@@ -155,7 +156,7 @@ guided flow that gets in the way on the second use.
 
 1. **Screenshots in docs** — committed PNGs (large, but the repo already commits the Playwright
    screenshots) or generated at doc-build time? Leaning: a script that copies a named subset out of
-   the Playwright output into `docs/img/`, run in the same CI job, so they cannot drift from the UI.
+   `screenshots/` into `docs/img/`, run in the same CI job, so they cannot drift from the UI.
 2. **Permission probing on Test** vs. a doc table of `GRANT`s. Leaning: the doc table first (cheap,
    covers every case); a probe later if the doc does not stop the questions.
 3. Whether the "first replication" tutorial should assume the dev-harness containers (reproducible,

@@ -1,4 +1,8 @@
+import path from 'node:path'
 import { test, expect } from '@playwright/test'
+import { screenshotDir } from '../screenshots'
+
+const screenshotsDir = screenshotDir('admin-library-install')
 
 /**
  * Phase 120's install/remove flow for a package the operator found themselves, not one of the
@@ -34,10 +38,12 @@ test.describe.serial('admin: install and remove a non-curated library', () => {
 
     await installButton.click()
     await expect(page.getByTestId('admin-libraries-trust-dialog')).toBeVisible()
+    await page.screenshot({ path: path.join(screenshotsDir, '120-trust-dialog.png'), fullPage: true })
     await page.getByTestId('admin-libraries-trust-confirm').click()
 
     await expect(page.getByTestId('admin-library-row-Dapper')).toBeVisible({ timeout: 30_000 })
     await expect(page.getByTestId('restart-required-banner')).toBeVisible()
+    await page.screenshot({ path: path.join(screenshotsDir, '120-install-restart-required.png'), fullPage: true })
   })
 
   test('removing it (nothing depends on it) works with a plain confirm', async ({ page }) => {

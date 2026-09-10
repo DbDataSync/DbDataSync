@@ -3,10 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DB_NAME, querySql, runSql, SA_PASSWORD, SOURCE_TABLE, SRC_CONNECTION_NAME, TARGET_TABLE, TGT_CONNECTION_NAME } from '../test-db'
+import { screenshotDir } from '../screenshots'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const screenshotsDir = path.join(__dirname, '..', 'screenshots')
-fs.mkdirSync(screenshotsDir, { recursive: true })
+const screenshotsDir = screenshotDir('golden-path')
 
 const REPLICATION_NAME = 'playwright-sync'
 const MAPPING_NAME = 'items'

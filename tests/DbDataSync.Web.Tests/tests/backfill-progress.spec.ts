@@ -1,11 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
-import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { screenshotDir } from '../screenshots'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const screenshotsDir = path.join(__dirname, '..', 'screenshots')
-fs.mkdirSync(screenshotsDir, { recursive: true })
+const screenshotsDir = screenshotDir('backfill-progress')
 
 const REPLICATION_NAME = 'backfill-progress-demo'
 const MAPPING_NAME = 'orders'

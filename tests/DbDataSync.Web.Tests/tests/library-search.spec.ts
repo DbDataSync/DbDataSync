@@ -1,4 +1,8 @@
+import path from 'node:path'
 import { test, expect } from '@playwright/test'
+import { screenshotDir } from '../screenshots'
+
+const screenshotsDir = screenshotDir('library-search')
 
 /**
  * Phase 119's NuGet search box on the Libraries screen — against the real public index, since this
@@ -35,6 +39,8 @@ test.describe('admin: Libraries — NuGet search', () => {
     await expect(command).toContainText(`dbdatasync config library install MySqlConnector --version ${firstRealVersion}`)
     // MySqlConnector is a bundled, curated entry (phase 117) — no trust warning for it.
     await expect(command).not.toContainText("isn't one of the bundled")
+
+    await page.screenshot({ path: path.join(screenshotsDir, '119-nuget-search-results.png'), fullPage: true })
   })
 
   test('a quick-add chip for a curated library not yet installed pre-fills its id', async ({ page }) => {
@@ -50,5 +56,7 @@ test.describe('admin: Libraries — NuGet search', () => {
 
     const command = page.getByTestId('admin-libraries-install-command')
     await expect(command).toContainText('dbdatasync config library install Npgsql --version 9.0.0')
+
+    await page.screenshot({ path: path.join(screenshotsDir, '119-curated-quick-add.png'), fullPage: true })
   })
 })
