@@ -1,9 +1,10 @@
 # Phase 127 — publish `DbDataSync` to nuget.org via Trusted Publishing (OIDC)
 
-**Status**: **The beta/prerelease path is fully verified; the stable path is deliberately deferred**,
-so this stays in `todo/` rather than `done/` — not because anything is broken, but because one item of
-this doc's own verification checklist (a real, non-beta tag) is a genuinely permanent, fully-listed
-public nuget.org release, and that is the account owner's call to make on their own schedule, not
+**Status**: **The beta/prerelease path is fully verified, under both the original tag-push trigger and
+the `workflow_dispatch` redesign that replaced it; the stable path is deliberately deferred** — so this
+stays in `todo/` rather than `done/`, not because anything is broken, but because one item of this
+doc's own verification checklist (a real, non-beta release) is a genuinely permanent, fully-listed
+public nuget.org publish, and that is the account owner's call to make on their own schedule, not
 something to tick off a checklist for its own sake.
 
 What's confirmed, against the real `release/v1-beta` tag (`ff6d02d`), in order: the whole workflow ran
@@ -20,16 +21,16 @@ appears in it.
 Five real things were found and fixed or learned getting here (below); none were guessed at, all were
 caught by running the real thing and reading what actually came back.
 
-**The trigger was then redesigned, 2026-09-11, and that redesign is not yet proven by a real run.**
+**The trigger was then redesigned, 2026-09-11, and the redesign is itself proven by a real run.**
 Everything above happened against the tag-push-triggered shape phase 78 originally built. Operating
 it — five iterations, each needing `release/v1-beta` deleted and recreated by hand before a retry
 could even start — was itself the argument for replacing it: `release.yml` now triggers on manual
 `workflow_dispatch` (a `beta` checkbox, no tag needed to start a run) and creates + pushes the release
 tag *itself*, named after the version it just published, only once that version is confirmed live on
-nuget.org. See *The trigger redesign* below for the full design and why. The new git-tagging mechanism
-and the input-reading were dry-run rehearsed locally (a scratch git repo for the tag push; synthetic
-dates for the version math) but **not yet exercised by an actual dispatched Actions run** — that is
-the next thing to do, not something to assume works because the pieces checked out individually.
+nuget.org. See *The trigger redesign* below for the full design and why. `gh workflow run release.yml
+-f beta=true` (`ef64c85`) ran fully green on the first real dispatch — see the second checklist item
+below for exactly what it confirmed, including that the tag landed on the right repo and nowhere
+else.
 **Plan reference**: `architecture/planning/done/nuget-org-publishing-and-github-hosting-move.md` §2.
 Depends on phase 126 (the repo needs to exist at its final `DbDataSync/DbDataSync` location, since a
 Trusted Publishing policy names that exact repo).
@@ -145,14 +146,17 @@ the message if it appears rather than treating it as an error.
   2026.9.11.425-beta` succeeded and `dbdatasync version` reported that exact string; the GitHub Release
   was created marked `prerelease: true` with exactly one asset and a working exact-version install
   command in its notes.
-- ⬜ **Not yet done: the same beta run, under the redesigned `workflow_dispatch` trigger.** The trigger
-  mechanism changed after the run above — `gh workflow run release.yml -f beta=true` needs its own real
-  confirmation that: the run actually dispatches and reads the `beta` input correctly; `git tag
-  "$VERSION" && git push origin refs/tags/$VERSION` succeeds inside the Actions runner using nothing
-  but `actions/checkout@v4`'s default credentials; the pushed tag is visible (`git ls-remote --tags
-  origin`) and points at the commit that was actually packed; `gh release create "$VERSION"` correctly
-  uses that already-existing tag rather than trying to create a second one. This is the very next
-  thing to do — a redesign this session made a point of not shipping on "should work."
+- ✅ **The same beta run, under the redesigned `workflow_dispatch` trigger** — `gh workflow run
+  release.yml -f beta=true` against `DbDataSync/DbDataSync` (`ef64c85`), fully green on the first
+  attempt: the run dispatched correctly (`Triggered via workflow_dispatch`, no tag involved) and read
+  the `beta` input; `Compute the version` emitted `2026.9.11.450-beta`; the whole pack/smoke-test/nuget
+  chain passed unchanged; `Tag this commit with the released version` created and pushed the tag using
+  nothing but `actions/checkout@v4`'s default credentials (`[new tag] 2026.9.11.450-beta ->
+  2026.9.11.450-beta`, confirmed on `origin` — and confirmed **absent** on `old-origin`, proving the
+  in-runner `git push origin` genuinely targets the repo the workflow lives in, unrelated to any local
+  git remote naming); `gh release create` used that already-existing tag directly (no second tag
+  created) and produced a release titled and tagged `2026.9.11.450-beta`, correctly marked
+  `prerelease: true`, with notes naming the exact commit and the tag the run created for it.
 - ⬜ **Deliberately not done**: a real, non-beta dispatch (`beta` unchecked / `-f beta=false`) —
   confirming the version has no `-beta` suffix, `prerelease` is `false`, a plain `dotnet tool install`
   with no flags at all finds it, and the GitHub Release is **not** marked pre-release. Held back on the
