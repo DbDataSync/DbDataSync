@@ -68,11 +68,25 @@ jobs:
           dotnet pack src/DbDataSync.Cli/DbDataSync.Cli.csproj \
             -c Release -o artifacts \
             -p:Version="$VERSION"
-          nupkg=$(ls artifacts/DbDataSync.*.nupkg)
+
+          # DbDataSync.Cli references DbDataSync.Drivers.Abstractions, which has had its own
+          # GeneratePackageOnBuild=true since phase 109e (for a future third-party compiled IDriver
+          # plugin to reference) — and -o/-p:Version on the command line become global MSBuild
+          # properties applying to the *whole* build graph, not just the top-level project, so packing
+          # the Cli quietly packs Abstractions too, into the same -o directory. A bare
+          # `DbDataSync.*.nupkg` glob matches both filenames (<PackageId>.<Version>.nupkg, and both ids
+          # start with "DbDataSync."), which is exactly how this was caught: the first real tag push
+          # this repo ever made picked the wrong one. Anchored to a digit right after the id — a
+          # version always starts with one, "Drivers" never does — the narrowest fix that leaves
+          # Abstractions' own packing (deliberate, not this phase's to touch) alone. The exact resolved
+          # path is captured once here and reused by every later step, rather than re-globbing and
+          # risking the same ambiguity a second time.
+          nupkg=$(ls artifacts/DbDataSync.[0-9]*.nupkg)
           shipped=$(basename "$nupkg" .nupkg)
           shipped=${shipped#DbDataSync.}
           echo "asked for $VERSION, NuGet shipped $shipped ($nupkg)"
           echo "shipped=$shipped" >> "$GITHUB_OUTPUT"
+          echo "nupkg=$nupkg" >> "$GITHUB_OUTPUT"
 
       # The same smoke test ci.yml's package job runs, repeated here deliberately: a release is
       # public and awkward to withdraw, so the package proves it installs and runs before it is
@@ -113,9 +127,14 @@ jobs:
 
       # Before the GitHub Release, not after: so that Release's own notes can say "published to
       # nuget.org" truthfully, rather than promising a step that hasn't run yet.
+      #
+      # steps.pack.outputs.nupkg by exact path, not artifacts/*.nupkg: this repo publishes the CLI
+      # tool only (see the parent planning doc) — a bare glob would also push the incidental
+      # DbDataSync.Drivers.Abstractions package the pack step's own comment explains, which is a real
+      # scope violation, not a cosmetic one.
       - name: Push to nuget.org
         run: |
-          dotnet nuget push artifacts/*.nupkg \
+          dotnet nuget push "${{ steps.pack.outputs.nupkg }}" \
             --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
@@ -129,6 +148,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.pack.outputs.shipped }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          NUPKG: ${{ steps.pack.outputs.nupkg }}
         run: |
           # Built as a plain variable first, not inline in the heredoc below: the heredoc is unquoted
           # (so ${VERSION} etc. expand), which means a literal backtick anywhere in its body is live
@@ -166,8 +186,11 @@ jobs:
           EOF
           prerelease_flag=()
           [ "$PRERELEASE" = "true" ] && prerelease_flag=(--prerelease)
+          # The exact nupkg path, not artifacts/*.nupkg — same reason as the nuget.org push above:
+          # "The nupkg alone" (this step's own comment) was always meant to be one file, not
+          # incidentally two.
           gh release create "$GITHUB_REF_NAME" \
             --title "DbDataSync $VERSION" \
             --notes-file /tmp/release-notes.md \
             "${prerelease_flag[@]}" \
-            artifacts/*.nupkg
+            "$NUPKG"
