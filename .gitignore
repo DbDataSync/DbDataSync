@@ -10,8 +10,11 @@ dist/
 dist-ssr/
 *.local
 
-# Local tooling state
-.claude/
+# Local tooling state — session locks, scheduled-task state, etc. Skills are the exception: they're
+# process knowledge worth versioning like anything else in architecture/, not per-machine state.
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 
 # DbDataSync.Api dev-time default RepoRoot/StateDbPath (auto-created git repo + state db from running
 # the API locally) — runtime state, not source.
