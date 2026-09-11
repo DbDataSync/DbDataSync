@@ -21,6 +21,29 @@ for arg in "$@"; do
   esac
 done
 
+# The workflow builds whatever is on origin/main, not this working tree — so a local edit that
+# hasn't been committed, or a commit that hasn't been pushed, would silently be missing from the
+# release with no error anywhere. Refuse rather than release something other than what was asked for.
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "Not inside a git working tree. Run this from a clone of $REPO." >&2
+  exit 1
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Working tree has uncommitted changes — commit or stash them before releasing:" >&2
+  git status --short >&2
+  exit 1
+fi
+
+git fetch origin main --quiet
+local_sha=$(git rev-parse HEAD)
+remote_sha=$(git rev-parse origin/main)
+if [ "$local_sha" != "$remote_sha" ]; then
+  echo "Local HEAD ($local_sha) does not match origin/main ($remote_sha)." >&2
+  echo "Push your commits (or pull) before releasing — release.yml builds origin/main, not this checkout." >&2
+  exit 1
+fi
+
 echo "Dispatching release.yml (beta=$BETA) against $REPO..."
 before=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 gh workflow run release.yml --repo "$REPO" -f beta="$BETA"

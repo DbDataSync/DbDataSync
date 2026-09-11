@@ -20,13 +20,14 @@ the released commit itself once the publish is confirmed, and creates the GitHub
 publishes `DbDataSync.Drivers.Abstractions` — that package exists for a future third-party compiled
 driver plugin and is deliberately out of scope here.
 
-The repo is **`DbDataSync/DbDataSync`** (the `origin` remote) — not the old `danshryock/DataSync`,
-which nothing publishes to any more.
+The repo is **`DbDataSync/DbDataSync`**.
 
 ## Running a release
 
-Use `scripts/release.sh`, which wraps the whole dispatch-find-watch sequence this doc used to ask a
-human to do by hand three separate `gh` calls:
+The workflow always builds whatever is on `origin/main` — not your working tree, not a local commit
+that hasn't been pushed. Before dispatching, make sure the repo you're releasing from is clean and
+pushed: no uncommitted changes, and local `main` exactly matches `origin/main`. `scripts/release.sh`
+checks this itself and refuses to run otherwise, so the common case is just:
 
 ```sh
 .claude/skills/nuget-release/scripts/release.sh          # a real, stable release
@@ -36,9 +37,14 @@ human to do by hand three separate `gh` calls:
 It dispatches `release.yml`, finds the run it just created (`gh workflow run` doesn't hand back a
 run id, so the script matches the newest `workflow_dispatch` Release run created after the moment it
 dispatched), watches it to completion with `--exit-status`, and on success prints the resulting
-version and the release list. Requires `gh` authenticated with access to the repo — nothing else.
+version and the release list. Requires `gh` authenticated with access to the repo, run from inside a
+clone of it — nothing else.
 
-If the script isn't available or you need to do this by hand:
+If the script refuses because of uncommitted or unpushed changes, commit and push them first (or
+confirm with the user that releasing an older commit is actually what they want, then run the raw
+`gh` commands below instead of the script).
+
+If the script isn't available for some other reason:
 
 ```sh
 gh workflow run release.yml --repo DbDataSync/DbDataSync -f beta=false   # or beta=true
@@ -54,10 +60,12 @@ release is a permanent, fully-listed public nuget.org version — don't reach fo
 because a release feels like a big or risky action; that caution belongs in *confirming with the
 user before running the script*, not in silently downgrading what they asked for.
 
-A beta run appends `-beta` to the computed version (a real SemVer 2 prerelease label, not a
-cosmetic one) and marks the GitHub Release as a prerelease. nuget.org then hides it from a plain
-`dotnet tool install DbDataSync` — only an exact `--version` or `--prerelease` finds it. That's the
-right choice for exercising the pipeline itself, not for a release meant to be found normally.
+A beta run appends `-beta` to the computed version (a real SemVer 2 prerelease label) and marks the
+GitHub Release as a prerelease. nuget.org hides a prerelease from a plain `dotnet tool install` —
+only an exact `--version` or `--prerelease` finds it — which is the right shape for exercising the
+pipeline itself, not for a release meant to be found normally. No need to go prove that hiding
+behavior after every beta; it's an established property of nuget.org, not something this workflow
+could get wrong per run.
 
 ## What a successful run means
 
@@ -72,66 +80,32 @@ right choice for exercising the pipeline itself, not for a release meant to be f
   tag, titled and named after the version, carrying the `.nupkg` as its one asset.
 - The version is on nuget.org: `https://www.nuget.org/packages/DbDataSync/<version>`.
 
-## If the package doesn't show up on nuget.org right away
+A green workflow run is the real confirmation that the release shipped — nuget.org publishing
+doesn't need to be independently re-proven every time.
 
-A **brand-new package id's first-ever publish** goes through nuget.org's validation pipeline before
-it's fully indexed, and can lag the workflow's own "Your package was pushed" by several minutes —
-this bit us hard getting Trusted Publishing working the first time (see
-`architecture/implementation/todo/phase-127-nuget-trusted-publishing.md`, bug 5, for the full story).
-Specifically, nuget.org has two independently-lagging stages: the raw flat-container blob
-(`api.nuget.org/v3-flatcontainer/...`) tends to go live first, but `dotnet tool install` resolves
-versions through the **registration index**
-(`api.nuget.org/v3/registration5-gz-semver2/dbdatasync/index.json`), which can return `404` for a
-while after the blob itself is already reachable. Checking the flat container or the nuget.org web
-page is not proof `dotnet tool install` can find it yet.
+## nuget.org indexing can lag behind the push by several minutes
 
-**This isn't limited to a package id's very first publish, and it can be slower than that expression
-suggests.** It was assumed here that an ordinary version bump would index faster than a brand-new
-package id — measured wrong: the first *stable* (non-prerelease) release took **893 seconds (~15
-minutes)** to reach the registration index, noticeably longer than either prerelease before it. The
-likely reason: the two earlier publishes were both prereleases, which nuget.org excludes from normal
-search/listing entirely — so this may have been effectively a first-ever-listed event for this
-package id, distinct from "first publish of any kind." Don't assume a release is broken just because
-`dotnet tool install DbDataSync` (no version pin) doesn't find it for 10–15 minutes; a `curl` check
-against the flat container or the registration index's bare existence is not proof either — it can
-report the version present (e.g. as a page-range bound) before an unversioned resolve actually
-succeeds. **The only check that means anything is the real command**, retried:
+Let the user know this rather than treating a not-yet-visible package as something wrong: nuget.org
+has indexed a fresh publish anywhere from under a minute to as long as ~15 minutes after the workflow
+reports success, and that's without anything having failed — see
+`architecture/implementation/done/phase-127-nuget-trusted-publishing.md` (bugs 5–6) for the real
+numbers this was measured against. If someone wants to confirm a specific version is live, this is
+the one command that actually answers it (an unversioned `--global` install can misleadingly resolve
+from a local cache instead, so this uses a scratch path and skips that cache):
 
 ```sh
-until dotnet tool install --tool-path /tmp/nuget-wait-probe DbDataSync --no-cache >/dev/null 2>&1; do
-  rm -rf /tmp/nuget-wait-probe
-  sleep 20
-done
-rm -rf /tmp/nuget-wait-probe
+dotnet tool install --tool-path /tmp/verify-release DbDataSync --version <version> --no-cache
 ```
 
-`--no-cache` matters — `dotnet` keeps its own local HTTP cache independent of nuget.org's server-side
-state, and a `404` cached from an install attempt made *before* the package existed can otherwise
-make a perfectly-indexed package look absent to this exact machine for a while.
-
-## Verifying an install for real
-
-Don't trust `--global` alone to prove a release is installable — it can silently resolve from your
-own machine's local NuGet cache. Use a scratch tool-path with no local source, exactly what the
-workflow's own smoke test does:
-
-```sh
-dotnet tool install --tool-path /tmp/verify-release DbDataSync --version <version>
-/tmp/verify-release/dbdatasync version
-```
-
-For a beta, also confirm a plain unversioned install correctly finds *nothing* — proof nuget.org is
-genuinely treating it as hidden, not merely that the string "beta" is in the version:
-
-```sh
-dotnet tool install --tool-path /tmp/verify-release-2 DbDataSync   # should fail to find anything
-```
+If that doesn't find it yet, it's very likely just still indexing — wait a few minutes and try again
+rather than assuming the release failed (the GitHub Release existing and the workflow having gone
+green already established that it published).
 
 ## Reference
 
 - `.github/workflows/release.yml` — the workflow itself, heavily commented; read it before changing
   anything about the release process.
-- `architecture/implementation/todo/phase-127-nuget-trusted-publishing.md` — the full design
+- `architecture/implementation/done/phase-127-nuget-trusted-publishing.md` — the full design
   rationale, the nuget.org Trusted Publishing policy setup, and every real bug found building this
   (worth reading before assuming something "should just work").
 - `architecture/planning/done/nuget-org-publishing-and-github-hosting-move.md` — why Trusted
