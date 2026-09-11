@@ -85,17 +85,29 @@ versions through the **registration index**
 while after the blob itself is already reachable. Checking the flat container or the nuget.org web
 page is not proof `dotnet tool install` can find it yet.
 
-**This only matters for a first-ever publish of a package id.** `DbDataSync` is a real, established
-package now — an ordinary new *version* of it should index much faster. If a fresh release genuinely
-doesn't show up after a few minutes, poll the registration index directly rather than assuming
-something in the workflow is broken:
+**This isn't limited to a package id's very first publish, and it can be slower than that expression
+suggests.** It was assumed here that an ordinary version bump would index faster than a brand-new
+package id — measured wrong: the first *stable* (non-prerelease) release took **893 seconds (~15
+minutes)** to reach the registration index, noticeably longer than either prerelease before it. The
+likely reason: the two earlier publishes were both prereleases, which nuget.org excludes from normal
+search/listing entirely — so this may have been effectively a first-ever-listed event for this
+package id, distinct from "first publish of any kind." Don't assume a release is broken just because
+`dotnet tool install DbDataSync` (no version pin) doesn't find it for 10–15 minutes; a `curl` check
+against the flat container or the registration index's bare existence is not proof either — it can
+report the version present (e.g. as a page-range bound) before an unversioned resolve actually
+succeeds. **The only check that means anything is the real command**, retried:
 
 ```sh
-until curl -s -o /dev/null -w "%{http_code}" \
-  "https://api.nuget.org/v3/registration5-gz-semver2/dbdatasync/index.json" | grep -q "^200$"; do
+until dotnet tool install --tool-path /tmp/nuget-wait-probe DbDataSync --no-cache >/dev/null 2>&1; do
+  rm -rf /tmp/nuget-wait-probe
   sleep 20
 done
+rm -rf /tmp/nuget-wait-probe
 ```
+
+`--no-cache` matters — `dotnet` keeps its own local HTTP cache independent of nuget.org's server-side
+state, and a `404` cached from an install attempt made *before* the package existed can otherwise
+make a perfectly-indexed package look absent to this exact machine for a while.
 
 ## Verifying an install for real
 

@@ -33,6 +33,15 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
+Updated 2026-09-11 (latest of all): **127** is done and removed — nuget.org Trusted Publishing works
+end to end: a real stable release (`2026.9.11.532`) and two betas all shipped correctly through
+`release.yml`, which moved mid-phase from a pushed tag to a manual `workflow_dispatch` (a `beta`
+checkbox) that tags the released commit itself once nuget.org confirms the publish — no more
+delete-and-recreate-a-tag cycle to retry a failed run. A `.claude/skills/nuget-release/` skill now
+makes cutting a release a documented, one-command procedure (`scripts/release.sh [--beta]`). Six real
+bugs/findings along the way, all in the phase doc — worth reading before assuming a release pipeline
+"should just work" on a first real run against a public feed.
+
 Updated 2026-09-10 (later than the note below): **126** is done and removed — the project's GitHub
 hosting moved to `github.com/DbDataSync/DbDataSync` (public, full history, the old
 `danshryock/DataSync` left untouched). **127** joins `todo/` alongside it — `release.yml` now has the
