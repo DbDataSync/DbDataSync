@@ -106,8 +106,7 @@ the message if it appears rather than treating it as an error.
 
 ## Real bugs found so far, exercising a `release/v1-beta` tag against `DbDataSync/DbDataSync`
 
-Two, both real, both in code this phase touched — worth recording now rather than losing them once the
-run finally goes green:
+Three, all real — worth recording now rather than losing them once the run finally goes green:
 
 1. **The pack step's own glob matched a second, unrelated package.** `dotnet pack
    src/DbDataSync.Cli/DbDataSync.Cli.csproj -o artifacts -p:Version=…` also side-effect-packs
@@ -133,6 +132,24 @@ run finally goes green:
    in this step. Fixed by passing `--version "$SHIPPED"` explicitly, which bypasses the
    stable-only default and is a strictly stronger assertion than before (proves *this exact* version
    installs, not merely that installing found something whose reported string happens to contain it).
+3. **`dbdatasync version` structurally cannot report a prerelease label, and never has.**
+   `src/DbDataSync.Cli/Program.cs`'s `Version()` read `Assembly.GetName().Version` — a strict 4-part
+   numeric `System.Version` — which the SDK derives from `<Version>`'s numeric core alone, silently
+   dropping any prerelease suffix. Install succeeded (`Tool 'dbdatasync' (version '2026.9.11.415-beta')
+   was successfully installed`), but the *running binary* then reported plain `2026.9.11.415`, failing
+   the smoke test's substring check for real — not a test bug, a genuine "the tool can't tell you which
+   build you're running" gap. **Pre-existing, not introduced by this phase**: the dev-build
+   `-alpha.<seconds>` suffix (landed on `main` the day before this phase, in "Move the local-tool
+   version convention into MSBuild") has been silently truncated by every `dbdatasync version` since —
+   nothing had ever asserted on the exact string before this run did. Fixed in `Program.cs`: read
+   `AssemblyInformationalVersionAttribute` instead (falling back to `AssemblyName.Version` if somehow
+   absent) — SDK-style projects stamp it with the *whole* `<Version>` string, prerelease label
+   included, plus a `+<git-sha>` build-metadata suffix the SDK adds automatically from source control
+   (confirmed harmless: NuGet's own package version is unaffected — metadata after `+` is excluded from
+   `PackageVersion` by SemVer 2 convention — and the smoke test's existing substring match already
+   tolerates the extra suffix without any further change). Verified locally before pushing: a plain dev
+   build now reports `2026.09.11.0418-alpha.10+<sha>`; a build with `-p:Version=2026.9.11.415-beta`
+   reports `2026.9.11.415-beta+<sha>`; the full `DbDataSync.Cli.Tests` suite (104 tests) stayed green.
 
 ## What this phase will not build
 
