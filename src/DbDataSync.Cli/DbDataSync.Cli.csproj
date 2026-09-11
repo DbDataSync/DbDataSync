@@ -11,11 +11,23 @@
     <ToolCommandName>dbdatasync</ToolCommandName>
     <PackageId>DbDataSync</PackageId>
     <!--
-      The version every local and CI build carries. Releases do not use it: .github/workflows/release.yml
-      passes -p:Version=YYYY.MM.DD.HHmm, and a command-line property overrides this one rather than
-      colliding with it. So a 0.1.0 in the wild means a build nobody released.
+      Every build not explicitly versioned gets a fresh alpha, dated and timed at evaluation — nobody
+      has to remember to pass one just to `dotnet pack`/`dotnet tool update` this project, which is the
+      whole point of tools/install-local-tool's dev loop. -p:Version=X on the command line still wins
+      outright: MSBuild treats a command-line property as global, and a global property cannot be
+      overwritten by a plain assignment in the project file, conditioned or not — which is exactly what
+      lets .github/workflows/release.yml pass -p:Version=YYYY.MM.DD.HHmm and get a real release version
+      with no alpha label and no change needed here.
+
+      The seconds component exists for this project alone, not for release.yml: a release is one build
+      for one pushed tag, but a dev-loop rerun can happen several times inside the same minute, and
+      `dotnet tool update` needs every one of those to look like a genuinely new version. Unpadded ("s",
+      not "ss") on purpose: a prerelease identifier is SemVer2-numeric and MUST NOT carry a leading
+      zero, unlike the four-part core above it — "-alpha.05" is a hard NETSDK1018 error where "2026.09"
+      is merely normalised away, and this is the one part of the string actually built from a two-digit
+      clock field often small enough to have one.
     -->
-    <Version>0.1.0</Version>
+    <Version>$([System.DateTime]::UtcNow.ToString("yyyy.MM.dd.HHmm'-alpha.'s"))</Version>
     <Description>Cross-database replication — a git-tracked config repo, a scheduler, and a web console.</Description>
 
     <!--

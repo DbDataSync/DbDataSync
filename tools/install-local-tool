@@ -19,7 +19,12 @@
 #
 # Packs every run, with no staleness check of its own — see tools/dev-harness's own comment for why:
 # MSBuild already decides what needs rebuilding, including changes in referenced projects, correctly.
-# The pack version is a timestamp, which is what makes `dotnet tool update` see each run as new.
+#
+# No -p:Version passed here: DbDataSync.Cli.csproj computes a dated, alpha-labelled default of its own
+# (see that file's <Version> comment) for exactly this dev loop, on the same UTC-clock convention
+# release.yml uses for a real release. So the version below is read back off whatever pack just wrote,
+# not decided here — the same reason release.yml reads its own shipped version back off the nupkg
+# filename rather than trusting what it asked for.
 set -e
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -61,9 +66,18 @@ if [ -n "$uninstall" ]; then
     esac
 fi
 
-version="0.1.0-local.$(date +%Y%m%d%H%M%S)"
-echo "Packing DbDataSync.Cli $version..." >&2
-dotnet pack "$project" -c Release -o "$feed" -p:Version="$version" $pack_args >&2
+echo "Packing DbDataSync.Cli..." >&2
+dotnet pack "$project" -c Release -o "$feed" $pack_args >&2
+
+# Newest by modification time, not by name: NuGet normalises the version it renders into a filename
+# (leading zeros stripped), which can sort out of date order across a month boundary, but nothing else
+# writes to this feed directory concurrently, so whatever pack just produced is trivially the newest
+# thing in it. The [0-9] right after "DbDataSync." excludes a project reference's own incidentally
+# packed sibling (e.g. DbDataSync.Drivers.Abstractions.*.nupkg) from matching.
+nupkg=$(ls -t "$feed"/DbDataSync.[0-9]*.nupkg | head -n 1)
+version=$(basename "$nupkg" .nupkg)
+version=${version#DbDataSync.}
+echo "Packed DbDataSync.Cli $version" >&2
 
 case "$target" in
     global)

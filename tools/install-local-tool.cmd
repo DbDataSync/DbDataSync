@@ -46,13 +46,21 @@ if defined DO_UNINSTALL (
     exit /b %errorlevel%
 )
 
-REM A timestamped version, so `dotnet tool update` sees each run as new.
-for /f "usebackq" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMddHHmmss"`) do set "STAMP=%%T"
-set "VERSION=0.1.0-local.%STAMP%"
-
-echo Packing DbDataSync.Cli %VERSION%... 1>&2
-dotnet pack "%PROJECT%" -c Release -o "%FEED%" -p:Version=%VERSION% %PACK_ARGS% 1>&2
+REM No -p:Version passed here: DbDataSync.Cli.csproj computes a dated, alpha-labelled default of its
+REM own (see that file's <Version> comment) for exactly this dev loop, on the same UTC-clock convention
+REM release.yml uses for a real release.
+echo Packing DbDataSync.Cli... 1>&2
+dotnet pack "%PROJECT%" -c Release -o "%FEED%" %PACK_ARGS% 1>&2
 if errorlevel 1 exit /b 1
+
+REM Read back off whatever pack just wrote, not decided here — the same reason release.yml reads its
+REM own shipped version back off the nupkg filename rather than trusting what it asked for. Newest by
+REM LastWriteTime, not by name (NuGet's leading-zero stripping can sort a filename out of date order
+REM across a month boundary); the "[0-9]" wildcard right after "DbDataSync." excludes a project
+REM reference's own incidentally packed sibling (DbDataSync.Drivers.Abstractions.*.nupkg) from matching.
+for /f "usebackq" %%T in (`powershell -NoProfile -Command ^
+    "(Get-ChildItem '%FEED%\DbDataSync.*.nupkg' | Where-Object { $_.BaseName -like 'DbDataSync.[0-9]*' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1).BaseName.Substring(11)"`) do set "VERSION=%%T"
+echo Packed DbDataSync.Cli %VERSION% 1>&2
 
 if "%TARGET%"=="global" (
     dotnet tool update --global --add-source "%FEED%" --version %VERSION% DbDataSync
