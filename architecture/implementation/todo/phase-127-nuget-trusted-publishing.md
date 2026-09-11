@@ -4,12 +4,18 @@
 `release/v1-beta` (`ff6d02d`) ran the whole workflow green end to end: `NuGet/login@v1` exchanged its
 OIDC token for a real API key ("Successfully exchanged OIDC token for NuGet API key"),
 `dotnet nuget push` succeeded ("Your package was pushed"), and the GitHub Release came out correctly
-marked `prerelease: true` with exactly one asset. **Still short of `done/`**: nuget.org's own indexing
-of a brand-new package id lags the push itself, so "an uninvolved machine can `dotnet tool install
---global DbDataSync --version …` with no local source" hasn't been confirmed from outside yet, and the
-non-beta (stable, unlisted-as-prerelease) path is still unexercised — see *How to verify when built*.
-Four real bugs were found and fixed getting here (below); none were guessed at, all were caught by
-running the real thing and reading what actually came back.
+marked `prerelease: true` with exactly one asset. **Still short of `done/`**: nuget.org indexes a
+brand-new package id in two separate stages, well behind the push itself — the raw flat-container blob
+(`v3-flatcontainer/…`) went live first, but `dotnet tool install` doesn't read that directly; it
+queries the **registration index** (`v3/registration5-gz-semver2/dbdatasync/index.json`), which lagged
+further and returned `404` for several more minutes after the flat container was already serving the
+file. A real install attempt from a genuinely clean tool-path failed on that gap alone ("Version …
+is not found in NuGet feeds …") — worth naming explicitly since "the file exists" and "the package is
+installable" are two different claims on nuget.org for a package id's very first publish, and only the
+second one is what an operator actually needs. The non-beta (stable, unlisted-as-prerelease) path is
+also still unexercised — see *How to verify when built*. Five real things were found and fixed or
+learned getting here (below); none were guessed at, all were caught by running the real thing and
+reading what actually came back.
 **Plan reference**: `architecture/planning/done/nuget-org-publishing-and-github-hosting-move.md` §2.
 Depends on phase 126 (the repo needs to exist at its final `DbDataSync/DbDataSync` location, since a
 Trusted Publishing policy names that exact repo).
@@ -111,7 +117,8 @@ the message if it appears rather than treating it as an error.
 
 ## Real bugs found so far, exercising a `release/v1-beta` tag against `DbDataSync/DbDataSync`
 
-Four, all real — worth recording now rather than losing them once the run finally goes green:
+Four in the workflow/CLI, plus one operational finding about nuget.org itself — worth recording now
+rather than losing them once the run finally goes green:
 
 1. **The pack step's own glob matched a second, unrelated package.** `dotnet pack
    src/DbDataSync.Cli/DbDataSync.Cli.csproj -o artifacts -p:Version=…` also side-effect-packs
@@ -184,6 +191,20 @@ Four, all real — worth recording now rather than losing them once the run fina
    installed binary's own `version` command → confirm the substring check passes. It did, across
    several synthetic zero-padded dates chosen to exercise every field (`2026.01.05.0421`,
    `2026.12.31.2359`, `2026.10.10.1000`), not only today's.
+5. **A workflow's own "the push succeeded" is not "the package is installable" — nuget.org indexes a
+   brand-new package id in two separate, independently-lagging stages.** After a fully green run
+   (`Push to nuget.org` reported "Your package was pushed"), the raw flat-container blob
+   (`v3-flatcontainer/dbdatasync/…/dbdatasync.….nupkg`) was serving `200` within about a minute, but a
+   real `dotnet tool install --tool-path <clean dir> DbDataSync --version 2026.9.11.425-beta` from an
+   uninvolved shell still failed: *"Version 2026.9.11.425-beta of package dbdatasync is not found in
+   NuGet feeds https://api.nuget.org/v3/index.json."* `dotnet tool install` resolves versions through
+   the **registration index** (`v3/registration5-gz-semver2/dbdatasync/index.json`), a separate
+   resource from the flat container, which returned `404` for several more minutes after the blob
+   itself was already reachable. Not a bug in this repo's workflow — nothing to fix here — but a real
+   trap for verifying a *first-ever* publish of a package id specifically: checking the flat container
+   (or the package's nuget.org web page) says nothing about whether `dotnet tool install` can actually
+   find it yet. Confirmed by polling the registration index directly rather than assuming the flat
+   container's availability generalized.
 
 ## What this phase will not build
 
