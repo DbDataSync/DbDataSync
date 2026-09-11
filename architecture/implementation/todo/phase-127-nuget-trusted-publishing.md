@@ -1,10 +1,15 @@
 # Phase 127 — publish `DbDataSync` to nuget.org via Trusted Publishing (OIDC)
 
-**Status**: Planned, not started — **the workflow code is written, but this stays in `todo/` until
-the one manual nuget.org-side step below is done and a real `release/v*` tag has exercised it
-end-to-end.** Per `implementation/README.md`'s own rule, a phase moves to `done/` only once
-implemented *and verified*; a policy that can't be created by any API call this repo's automation can
-make is a real precondition, not a formality.
+**Status**: In progress — the nuget.org Trusted Publishing policy is created, `NUGET_USER` is set, and
+`release/v1-beta` (`ff6d02d`) ran the whole workflow green end to end: `NuGet/login@v1` exchanged its
+OIDC token for a real API key ("Successfully exchanged OIDC token for NuGet API key"),
+`dotnet nuget push` succeeded ("Your package was pushed"), and the GitHub Release came out correctly
+marked `prerelease: true` with exactly one asset. **Still short of `done/`**: nuget.org's own indexing
+of a brand-new package id lags the push itself, so "an uninvolved machine can `dotnet tool install
+--global DbDataSync --version …` with no local source" hasn't been confirmed from outside yet, and the
+non-beta (stable, unlisted-as-prerelease) path is still unexercised — see *How to verify when built*.
+Four real bugs were found and fixed getting here (below); none were guessed at, all were caught by
+running the real thing and reading what actually came back.
 **Plan reference**: `architecture/planning/done/nuget-org-publishing-and-github-hosting-move.md` §2.
 Depends on phase 126 (the repo needs to exist at its final `DbDataSync/DbDataSync` location, since a
 Trusted Publishing policy names that exact repo).
