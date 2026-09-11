@@ -1,21 +1,24 @@
 # Phase 127 — publish `DbDataSync` to nuget.org via Trusted Publishing (OIDC)
 
-**Status**: In progress — the nuget.org Trusted Publishing policy is created, `NUGET_USER` is set, and
-`release/v1-beta` (`ff6d02d`) ran the whole workflow green end to end: `NuGet/login@v1` exchanged its
-OIDC token for a real API key ("Successfully exchanged OIDC token for NuGet API key"),
-`dotnet nuget push` succeeded ("Your package was pushed"), and the GitHub Release came out correctly
-marked `prerelease: true` with exactly one asset. **Still short of `done/`**: nuget.org indexes a
-brand-new package id in two separate stages, well behind the push itself — the raw flat-container blob
-(`v3-flatcontainer/…`) went live first, but `dotnet tool install` doesn't read that directly; it
-queries the **registration index** (`v3/registration5-gz-semver2/dbdatasync/index.json`), which lagged
-further and returned `404` for several more minutes after the flat container was already serving the
-file. A real install attempt from a genuinely clean tool-path failed on that gap alone ("Version …
-is not found in NuGet feeds …") — worth naming explicitly since "the file exists" and "the package is
-installable" are two different claims on nuget.org for a package id's very first publish, and only the
-second one is what an operator actually needs. The non-beta (stable, unlisted-as-prerelease) path is
-also still unexercised — see *How to verify when built*. Five real things were found and fixed or
-learned getting here (below); none were guessed at, all were caught by running the real thing and
-reading what actually came back.
+**Status**: **The beta/prerelease path is fully verified; the stable path is deliberately deferred**,
+so this stays in `todo/` rather than `done/` — not because anything is broken, but because one item of
+this doc's own verification checklist (a real, non-beta tag) is a genuinely permanent, fully-listed
+public nuget.org release, and that is the account owner's call to make on their own schedule, not
+something to tick off a checklist for its own sake.
+
+What's confirmed, against the real `release/v1-beta` tag (`ff6d02d`), in order: the whole workflow ran
+green end to end — `NuGet/login@v1` exchanged its OIDC token for a real API key ("Successfully
+exchanged OIDC token for NuGet API key"), `dotnet nuget push` succeeded ("Your package was pushed"),
+the GitHub Release came out correctly marked `prerelease: true` with exactly one asset; nuget.org's own
+two-stage indexing (see bug 5 below) was waited out; and, from a genuinely clean tool-path with no
+local source at all, `dotnet tool install DbDataSync --version 2026.9.11.425-beta` installed
+correctly, `dbdatasync version` reported exactly `2026.9.11.425-beta+ff6d02d…` (matching the exact
+commit), and a plain unversioned `dotnet tool install DbDataSync` with no flags correctly found
+**nothing** — proof nuget.org is genuinely treating it as hidden, not merely that the string "beta"
+appears in it.
+
+Five real things were found and fixed or learned getting here (below); none were guessed at, all were
+caught by running the real thing and reading what actually came back.
 **Plan reference**: `architecture/planning/done/nuget-org-publishing-and-github-hosting-move.md` §2.
 Depends on phase 126 (the repo needs to exist at its final `DbDataSync/DbDataSync` location, since a
 Trusted Publishing policy names that exact repo).
@@ -95,20 +98,26 @@ the message if it appears rather than treating it as an error.
 
 ## How to verify when built
 
-- **First real run is a `release/v*-beta*` tag, deliberately** — a genuinely first-ever publish
+- ✅ **First real run was a `release/v*-beta*` tag, deliberately** — a genuinely first-ever publish
   through a brand-new OIDC policy to a public feed is exactly the case to not also make a permanent,
-  fully-listed release version of on the first attempt. Push it against `DbDataSync/DbDataSync` and
-  confirm, in order: the pack + smoke-test steps pass unchanged; `Compute the version` emits a
-  `-beta`-suffixed version and `prerelease=true`; the `NuGet/login` step succeeds (proves the OIDC
-  token exchange and the policy match); `dotnet nuget push` succeeds; `dotnet tool install --global
-  DbDataSync` **without** `--version`/`--prerelease` does *not* find it (proves nuget.org actually
-  treated it as a prerelease, not merely that the string "beta" appears in it); an exact
-  `dotnet tool install --global DbDataSync --version <the emitted version> --prerelease` does; the
-  GitHub Release is created marked "Pre-release" with a working exact-version install command in its
-  notes.
-- Then a real, non-beta `release/v*` tag: confirm the version has no `-beta` suffix, `prerelease` is
-  `false`/absent, `dotnet tool install --global DbDataSync` with no flags at all finds it, and the
-  GitHub Release is **not** marked pre-release.
+  fully-listed release version on the first attempt. Pushed against `DbDataSync/DbDataSync`
+  (`release/v1-beta` → `ff6d02d`) and confirmed, in order: the pack + smoke-test steps passed; `Compute
+  the version` emitted a `-beta`-suffixed version (`2026.9.11.425-beta`) and `prerelease=true`; the
+  `NuGet/login` step succeeded (the OIDC token exchange and the policy match, for real); `dotnet nuget
+  push` succeeded; a plain, unversioned `dotnet tool install --tool-path <clean dir> DbDataSync` (no
+  `--global`, deliberately — a scratch tool-path is the honest "uninvolved machine" test, `--global`
+  would only prove *this* machine's own cache) found **nothing** (nuget.org genuinely treated it as a
+  prerelease); the exact `dotnet tool install --tool-path <clean dir> DbDataSync --version
+  2026.9.11.425-beta` succeeded and `dbdatasync version` reported that exact string; the GitHub Release
+  was created marked `prerelease: true` with exactly one asset and a working exact-version install
+  command in its notes.
+- ⬜ **Deliberately not done**: a real, non-beta `release/v*` tag — confirming the version has no
+  `-beta` suffix, `prerelease` is `false`, a plain `dotnet tool install` with no flags at all finds it,
+  and the GitHub Release is **not** marked pre-release. Held back on the account owner's explicit
+  instruction (2026-09-11): the beta path proved the mechanism works; the first real, permanent,
+  fully-listed release is theirs to cut on their own schedule, not something to complete a checklist.
+  **This is the one thing standing between this doc and `implementation/done/`** — move it once that
+  tag is pushed and confirmed exactly as above, minus the prerelease assertions.
 - Confirm `ci.yml`'s per-push `package` job is unaffected — still packs and artifact-uploads on every
   push to `main`, does not attempt a NuGet push.
 - Once verified, rewrite this doc as a retrospective (what was actually confirmed, the exact tag used)
