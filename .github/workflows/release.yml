@@ -10,9 +10,15 @@ on:
       - "release/v*"
 
 # gh release create writes to the repo. The default GITHUB_TOKEN covers it with this scope; no
-# separate secret is involved, and nothing here needs any other permission.
+# separate secret is involved.
 permissions:
   contents: write
+  # Lets this job request a short-lived OIDC token identifying this exact repo + workflow file, which
+  # NuGet/login exchanges for a one-hour, single-use nuget.org API key (phase 127's Trusted
+  # Publishing) — no long-lived NuGet secret is stored anywhere. Required for that step to work at
+  # all; its absence fails the token request silently rather than with a clear error, so it's listed
+  # here even though nothing above it used to need more than `contents`.
+  id-token: write
 
 jobs:
   release:
@@ -73,6 +79,32 @@ jobs:
               ;;
           esac
 
+      # Trusted Publishing (phase 127) — no NUGET_API_KEY secret exists anywhere in this repo. This
+      # job's own OIDC identity (repo DbDataSync/DbDataSync, workflow release.yml) is what nuget.org's
+      # Trusted Publishing policy checks; see phase-127-nuget-trusted-publishing.md for the one-time
+      # policy setup on nuget.org's side, which nothing in this repo can do for itself.
+      #
+      # Requested here, immediately before the push that spends it, and not any earlier in the job:
+      # the key nuget.org hands back is valid for one hour and good for exactly one push.
+      - name: NuGet login (OIDC → a one-hour API key)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          # The nuget.org profile name the Trusted Publishing policy is registered under — not an
+          # email address. Not sensitive in itself; stored as a secret only because that's nuget.org's
+          # own documented pattern, and there's no reason to diverge from a vendor's tested example
+          # for a low-stakes value.
+          user: ${{ secrets.NUGET_USER }}
+
+      # Before the GitHub Release, not after: so that Release's own notes can say "published to
+      # nuget.org" truthfully, rather than promising a step that hasn't run yet.
+      - name: Push to nuget.org
+        run: |
+          dotnet nuget push artifacts/*.nupkg \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
       # The nupkg alone. ci.yml's package job builds a container image but only ever tags it
       # dbdatasync:ci locally and never pushes it to a registry, so there is no published image
       # reference a release could point at — attaching one would mean first deciding to publish
@@ -91,7 +123,13 @@ jobs:
           The version is the UTC date and time this release was built, not the tag's text — the tag
           only decides *when* a release is cut.
 
-          Install it from the attached package:
+          Published to nuget.org:
+
+          \`\`\`
+          dotnet tool install --global DbDataSync --version ${VERSION}
+          \`\`\`
+
+          The attached package is the same bits, for an offline or air-gapped install:
 
           \`\`\`
           dotnet tool install --global --add-source . DbDataSync --version ${VERSION}

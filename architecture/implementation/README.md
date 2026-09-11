@@ -33,6 +33,14 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
+Updated 2026-09-10 (later than the note below): **126** is done and removed — the project's GitHub
+hosting moved to `github.com/DbDataSync/DbDataSync` (public, full history, the old
+`danshryock/DataSync` left untouched). **127** joins `todo/` alongside it — `release.yml` now has the
+Trusted Publishing (OIDC) steps to push `DbDataSync` to nuget.org on a release tag, but it stays in
+`todo/` rather than `done/` until the one thing this repo's automation cannot do for itself — creating
+the Trusted Publishing policy on nuget.org — happens and a real tag exercises the whole path
+end-to-end. See `architecture/planning/done/nuget-org-publishing-and-github-hosting-move.md`.
+
 Updated 2026-09-10 (latest of all): 125 is done and removed — `ReconcileConfig` (replication-level, with
 a per-mapping override), a scheduled cadence and an `AfterChangeStrategy` (`None`/`AfterAny`) for phase
 124's delete-diff sweep, both persisted to YAML via new hand-written converters
