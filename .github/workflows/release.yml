@@ -93,11 +93,20 @@ jobs:
       # published rather than after. It also confirms the computed version actually reached the
       # assembly — `dbdatasync version` reflects the assembly's own version, so a silently ignored
       # -p:Version would still print 0.1.0 and fail this step.
+      #
+      # --version "$SHIPPED", not left to float: --add-source only *adds* to the default sources
+      # (nuget.org included, confirmed by `dotnet nuget list source`), and an unversioned
+      # `dotnet tool install` considers only stable versions by design — which hides a -beta package
+      # in the local artifacts feed exactly as it would on nuget.org itself, so a beta tag's smoke
+      # test found nothing in either source without this. An explicit version bypasses that
+      # restriction and is the stronger assertion anyway: it proves *this exact* computed version
+      # installs, not merely that installing found something whose reported string happens to
+      # contain it.
       - name: Install it into a clean tool root and check it reports the computed version
         env:
           SHIPPED: ${{ steps.pack.outputs.shipped }}
         run: |
-          dotnet tool install --tool-path /tmp/dbdatasync-tool --add-source artifacts DbDataSync
+          dotnet tool install --tool-path /tmp/dbdatasync-tool --add-source artifacts DbDataSync --version "$SHIPPED"
           reported=$(/tmp/dbdatasync-tool/dbdatasync version)
           echo "dbdatasync version said: $reported"
           case "$reported" in

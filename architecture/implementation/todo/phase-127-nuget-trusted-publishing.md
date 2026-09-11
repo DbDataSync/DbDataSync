@@ -104,6 +104,36 @@ the message if it appears rather than treating it as an error.
   and move it to `implementation/done/` in the same commit as any follow-up fix the first real run
   turns up.
 
+## Real bugs found so far, exercising a `release/v1-beta` tag against `DbDataSync/DbDataSync`
+
+Two, both real, both in code this phase touched — worth recording now rather than losing them once the
+run finally goes green:
+
+1. **The pack step's own glob matched a second, unrelated package.** `dotnet pack
+   src/DbDataSync.Cli/DbDataSync.Cli.csproj -o artifacts -p:Version=…` also side-effect-packs
+   `DbDataSync.Drivers.Abstractions` into the same directory — `-o`/`-p:Version` on the command line
+   are global MSBuild properties applying to the whole build graph, and that project has had
+   `GeneratePackageOnBuild=true` since phase 109e. `ls artifacts/DbDataSync.*.nupkg` matched both
+   filenames (both package ids start with `DbDataSync.`) and picked the wrong one — the first real tag
+   this repo ever pushed is what caught it; nothing before today had run `dotnet pack` on the Cli
+   project with a global `-o`/`-p:Version` override at all. **Not cosmetic**: the same broad glob was
+   also used by the `dotnet nuget push` and `gh release create` attach steps, so left unfixed the very
+   next steps would have published `DbDataSync.Drivers.Abstractions` to nuget.org too — a real scope
+   violation, not a wrong log line. Fixed by anchoring the glob to a digit right after the package id
+   (a version always starts with one) and capturing the one resolved path as a step output every later
+   step reuses, rather than each re-globbing.
+2. **The smoke test couldn't see its own just-packed prerelease package.** `dotnet tool install
+   --add-source artifacts DbDataSync` (no `--version`) failed on the very first beta tag with "dbdatasync
+   is not found in NuGet feeds https://api.nuget.org/v3/index.json, …/artifacts" — from *both* sources
+   it checked, not just nuget.org. `--add-source` only **adds** to the default source list (confirmed
+   with `dotnet nuget list source` — nuget.org is already registered by default), and an unversioned
+   `dotnet tool install` considers only stable versions by design, which hides a `-beta` package in a
+   local folder feed exactly as it would on nuget.org itself. This is a real gap in the beta-versioning
+   addition itself, not a pre-existing issue: nothing before this phase ever packed a prerelease version
+   in this step. Fixed by passing `--version "$SHIPPED"` explicitly, which bypasses the
+   stable-only default and is a strictly stronger assertion than before (proves *this exact* version
+   installs, not merely that installing found something whose reported string happens to contain it).
+
 ## What this phase will not build
 
 - Publishing `DbDataSync.Drivers.Abstractions` or any other package.
