@@ -1,16 +1,31 @@
 name: Release
 
 # A separate workflow from ci.yml because the trigger and the purpose are different: ci.yml proves
-# every push builds, this one publishes one. Pushing a tag under release/v* is the gate — an operator
-# deciding "cut a release now" — and nothing else in the repo cuts one. Ordinary pushes to main are
-# untouched: ci.yml's package job still packs and artifact-uploads exactly as it did before.
+# every push builds, this one publishes one. Ordinary pushes to main are untouched: ci.yml's package
+# job still packs and artifact-uploads exactly as it did before.
+#
+# Manually run from the Actions tab (or `gh workflow run release.yml`), not triggered by a pushed
+# tag — that was this workflow's original shape (phase 78), abandoned once actually operating it
+# showed its real cost: getting phase 127's Trusted Publishing pipeline working took five iterations,
+# each needing the previous release/v* tag deleted and recreated by hand before a retry could even
+# start, because the tag was the trigger and the version. Nothing here computes a version from that
+# tag any more; the run itself creates and pushes the real release tag once the version it computed
+# is confirmed live (see "Tag this commit," below) — the tag becomes a record of what shipped, not an
+# advance guess of what might.
 on:
-  push:
-    tags:
-      - "release/v*"
+  workflow_dispatch:
+    inputs:
+      beta:
+        description: >-
+          Publish as a prerelease (-beta suffix). nuget.org then hides it from a plain
+          `dotnet tool install` — only an exact --version, or --prerelease, finds it.
+        type: boolean
+        default: false
 
-# gh release create writes to the repo. The default GITHUB_TOKEN covers it with this scope; no
-# separate secret is involved.
+# gh release create writes to the repo, and so does pushing the tag this run creates for itself
+# ("Tag this commit," below) — actions/checkout@v4's default persist-credentials leaves the
+# GITHUB_TOKEN wired into the checkout's own git config for the rest of the job, so a plain
+# `git push` needs nothing further as long as this scope covers it.
 permissions:
   contents: write
   # Lets this job request a short-lived OIDC token identifying this exact repo + workflow file, which
@@ -29,17 +44,17 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      # The shipped version is computed here, not read out of the tag. The tag's text is a human's
-      # choice of gate name and carries no meaning for the package; deriving the version from the
-      # clock instead means the two can never disagree. YYYY.MM.DD.HHmm in UTC, which is a valid
-      # four-part assembly version (every part is well under the 65534 ceiling) and sorts as a
-      # NuGet version in the same order it was released in.
+      # The shipped version is computed here, from the clock — not typed by a human anywhere.
+      # YYYY.MM.DD.HHmm in UTC, which is a valid four-part assembly version (every part is well under
+      # the 65534 ceiling) and sorts as a NuGet version in the same order it was released in.
       #
-      # The one thing the tag's text *does* still decide: whether this is a prerelease. A tag
-      # containing "beta" anywhere (release/v1-beta, release/v2026-09-beta3, …) appends a `-beta`
-      # SemVer 2 prerelease label to the computed version — nuget.org then correctly hides it from a
-      # plain `dotnet tool install` (only `--prerelease` finds it), which matters the moment a real
-      # public feed is on the other end of this workflow rather than only a GitHub Release asset.
+      # Whether this is a prerelease is the one thing the operator *does* still choose, via the
+      # `beta` checkbox on the manual run (the dispatch UI, or `gh workflow run release.yml -f
+      # beta=true`) — appends a `-beta` SemVer 2 prerelease label, which nuget.org then correctly
+      # hides from a plain `dotnet tool install` (only `--prerelease`, or an exact `--version`, finds
+      # it). That matters the moment a real public feed is on the other end of this workflow rather
+      # than only a GitHub Release asset.
+      #
       # Normalized here, before it ever reaches MSBuild — not left zero-padded and reconciled later.
       # `date`'s own %m/%d/%H%M are always zero-padded (2026.09.11.0421), but NuGet strips a leading
       # zero from every dot-separated numeric component of a version core (2026.9.11.421 — the pack
@@ -52,14 +67,15 @@ jobs:
       - name: Compute the version
         id: version
         env:
-          TAG: ${{ github.ref_name }}
+          BETA: ${{ inputs.beta }}
         run: |
           IFS=. read -r y m d hm <<< "$(date -u +%Y.%m.%d.%H%M)"
           version="$((10#$y)).$((10#$m)).$((10#$d)).$((10#$hm))"
           prerelease=false
-          case "${TAG,,}" in
-            *beta*) version="${version}-beta"; prerelease=true ;;
-          esac
+          if [ "$BETA" = "true" ]; then
+            version="${version}-beta"
+            prerelease=true
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
@@ -158,6 +174,24 @@ jobs:
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
 
+      # After the nuget.org push, not before: a tag is a claim that this version shipped, and it
+      # should never exist for one that didn't. This is also *why* a failed run needs no tag cleanup
+      # any more, unlike the tag-push-triggered shape this replaced — a run that fails anywhere above
+      # this step simply leaves no trace at all, and a retry is just running the workflow again with a
+      # freshly computed (and therefore always-unique) version, never a colliding tag to delete first.
+      #
+      # Lightweight, not annotated: an annotated tag needs a git author identity configured for
+      # nothing this repo would use, since the one thing an annotation would carry — who, why — already
+      # lives in the GitHub Release's own notes, the richer and more visible copy of the same
+      # information. actions/checkout@v4's default persist-credentials is what makes a plain `git
+      # push` here work with no further auth setup.
+      - name: Tag this commit with the released version
+        env:
+          VERSION: ${{ steps.pack.outputs.shipped }}
+        run: |
+          git tag "$VERSION"
+          git push origin "refs/tags/$VERSION"
+
       # The nupkg alone. ci.yml's package job builds a container image but only ever tags it
       # dbdatasync:ci locally and never pushes it to a registry, so there is no published image
       # reference a release could point at — attaching one would mean first deciding to publish
@@ -185,11 +219,11 @@ jobs:
           # backticks and fences in it, and a heredoc keeps it readable here and out of the way of
           # the shell's quoting.
           cat > /tmp/release-notes.md <<EOF
-          The \`dbdatasync\` .NET global tool, packed from \`${GITHUB_SHA}\` and released by the tag \`${GITHUB_REF_NAME}\`.
+          The \`dbdatasync\` .NET global tool, packed from \`${GITHUB_SHA}\` — a manual run of this
+          workflow, which tagged that commit \`${VERSION}\` itself once this version was confirmed
+          published.
 
-          The version is the UTC date and time this release was built, not the tag's text — the tag
-          decides *when* a release is cut, and, via a \`beta\` in its own name, whether it ships as a
-          SemVer 2 prerelease. ${prerelease_note}
+          The version is the UTC date and time this release was built. ${prerelease_note}
 
           Published to nuget.org:
 
@@ -205,10 +239,12 @@ jobs:
           EOF
           prerelease_flag=()
           [ "$PRERELEASE" = "true" ] && prerelease_flag=(--prerelease)
+          # "$VERSION" — the tag the previous step just pushed, not $GITHUB_REF_NAME (that's the
+          # branch this run was dispatched against, e.g. "main"; there is no incoming tag any more).
           # The exact nupkg path, not artifacts/*.nupkg — same reason as the nuget.org push above:
           # "The nupkg alone" (this step's own comment) was always meant to be one file, not
           # incidentally two.
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$VERSION" \
             --title "DbDataSync $VERSION" \
             --notes-file /tmp/release-notes.md \
             "${prerelease_flag[@]}" \

@@ -19,6 +19,17 @@ appears in it.
 
 Five real things were found and fixed or learned getting here (below); none were guessed at, all were
 caught by running the real thing and reading what actually came back.
+
+**The trigger was then redesigned, 2026-09-11, and that redesign is not yet proven by a real run.**
+Everything above happened against the tag-push-triggered shape phase 78 originally built. Operating
+it — five iterations, each needing `release/v1-beta` deleted and recreated by hand before a retry
+could even start — was itself the argument for replacing it: `release.yml` now triggers on manual
+`workflow_dispatch` (a `beta` checkbox, no tag needed to start a run) and creates + pushes the release
+tag *itself*, named after the version it just published, only once that version is confirmed live on
+nuget.org. See *The trigger redesign* below for the full design and why. The new git-tagging mechanism
+and the input-reading were dry-run rehearsed locally (a scratch git repo for the tag push; synthetic
+dates for the version math) but **not yet exercised by an actual dispatched Actions run** — that is
+the next thing to do, not something to assume works because the pieces checked out individually.
 **Plan reference**: `architecture/planning/done/nuget-org-publishing-and-github-hosting-move.md` §2.
 Depends on phase 126 (the repo needs to exist at its final `DbDataSync/DbDataSync` location, since a
 Trusted Publishing policy names that exact repo).
@@ -54,22 +65,45 @@ documents) resolves against nuget.org by default and currently finds nothing the
   `dotnet tool install --global DbDataSync --version ${VERSION}` (no `--add-source` needed once it's
   really on nuget.org); the attached-package `--add-source .` form stays, documented as the
   offline/air-gapped path.
-- **A tag containing `beta` ships a real SemVer 2 prerelease**, not just a cosmetically-named tag.
-  `Compute the version` lowercases `github.ref_name` and appends `-beta` to the computed
-  `YYYY.MM.DD.HHmm` when it matches `*beta*` (`release/v1-beta`, `release/v2026-09-beta3`, …),
-  emitting a second `prerelease` step output. nuget.org then correctly hides that version from a
-  plain `dotnet tool install` (only `--prerelease`, or an exact `--version`, finds it) — the first
-  real test of this pipeline against a public feed should not be indistinguishable from a real
-  release. `Publish the GitHub Release` reads the same output and passes `--prerelease` to
-  `gh release create` when set, so the GitHub side agrees with nuget.org rather than showing a beta
-  build as "Latest release." The release notes' one prerelease-specific sentence is built as its own
-  shell variable *before* the notes heredoc, not inline inside it — the heredoc is unquoted so every
-  literal backtick in it is normally backslash-escaped to stop bash reading it as command
-  substitution, and nesting a backtick-bearing `echo` inside a `$(...)` inline in that same heredoc
-  hits exactly that trap (confirmed by dry-running it: bash tries to *execute*
-  `` `dotnet tool install` `` rather than print it). A pre-computed `${prerelease_note}` variable
-  splices in as inert text with no such re-scanning.
+- **A `beta` checkbox ships a real SemVer 2 prerelease**, not just a cosmetically-named tag. `on:
+  workflow_dispatch: inputs: beta` (boolean, default false); `Compute the version` reads `${{
+  inputs.beta }}` and appends `-beta` to the computed `YYYY.MM.DD.HHmm` when set, emitting a second
+  `prerelease` step output. nuget.org then correctly hides that version from a plain `dotnet tool
+  install` (only `--prerelease`, or an exact `--version`, finds it). `Publish the GitHub Release`
+  reads the same output and passes `--prerelease` to `gh release create` when set, so the GitHub side
+  agrees with nuget.org rather than showing a beta build as "Latest release." The release notes' one
+  prerelease-specific sentence is built as its own shell variable *before* the notes heredoc, not
+  inline inside it — the heredoc is unquoted so every literal backtick in it is normally
+  backslash-escaped to stop bash reading it as command substitution, and nesting a backtick-bearing
+  `echo` inside a `$(...)` inline in that same heredoc hits exactly that trap (confirmed by
+  dry-running it: bash tries to *execute* `` `dotnet tool install` `` rather than print it). A
+  pre-computed `${prerelease_note}` variable splices in as inert text with no such re-scanning.
+- **The run tags the released commit itself, after the nuget.org push succeeds** — `git tag
+  "$VERSION" && git push origin "refs/tags/$VERSION"`, using `actions/checkout@v4`'s default
+  `persist-credentials` (needs nothing beyond the existing `contents: write`). A lightweight tag, not
+  annotated — the "who/why" an annotation would carry already lives in the GitHub Release's own
+  notes. `gh release create "$VERSION" …` then just uses that already-pushed tag. See *The trigger
+  redesign*, immediately below, for why this replaced pushing a tag to start the run.
 - No change to `ci.yml`'s per-push `package` job, which never touches this workflow.
+
+### The trigger redesign — from a pushed tag to a manual dispatch, 2026-09-11
+
+The original design (phase 78) triggered on `push: tags: ["release/v*"]`, with the version computed
+from the clock rather than the tag's text — deliberate, so the two could never disagree. What that
+design didn't anticipate: **iterating on the pipeline itself**, which a brand-new Trusted Publishing
+setup all but guarantees on its first real use. Every one of the five bugs above needed a fix, a
+commit, and *a retry* — and retrying meant `git tag -d release/v1-beta && git push origin
+:refs/tags/release/v1-beta` before the new commit's push could even trigger a fresh attempt, because
+the tag was both the trigger and (via its presence) something a naive retry would collide with.
+
+Moved to `workflow_dispatch` with a `beta` boolean input instead: an operator runs it from the Actions
+tab (or `gh workflow run release.yml -f beta=true`), no tag involved in starting anything. The pipeline
+creates and pushes the release tag *itself*, named after the version it computed, and only after that
+version is confirmed live on nuget.org — so the tag is always a true record of what shipped, never an
+advance guess, and a failed run leaves no tag to clean up before the next attempt. `phase-078`'s own
+doc has a superseded-note pointing here; the version-by-clock computation and "the trigger's own text
+carries no meaning for the shipped version" reasoning it established are otherwise unchanged — only
+what starts a run, and what happens to the tag, moved.
 
 ### `NUGET_USER` — a GitHub Actions secret on `DbDataSync/DbDataSync`
 
@@ -88,7 +122,7 @@ nuget.org has no API for this; it is a UI action under the signed-in account's o
 | Repository Owner | `DbDataSync` |
 | Repository | `DbDataSync` |
 | Workflow File | `release.yml` **(file name only — not `.github/workflows/release.yml`)** |
-| Environment | *(leave blank — no GitHub Environment is used, see the parent planning doc's "no approval gate beyond the tag")* |
+| Environment | *(leave blank — no GitHub Environment is used, see the parent planning doc's "no approval gate beyond the trigger")* |
 | Scope / package glob | `DbDataSync` (exact — this phase publishes exactly one package id, not a prefix) |
 
 A policy on a repo that was private very recently may show as "pending" for up to 7 days until a real
@@ -98,8 +132,8 @@ the message if it appears rather than treating it as an error.
 
 ## How to verify when built
 
-- ✅ **First real run was a `release/v*-beta*` tag, deliberately** — a genuinely first-ever publish
-  through a brand-new OIDC policy to a public feed is exactly the case to not also make a permanent,
+- ✅ **First real run, under the original tag-push trigger** — a genuinely first-ever publish through
+  a brand-new OIDC policy to a public feed is exactly the case to not also make a permanent,
   fully-listed release version on the first attempt. Pushed against `DbDataSync/DbDataSync`
   (`release/v1-beta` → `ff6d02d`) and confirmed, in order: the pack + smoke-test steps passed; `Compute
   the version` emitted a `-beta`-suffixed version (`2026.9.11.425-beta`) and `prerelease=true`; the
@@ -111,13 +145,21 @@ the message if it appears rather than treating it as an error.
   2026.9.11.425-beta` succeeded and `dbdatasync version` reported that exact string; the GitHub Release
   was created marked `prerelease: true` with exactly one asset and a working exact-version install
   command in its notes.
-- ⬜ **Deliberately not done**: a real, non-beta `release/v*` tag — confirming the version has no
-  `-beta` suffix, `prerelease` is `false`, a plain `dotnet tool install` with no flags at all finds it,
-  and the GitHub Release is **not** marked pre-release. Held back on the account owner's explicit
-  instruction (2026-09-11): the beta path proved the mechanism works; the first real, permanent,
-  fully-listed release is theirs to cut on their own schedule, not something to complete a checklist.
-  **This is the one thing standing between this doc and `implementation/done/`** — move it once that
-  tag is pushed and confirmed exactly as above, minus the prerelease assertions.
+- ⬜ **Not yet done: the same beta run, under the redesigned `workflow_dispatch` trigger.** The trigger
+  mechanism changed after the run above — `gh workflow run release.yml -f beta=true` needs its own real
+  confirmation that: the run actually dispatches and reads the `beta` input correctly; `git tag
+  "$VERSION" && git push origin refs/tags/$VERSION` succeeds inside the Actions runner using nothing
+  but `actions/checkout@v4`'s default credentials; the pushed tag is visible (`git ls-remote --tags
+  origin`) and points at the commit that was actually packed; `gh release create "$VERSION"` correctly
+  uses that already-existing tag rather than trying to create a second one. This is the very next
+  thing to do — a redesign this session made a point of not shipping on "should work."
+- ⬜ **Deliberately not done**: a real, non-beta dispatch (`beta` unchecked / `-f beta=false`) —
+  confirming the version has no `-beta` suffix, `prerelease` is `false`, a plain `dotnet tool install`
+  with no flags at all finds it, and the GitHub Release is **not** marked pre-release. Held back on the
+  account owner's explicit instruction (2026-09-11): the beta path proves the mechanism; the first
+  real, permanent, fully-listed release is theirs to cut on their own schedule, not something to
+  complete a checklist. **This is the last thing standing between this doc and `implementation/done/`**
+  — move it once that dispatch runs and is confirmed exactly as above, minus the prerelease assertions.
 - Confirm `ci.yml`'s per-push `package` job is unaffected — still packs and artifact-uploads on every
   push to `main`, does not attempt a NuGet push.
 - Once verified, rewrite this doc as a retrospective (what was actually confirmed, the exact tag used)

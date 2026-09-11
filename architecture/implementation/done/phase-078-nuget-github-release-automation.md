@@ -154,3 +154,16 @@ artifact-uploads, cutting no release.
 The tag pattern is `release/v*`, so `release/v0.0.0-test` matches and so does `release/v1`. A tag
 without the `v` — `release/1` — silently does nothing at all. That is the intended shape of the gate
 but it is a quiet failure mode, and the likeliest way a future operator's release "doesn't run".
+
+### Superseded — 2026-09-11
+
+The tag-push trigger this phase built is gone: `release.yml` moved to `workflow_dispatch` (manually
+run from the Actions tab, with a `beta` checkbox) as part of phase 127's nuget.org Trusted Publishing
+work, once actually operating it exposed the real cost of this shape — five iterations fixing real
+bugs in the pipeline each needed the previous tag deleted and recreated by hand before a retry could
+even start. The pipeline now creates and pushes the release tag *itself*, named after the version it
+just published, only once that version is confirmed live — so the tag is always a true record of what
+shipped rather than a human's advance guess this phase's own version-computation step already made
+irrelevant. See `implementation/todo/phase-127-nuget-trusted-publishing.md` for the current design.
+The version-by-clock computation and the "tag text carries no meaning for the shipped version"
+reasoning this phase established are both still exactly right — only *what triggers a run* changed.

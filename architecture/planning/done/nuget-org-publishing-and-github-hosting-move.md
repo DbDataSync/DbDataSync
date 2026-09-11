@@ -55,11 +55,13 @@ nothing to rotate, nothing that leaks if a secret ever does. The one thing a sto
 — a manual nuget.org-side setup step — is unavoidable either way (an API key still has to be generated
 there by hand), so Trusted Publishing is strictly the better trade.
 
-**No approval gate beyond the tag.** `release.yml`'s own existing comment already states the project's
-convention: *"Pushing a tag under release/v* is the gate — an operator deciding 'cut a release now' —
-and nothing else in the repo cuts one."* The GitHub Release publish already works this way with no
-second confirmation; the nuget.org push follows the same rule rather than getting a bespoke
-`environment:`-gated approval step that nothing else in this workflow has.
+**No approval gate beyond the trigger.** `release.yml`'s own existing comment states the project's
+convention: the human decision to start a run *is* the gate, and nothing else in the repo cuts one.
+(Originally "pushing a `release/v*` tag"; superseded 2026-09-11 by a manual `workflow_dispatch` run —
+see phase 127's own doc for why — but the rule this decision states is unchanged: whichever mechanism
+starts the run, nothing downstream needs a second confirmation.) The GitHub Release publish already
+works this way with no second confirmation; the nuget.org push follows the same rule rather than
+getting a bespoke `environment:`-gated approval step that nothing else in this workflow has.
 
 **Push before the GitHub Release, not after.** So the Release's own notes can truthfully say "published
 to nuget.org" rather than promising something the next step might still fail to do.
