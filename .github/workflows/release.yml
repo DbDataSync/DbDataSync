@@ -34,9 +34,24 @@ jobs:
       # clock instead means the two can never disagree. YYYY.MM.DD.HHmm in UTC, which is a valid
       # four-part assembly version (every part is well under the 65534 ceiling) and sorts as a
       # NuGet version in the same order it was released in.
+      #
+      # The one thing the tag's text *does* still decide: whether this is a prerelease. A tag
+      # containing "beta" anywhere (release/v1-beta, release/v2026-09-beta3, …) appends a `-beta`
+      # SemVer 2 prerelease label to the computed version — nuget.org then correctly hides it from a
+      # plain `dotnet tool install` (only `--prerelease` finds it), which matters the moment a real
+      # public feed is on the other end of this workflow rather than only a GitHub Release asset.
       - name: Compute the version
         id: version
-        run: echo "version=$(date -u +%Y.%m.%d.%H%M)" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(date -u +%Y.%m.%d.%H%M)
+          prerelease=false
+          case "${TAG,,}" in
+            *beta*) version="${version}-beta"; prerelease=true ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       # -p:Version is a global MSBuild property, so it overrides the csproj's development default
       # rather than colliding with it.
@@ -113,7 +128,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.pack.outputs.shipped }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
+          # Built as a plain variable first, not inline in the heredoc below: the heredoc is unquoted
+          # (so ${VERSION} etc. expand), which means a literal backtick anywhere in its body is live
+          # command-substitution syntax to bash, not markdown code-formatting — every backtick in this
+          # file is backslash-escaped for exactly that reason. A ${var} expansion's *value* is spliced
+          # in as inert text with no such re-scanning, so building the one conditional, backtick-bearing
+          # sentence as its own variable sidesteps the escaping problem entirely rather than fighting it
+          # inside a heredoc-embedded command substitution.
+          prerelease_note=""
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_note='**This is a prerelease** — nuget.org will not surface it to a plain `dotnet tool install`; the exact `--version` below is required.'
+          fi
+
           # A file rather than an inline --notes argument: the body is multi-line Markdown with
           # backticks and fences in it, and a heredoc keeps it readable here and out of the way of
           # the shell's quoting.
@@ -121,7 +149,8 @@ jobs:
           The \`dbdatasync\` .NET global tool, packed from \`${GITHUB_SHA}\` and released by the tag \`${GITHUB_REF_NAME}\`.
 
           The version is the UTC date and time this release was built, not the tag's text — the tag
-          only decides *when* a release is cut.
+          decides *when* a release is cut, and, via a \`beta\` in its own name, whether it ships as a
+          SemVer 2 prerelease. ${prerelease_note}
 
           Published to nuget.org:
 
@@ -135,7 +164,10 @@ jobs:
           dotnet tool install --global --add-source . DbDataSync --version ${VERSION}
           \`\`\`
           EOF
+          prerelease_flag=()
+          [ "$PRERELEASE" = "true" ] && prerelease_flag=(--prerelease)
           gh release create "$GITHUB_REF_NAME" \
             --title "DbDataSync $VERSION" \
             --notes-file /tmp/release-notes.md \
+            "${prerelease_flag[@]}" \
             artifacts/*.nupkg

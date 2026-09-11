@@ -40,6 +40,21 @@ documents) resolves against nuget.org by default and currently finds nothing the
   `dotnet tool install --global DbDataSync --version ${VERSION}` (no `--add-source` needed once it's
   really on nuget.org); the attached-package `--add-source .` form stays, documented as the
   offline/air-gapped path.
+- **A tag containing `beta` ships a real SemVer 2 prerelease**, not just a cosmetically-named tag.
+  `Compute the version` lowercases `github.ref_name` and appends `-beta` to the computed
+  `YYYY.MM.DD.HHmm` when it matches `*beta*` (`release/v1-beta`, `release/v2026-09-beta3`, …),
+  emitting a second `prerelease` step output. nuget.org then correctly hides that version from a
+  plain `dotnet tool install` (only `--prerelease`, or an exact `--version`, finds it) — the first
+  real test of this pipeline against a public feed should not be indistinguishable from a real
+  release. `Publish the GitHub Release` reads the same output and passes `--prerelease` to
+  `gh release create` when set, so the GitHub side agrees with nuget.org rather than showing a beta
+  build as "Latest release." The release notes' one prerelease-specific sentence is built as its own
+  shell variable *before* the notes heredoc, not inline inside it — the heredoc is unquoted so every
+  literal backtick in it is normally backslash-escaped to stop bash reading it as command
+  substitution, and nesting a backtick-bearing `echo` inside a `$(...)` inline in that same heredoc
+  hits exactly that trap (confirmed by dry-running it: bash tries to *execute*
+  `` `dotnet tool install` `` rather than print it). A pre-computed `${prerelease_note}` variable
+  splices in as inert text with no such re-scanning.
 - No change to `ci.yml`'s per-push `package` job, which never touches this workflow.
 
 ### `NUGET_USER` — a GitHub Actions secret on `DbDataSync/DbDataSync`
@@ -69,15 +84,20 @@ the message if it appears rather than treating it as an error.
 
 ## How to verify when built
 
-- Push a real `release/v*` tag (or a disposable test one, cleaned up after) against
-  `DbDataSync/DbDataSync` and confirm, in order: the pack + smoke-test steps pass unchanged; the
-  `NuGet/login` step succeeds (proves the OIDC token exchange and the policy match); `dotnet nuget
-  push` succeeds; `https://www.nuget.org/packages/DbDataSync` shows the new version within nuget.org's
-  normal indexing delay; the GitHub Release is created with notes naming that version and a working
-  plain `dotnet tool install --global DbDataSync` command.
-- From a machine that has never touched this repo: `dotnet tool install --global DbDataSync` with no
-  `--add-source` at all succeeds and `dbdatasync version` reports the released version — the actual
-  claim this phase makes.
+- **First real run is a `release/v*-beta*` tag, deliberately** — a genuinely first-ever publish
+  through a brand-new OIDC policy to a public feed is exactly the case to not also make a permanent,
+  fully-listed release version of on the first attempt. Push it against `DbDataSync/DbDataSync` and
+  confirm, in order: the pack + smoke-test steps pass unchanged; `Compute the version` emits a
+  `-beta`-suffixed version and `prerelease=true`; the `NuGet/login` step succeeds (proves the OIDC
+  token exchange and the policy match); `dotnet nuget push` succeeds; `dotnet tool install --global
+  DbDataSync` **without** `--version`/`--prerelease` does *not* find it (proves nuget.org actually
+  treated it as a prerelease, not merely that the string "beta" appears in it); an exact
+  `dotnet tool install --global DbDataSync --version <the emitted version> --prerelease` does; the
+  GitHub Release is created marked "Pre-release" with a working exact-version install command in its
+  notes.
+- Then a real, non-beta `release/v*` tag: confirm the version has no `-beta` suffix, `prerelease` is
+  `false`/absent, `dotnet tool install --global DbDataSync` with no flags at all finds it, and the
+  GitHub Release is **not** marked pre-release.
 - Confirm `ci.yml`'s per-push `package` job is unaffected — still packs and artifact-uploads on every
   push to `main`, does not attempt a NuGet push.
 - Once verified, rewrite this doc as a retrospective (what was actually confirmed, the exact tag used)
