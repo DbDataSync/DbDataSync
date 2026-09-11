@@ -40,12 +40,22 @@ jobs:
       # SemVer 2 prerelease label to the computed version — nuget.org then correctly hides it from a
       # plain `dotnet tool install` (only `--prerelease` finds it), which matters the moment a real
       # public feed is on the other end of this workflow rather than only a GitHub Release asset.
+      # Normalized here, before it ever reaches MSBuild — not left zero-padded and reconciled later.
+      # `date`'s own %m/%d/%H%M are always zero-padded (2026.09.11.0421), but NuGet strips a leading
+      # zero from every dot-separated numeric component of a version core (2026.9.11.421 — the pack
+      # step's own comment already documents this). AssemblyInformationalVersionAttribute, unlike the
+      # package version, is just a raw echo of whatever -p:Version was actually given — it does *not*
+      # go through NuGet's normalization, so a zero-padded input here means the assembly's own
+      # reported version and the nupkg's version disagree downstream, in string form, forever
+      # (`$((10#$part))` forces base-10 rather than bash's own octal interpretation of a leading zero,
+      # which would otherwise reject "09" outright as an invalid octal digit).
       - name: Compute the version
         id: version
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          version=$(date -u +%Y.%m.%d.%H%M)
+          IFS=. read -r y m d hm <<< "$(date -u +%Y.%m.%d.%H%M)"
+          version="$((10#$y)).$((10#$m)).$((10#$d)).$((10#$hm))"
           prerelease=false
           case "${TAG,,}" in
             *beta*) version="${version}-beta"; prerelease=true ;;

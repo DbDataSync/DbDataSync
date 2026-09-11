@@ -106,7 +106,7 @@ the message if it appears rather than treating it as an error.
 
 ## Real bugs found so far, exercising a `release/v1-beta` tag against `DbDataSync/DbDataSync`
 
-Three, all real — worth recording now rather than losing them once the run finally goes green:
+Four, all real — worth recording now rather than losing them once the run finally goes green:
 
 1. **The pack step's own glob matched a second, unrelated package.** `dotnet pack
    src/DbDataSync.Cli/DbDataSync.Cli.csproj -o artifacts -p:Version=…` also side-effect-packs
@@ -150,6 +150,35 @@ Three, all real — worth recording now rather than losing them once the run fin
    tolerates the extra suffix without any further change). Verified locally before pushing: a plain dev
    build now reports `2026.09.11.0418-alpha.10+<sha>`; a build with `-p:Version=2026.9.11.415-beta`
    reports `2026.9.11.415-beta+<sha>`; the full `DbDataSync.Cli.Tests` suite (104 tests) stayed green.
+   **This local verification is itself why bug 4 below wasn't caught until the next real run** — it
+   used a hand-typed, already-normalized version string, sidestepping the exact discrepancy that
+   only shows up when the version comes from `date`'s own zero-padded output.
+4. **The computed version and the assembly's reported version disagreed on zero-padding, always —
+   not just today.** `date -u +%Y.%m.%d.%H%M` zero-pads every field (`2026.09.11.0421`); NuGet strips
+   a leading zero from each dot-separated numeric component of a version core
+   (`2026.9.11.421` — the pack step's own comment already documented this, for the nupkg side).
+   `AssemblyInformationalVersionAttribute` (bug 3's fix) does not go through that normalization at
+   all — it is a raw echo of whatever `-p:Version` literally received — so `$SHIPPED` (read off the
+   normalized nupkg filename) and the running binary's reported version were never going to agree as
+   strings once bug 3 made the binary report its full version honestly. The smoke test's substring
+   check failed for real, with genuinely different numeric text (`2026.09.11.0421-beta` vs.
+   `2026.9.11.421-beta`) — not a formatting nit. **This is exactly the discrepancy the pack step's own
+   long-standing comment was already written to route around** ("Rather than reimplement those
+   normalization rules here … the shipped version is read back off the filename"), except that
+   workaround only ever reconciled the nupkg side; nothing made the *assembly's own* reported string
+   agree until now, because nothing before bug 3 read anything past the numeric core the SDK derives
+   automatically.
+
+   Fixed at the source rather than reconciled afterward: `Compute the version` now strips the leading
+   zeros itself (`$((10#$part))` per dot-separated field — forcing base-10 avoids bash reading `08`/`09`
+   as invalid octal literals) *before* the string ever reaches `-p:Version`, so what MSBuild receives
+   is already in NuGet's normalized form. `$VERSION` and `$SHIPPED` become the identical string by
+   construction, for every field, every run — not only when the clock happens to need no padding.
+   Verified with a genuine end-to-end local rehearsal this time, not a hand-typed shortcut: pack with
+   the pre-normalized version → install into a clean tool-path exactly as the workflow does → run the
+   installed binary's own `version` command → confirm the substring check passes. It did, across
+   several synthetic zero-padded dates chosen to exercise every field (`2026.01.05.0421`,
+   `2026.12.31.2359`, `2026.10.10.1000`), not only today's.
 
 ## What this phase will not build
 
