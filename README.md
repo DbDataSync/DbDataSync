@@ -1,141 +1,89 @@
 # DbDataSync
 
-Cross-database replication tool. Define a replication (source table → target table, column
-mapping, schedule, change-processing settings) entirely through a web UI, and DbDataSync keeps the
-target in sync — full initial load, then incremental change capture and apply on a schedule or on
-demand.
+[![NuGet](https://img.shields.io/nuget/v/DbDataSync.svg?label=NuGet)](https://www.nuget.org/packages/DbDataSync)
+
+DbDataSync is a cross-database replication tool. You define a replication in a web UI — the source
+table, the target table, column mappings, a schedule, and how changes are processed — and DbDataSync
+keeps the target in sync. It does a full initial load, then applies incremental changes on a schedule
+or on demand.
 
 v1 supports MSSQL → MSSQL. See `architecture/planning/done/overview.md` for the broader ambition and
-`architecture/detailed-design.md` for the full system design. See [CONFIG.md](CONFIG.md) for every CLI
-flag and environment variable across all the ways DbDataSync can be started — the `dbdatasync` CLI, the
-raw `dotnet run` dev loop, and the container image.
+`architecture/detailed-design.md` for the full system design.
 
-## Quick start: the dev harness
-
-To get a working environment without following the manual steps below, one command does the lot —
-containers, databases, seed data, the API, the SPA, and a configured replication:
+## Install
 
 ```sh
-tools/dev-harness up          # tools\dev-harness up on Windows
+dotnet tool install -g DbDataSync
+dbdatasync setup
 ```
 
-Open `http://localhost:5173` and pick the `dev-sync` replication. Ctrl+C stops the API and SPA
-(the containers keep running; `tools/dev-harness down` stops those).
+`setup` walks you through picking a config folder, adding connections, and setting up secrets. When
+you're done, it starts DbDataSync for you. This needs the
+[.NET 10 runtime](https://dotnet.microsoft.com/download) or SDK.
 
-In another terminal, put real traffic through it:
+The command above installs DbDataSync into your own user profile. That's fine for trying it out, but
+not for running it as a service or for a deployment more than one person uses. For a Windows or
+systemd service, a machine-wide install, or running in a container, see
+[docs/install.md](docs/install.md). [CONFIG.md](CONFIG.md) lists every flag and environment variable.
+The package is also on [nuget.org](https://www.nuget.org/packages/DbDataSync).
 
-```sh
-tools/dev-harness seed --rows 25000            # bulk-load the source
-tools/dev-harness workload --rate 20 --duration 2m   # live inserts/updates/deletes
-tools/dev-harness verify                       # compare source and target row by row
-tools/dev-harness drift                        # corrupt the target behind the replication's back
-```
+Once DbDataSync is running, open the URL it prints (`http://localhost:5080` by default) and continue
+with the walkthrough below. The UI is the same no matter how you started it.
 
-`drift` is the quickest way to see why batch reload exists: it changes the *target* only, so Change
-Tracking has nothing to report and no incremental run will ever repair it — `verify` keeps failing
-until you trigger a backfill with a reconciling writer.
+## Your first replication
 
-`tools/dev-harness help` lists every verb and option. The tool itself is
-`tools/DbDataSync.DevHarness`; see `architecture/implementation/done/phase-011-dev-harness.md`.
+Everything below happens in the UI.
 
-## Prerequisites
+1. **Connections.** Add a `SQL Auth` connection for each of your two SQL Server instances.
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- [Node.js 24+](https://nodejs.org/) and npm
-- [Docker](https://www.docker.com/) (for local SQL Server instances)
+   ![New connection form](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/02-connection-form.png)
 
-## 1. Start SQL Server
+2. **Replications → New Replication.** Name the replication and pick its source and target connection
+   and database. Leave the schedule set to `Continuous` for now.
 
-```sh
-docker compose up -d
-```
+   ![Replication overview: source, target, and schedule](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/04-replication-endpoints.png)
 
-This starts two independent SQL Server containers — `mssql-source` (`localhost,14330`) and
-`mssql-target` (`localhost,14331`) — so a local replication genuinely crosses two database server
-instances, not just two databases on one shared instance. Both use SA password `DbDataSync_Test_Pw1`
-by default (override with the `DBDATASYNC_MSSQL_SA_PASSWORD` environment variable before first `up` —
-the password is baked in at first container init, so changing it later requires
-`docker compose down -v` to reset the data volumes).
+3. Open the replication, then go to **Table Mappings → New Table Mapping**. Pick the source and
+   target table using the pickers. DbDataSync suggests column mappings automatically for columns with
+   matching names.
 
-Wait for both to report healthy:
+   ![Table mapping with auto-mapped columns](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/05-table-mapping-form.png)
 
-```sh
-docker compose ps
-```
+4. **Runs → Run Now.** Watch the log and status update in real time.
 
-## 2. Build the solution
+   ![A live run in progress](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/07-live-run-in-progress.png)
 
-```sh
-dotnet build
-```
+5. Open the **Version Control** tab to see the git log of every config change. DbDataSync commits
+   automatically every time you save, so this log also works as an audit trail.
 
-The API spawns `DbDataSync.TaskRunner` as a child process per run and locates its build output
-relative to its own — build the whole solution at least once (not just `src/DbDataSync.Api`) before
-running the API.
-
-## 3. Run the API
-
-```sh
-dotnet run --project src/DbDataSync.Api
-```
-
-Listens on `http://localhost:5183`. On first run it creates a local `dbdatasync-repo/` directory
-(under `src/DbDataSync.Api/`, gitignored) as its git-backed config store and SQLite state database —
-no separate setup step needed. Override the location via the `DbDataSync__RepoRoot` and
-`DbDataSync__StateDbPath` environment variables (or `appsettings.Development.json`) if you'd rather
-keep it elsewhere. This is one of several ways to start DbDataSync — see [CONFIG.md](CONFIG.md) for the
-rest (the `dbdatasync` CLI, the Windows service, the container image) and everything each one can be
-configured with, including authentication.
-
-Secrets (connection passwords) need an OS keychain in production; in a sandboxed/CI environment
-without one, `SecretStore` falls back to environment variables named
-`DBDATASYNC_SECRET_DBDATASYNC_CONNECTION_<NAME>` (uppercased connection name) — set these before
-triggering a run if you hit that fallback path locally.
-
-## 4. Run the SPA
-
-```sh
-cd src/DbDataSync.Web
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`. It proxies `/api` and `/hubs` to the API (`http://localhost:5183` by
-default — override with the `DBDATASYNC_API_URL` environment variable).
-
-## 5. Define and run a replication
-
-Entirely through the UI:
-
-1. **Connections** — add a `SQL Auth` connection to each SQL Server instance (`localhost`, port
-   `14330` for source / `14331` for target, user `sa`, the SA password from step 1).
-2. **Replications → New Replication** — name it, leave the default `Continuous` schedule.
-3. Open the replication → **Table Mappings → New Table Mapping** — pick the source
-   connection/database/table and target connection/database/table via the cascading pickers;
-   column mappings are auto-suggested for same-named columns.
-4. **Runs → Run Now** — watch the live log tail and status update in real time.
-5. **History** tab shows the git log of every config change DbDataSync auto-committed along the way.
+   ![Config history — every save is an auto-commit](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/10-config-history.png)
 
 ## Backfilling a table
 
-Incremental sync only ever applies what changed at the *source*. When a target has drifted for some
-other reason — a bad deploy, an out-of-band edit, a mapping that was wrong for a while — the fix is a
-backfill: **Runs → Backfill…**, which re-reads the source and makes the target match it.
+Incremental sync only applies changes made at the source. If the target drifts for some other
+reason — a bad deploy, a manual edit, a mapping that was wrong for a while — use a backfill instead.
+Go to **Runs → Backfill…**. It re-reads the source and makes the target match it.
 
-A backfill is scoped to one table mapping and, optionally, to one segment of it — a list of values, a
-range, "split this column's range into N buckets," or a **custom segmenting strategy**, where each
-segment becomes its own independently queued run. It never advances the incremental watermark, so it
-can be run against a live, scheduled replication without disturbing the ongoing sync.
+![Queuing a backfill](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/11-backfill-form.png)
 
-A mapping states **how it divides for a reload** on its own editor, under *Default reload segmenting*.
-That default is what the Backfill form opens pre-filled to, and what a scheduled `BatchReload` pass
-processes. Leaving it empty means the whole table, unsegmented.
+A backfill applies to one table mapping, and optionally to just one segment of it: a list of values, a
+range, an even split of a column's range into buckets, or a custom segmenting strategy (below). Each
+segment runs as its own independently queued run. A backfill never advances the incremental watermark,
+so it can run against a live, scheduled replication without disturbing the ongoing sync. It shows up
+in the same run history as the regular sync, tagged `BACKFILL`.
+
+![A backfill run alongside the regular sync in run history](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/13-run-history-with-backfill.png)
+
+Each mapping has a *Default reload segmenting* setting, in its own editor, that states how it divides
+for a reload. The Backfill form opens pre-filled with that default, and a scheduled `BatchReload` pass
+uses it too. Leaving it empty means the whole table, unsegmented.
 
 ### Custom segmenting strategies
 
-`Auto` splits a column's value range into evenly-sized buckets, which stops being enough as soon as the
-boundaries have to mean something — a calendar month is not a fixed number of days. A replication can
-define named strategies (**Overview → Settings**) that propose segments instead, authored four ways:
+`Auto` splits a column's value range into evenly sized buckets. That works until the boundaries need
+to mean something — a calendar month, say, which isn't a fixed number of days. For that, a replication
+can define named strategies, under **Overview → Settings**, that propose segments a different way.
+There are four ways to author one:
 
 - **DuckDB SQL** — runs against an ephemeral in-memory DuckDB and touches neither database. Good for
   a table whose write pattern you already know:
@@ -152,40 +100,37 @@ define named strategies (**Overview → Settings**) that propose segments instea
   control table on the target.
 - **C#** — a bound `ISegmentingStrategy`, handed both connections and the source's metadata.
 
-`label` names the segment in run history; `range_start`/`range_end` are half-open; `selected` decides
-which candidates start ticked in the Backfill checklist, and — for a mapping whose default is a
-strategy — which segments a *scheduled* pass reloads without anyone asking. A strategy flagging "the
-last three months" is re-evaluated against today on every run, which is a relative-date ETL with no
-extra scheduling concept behind it.
+`label` names the segment in run history. `range_start`/`range_end` are half-open. `selected` decides
+which candidates start ticked in the Backfill checklist, and, for a mapping whose default is a
+strategy, which segments a scheduled pass reloads on its own. A strategy such as "the last three
+months" is re-evaluated against the current date every time it runs, so it needs no separate
+scheduling logic.
 
-A strategy that queries a real database, bound as a mapping's default, runs on **every scheduled
-pass**. The mapping editor says so beside the picker; whether that is acceptable is your judgement
-about your tables, not something DbDataSync decides for you.
+If a mapping's default strategy queries a real database, that query runs on every scheduled pass. The
+mapping editor notes this next to the picker. Whether that's acceptable depends on your tables, so
+DbDataSync leaves that judgment to you.
 
-The reader/staging/writer pickers (here and in **Overview → Settings**) are populated from
-`GET /api/connections/{name}/capabilities`, which reports what the connection's registered driver
-actually supports — including which readers can be segmented and which writers *reconcile* (remove
-target rows the source no longer has) rather than only insert and update.
+The reader, staging, and writer pickers — here and under **Overview → Settings** — only list what the
+connection's driver actually supports. This includes which readers can be segmented, and which writers
+*reconcile*: removing target rows the source no longer has, rather than only inserting and updating.
 
-A replication can also be a standalone reload rather than an incremental sync: set its reader to
-`MsSqlBatchReload` and give each mapping a *Default reload segmenting* list, which it re-reads on its
-normal schedule.
+A replication can also be a standalone reload instead of an incremental sync. Set its reader to
+`MsSqlBatchReload` and give each mapping a *Default reload segmenting* list; it re-reads that list on
+its normal schedule.
 
-> **Breaking change.** The `segments` **reader option** — a JSON array hand-typed into the reader's
-> settings — is no longer read. Segmenting now lives on the table mapping, where it has a real editor.
-> A config still carrying that option behaves as though it had none (full table, unsegmented) until
-> the mapping's *Default reload segmenting* is filled in. There is deliberately no automatic
-> conversion: the two are not quite the same thing, and silently reinterpreting a stored reload scope
-> is a worse failure than an obvious one.
+> **Breaking change.** The `segments` reader option — a JSON array typed directly into the reader's
+> settings — is no longer read. Segmenting now lives on the table mapping, where it has a proper
+> editor. A config that still has that option behaves as though it had none (full table, unsegmented)
+> until you fill in the mapping's *Default reload segmenting*. There is no automatic conversion between
+> the two.
 
 ## Where the state store lives
 
-The state database — run history, the work queue, watermarks, users and sessions — is **SQLite by
-default**, a file beside the config repo. Nothing needs configuring for that, and it is what an
-unconfigured deployment gets.
+The state database holds run history, the work queue, watermarks, users, and sessions. It's **SQLite
+by default**, a file next to the config repo — you don't need to configure anything for this.
 
-It can instead run on SQL Server or PostgreSQL, for a deployment that would rather this lived on
-infrastructure it already operates and backs up:
+It can also run on SQL Server or PostgreSQL, if you'd rather it lived on infrastructure you already
+operate and back up:
 
 | setting (under `DbDataSync:`) | default | meaning |
 | --- | --- | --- |
@@ -193,21 +138,21 @@ infrastructure it already operates and backs up:
 | `StateConnectionString` | — | how to reach that server. Required unless the engine is SQLite |
 | `StateDbPath` | `<repo>/state.db` | the SQLite file. Ignored by the other two |
 
-The schema is created on first open, whichever engine it is, and the three behave identically — the
-cross-engine test suite exists to keep that true rather than to assert it once.
+The schema is created automatically the first time the store is opened, on any of the three engines,
+and all three behave the same way.
 
-> **There is no migration between engines.** Pointing an existing deployment at a different one
-> starts an empty state store; it does not move anything. Choose once, when the deployment is stood
-> up. Moving an existing store is a deliberate follow-up.
+> **There is no migration between engines.** If you point an existing deployment at a different
+> engine, it starts with an empty state store — nothing is moved over. Choose the engine when you
+> first set up the deployment.
 
-An unrecognised `StateEngine` falls back to SQLite rather than refusing to start: a typo in an engine
-name should not take down an API that has a perfectly good store already.
+If `StateEngine` is set to a value DbDataSync doesn't recognize, it falls back to SQLite instead of
+refusing to start.
 
 ## Run history retention
 
 Every pass writes a `TaskRuns` row and its log lines to the state database, so a continuous
 replication of a busy table produces rows indefinitely. Two independent caps, both applied by an
-hourly sweep inside the API process:
+hourly sweep inside the API process, keep that in check:
 
 | setting (under `DbDataSync:`) | default | meaning |
 | --- | --- | --- |
@@ -215,58 +160,18 @@ hourly sweep inside the API process:
 | `RunRetentionMaxPerMapping` | 1000 | only the most recent N finished runs per table mapping are kept |
 | `RunPruningIntervalMinutes` | 60 | how often the sweep runs |
 
-A run failing *either* cap is pruned, along with its log lines. The count cap is per table mapping on
-purpose: a global one would let one busy mapping evict a quiet mapping's entire history, which is
-exactly the history somebody goes looking for when the quiet one finally breaks. **A run that has not
-finished is never pruned**, whatever its age.
+A run that exceeds either cap is pruned, along with its log lines. The count cap applies separately to
+each table mapping, so a busy mapping can't push a quiet mapping's history out. **A run that hasn't
+finished is never pruned**, regardless of its age.
 
-Set a cap to `0` to turn it off. Leaving it unset applies the default rather than meaning "keep
-everything" — a state database that only grows is not a policy anyone chose.
+Set a cap to `0` to turn it off. If you leave a cap unset, DbDataSync uses its default — that does not
+mean "keep everything."
 
-> Verification results are **not** pruned by this. A verification run's `TaskRuns` row is, but its
-> parquet result file and index entry are not — a known gap, not an oversight.
+> Verification results are not pruned by this process. A verification run's `TaskRuns` row is deleted,
+> but its parquet result file and index entry are kept.
 
-## Running the tests
+## Building from source
 
-```sh
-dotnet test --filter "Category!=Integration"   # fast, no external dependencies
-dotnet test --filter "Category=Integration"    # needs the two containers from step 1
-```
-
-The Playwright SPA end-to-end suite (`tests/DbDataSync.Web.Tests/`) drives the same golden-path
-scenario as step 5 above through a real browser, starting its own scratch config repo, state
-database, and disposable SQL Server test database automatically:
-
-```sh
-cd tests/DbDataSync.Web.Tests
-npm install
-npx playwright install chromium
-npx playwright test
-```
-
-Screenshots of each screen land in `screenshots/`, one sub-folder per spec (`screenshots/README.md`
-indexes them).
-
-## Repository layout
-
-- `src/DbDataSync.Api` — ASP.NET Core orchestrator: REST API, scheduler, process supervisor, SignalR
-  live-run hub.
-- `src/DbDataSync.Web` — React/TypeScript SPA.
-- `src/DbDataSync.Core` — config models, git-backed config store, secrets.
-- `src/DbDataSync.State` — shared SQLite state store (runs, logs, watermarks, locks).
-- `src/DbDataSync.Drivers.Abstractions` — the driver interfaces and capability discovery.
-- `src/DbDataSync.Drivers.Generic` — the engine-neutral implementations every driver gets for free: a
-  SQL dialect, a watermark reader, a batch-reload reader, a batched-insert staging provider and a
-  delete/insert writer. A new engine's driver is a dialect, a connection factory and a catalog.
-- `src/DbDataSync.Drivers.MsSql` — SQL Server, with its own faster implementations (Change Tracking
-  reader, `SqlBulkCopy` staging, MERGE writers) alongside the generic ones.
-- `src/DbDataSync.Drivers.Postgres` — PostgreSQL, on Npgsql. Registers only the generic pipeline;
-  batch and watermark mode, no CDC.
-- `src/DbDataSync.TaskRunner` — the console process actually spawned per replication run.
-- `tools/DbDataSync.DevHarness` — the dev harness above (environment setup, workload generation,
-  drift injection, source/target verification — including SQL Server → PostgreSQL, via
-  `--target-engine postgres`). Not part of the shipped product.
-- `tools/DbDataSync.Benchmarks` — `tools/benchmarks`, which measures how much the in-memory shape of a
-  change batch costs, through a real `SqlBulkCopy` and through a typed sink. Also not shipped.
-- `architecture/` — design docs; `architecture/implementation/` has a written summary of each build
-  phase, including real bugs found and how they were fixed.
+To build DbDataSync from source, run the dev harness, or contribute, see
+[docs/development.md](docs/development.md). It covers the dev loop, the test suite, and the
+repository layout.

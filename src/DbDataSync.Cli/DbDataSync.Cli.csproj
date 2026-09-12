@@ -29,6 +29,26 @@
     -->
     <Version>$([System.DateTime]::UtcNow.ToString("yyyy.MM.dd.HHmm'-alpha.'s"))</Version>
     <Description>Cross-database replication — a git-tracked config repo, a scheduler, and a web console.</Description>
+    <Authors>Dan Shryock</Authors>
+    <PackageTags>database;replication;sync;etl;sql-server;mssql;postgresql;cli;dotnet-tool</PackageTags>
+
+    <!--
+      Feeds the "Source repository" link and the README tab on the nuget.org listing — both were
+      previously blank because nothing here set them, which is a distinct gap from Description above
+      (that one already showed up; a listing can render a summary with no link back to the repo and no
+      rendered docs at all). RepositoryUrl/RepositoryType is the pair NuGet actually reads for the
+      source link; PackageProjectUrl is the separate "Project site" link nuget.org shows alongside it —
+      both point at the same GitHub repo here, so set both rather than lean on one implying the other.
+    -->
+    <RepositoryUrl>https://github.com/DbDataSync/DbDataSync</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/DbDataSync/DbDataSync</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- Packed from the ItemGroup below — the repo root README, not a copy kept here. It's the same
+         page GitHub shows on the repo's front page, so there is exactly one end-user-facing README to
+         keep in sync, not two that quietly drift; anything specific to building from source lives in
+         docs/development.md instead, linked from it rather than folded into the package listing. -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
 
     <!--
       Framework-dependent and RID-agnostic. LibGit2Sharp, SQLite and DuckDB.NET all ship their native
@@ -60,6 +80,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DbDataSync.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

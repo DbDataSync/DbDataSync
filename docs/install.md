@@ -76,11 +76,20 @@ dbdatasync service install          # Windows (elevated) — registers as a Wind
 dbdatasync config check
 ```
 
-`service install` warns (Linux, a non-default `--repo`) or refuses outright (Linux, the default
-machine-wide `--repo` — the unit hardens with `ProtectHome=yes`, which would hide a user-profile
-executable from the service entirely, installing cleanly and then failing to start) if it notices its
-own executable is still sitting in a user profile. Installing machine-wide first, as above, is what
-that warning/refusal is pointing you at.
+`install` resolves the paths and prints them, because a service has no console to say "I could not
+find my config repository" on.
+
+**Windows**: `--account` sets the service account, which matters — a connection using integrated
+authentication connects **as that account**. `install` warns if this tool is still installed in a user
+profile, for the reason below.
+
+**Linux**: runs as a dedicated system user (`dbdatasync` by default; `--user` overrides), enabled but
+not started — `sudo systemctl start dbdatasync` next. `install` **refuses outright** (not just a
+warning) if this tool is still installed in a user profile and `--repo` is the default machine-wide
+root: the unit's own hardening (`ProtectHome=yes`) would hide a user-profile executable from the
+service entirely, so it would install cleanly and then fail to start.
+
+Either way, installing machine-wide first, as above, is what that warning/refusal is pointing you at.
 
 ## What sees `dbdatasync` on `PATH`, and what doesn't
 
@@ -91,6 +100,23 @@ that warning/refusal is pointing you at.
 - **A `cron` job, or anything else that doesn't source a login shell's profile** — no. Use the absolute
   path (`/opt/dbdatasync/dbdatasync`, or wherever `--dir` pointed) rather than assuming `PATH` reaches
   there.
+
+## Running in a container
+
+```sh
+docker compose -f docker-compose.app.yml up
+```
+
+One volume at `/var/lib/dbdatasync` holds both the config repository and the state database, so a
+backup of that directory is a backup of everything that is not the image. There is no `PATH` question
+in a container — it runs an absolute `dotnet /app/...`, so `tool install` has nothing to do here.
+
+The default image ships the .NET SDK so `POST /api/libraries`/`config library install` can restore any
+library on the fly. `docker build --target runtime -t dbdatasync:<v>-runtime .` builds a smaller,
+SDK-less alternative for a deployment that only ever installs the seven bundled `KnownLibraries`
+catalog entries — those still install with no SDK and no network, copied from a cache baked into the
+image at build time; anything else is written and left "pending restore" (see the Libraries admin
+screen) until `config library sync` runs somewhere with the SDK.
 
 ## Notes
 

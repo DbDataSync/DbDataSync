@@ -6,12 +6,16 @@ distinction matters more than any individual setting below, so it's worth readin
 
 ## Two entry points, one host
 
-- **`dotnet run --project src/DbDataSync.Api`** — the raw ASP.NET Core project. This is the dev-loop
-  path in the main [README](README.md), and the only one it currently documents.
+- **`dotnet run --project src/DbDataSync.Api`** — the raw ASP.NET Core project. This is the
+  [Building from source](README.md#building-from-source) dev-loop path in the main README, detailed in
+  [docs/development.md](docs/development.md).
 - **`dbdatasync`** — a dotnet global tool (`src/DbDataSync.Cli`, `PackAsTool=true`,
-  `ToolCommandName=dbdatasync`). This is the actual product distribution: `dbdatasync serve`,
+  `ToolCommandName=dbdatasync`, [on NuGet](https://www.nuget.org/packages/DbDataSync)). This is the
+  actual product distribution: `dbdatasync setup`, `dbdatasync serve`,
   `dbdatasync service install|uninstall|status`, `dbdatasync cert ...`, `dbdatasync invite`,
-  `dbdatasync health`, `dbdatasync version`. It's also what the Docker image runs.
+  `dbdatasync health`, `dbdatasync version`. It's also what the Docker image runs. See the
+  [**Install**](README.md#install) section of the main README (also the readme nuget.org shows for this
+  package) and [docs/install.md](docs/install.md) for every way to install and run it.
 
 Both ultimately call the same `DbDataSyncHost.Build(args)` composition root
 (`src/DbDataSync.Api/DbDataSyncHost.cs`), so a setting documented under "DbDataSync.Api process config"
