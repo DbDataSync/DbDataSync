@@ -92,17 +92,27 @@ public static class ServiceCommand
             Console.WriteLine();
         }
 
-        // Quoted as one binPath value, which is what sc.exe takes — and the space after `binPath=` is
-        // load-bearing in sc.exe's own argument syntax, which is a thing it will not tell you.
         var binPath = $"\"{executable}\" serve --repo \"{root}\" --url {url}";
 
+        // sc.exe's parser wants each `key=` and its value as two SEPARATE argv tokens — exactly what
+        // typing them at a cmd.exe prompt produces, since the unescaped space between "start=" and
+        // "auto" is what cmd splits on. ArgumentList doesn't do that splitting: a single entry like
+        // $"start= {value}" survives as one atomic argument and gets wrapped in quotes because it
+        // contains a space, so sc.exe never sees a token that's exactly "start=" — its lookahead for
+        // the enum value grabs the *next* real argument instead and fails validation on it, which is
+        // exactly the "Invalid start= field" sc.exe reports. binPath is the one field that tolerated
+        // this: it's free-form, not an enum sc.exe checks, so the extra text just became part of its
+        // value. Every key and its value now gets its own list entry, matching cmd's own tokenization.
         var arguments = new List<string>
         {
-            "create", ServiceName, $"binPath= {binPath}", "start= auto", "DisplayName= DbDataSync",
+            "create", ServiceName, "binPath=", binPath, "start=", "auto", "DisplayName=", "DbDataSync",
         };
 
         if (account is not null)
-            arguments.Add($"obj= {account}");
+        {
+            arguments.Add("obj=");
+            arguments.Add(account);
+        }
 
         Console.WriteLine($"Registering the '{ServiceName}' service:");
         Console.WriteLine($"  executable         {executable}");
