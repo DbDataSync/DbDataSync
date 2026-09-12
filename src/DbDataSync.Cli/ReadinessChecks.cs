@@ -89,10 +89,10 @@ internal static class ReadinessChecks
         return results;
     }
 
-    /// <summary>One or two lines of human-readable text for <paramref name="result"/> — a list, not a
-    /// single string, so a caller writing through <see cref="IPromptIo"/> (<c>SetupCommand</c>'s review
-    /// screen) emits each line the same way <see cref="ConfigCommand"/>'s own <see cref="Console"/>
-    /// output does.</summary>
+    /// <summary>One or two lines of human-readable text for <paramref name="result"/> — <c>config
+    /// check</c>'s own plain-text report, one line at a time via <see cref="Console"/>. Phase 128's
+    /// <c>dbdatasync setup</c> TUI renders <see cref="CheckResult"/> directly instead (a color-coded
+    /// list, not flattened text) — this stays here for <see cref="ConfigCommand"/>'s path only.</summary>
     internal static IReadOnlyList<string> FormatResult(CheckResult result)
     {
         var marker = result.Status switch

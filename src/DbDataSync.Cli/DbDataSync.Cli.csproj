@@ -40,6 +40,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The `setup` command's TUI (phase 128) — this project's first real package dependency.
+         Managed-only (no runtimes/ native assets), net10.0-targeted like this project itself, so it
+         adds nothing to worry about for `dotnet tool install -g` or the container image. Pinned
+         exact, not a floating range, matching how this repo pins everywhere else. -->
+    <PackageReference Include="Terminal.Gui" Version="2.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\DbDataSync.Api\DbDataSync.Api.csproj" />
     <ProjectReference Include="..\DbDataSync.Certificates\DbDataSync.Certificates.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Descriptor\DbDataSync.Drivers.Descriptor.csproj" />

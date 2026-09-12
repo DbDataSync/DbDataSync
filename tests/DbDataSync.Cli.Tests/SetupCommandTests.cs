@@ -1,169 +1,36 @@
-using ClrKernel.Core.Secrets;
-using DbDataSync.Core.Config;
-using DbDataSync.Core.Secrets;
-using DbDataSync.Libraries;
-using LibGit2Sharp;
-
 namespace DbDataSync.Cli.Tests;
 
 /// <summary>
-/// Drives <c>dbdatasync setup</c> end to end against a real temp repo, exactly the way an operator's
-/// own typing would — only <see cref="LibraryInstaller.InstallAsync"/> is faked, since the real one
-/// shells out to <c>dotnet publish</c> and would make the driver-step tests a network call.
+/// <c>dbdatasync setup</c> is a Terminal.Gui TUI now (phase 128) — everything section-shaped
+/// (config/secret/git writes) is covered UI-free by <c>SetupStepsTests</c>, and the real widget wiring
+/// by <c>Tui.TabWiringTests</c>. This covers the one thing left in <see cref="SetupCommand"/> itself:
+/// the no-terminal gate, which needs no fake at all — a test host's own stdio is already redirected, so
+/// calling the real method exercises the real gate.
 /// </summary>
-public sealed class SetupCommandTests : IDisposable
+public sealed class SetupCommandTests
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("dbdatasync-setup-tests-").FullName;
-
-    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
-
-    [Fact]
-    public async Task FreshRoot_SqliteAndPasskeysAndNoDrivers_WritesConfigAndCommitsAndDoesNotStart()
-    {
-        var io = new ScriptedPromptIo(
-            [
-                "",   // config folder — accept the default (the --repo value itself)
-                "",   // reachable at a hostname other than localhost? -> no
-                "",   // console URL -> default
-                "",   // state database -> default (SQLite)
-                "",   // additional drivers -> none
-                "",   // authentication -> default (passkeys)
-                "",   // relying party id -> default (localhost)
-                "",   // register as a systemd service? -> no (Linux step)
-                "",   // point Kestrel at a certificate file? -> no (non-Windows step)
-                "n",  // start DbDataSync now? -> no
-            ]);
-
-        var exitCode = await SetupCommand.RunAsync(["--repo", _root], io, FailingInstallLibrary);
-
-        Assert.Equal(0, exitCode);
-
-        var config = DbDataSyncConfigFile.Read(_root);
-        Assert.Equal("http://localhost:5080", config["DbDataSync:Url"]);
-        Assert.Equal("localhost", config["DbDataSync:Auth:Passkeys:RelyingPartyId"]);
-        Assert.Equal("http://localhost:5080", config["DbDataSync:Auth:Passkeys:Origins:0"]);
-
-        using var repo = new Repository(_root);
-        Assert.True(repo.Commits.Count() >= 2); // the starter commit, and setup's own.
-        Assert.Contains(repo.Commits, c => c.MessageShort == "dbdatasync setup");
-
-        Assert.Contains(io.Written, line => line.Contains("Setup is complete."));
-        Assert.Contains(io.Written, line => line.Contains("FIRST-RUN.txt"));
-    }
-
-    /// <summary>Split from <c>Environment.ProcessPath</c> so this doesn't need this test process's own
-    /// executable to actually live under a user profile — see
-    /// <c>SetupCommand.WriteMachineWideToolInstallBlockIfNeeded</c>'s own doc comment.</summary>
-    [Fact]
-    public void WriteMachineWideToolInstallBlockIfNeeded_UnderAUserProfile_PrintsTheTwoLineBlock()
-    {
-        var io = new ScriptedPromptIo([]);
-
-        SetupCommand.WriteMachineWideToolInstallBlockIfNeeded(io, isUnderUserProfile: true);
-
-        Assert.Contains(io.Written, line => line.Contains("user profile"));
-        Assert.Contains(io.Written, line => line.Contains("dotnet tool install --tool-path"));
-        Assert.Contains(io.Written, line => line.Contains("tool install") && line.Contains(CliOptions.DefaultToolDir));
-    }
-
-    [Fact]
-    public void WriteMachineWideToolInstallBlockIfNeeded_NotUnderAUserProfile_PrintsNothing()
-    {
-        var io = new ScriptedPromptIo([]);
-
-        SetupCommand.WriteMachineWideToolInstallBlockIfNeeded(io, isUnderUserProfile: false);
-
-        Assert.Empty(io.Written);
-    }
-
-    [Fact]
-    public async Task ExistingSetup_GoesStraightToTheReviewScreenAndPrintsEffectiveConfiguration()
-    {
-        await SetupCommand.RunAsync(
-            ["--repo", _root], ScriptFor(SqliteWalkthroughWithNoStart), FailingInstallLibrary);
-
-        var reviewIo = new ScriptedPromptIo(["1", "4"]); // print effective configuration, then exit
-        var exitCode = await SetupCommand.RunAsync(["--repo", _root], reviewIo, FailingInstallLibrary);
-
-        Assert.Equal(0, exitCode);
-        Assert.Contains(reviewIo.Written, line => line.Contains("DbDataSync:Url = http://localhost:5080"));
-        // Nothing here can carry a password — SetValue refuses one outright — but this is still the
-        // seam an env-var-supplied connection string would have to be redacted through.
-        Assert.DoesNotContain(reviewIo.Written, line => line.Contains("Password=", StringComparison.OrdinalIgnoreCase));
-    }
-
     [Fact]
     public async Task NonInteractive_RefusesAndPointsAtConfigCheck()
     {
-        var io = new NonInteractivePromptIo();
-
-        var exitCode = await SetupCommand.RunAsync(["--repo", _root], io, FailingInstallLibrary);
-
-        Assert.Equal(1, exitCode);
-        Assert.Contains(io.Written, line => line.Contains("dbdatasync config check"));
-    }
-
-    [Fact]
-    public async Task ServerStateEngine_StoresTheSecretAndInstallsTheChosenDriverThroughTheFakeInstaller()
-    {
-        var calls = new List<(string RepoRoot, string Id, IReadOnlyList<PackageRef> Packages, string FactoryType)>();
-        Task<LibraryManifest> FakeInstall(
-            string repoRoot, string id, IReadOnlyList<PackageRef> packages, string factoryType,
-            string? source, CancellationToken cancellationToken)
+        var originalError = Console.Error;
+        var error = new StringWriter();
+        Console.SetError(error);
+        int exitCode;
+        try
         {
-            calls.Add((repoRoot, id, packages, factoryType));
-            return Task.FromResult(new LibraryManifest(id, factoryType, packages));
+            exitCode = await SetupCommand.RunAsync(["--repo", "unused"], FailingInstallLibrary);
+        }
+        finally
+        {
+            Console.SetError(originalError);
         }
 
-        var io = new ScriptedPromptIo(
-            lines:
-            [
-                "",                                         // config folder — default
-                "",                                         // reachable at a hostname? -> no
-                "",                                         // console URL -> default
-                "2",                                        // state database -> SQL Server
-                // Loopback with a port nothing listens on — a fast connection-refused rather than a
-                // real server's DNS-timeout-length wait, since this test only cares that setup stores
-                // the value and reports a failure, not that it can reach a real SQL Server.
-                "Server=127.0.0.1,1;Database=DbDataSyncState;Connect Timeout=1;",
-                "4",                                         // additional drivers -> MySQL / MariaDB
-                "8.0.32",                                    // MySqlConnector version
-                "",                                          // authentication -> default (passkeys)
-                "",                                          // relying party id -> default (localhost)
-                "",                                          // register as a systemd service? -> no (Linux step)
-                "",                                          // point Kestrel at a certificate file? -> no (non-Windows step)
-                "n",                                         // start DbDataSync now? -> no
-            ],
-            keys: "hunter2\r".Select(c => c == '\r' ? ScriptedPromptIo.Enter : ScriptedPromptIo.Char(c)));
-
-        var exitCode = await SetupCommand.RunAsync(["--repo", _root], io, FakeInstall);
-
-        Assert.Equal(0, exitCode);
-
-        var config = DbDataSyncConfigFile.Read(_root);
-        Assert.Equal("MsSql", config["DbDataSync:StateEngine"]);
-        Assert.Equal(
-            "Server=127.0.0.1,1;Database=DbDataSyncState;Connect Timeout=1;",
-            config["DbDataSync:StateConnectionString"]);
-
-        var secrets = new SecretStore("DbDataSync", true);
-        Assert.True(secrets.TryResolve(SecretRefs.ForAppSetting("stateConnectionString"), out var password));
-        Assert.Equal("hunter2", password);
-
-        var call = Assert.Single(calls);
-        Assert.Equal("MySqlConnector", call.Id);
-        Assert.Equal("8.0.32", Assert.Single(call.Packages).Version);
-        Assert.True(File.Exists(Path.Combine(_root, "drivers", "mysql", "driver.yaml")));
-
-        secrets.Delete(SecretRefs.ForAppSetting("stateConnectionString"));
+        Assert.Equal(1, exitCode);
+        Assert.Contains("dbdatasync config check", error.ToString());
     }
 
-    private static readonly string?[] SqliteWalkthroughWithNoStart =
-        ["", "", "", "", "", "", "", "", "", "n"];
-
-    private static ScriptedPromptIo ScriptFor(string?[] lines) => new(lines);
-
-    private static readonly Func<string, string, IReadOnlyList<PackageRef>, string, string?, CancellationToken, Task<LibraryManifest>>
-        FailingInstallLibrary = (_, _, _, _, _, _) =>
-            throw new InvalidOperationException("This test's walkthrough should never need to install a library.");
+    private static Task<DbDataSync.Libraries.LibraryManifest> FailingInstallLibrary(
+        string repoRoot, string id, IReadOnlyList<DbDataSync.Libraries.PackageRef> packages, string factoryType,
+        string? source, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("This test's gate should return before ever installing a library.");
 }

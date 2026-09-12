@@ -100,9 +100,11 @@ them, never a second source of truth.
 check a configuration, or edit `dbdatasync.config.yaml` (see CONFIG.md)"* and exits non-zero. There
 is no `--non-interactive` mode; that role belongs to the config file.
 
-**No new dependency.** A small internal `Prompt` helper — text-with-default, yes/no, single choice,
-multi-choice, masked secret — over `Console.ReadLine`/`ReadKey`. The CLI project has zero package
-references today and this keeps it that way.
+**Superseded by phase 128.** This originally specified a small internal `Prompt` helper over
+`Console.ReadLine`/`ReadKey`, keeping the CLI project's package-reference count at zero. Phase 128
+deliberately reversed that: `setup` is now a Terminal.Gui TUI (`Terminal.Gui` 2.5.0, the CLI project's
+first real package dependency), a tabbed form with a live readiness-checks sidebar rather than a
+sequential prompt flow — see the phase doc once written.
 
 #### Step 0 — find or choose the root
 
@@ -260,7 +262,8 @@ not duplicate it.
   owns the setup *experience* around them.
 - High availability, multi-instance, or externalising the config repo to a remote as the primary —
   separate questions.
-- A GUI installer. `setup` is a terminal prompt flow, not a windowed wizard.
+- A GUI installer. `setup` is a terminal *TUI* since phase 128 (Terminal.Gui) — a real tabbed form and
+  widgets, not a bare prompt flow any more, but still not a windowed/graphical installer.
 - `setup` does not run the server — it configures, then offers to hand off to `serve` or the service.
 
 ---

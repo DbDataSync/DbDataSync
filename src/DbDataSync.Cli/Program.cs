@@ -18,7 +18,7 @@ return command switch
     "health" => await HealthCommand.RunAsync(rest),
     "invite" => InviteCommand.Run(rest),
     "config" => await ConfigCommand.RunAsync(rest),
-    "setup" => await SetupCommand.RunAsync(rest, new ConsolePromptIo()),
+    "setup" => await SetupCommand.RunAsync(rest),
     "internal" => await InternalCommand.RunAsync(rest),
     "version" => Version(),
     _ => Unknown(command),
