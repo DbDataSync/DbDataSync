@@ -1,21 +1,21 @@
 # Configuration
 
+[DbDataSync](README.md) · [Install](docs/install.md) · [Getting started](docs/getting-started.md) · **Configuration** · [Building from source](docs/development.md)
+
 Every CLI flag and environment variable that configures a running DbDataSync, across every way it can
 be started. There are two separate entry points into the same host, with different defaults — that
 distinction matters more than any individual setting below, so it's worth reading first.
 
 ## Two entry points, one host
 
-- **`dotnet run --project src/DbDataSync.Api`** — the raw ASP.NET Core project. This is the
-  [Building from source](README.md#building-from-source) dev-loop path in the main README, detailed in
-  [docs/development.md](docs/development.md).
+- **`dotnet run --project src/DbDataSync.Api`** — the raw ASP.NET Core project. This is the dev-loop
+  path documented in [Building from source](docs/development.md).
 - **`dbdatasync`** — a dotnet global tool (`src/DbDataSync.Cli`, `PackAsTool=true`,
   `ToolCommandName=dbdatasync`, [on NuGet](https://www.nuget.org/packages/DbDataSync)). This is the
   actual product distribution: `dbdatasync setup`, `dbdatasync serve`,
   `dbdatasync service install|uninstall|status`, `dbdatasync cert ...`, `dbdatasync invite`,
-  `dbdatasync health`, `dbdatasync version`. It's also what the Docker image runs. See the
-  [**Install**](README.md#install) section of the main README (also the readme nuget.org shows for this
-  package) and [docs/install.md](docs/install.md) for every way to install and run it.
+  `dbdatasync health`, `dbdatasync version`. It's also what the Docker image runs. See
+  [Install](docs/install.md) for every way to install and run it.
 
 Both ultimately call the same `DbDataSyncHost.Build(args)` composition root
 (`src/DbDataSync.Api/DbDataSyncHost.cs`), so a setting documented under "DbDataSync.Api process config"
@@ -417,3 +417,8 @@ Its environment variables:
 | `DBDATASYNC_POSTGRES_PASSWORD` | `DbDataSync_Test_Pw1` | PostgreSQL container password |
 | `DBDATASYNC_HARNESS_TARGET_ENGINE` | `mssql` | or `postgres` — must agree across `up`/`verify`/`drift` |
 | `DBDATASYNC_HARNESS_TABLES` | `1` | how many generated tables — same rule |
+
+## Next: Getting started
+
+Once DbDataSync is configured, see [Getting started](docs/getting-started.md) to set up your first
+replication.

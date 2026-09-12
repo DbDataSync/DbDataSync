@@ -1,9 +1,10 @@
 # Building DbDataSync from source
 
+[DbDataSync](../README.md) · [Install](install.md) · [Getting started](getting-started.md) · [Configuration](../CONFIG.md) · **Building from source**
+
 This is for working on DbDataSync itself — contributing, running the dev loop, or building it rather
-than installing the packaged CLI. If you just want to run DbDataSync, see the
-[**Install**](../README.md#install) section of the main README instead; nothing here is needed for
-that.
+than installing the packaged CLI. If you just want to run DbDataSync, see [Install](install.md)
+instead; nothing here is needed for that.
 
 ## Quick start: the dev harness
 
@@ -98,8 +99,8 @@ npm run dev
 Open `http://localhost:5173`. It proxies `/api` and `/hubs` to the API (`http://localhost:5183` by
 default — override with the `DBDATASYNC_API_URL` environment variable).
 
-From here, [**Your first replication**](../README.md#your-first-replication) in the main README walks
-through the same UI regardless of how DbDataSync was started.
+From here, [Getting started](getting-started.md) walks through the same UI regardless of how
+DbDataSync was started.
 
 ## Running the tests
 
@@ -109,8 +110,8 @@ dotnet test --filter "Category=Integration"    # needs the two containers from s
 ```
 
 The Playwright SPA end-to-end suite (`tests/DbDataSync.Web.Tests/`) drives the same golden-path
-scenario as the main README's walkthrough through a real browser, starting its own scratch config
-repo, state database, and disposable SQL Server test database automatically:
+scenario as [Getting started](getting-started.md) through a real browser, starting its own scratch
+config repo, state database, and disposable SQL Server test database automatically:
 
 ```sh
 cd tests/DbDataSync.Web.Tests
@@ -120,7 +121,7 @@ npx playwright test
 ```
 
 Screenshots of each screen land in `screenshots/`, one sub-folder per spec (`screenshots/README.md`
-indexes them) — including the ones embedded in the main README.
+indexes them) — including the ones embedded in [Getting started](getting-started.md).
 
 ## Repository layout
 
