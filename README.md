@@ -9,8 +9,22 @@ table, the target table, column mappings, a schedule, and how changes are proces
 keeps the target in sync. It does a full initial load, then applies incremental changes on a schedule
 or on demand.
 
-v1 supports MSSQL → MSSQL. See `architecture/planning/done/overview.md` for the broader ambition and
-`architecture/detailed-design.md` for the full system design.
+A replication's source and target can be different engines — a SQL Server source can feed a
+PostgreSQL target, for example. Support varies by engine:
+
+| Feature                      | SQL Server                     | PostgreSQL               | DuckDB           |
+| ---------------------------- | ------------------------------ | ------------------------ | ---------------- |
+| Source (read from)           | Yes                            | Yes                      | Yes (query only) |
+| Target (write to)            | Yes                            | Yes                      | No               |
+| Incremental sync             | Native (Change Tracking / CDC) | Watermark column         | N/A              |
+| Backfill / batch reload      | Yes                            | Yes                      | N/A              |
+| Bulk staging                 | Native (SqlBulkCopy)           | Generic (batched insert) | N/A              |
+| Delete detection (reconcile) | Yes                            | Yes                      | N/A              |
+| SCD2 target                  | Yes                            | Yes                      | N/A              |
+
+DuckDB is a source only, for query-based sources like Parquet, CSV, an S3 glob, or an attached
+database. It is not a replication target. See `architecture/planning/done/overview.md` for the
+broader ambition and `architecture/detailed-design.md` for the full system design.
 
 ## Install
 
