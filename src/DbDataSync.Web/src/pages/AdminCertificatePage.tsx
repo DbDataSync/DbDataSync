@@ -122,7 +122,7 @@ export function AdminCertificatePage() {
           <span className="page-note">
             The TLS certificate DbDataSync serves, how long it has left, and whether this host can actually
             read its private key. Every action here is a second door onto <code className="mono">dbdatasync
-            cert …</code> — see CONFIG.md.
+            cert …</code> — see docs/configuration.md.
           </span>
         </div>
 

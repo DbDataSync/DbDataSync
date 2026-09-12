@@ -53,7 +53,7 @@ public sealed class AdminConfigServiceTests : IDisposable
     }
 
     /// <summary>The same precedence InsertConfigFile establishes: the file first, environment variables
-    /// after (so either can still override it), matching CONFIG.md's own documented ordering. Always
+    /// after (so either can still override it), matching docs/configuration.md's own documented ordering. Always
     /// carries DbDataSync:RepoRoot pointed at this test's own temp directory — otherwise ApiOptions
     /// defaults it to "&lt;cwd&gt;/dbdatasync-repo", which is not where this test's own SetValue/Read
     /// calls (against _repoRoot) are looking.</summary>

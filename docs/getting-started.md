@@ -1,6 +1,6 @@
 # Getting started
 
-[DbDataSync](../README.md) · [Install](install.md) · **Getting started** · [Configuration](../CONFIG.md) · [Building from source](development.md)
+[DbDataSync](../README.md) · [Install](install.md) · [Configuration](configuration.md) · **Getting started** · [Building from source](development.md)
 
 This walks through setting up your first replication. If you haven't installed DbDataSync yet, see
 [Install](install.md) first. Everything below happens in the web UI, once DbDataSync is running.

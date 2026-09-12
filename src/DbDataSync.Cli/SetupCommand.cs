@@ -10,7 +10,7 @@ namespace DbDataSync.Cli;
 /// configuration when there is one. Everything it writes goes through the same
 /// <see cref="DbDataSyncConfigFile"/> and <see cref="ClrKernel.Core.Secrets.SecretStore"/> calls a
 /// scripted deployment already uses; this exists to save a first-time operator from having to know
-/// CONFIG.md by heart, not to add a configuration path nothing else uses.
+/// docs/configuration.md by heart, not to add a configuration path nothing else uses.
 /// </summary>
 public static class SetupCommand
 {
@@ -32,7 +32,7 @@ public static class SetupCommand
         {
             Console.Error.WriteLine(
                 "setup is interactive — run `dbdatasync config check` to check a configuration, or " +
-                $"edit {DbDataSyncConfigFile.FileName} directly (see CONFIG.md).");
+                $"edit {DbDataSyncConfigFile.FileName} directly (see docs/configuration.md).");
             return 1;
         }
 

@@ -5,7 +5,7 @@ namespace DbDataSync.Core.Config;
 
 /// <summary>
 /// Reads and writes <c>&lt;RepoRoot&gt;/dbdatasync.config.yaml</c> — phase 79's git-tracked,
-/// human-editable home for the <c>DbDataSync:*</c> settings CONFIG.md documents (<c>Url</c>,
+/// human-editable home for the <c>DbDataSync:*</c> settings docs/configuration.md documents (<c>Url</c>,
 /// <c>StateEngine</c>, <c>StateConnectionString</c>, ...), the same shape a CLI flag or
 /// <c>DbDataSync__Key</c> environment variable already sets.
 /// <para>

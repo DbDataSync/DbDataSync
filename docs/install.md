@@ -1,6 +1,6 @@
 # Installing dbdatasync
 
-[DbDataSync](../README.md) · **Install** · [Getting started](getting-started.md) · [Configuration](../CONFIG.md) · [Building from source](development.md)
+[DbDataSync](../README.md) · **Install** · [Configuration](configuration.md) · [Getting started](getting-started.md) · [Building from source](development.md)
 
 `dbdatasync` ships as a .NET global tool. Pick the install below that matches how you plan to run it.
 
@@ -105,5 +105,5 @@ One volume, at `/var/lib/dbdatasync`, holds both the config repository and the s
 
 ## Next: Configuration
 
-Once DbDataSync is installed, see [Configuration](../CONFIG.md) for every flag and environment
+Once DbDataSync is installed, see [Configuration](configuration.md) for every flag and environment
 variable it accepts.

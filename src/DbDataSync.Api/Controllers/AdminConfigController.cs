@@ -53,7 +53,7 @@ public sealed class AdminConfigController(AdminConfigService service, CurrentUse
 
     /// <summary>
     /// Sets StateConnectionString's password, through <c>SecretStore</c> the same way
-    /// <c>dbdatasync config secret set</c> does. The only key this route accepts — see CONFIG.md's "Secrets"
+    /// <c>dbdatasync config secret set</c> does. The only key this route accepts — see docs/configuration.md's "Secrets"
     /// section.
     /// </summary>
     [Authorize(Policies.Admin)]

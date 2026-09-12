@@ -30,7 +30,7 @@ step that does not exist today, and it should be designed rather than accreted.
    service or container deployment has somewhere to look.
 4. **`docs/getting-started.md`** — the happy path, once, per deployment shape (local, container,
    Windows service, Linux behind a proxy). Points at `dbdatasync setup` for the interactive path and
-   at `CONFIG.md` for the full surface; does not duplicate either.
+   at `docs/configuration.md` for the full surface; does not duplicate either.
 5. **Provider/driver setup wired into `setup`, `serve` and `config check`** — `config driver sync` on deploy, a
    clear failure when a configured engine's provider is missing, and the offline story. Design this
    alongside phase 109, not after.
@@ -48,9 +48,9 @@ What a deployer works with today:
   `--repo`, else walk up for `dbdatasync.config.yaml`, else `%LOCALAPPDATA%\DbDataSync`), `git init`s
   it on first run, commits a fully-commented starter `dbdatasync.config.yaml`, prints three lines
   (repo, state db, console URL), and runs. There is no `init` command — `serve` is the bootstrap.
-- **Config** (`CONFIG.md`) — `dbdatasync.config.yaml` in the repo root, in the `appsettings.json`
+- **Config** (`docs/configuration.md`) — `dbdatasync.config.yaml` in the repo root, in the `appsettings.json`
   precedence slot; env vars and `--DbDataSync:Key` override it. Three entry points, **three default
-  ports** (5183 / 5080 / 8080), which `CONFIG.md` itself calls the most common source of confusion.
+  ports** (5183 / 5080 / 8080), which `docs/configuration.md` itself calls the most common source of confusion.
 - **State store** — SQLite by default (a file beside the repo, zero config). `StateEngine: MsSql` or
   `Postgres` needs `StateConnectionString` (credential-free) in the config file plus
   `dbdatasync config secret set dbdatasync:config:stateConnectionString "Password=…"` — a verbatim
@@ -97,7 +97,7 @@ them, never a second source of truth.
 
 **Requires a TTY.** When input is redirected or there is no interactive console
 (`Console.IsInputRedirected`), it prints *"setup is interactive — run `dbdatasync config check` to
-check a configuration, or edit `dbdatasync.config.yaml` (see CONFIG.md)"* and exits non-zero. There
+check a configuration, or edit `dbdatasync.config.yaml` (see docs/configuration.md)"* and exits non-zero. There
 is no `--non-interactive` mode; that role belongs to the config file.
 
 **Superseded by phase 128.** This originally specified a small internal `Prompt` helper over
@@ -226,7 +226,7 @@ then `dbdatasync setup`. The container section is env + volume (setup does not a
 reverse-proxy section is new material `setup` points at: an nginx/Caddy snippet terminating TLS,
 forwarding `/`, `/api`, `/hubs` (SignalR needs the upgrade headers), and the
 `Passkeys:RelyingPartyId` / `Origins` / `DbDataSync:Url` values that must match the public hostname.
-Every section ends in `dbdatasync config check` → sign in. Links to `CONFIG.md` for the full surface; does
+Every section ends in `dbdatasync config check` → sign in. Links to `docs/configuration.md` for the full surface; does
 not duplicate it.
 
 ### 5. Provider/driver setup, designed with phase 109

@@ -1358,7 +1358,7 @@ export interface UserSummary {
 }
 
 /**
- * One row of the admin config screen (phase 81) — a DbDataSync:* key CONFIG.md documents, its live
+ * One row of the admin config screen (phase 81) — a DbDataSync:* key docs/configuration.md documents, its live
  * effective value and where that came from, and what this screen can do about it.
  *
  * `value` is null both for a genuinely unset key and — StateConnectionString only — when `masked` is

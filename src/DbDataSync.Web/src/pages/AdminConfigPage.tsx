@@ -33,7 +33,7 @@ function ValueWithUnit({ value, unit, testId }: { value: string; unit: string | 
 }
 
 /**
- * Every DbDataSync:* key CONFIG.md documents, its live effective value and source, and — for the keys
+ * Every DbDataSync:* key docs/configuration.md documents, its live effective value and source, and — for the keys
  * dbdatasync.config.yaml's writer can actually address — a way to change it (phase 81).
  *
  * Nothing here takes effect in the running process until it restarts: `ApiOptions` (and the sibling
@@ -92,7 +92,7 @@ export function AdminConfigPage() {
           <h1 className="page-title">Configuration</h1>
           <span className="page-note">
             Every DbDataSync:* setting this build reads, where its current value comes from, and what can
-            be changed here. See CONFIG.md for the full reference.
+            be changed here. See docs/configuration.md for the full reference.
           </span>
         </div>
 

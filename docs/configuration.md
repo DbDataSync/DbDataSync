@@ -1,6 +1,6 @@
 # Configuration
 
-[DbDataSync](README.md) · [Install](docs/install.md) · [Getting started](docs/getting-started.md) · **Configuration** · [Building from source](docs/development.md)
+[DbDataSync](../README.md) · [Install](install.md) · **Configuration** · [Getting started](getting-started.md) · [Building from source](development.md)
 
 Every CLI flag and environment variable that configures a running DbDataSync, across every way it can
 be started. There are two separate entry points into the same host, with different defaults — that
@@ -9,13 +9,13 @@ distinction matters more than any individual setting below, so it's worth readin
 ## Two entry points, one host
 
 - **`dotnet run --project src/DbDataSync.Api`** — the raw ASP.NET Core project. This is the dev-loop
-  path documented in [Building from source](docs/development.md).
+  path documented in [Building from source](development.md).
 - **`dbdatasync`** — a dotnet global tool (`src/DbDataSync.Cli`, `PackAsTool=true`,
   `ToolCommandName=dbdatasync`, [on NuGet](https://www.nuget.org/packages/DbDataSync)). This is the
   actual product distribution: `dbdatasync setup`, `dbdatasync serve`,
   `dbdatasync service install|uninstall|status`, `dbdatasync cert ...`, `dbdatasync invite`,
   `dbdatasync health`, `dbdatasync version`. It's also what the Docker image runs. See
-  [Install](docs/install.md) for every way to install and run it.
+  [Install](install.md) for every way to install and run it.
 
 Both ultimately call the same `DbDataSyncHost.Build(args)` composition root
 (`src/DbDataSync.Api/DbDataSyncHost.cs`), so a setting documented under "DbDataSync.Api process config"
@@ -420,5 +420,5 @@ Its environment variables:
 
 ## Next: Getting started
 
-Once DbDataSync is configured, see [Getting started](docs/getting-started.md) to set up your first
+Once DbDataSync is configured, see [Getting started](getting-started.md) to set up your first
 replication.

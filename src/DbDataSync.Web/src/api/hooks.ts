@@ -1002,7 +1002,7 @@ export function useApplyReplicationProvisioningPlan(replicationName: string) {
   })
 }
 
-/** Every DbDataSync:* key CONFIG.md documents — the admin config screen (phase 81). Not polled: this is
+/** Every DbDataSync:* key docs/configuration.md documents — the admin config screen (phase 81). Not polled: this is
  * process configuration, not something that changes underneath an open tab. */
 export function useAdminConfig() {
   return useQuery({ queryKey: keys.adminConfig, queryFn: api.admin.config.list })

@@ -11,7 +11,7 @@ using Microsoft.Extensions.Configuration.Json;
 namespace DbDataSync.Api.Services;
 
 /// <summary>
-/// The admin config screen's backend (phase 81) — every <c>DbDataSync:*</c> key CONFIG.md documents,
+/// The admin config screen's backend (phase 81) — every <c>DbDataSync:*</c> key docs/configuration.md documents,
 /// its live effective value, where that value actually came from, and what this screen can do about
 /// it.
 /// <para>
@@ -141,7 +141,7 @@ public sealed class AdminConfigService(
     /// <summary>
     /// Sets StateConnectionString's password through the same store <c>dbdatasync config secret set</c> writes
     /// to — this screen and the CLI command are two doors onto the same store, not two stores. The only
-    /// key this applies to today; see CONFIG.md's "Secrets" section.
+    /// key this applies to today; see docs/configuration.md's "Secrets" section.
     /// </summary>
     public bool SetStateConnectionSecret(string key, string value)
     {
@@ -306,7 +306,7 @@ public sealed class AdminConfigService(
     };
 }
 
-/// <param name="Key">The full <c>DbDataSync:*</c> key, colon-separated, matching CONFIG.md exactly.</param>
+/// <param name="Key">The full <c>DbDataSync:*</c> key, colon-separated, matching docs/configuration.md exactly.</param>
 /// <param name="Value">
 /// The <b>configured</b> value — what the winning provider says right now, re-read fresh for a
 /// file-sourced key so a save this screen just made shows up immediately. This is what

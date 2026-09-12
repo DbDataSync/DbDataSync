@@ -1,6 +1,6 @@
 # Building DbDataSync from source
 
-[DbDataSync](../README.md) · [Install](install.md) · [Getting started](getting-started.md) · [Configuration](../CONFIG.md) · **Building from source**
+[DbDataSync](../README.md) · [Install](install.md) · [Configuration](configuration.md) · [Getting started](getting-started.md) · **Building from source**
 
 This is for working on DbDataSync itself — contributing, running the dev loop, or building it rather
 than installing the packaged CLI. If you just want to run DbDataSync, see [Install](install.md)
@@ -79,9 +79,9 @@ Listens on `http://localhost:5183`. On first run it creates a local `dbdatasync-
 (under `src/DbDataSync.Api/`, gitignored) as its git-backed config store and SQLite state database —
 no separate setup step needed. Override the location via the `DbDataSync__RepoRoot` and
 `DbDataSync__StateDbPath` environment variables (or `appsettings.Development.json`) if you'd rather
-keep it elsewhere. This is one of several ways to start DbDataSync — see [CONFIG.md](../CONFIG.md) for
-the rest (the `dbdatasync` CLI, the Windows service, the container image) and everything each one can
-be configured with, including authentication.
+keep it elsewhere. This is one of several ways to start DbDataSync — see
+[Configuration](configuration.md) for the rest (the `dbdatasync` CLI, the Windows service, the
+container image) and everything each one can be configured with, including authentication.
 
 Secrets (connection passwords) need an OS keychain in production; in a sandboxed/CI environment
 without one, `SecretStore` falls back to environment variables named
