@@ -211,24 +211,37 @@ public static class ConfigValidation
     }
 
     /// <summary>
-    /// Phase 124's <c>KeyReconcile</c>/<c>KeyReconcileDelete</c> pair, save-time. Plain string literals
-    /// rather than <c>DbDataSync.Drivers.Generic.GenericDriverKinds</c> constants — Core cannot
-    /// reference the driver layer, which is what keeps config depending on drivers and not the other
-    /// way round; <see cref="ValidateHistorizedTarget"/> makes the same choice for "Snapshot"/"Scd2".
+    /// Phase 124's <c>KeyReconcile</c>/<c>KeyReconcileDelete</c> pair, save-time, widened by phase 129
+    /// to also accept <c>KeyReconcileScd2Close</c> as the paired writer — and, only for that ending,
+    /// two more checks that need the mapping's own primary writer. Plain string literals rather than
+    /// <c>DbDataSync.Drivers.Generic.GenericDriverKinds</c> constants — Core cannot reference the
+    /// driver layer, which is what keeps config depending on drivers and not the other way round;
+    /// <see cref="ValidateHistorizedTarget"/> makes the same choice for "Snapshot"/"Scd2".
+    /// <para>
+    /// <paramref name="primaryWriterKind"/>/<paramref name="primaryWriterOptions"/> are the mapping's
+    /// own <see cref="PipelineResolution.Writer"/> — not the reconcile writer being validated — needed
+    /// only to check that a <c>KeyReconcileScd2Close</c> pairing makes sense: closing a version is
+    /// meaningless unless the mapping's own writer is <c>Scd2</c>, and a stated natural key has to be
+    /// the same columns <c>KeyReconcileReader</c> actually stages.
+    /// </para>
     /// </summary>
-    public static void ValidateKeyReconcilePairing(string readerKind, string writerKind, TableMappingConfig mapping)
+    public static void ValidateKeyReconcilePairing(
+        string readerKind, string writerKind, TableMappingConfig mapping,
+        string primaryWriterKind, IReadOnlyDictionary<string, string> primaryWriterOptions)
     {
         const string keyReconcileReader = "KeyReconcile";
-        const string keyReconcileWriter = "KeyReconcileDelete";
+        const string keyReconcileDeleteWriter = "KeyReconcileDelete";
+        const string keyReconcileScd2CloseWriter = "KeyReconcileScd2Close";
 
         var readerIsKeyReconcile = readerKind == keyReconcileReader;
-        var writerIsKeyReconcileDelete = writerKind == keyReconcileWriter;
+        var writerIsValidPair = writerKind == keyReconcileDeleteWriter || writerKind == keyReconcileScd2CloseWriter;
 
-        if (readerIsKeyReconcile != writerIsKeyReconcileDelete)
+        if (readerIsKeyReconcile != writerIsValidPair)
             throw new ConfigValidationException(
                 $"Table mapping '{mapping.Name}' pairs reader '{readerKind}' with writer '{writerKind}'. " +
-                $"'{keyReconcileReader}' must always be paired with '{keyReconcileWriter}' — any other " +
-                "combination would re-insert or corrupt rows a delete-diff sweep only ever means to remove.");
+                $"'{keyReconcileReader}' must always be paired with '{keyReconcileDeleteWriter}' or " +
+                $"'{keyReconcileScd2CloseWriter}' — any other combination would re-insert or corrupt rows " +
+                "a delete-diff sweep only ever means to remove or close.");
 
         if (!readerIsKeyReconcile)
             return;
@@ -254,6 +267,34 @@ public static class ConfigValidation
                 $"Table mapping '{mapping.Name}' uses the '{keyReconcileReader}' reader, but its primary " +
                 $"key column(s) {string.Join(", ", unmapped)} are not in its column mappings. Every source " +
                 "key column must be mapped so the target side can be anti-joined on it.");
+
+        if (writerKind != keyReconcileScd2CloseWriter)
+            return;
+
+        if (primaryWriterKind != "Scd2")
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' pairs '{keyReconcileScd2CloseWriter}' with a primary " +
+                $"writer of '{primaryWriterKind}', not 'Scd2'. Closing a version on a target that isn't " +
+                "versioned is meaningless — this writer only pairs with a mapping whose own writer is Scd2.");
+
+        if (primaryWriterOptions.TryGetValue("naturalKey", out var stated) && !string.IsNullOrWhiteSpace(stated))
+        {
+            var statedKeys = stated.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var derivedTargetNames = keyColumns
+                .Select(c => mapping.ColumnMappings.First(
+                    m => string.Equals(m.SourceColumn, c.Name, StringComparison.OrdinalIgnoreCase)).TargetColumn)
+                .ToList();
+
+            if (!statedKeys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                    .SequenceEqual(derivedTargetNames.OrderBy(k => k, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
+                throw new ConfigValidationException(
+                    $"Table mapping '{mapping.Name}' states an Scd2 natural key ({string.Join(", ", statedKeys)}) " +
+                    $"that differs from the source's primary key ({string.Join(", ", derivedTargetNames)}) — the " +
+                    $"only columns '{keyReconcileReader}' actually stages. '{keyReconcileScd2CloseWriter}' would " +
+                    "join on columns the staging table doesn't have. Either drop the custom natural key, or keep " +
+                    "this mapping on the status quo (no SCD2 delete detection) until a future phase lets " +
+                    $"'{keyReconcileReader}' stage an arbitrary column list.");
+        }
     }
 
     /// <summary>
@@ -266,12 +307,13 @@ public static class ConfigValidation
     /// an explicit number, not an implied one.
     /// </summary>
     public static void ValidateReconcile(
-        ReconcileConfig reconcile, TableMappingConfig mapping, string readerKind, string writerKind)
+        ReconcileConfig reconcile, TableMappingConfig mapping, string readerKind, string writerKind,
+        string primaryWriterKind, IReadOnlyDictionary<string, string> primaryWriterOptions)
     {
         if (!reconcile.Enabled)
             return;
 
-        ValidateKeyReconcilePairing(readerKind, writerKind, mapping);
+        ValidateKeyReconcilePairing(readerKind, writerKind, mapping, primaryWriterKind, primaryWriterOptions);
 
         if (reconcile.Every is not null)
             ValidateScheduling(reconcile.Every, $"{mapping.Name} (reconcile)");

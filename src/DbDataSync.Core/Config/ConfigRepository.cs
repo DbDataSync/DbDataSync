@@ -249,23 +249,31 @@ public sealed class ConfigRepository
         EndpointResolution.Validate(task, mapping);
         ValidateHooks(mapping.Hooks);
 
+        // The mapping's own primary writer — computed once and reused below, both for the
+        // already-existing historized-target check and for phase 129's Scd2-specific reconcile checks,
+        // which need to know Kind *and* Options (a stated naturalKey) to validate a KeyReconcileScd2Close
+        // pairing.
+        var primaryWriter = PipelineResolution.Writer(task, mapping);
+
         // Same reasoning, one step further: a historizing writer pointed at its own source grows the
         // table on every pass, and finding out at run time means finding out after it has.
         if (mapping.Sources.Count == 1 && mapping.Targets.Count == 1)
         {
             ConfigValidation.ValidateHistorizedTarget(
-                PipelineResolution.Writer(task, mapping).Kind,
+                primaryWriter.Kind,
                 EndpointResolution.ResolveSource(task, mapping.Sources[0]),
                 EndpointResolution.ResolveTarget(task, mapping.Targets[0]),
                 mapping.Name);
         }
 
         ConfigValidation.ValidateKeyReconcilePairing(
-            PipelineResolution.Reader(task, mapping).Kind, PipelineResolution.Writer(task, mapping).Kind, mapping);
+            PipelineResolution.Reader(task, mapping).Kind, PipelineResolution.Writer(task, mapping).Kind, mapping,
+            primaryWriter.Kind, primaryWriter.Options);
 
         ConfigValidation.ValidateReconcile(
             PipelineResolution.Reconcile(task, mapping), mapping,
-            PipelineResolution.ReconcileReaderKind(task, mapping), PipelineResolution.ReconcileWriterKind(task, mapping));
+            PipelineResolution.ReconcileReaderKind(task, mapping), PipelineResolution.ReconcileWriterKind(task, mapping),
+            primaryWriter.Kind, primaryWriter.Options);
 
         var path = ConfigPaths.TableMappingFile(_configRoot, replicationName, mapping.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
