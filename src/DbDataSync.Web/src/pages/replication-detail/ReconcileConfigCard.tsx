@@ -11,8 +11,13 @@ import type { AfterChangeStrategy, DeleteGuard, ReconcileConfig, ScheduleMode } 
  * specifically, and threading a second, independent `SchedulingConfig | null` through it would be more
  * surface than the shared code saves.
  */
-export function ReconcileConfigCard({ reconcile, onChange }: {
+export function ReconcileConfigCard({ reconcile, writerKind, onChange }: {
   reconcile: ReconcileConfig
+  /** The mapping's own Change Processing writer Kind — not a field this card edits, only read to say
+   * which reconcile writer a sweep will actually resolve to (phase 129):
+   * `PipelineResolution.ReconcileWriterKind`'s own default is `KeyReconcileScd2Close` when this is
+   * `'Scd2'`, `KeyReconcileDelete` otherwise. */
+  writerKind: string
   onChange: (next: ReconcileConfig) => void
 }) {
   const every = reconcile.every
@@ -136,8 +141,9 @@ export function ReconcileConfigCard({ reconcile, onChange }: {
             </div>
           </Field>
 
-          <span className="hint">
-            Always the <span className="mono">KeyReconcile</span>/<span className="mono">KeyReconcileDelete</span> pair —
+          <span className="hint" data-testid="reconcile-pair-hint">
+            Always the <span className="mono">KeyReconcile</span>/
+            <span className="mono">{writerKind === 'Scd2' ? 'KeyReconcileScd2Close' : 'KeyReconcileDelete'}</span> pair —
             a segment is scoped from each table mapping's own default segmenting, the same as a Backfill.
           </span>
         </div>

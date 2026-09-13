@@ -1001,10 +1001,15 @@ export interface ReconcileDeletesRequest {
 export type RunStatus = 'Queued' | 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'
 export type RunKind = 'Primary' | 'Backfill' | 'ReconcileDeletes'
 
-/** Phase 124's `KeyReconcile`/`KeyReconcileDelete` pair exists only for a delete-diff sweep — never
- * offered in an ordinary Change Processing or Backfill reader/writer picker, which is what every
- * `capabilities.readers`/`.writers` list gets filtered against before rendering one. */
-export const RECONCILE_ONLY_KINDS: ReadonlySet<string> = new Set(['KeyReconcile', 'KeyReconcileDelete'])
+/** Phase 124's `KeyReconcile`/`KeyReconcileDelete` pair — and phase 129's `KeyReconcileScd2Close`,
+ * the same pair's ending for a mapping whose own writer is `Scd2` — exist only for a delete-diff
+ * sweep, never offered in an ordinary Change Processing or Backfill reader/writer picker, which is
+ * what every `capabilities.readers`/`.writers` list gets filtered against before rendering one. */
+export const RECONCILE_ONLY_KINDS: ReadonlySet<string> = new Set([
+  'KeyReconcile',
+  'KeyReconcileDelete',
+  'KeyReconcileScd2Close',
+])
 
 export interface TaskRunRecord {
   runId: string

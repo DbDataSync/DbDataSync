@@ -297,6 +297,7 @@ export function PipelineTab() {
 
       <ReconcileConfigCard
         reconcile={draft.reconcile}
+        writerKind={draft.changeProcessing.writer.kind}
         onChange={(next) => setDraft({ ...draft, reconcile: next })}
       />
     </>

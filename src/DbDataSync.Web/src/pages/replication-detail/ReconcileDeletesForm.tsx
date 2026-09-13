@@ -14,9 +14,26 @@ import { runsAgainstAConnection } from '../../api/types'
 /**
  * Queues an ad-hoc delete-diff sweep of one table mapping — phase 124. Same segment-picker shape as
  * {@link BackfillForm} (opens pre-filled from the mapping's own default segmenting), but with no
- * reader/cache/writer pickers: a sweep always runs KeyReconcile/StagingTable/KeyReconcileDelete —
- * there is nothing else this action means.
+ * reader/cache/writer pickers: a sweep always runs KeyReconcile/StagingTable, ending in either
+ * KeyReconcileDelete or, since phase 129, KeyReconcileScd2Close when the selected mapping's own writer
+ * is Scd2 — there is nothing else this action means, but which of the two endings it means is worth
+ * saying (see resolvedReconcileWriterKind below).
  */
+
+/** Mirrors `PipelineResolution.ReconcileWriterKind`'s own resolution client-side: an explicit
+ * `ReconcileConfig.Writer` override (mapping level, then replication level) wins outright; failing
+ * that, the mapping's own resolved Change Processing writer decides the default. */
+function resolvedReconcileWriterKind(
+  mapping: { writerOverride?: { kind: string } | null; reconcileOverride?: { writer?: { kind: string } | null } | null } | undefined,
+  replication: { changeProcessing: { writer: { kind: string } }; reconcile: { writer?: { kind: string } | null } } | undefined,
+): string | null {
+  if (!mapping || !replication) return null
+  const stated = mapping.reconcileOverride?.writer?.kind ?? replication.reconcile.writer?.kind
+  if (stated) return stated
+  const primaryWriterKind = mapping.writerOverride?.kind ?? replication.changeProcessing.writer.kind
+  return primaryWriterKind === 'Scd2' ? 'KeyReconcileScd2Close' : 'KeyReconcileDelete'
+}
+
 export function ReconcileDeletesForm({ replicationName, onQueued, onClose }: {
   replicationName: string
   onQueued: (runIds: string[]) => void
@@ -111,6 +128,7 @@ export function ReconcileDeletesForm({ replicationName, onQueued, onClose }: {
   }
 
   const nothingChosen = mode === 'custom' && chosen.length === 0
+  const closesVersionsInstead = resolvedReconcileWriterKind(mapping, replication) === 'KeyReconcileScd2Close'
 
   return (
     <form className="card" style={{ width: 288, flex: 'none' }} onSubmit={submit} data-testid="reconcile-deletes-form">
@@ -120,10 +138,11 @@ export function ReconcileDeletesForm({ replicationName, onQueued, onClose }: {
       </div>
       <div className="card-body" style={{ gap: 10 }}>
         <ErrorBanner error={reconcile.error} />
-        <span className="hint">
-          Reads only the source's primary-key values within the scope below and removes target rows
-          whose key is no longer there. Never inserts or updates — an updated source row is a job for
-          the ordinary sync, not this.
+        <span className="hint" data-testid="reconcile-mechanism-hint">
+          Reads only the source's primary-key values within the scope below and {closesVersionsInstead
+            ? 'closes the version of target rows whose key is no longer there'
+            : 'removes target rows whose key is no longer there'}. Never inserts or updates — an updated
+          source row is a job for the ordinary sync, not this.
         </span>
 
         <Field label="Table mapping">
