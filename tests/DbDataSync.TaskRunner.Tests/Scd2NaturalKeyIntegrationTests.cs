@@ -232,6 +232,35 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
         return _taskRunStore.GetRun(runId)!;
     }
 
+    /// <summary>Phase 129: enqueues a <see cref="RunKind.ReconcileDeletes"/> item running
+    /// <c>KeyReconcile</c>/<c>StagingTable</c>/<c>KeyReconcileScd2Close</c> for <paramref name="mappingName"/>
+    /// — the SCD2 ending of phase 124's delete-diff sweep. Mirrors
+    /// <c>RunExecutorIntegrationTests.EnqueueAndDrainReconcileAsync</c> exactly, one Kind different.</summary>
+    private async Task<TaskRunRecord> EnqueueAndDrainReconcileAsync(
+        string mappingName, BatchReloadSegment? segment = null, DeleteGuard? overrideGuard = null)
+    {
+        var effective = segment ?? new FullSegment();
+        var runId = _workQueueStore.Enqueue(
+            TaskName, RunKind.ReconcileDeletes, mappingName, effective.Describe(), SegmentSerializer.Serialize(effective),
+            new WorkItemKinds(GenericDriverKinds.KeyReconcile, GenericDriverKinds.StagingTable, GenericDriverKinds.KeyReconcileScd2Close),
+            deleteGuardJson: overrideGuard is null ? null : DeleteGuardOption.Serialize(overrideGuard));
+        await _executor.ExecuteWorkerAsync(TaskName, WorkerLanes.Uniform(1), CancellationToken.None);
+        return _taskRunStore.GetRun(runId)!;
+    }
+
+    /// <summary>Whether the version matching <paramref name="keyExpression"/> is open (<c>DS_IsCurrent</c>
+    /// true and <c>DS_ValidTo</c> null) or closed (both the other way, together) — never one without the
+    /// other, which is exactly what a row this writer closed must look like.</summary>
+    private async Task<(bool IsCurrent, bool ValidToIsSet)> ReadOpenStateAsync(string table, string keyExpression)
+    {
+        await using var cmd = _adminConnection.CreateCommand();
+        cmd.CommandText = $"SELECT {HistorizedColumns.IsCurrent}, {HistorizedColumns.ValidTo} " +
+            $"FROM dbo.[{table}] WHERE {keyExpression};";
+        await using var reader = await cmd.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync(), $"No row matched '{keyExpression}' in '{table}'.");
+        return (reader.GetBoolean(0), !await reader.IsDBNullAsync(1));
+    }
+
     /// <summary>
     /// A failed run's own message and its log, rather than "Succeeded != Failed". Worth the four lines:
     /// what these exercise is generated SQL running against a real server, and the statement that broke
@@ -361,4 +390,107 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
         Assert.Equal(["10"], rows.Where(r => !r.Current).Select(r => r.Value));
         Assert.Equal(["20"], rows.Where(r => r.Current).Select(r => r.Value));
     }
+
+    #region Phase 129 — KeyReconcileScd2Close: the SCD2 ending of the delete-diff sweep
+
+    /// <summary>
+    /// The core promise of phase 129, for the SCD2 case exactly as phase 124's own test proves it for
+    /// the plain-delete one: a sweep closes exactly the open version of the key the source no longer
+    /// has, and does nothing else — an updated-but-not-deleted key's version stays open with its old
+    /// value (only a Primary pass, which never ran again here, would close it — for its own reason,
+    /// value change, not absence), and an untouched key's version is untouched.
+    /// </summary>
+    [Fact]
+    public async Task ReconcileDeletes_ClosesExactlyTheDeletedKeysOpenVersion_AndLeavesOthersOpen()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_orders}] (Id, Customer, Total) VALUES (1, 'One', 10), (2, 'Two', 20), (3, 'Three', 30);");
+        AssertSucceeded(await EnqueueAndDrainAsync("orders"));
+
+        // At the source: Id 1 is deleted, Id 2 is updated (never picked up by a reconcile — only a
+        // Primary pass does that), Id 3 is untouched.
+        await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_orders}] WHERE Id = 1;");
+        await ExecuteAsync(_adminConnection, $"UPDATE dbo.[{_orders}] SET Total = 99 WHERE Id = 2;");
+
+        AssertSucceeded(await EnqueueAndDrainReconcileAsync("orders"));
+
+        var closed = await ReadOpenStateAsync(_ordersTarget, "Id = 1");
+        Assert.False(closed.IsCurrent, "the deleted key's version should have been closed");
+        Assert.True(closed.ValidToIsSet, "a closed version must have DS_ValidTo populated");
+
+        var untouchedByValue = await ReadOpenStateAsync(_ordersTarget, "Id = 2");
+        Assert.True(untouchedByValue.IsCurrent, "a reconcile sweep never closes a version because a value changed");
+        Assert.False(untouchedByValue.ValidToIsSet);
+
+        var untouched = await ReadOpenStateAsync(_ordersTarget, "Id = 3");
+        Assert.True(untouched.IsCurrent);
+        Assert.False(untouched.ValidToIsSet);
+
+        // The stale value from before the reconcile — proof the sweep truly wrote nothing for this key.
+        var rows = await ReadVersionsAsync(_ordersTarget, "CAST(Id AS NVARCHAR(50))", "Total");
+        Assert.Equal(["20"], rows.Where(r => r.Key == "2").Select(r => r.Value));
+    }
+
+    /// <summary>An <see cref="AutoSegment"/>-free, explicit <see cref="RangeSegment"/> scopes a sweep
+    /// exactly like a plain-delete one — a key outside the requested range is never a candidate to
+    /// close, even though it too no longer exists at the source.</summary>
+    [Fact]
+    public async Task ReconcileDeletes_ASegmentedSweep_OnlyClosesWithinItsOwnRange()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_orders}] (Id, Customer, Total) VALUES (1, 'One', 10), (2, 'Two', 20), (10, 'Ten', 100);");
+        AssertSucceeded(await EnqueueAndDrainAsync("orders"));
+
+        await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_orders}] WHERE Id IN (1, 10);");
+
+        AssertSucceeded(await EnqueueAndDrainReconcileAsync("orders", new RangeSegment("Id", "1", "5")));
+
+        Assert.False((await ReadOpenStateAsync(_ordersTarget, "Id = 1")).IsCurrent);
+        Assert.True((await ReadOpenStateAsync(_ordersTarget, "Id = 2")).IsCurrent);
+        Assert.True(
+            (await ReadOpenStateAsync(_ordersTarget, "Id = 10")).IsCurrent,
+            "outside the requested segment — a sweep scoped to it must not touch key 10's version");
+    }
+
+    /// <summary>The same safety net phase 124 built: closing more than the guard's ratio rolls the
+    /// whole UPDATE back, so no version closes at all.</summary>
+    [Fact]
+    public async Task ReconcileDeletes_ExceedingTheDefaultGuardsRatio_FailsAndClosesNothing()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_orders}] (Id, Customer, Total) VALUES (1, 'One', 10), (2, 'Two', 20), (3, 'Three', 30);");
+        AssertSucceeded(await EnqueueAndDrainAsync("orders"));
+
+        // Every source row gone — a 100% close against the default RatioDeleteGuard's 50% ceiling.
+        await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_orders}];");
+
+        var run = await EnqueueAndDrainReconcileAsync("orders");
+
+        Assert.Equal(RunStatus.Failed, run.Status);
+        Assert.Contains("guard", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await ReadOpenStateAsync(_ordersTarget, "Id = 1")).IsCurrent);
+        Assert.True((await ReadOpenStateAsync(_ordersTarget, "Id = 2")).IsCurrent);
+        Assert.True((await ReadOpenStateAsync(_ordersTarget, "Id = 3")).IsCurrent);
+    }
+
+    /// <summary>An operator's explicit override lets an otherwise-refused sweep through, closing every
+    /// open version in scope.</summary>
+    [Fact]
+    public async Task ReconcileDeletes_WithAnOverrideGuard_ClosesEverythingWithoutRefusing()
+    {
+        await ExecuteAsync(_adminConnection,
+            $"INSERT INTO dbo.[{_orders}] (Id, Customer, Total) VALUES (1, 'One', 10), (2, 'Two', 20), (3, 'Three', 30);");
+        AssertSucceeded(await EnqueueAndDrainAsync("orders"));
+
+        await ExecuteAsync(_adminConnection, $"DELETE FROM dbo.[{_orders}];");
+
+        var run = await EnqueueAndDrainReconcileAsync("orders", overrideGuard: new NoneDeleteGuard());
+
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        Assert.False((await ReadOpenStateAsync(_ordersTarget, "Id = 1")).IsCurrent);
+        Assert.False((await ReadOpenStateAsync(_ordersTarget, "Id = 2")).IsCurrent);
+        Assert.False((await ReadOpenStateAsync(_ordersTarget, "Id = 3")).IsCurrent);
+    }
+
+    #endregion
 }
