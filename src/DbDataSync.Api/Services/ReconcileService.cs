@@ -11,8 +11,18 @@ namespace DbDataSync.Api.Services;
 /// <c>POST /api/replications/{r}/mappings/{m}/reconcile-deletes</c>. Near-identical to
 /// <see cref="BackfillService"/>: expand any <see cref="AutoSegment"/> against the real source table,
 /// then enqueue one independently-scheduled <see cref="RunKind.ReconcileDeletes"/> unit of work per
-/// resulting segment, always through the <c>KeyReconcile</c>/<c>StagingTable</c>/<c>KeyReconcileDelete</c>
-/// pipeline — there is no reader/cache/writer choice to make here, unlike a backfill.
+/// resulting segment, always through the <c>KeyReconcile</c>/<c>StagingTable</c> reader/cache pair —
+/// there is no per-request reader/cache choice to make here, unlike a backfill.
+/// <para>
+/// **The writer ending is resolved, not fixed**, since phase 129: <see cref="PipelineResolution.ReconcileWriterKind"/>
+/// says <c>KeyReconcileDelete</c> for an ordinary mapping and <c>KeyReconcileScd2Close</c> for one
+/// whose own writer is <c>Scd2</c> (or whatever an explicit <see cref="ReconcileConfig.Writer"/> states)
+/// — resolved fresh per mapping on every call, the same way <see cref="ConfigRepository.SaveTableMapping"/>
+/// already resolves it for save-time validation. Before this, both enqueue methods hardcoded
+/// <c>KeyReconcileDelete</c> unconditionally, which would have made an Scd2 mapping's on-demand and
+/// scheduled sweeps fail at run time — a work item naming a writer whose anti-join key does not exist
+/// on the target — no matter what <see cref="PipelineResolution.ReconcileWriterKind"/> said.
+/// </para>
 /// </summary>
 public sealed class ReconcileService(
     ConfigRepository configRepository,
@@ -23,7 +33,6 @@ public sealed class ReconcileService(
 {
     private const string ReaderKind = "KeyReconcile";
     private const string CacheKind = "StagingTable";
-    private const string WriterKind = "KeyReconcileDelete";
 
     public async Task<TriggerResult> EnqueueAsync(
         string replicationName, string mappingName, ReconcileDeletesRequest request, CancellationToken cancellationToken)
@@ -61,7 +70,7 @@ public sealed class ReconcileService(
             return TriggerResult.Invalid(ex.Message);
         }
 
-        var kinds = new WorkItemKinds(ReaderKind, CacheKind, WriterKind);
+        var kinds = new WorkItemKinds(ReaderKind, CacheKind, PipelineResolution.ReconcileWriterKind(task, mapping));
         // The mapping's own configured guard (phase 125's ReconcileConfig.DeleteGuard, or its default —
         // a fresh ReconcileConfig always has one) unless the operator explicitly overrides it for this
         // request. Always serialized, never left for the writer's own hardcoded fallback to resolve —
@@ -131,7 +140,7 @@ public sealed class ReconcileService(
         }
 
         var guard = PipelineResolution.Reconcile(task, mapping).DeleteGuard;
-        var kinds = new WorkItemKinds(ReaderKind, CacheKind, WriterKind);
+        var kinds = new WorkItemKinds(ReaderKind, CacheKind, PipelineResolution.ReconcileWriterKind(task, mapping));
         var guardJson = DeleteGuardOption.Serialize(guard);
 
         var runIds = segments
