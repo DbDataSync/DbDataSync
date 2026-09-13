@@ -1,5 +1,12 @@
 # Pause/resume history UI — follow-up
 
+**Resolved 2026-09-13 — became `architecture/implementation/todo/phase-131-pause-history-ui.md`.**
+Product direction: a third Monitoring sub-tab, beside Current Status and Run History. The phase doc
+resolves this doc's widened, two-grain scope below in full — one `PauseEvents` table already covers
+both once a nullable `MappingName` column is added, and the read side (`TaskRunStore.GetPauseHistory`)
+needs no query change at all to return both grains once that column exists. This document is kept
+below as the original scope record.
+
 **Status: minimal placeholder, 2026-08-31.**
 
 Phase 64 builds `PauseEvents` (every pause and resume, its note, timestamp, and who did it) but
