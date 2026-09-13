@@ -1,8 +1,18 @@
 # Linux TLS without a reverse proxy
 
-**Status: partly planned.** Two of the three tiers this doc proposed are now implementation phases;
-the third — a self-signed certificate DbDataSync generates and rotates itself — stays here for
-future consideration.
+**Resolved 2026-09-13 — all three tiers are now implementation phases.** Tier 1 is done
+(`architecture/implementation/done/phase-113-tls-bring-your-own-certificate.md`); tier 3 is scoped and
+deliberately deferred (`architecture/implementation/todo/phase-114-tls-acme.md`); tier 2, the one this
+document still had open, is now `architecture/implementation/todo/phase-130-tls-managed-self-signed.md`,
+which resolves all four of tier 2's open questions below (leaf-only, not a local CA; the key lives at
+`<repo>/tls/`; `setup` offers it on request, not automatically; `config check` distinguishes a
+self-signed cert this mechanism manages from one bound by other means) — and corrects two real gaps in
+this document's own tier-2 sketch: the "no restart" cert-swap it assumed doesn't exist anywhere in this
+codebase (phase 113 built and consumed the file-based path but explicitly declined to build a live
+reload seam), and "an extension of `CertificateExpiryService`" isn't possible since that service is
+Windows-only end to end. See phase 130 for the corrected design.
+
+This document is kept below as the original proposal record.
 
 Today the only documented way to serve DbDataSync over HTTPS on Linux is nginx/Caddy in front. That
 is a fine production topology, but it is a second thing to install, configure and patch for a tool
