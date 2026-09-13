@@ -73,10 +73,10 @@ public sealed class ConnectionsControllerTests : IClassFixture<TestApiFactory>
         // The SPA decides whether to offer a Test action from this flag alone.
         Assert.True(capabilities.SupportsConnectionTest);
 
-        // The reload writers reconcile, as does the key-diff delete sweep; the incremental MERGE writer
-        // is upsert-only.
+        // The reload writers reconcile, as does the key-diff delete sweep and its SCD2 close ending
+        // (phase 129); the incremental MERGE writer is upsert-only.
         Assert.Equal(
-            ["DeleteInsert", "KeyReconcileDelete", "MsSqlDeleteInsert", "MsSqlMergeReconcile"],
+            ["DeleteInsert", "KeyReconcileDelete", "KeyReconcileScd2Close", "MsSqlDeleteInsert", "MsSqlMergeReconcile"],
             capabilities.Writers.Where(w => w.SupportsReconciliation).Select(w => w.Kind).Order());
         Assert.False(capabilities.Writers.Single(w => w.Kind == "MsSqlMerge").SupportsReconciliation);
 
