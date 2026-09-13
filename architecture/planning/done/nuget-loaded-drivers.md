@@ -1,6 +1,30 @@
 # .NET database drivers loaded from NuGet
 
-**Status: proposal, not agreed.** Draft for review. Nothing here is a phase yet.
+**Resolved 2026-09-13 — 6 of 9 phases shipped.** Phases 1–6 below
+(`architecture/implementation/done/phase-109a-driver-id-is-a-string.md` through
+`-109f-stateengine-string-and-registry.md`) are done and verified against real code: `ConnectionConfig.DriverType`
+is a plain `string`, `GenericDriver` is public, the provider layer works end to end (restore-then-load,
+`dbdatasync provider install/sync`, proven against `MySqlConnector` — a package referenced in **no**
+`.csproj` in the solution), the YAML descriptor + `GET /api/drivers` ships and was tested against a real
+MySQL container, compiled `IDriver` plugins load via a per-driver `AssemblyLoadContext` gated on
+`IDriver.ContractVersion`, and `StateEngine` is a string-backed registry.
+
+Phases 7–9 (dependency removal) remain, and each already has its own phase doc — this document does
+not need to be revisited to create them:
+
+- `architecture/implementation/todo/phase-109g-state-store-off-provider-packages.md` — `DbDataSync.State.csproj`
+  still references `Microsoft.Data.SqlClient` and `Npgsql` directly, confirmed.
+- `architecture/implementation/todo/phase-109h-builtin-drivers-off-provider-packages.md` — `MsSqlDriver`/
+  `PostgresDriver` still reference their providers directly, confirmed. Deferred until 109g lands.
+- `architecture/implementation/todo/phase-109i-duckdb-decoupling.md` — `DuckDB.NET.Data.Full` still
+  referenced in `Verification`/`Scripting`, confirmed. Deferred, separate track.
+
+Of the five open questions this document raised (grep `UNDECIDED`, below): Q1, Q3 and Q5 were resolved
+during implementation; Q2 and Q4 are decided here — **Q2: no. Q4: not now.** See each question's own
+entry for the reasoning.
+
+The rest of this document — the phase breakdown, the descriptor/compiled-driver design, the worked
+examples — stays as the design record phases 7–9 and any future engine work build from.
 
 Goals, in order of value:
 
@@ -687,11 +711,13 @@ for the rest. Defer until an engine actually wants it.
   on demand: repo stays clean and diffable, matches the "repo is the source of truth" philosophy.
   Adds a `driver sync` step and a feed dependency for a fresh deployment.
 
-**Leaning:** lockfile + `dbdatasync driver sync` (explicit, not silent-on-boot — like `npm ci`).
-Air-gapped shops point `driver install --source` at an internal feed.
-
-**UNDECIDED** — depends on whether fully-offline / air-gapped deployment is a real requirement. If
-it is, a hybrid: lockfile always, `driver install --vendor` to also commit the closure.
+**Resolved 2026-09-13: no.** Lockfile only — the restored `lib/` DLLs are not committed to git.
+`dbdatasync provider sync` / `driver sync` (explicit, not silent-on-boot — like `npm ci`) restores them
+on a fresh checkout or after an edited version. Air-gapped shops point `install`/`sync --source` at an
+internal feed rather than the hybrid vendor-commit option this question left open; that option is
+dropped, not merely deferred — 109c already built the plain lockfile path and confirmed it (see its own
+"Open questions": "a deployment-policy decision, not an engineering one this phase forces"), and no
+fully-offline requirement has actually surfaced to justify the extra commit-the-closure mode.
 
 ### Q3 — Contract versioning cadence for `Abstractions` (Phase 5 only)
 
@@ -702,12 +728,11 @@ it is, a hybrid: lockfile always, `driver install --vendor` to also commit the c
 - **No promises:** `Abstractions` versions with the app; a mismatch fails loudly with "rebuild
   against x.y". Cheapest; fine while plugin authors are us or close partners.
 
-**Leaning:** no promises for now. DbDataSync is 0.1.0; committing to a stability regime before
-anyone ships a plugin is premature. Fail loudly; document "a plugin targets a specific DbDataSync
-minor."
-
-**UNDECIDED — deferred.** Only becomes real if Phase 5 ships *and* third parties write plugins.
-Revisit when Phase 5 is scoped.
+**Resolved — built exactly as leaned, in phase 109e.** An integer `IDriver.ContractVersion` (defaults
+to 1 via a default interface member on every existing driver, no source change needed), no semver
+promises, and a load that fails loudly and is skipped — never crashes the host — when the host can't
+support it. See `architecture/implementation/done/phase-109e-compiled-idriver-plugins.md`. Revisit only
+if an external plugin ecosystem actually forms.
 
 ### Q4 — Worker startup cost
 
@@ -718,10 +743,17 @@ cost.
 - **Load only the drivers a run's mappings reference:** the worker knows its replication → mappings
   → connections → driver ids. Bounded cost, a lazy registry to write.
 
-**Leaning:** load all, first. Measure ALC construction + first-use JIT with 1 vs. 5 fake drivers
-during implementation; move to lazy only if the number is bad.
+**Resolved 2026-09-13: not now.** No measurement was taken during 109c/109e, and none is being
+commissioned to close this out — load-all-eagerly stays the behavior until it's an observed operational
+problem, not a hypothetical one. Left unmeasured, and accepted as such.
 
-**UNDECIDED — decide from a measurement at implementation time**, not now.
+This also means a related, narrower gap 109e flagged stays accepted rather than fixed: if a compiled
+driver depends on a provider (109c) that hasn't yet been resolved into the shared
+`AssemblyLoadContext.Default` at the moment the driver's own loader runs, the driver loads a *private*
+copy of that provider from its own `lib/` instead of sharing the host's type identity — not observed in
+either composition root (providers load before drivers in both today), not exercised by any test. Fixing
+it properly means either the eager-loading this question just declined, or teaching a driver's resolver
+about providers it should never resolve privately — revisit both together if either becomes real.
 
 ### Q5 — Test story
 
@@ -737,7 +769,10 @@ An integration test for a NuGet-loaded driver needs a package to install and an 
   `.db`, round-trip. Real maintained provider, real SQL, no container — and doubles as a genuinely
   useful driver.
 
-**Leaning:** SQLite canary for end-to-end + the isolation-in-isolation tests for the loader's edges.
-
-**UNDECIDED** — whether to *also* run a container-engine variant (MySQL) for "we genuinely didn't
-compile this in" confidence, or trust SQLite-via-descriptor to stand in for Oracle-via-descriptor.
+**Resolved — went further than the leaning.** 109c/109d proved the mechanism against a real MySQL
+container via `MySqlConnector` (a package referenced in **no** `.csproj` in the solution) rather than
+settling for the SQLite canary alone — the stronger "we genuinely didn't compile this in" confidence
+this question raised as optional. 109e's own plugin-loader tests used a fixture published directly via
+`dotnet publish` rather than a local NuGet feed, since the restore mechanism itself was already proven
+in 109c. See `architecture/implementation/done/phase-109c-the-provider-layer.md` and
+`-109d-the-yaml-descriptor.md`.
