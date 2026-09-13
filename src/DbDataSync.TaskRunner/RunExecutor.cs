@@ -1431,7 +1431,7 @@ public sealed class RunExecutor(
         IDriver sourceDriver, DbConnection sourceConnection, SourceTableRef source,
         TableMappingConfig mapping, Guid runId, CancellationToken cancellationToken)
     {
-        if (writerKind != GenericDriverKinds.Scd2)
+        if (writerKind != GenericDriverKinds.Scd2 && writerKind != GenericDriverKinds.KeyReconcileScd2Close)
             return options;
 
         // A stated key wins outright — at either level, since the mapping's override has already

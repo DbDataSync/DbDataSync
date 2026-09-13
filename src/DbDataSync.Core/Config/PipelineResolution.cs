@@ -66,8 +66,15 @@ public static class PipelineResolution
     public static string ReconcileCacheKind(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
         Reconcile(task, mapping).Cache?.Kind ?? "StagingTable";
 
+    /// <summary>"KeyReconcileDelete" unless the resolved <see cref="ReconcileConfig.Writer"/> names
+    /// something else, except when the mapping's own primary writer is <c>Scd2</c> — a delete-diff
+    /// sweep against a versioned target has to close a version rather than remove the row, so the
+    /// unset default there is <c>KeyReconcileScd2Close</c> instead (phase 129). An explicit
+    /// <see cref="ReconcileConfig.Writer"/> override still wins outright; this only changes what
+    /// "unset" resolves to.</summary>
     public static string ReconcileWriterKind(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
-        Reconcile(task, mapping).Writer?.Kind ?? "KeyReconcileDelete";
+        Reconcile(task, mapping).Writer?.Kind
+        ?? (Writer(task, mapping).Kind == "Scd2" ? "KeyReconcileScd2Close" : "KeyReconcileDelete");
 
     public static BindingLevel LevelOfReconcile(TableMappingConfig? mapping) =>
         mapping?.ReconcileOverride is null ? BindingLevel.Replication : BindingLevel.Mapping;
