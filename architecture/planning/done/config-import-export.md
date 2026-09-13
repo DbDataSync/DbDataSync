@@ -1,9 +1,16 @@
 # Config import and export
 
-**Status: proposal, not agreed — and the questions below are the reason.** Split out of
-`config-import-export-and-revert.md`; the diff-and-revert half was resolved and became phase 35
-(`planning/done/config-history-diff-and-revert.md`). This is the half where the difficulty is, and
-none of it is technical.
+**Decided against, 2026-09-13.** The config store is already flat files in a git repository — export
+is already free (clone the repo, or `git archive` a subtree) without any dedicated feature, and that's
+the easy half this doc itself says is "nearly free." Import is where the actual difficulty lives, and
+none of it is technical — see "Why no implementation phase was written," below — so this isn't a case
+of the hard questions getting answered later; the decision is that a dedicated import/export feature
+isn't worth building at all when the underlying store already gives export away for free and import's
+open questions are product questions nobody has asked for badly enough to answer.
+
+Split out of `config-import-export-and-revert.md`; the diff-and-revert half was resolved and became
+phase 35 (`planning/done/config-history-diff-and-revert.md`). The rest of this document is kept as the
+original proposal record.
 
 From the phase 15 mockups, which show an **Import config** action on the replications list.
 

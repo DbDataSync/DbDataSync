@@ -1,6 +1,6 @@
 # Phase 84 — Row-bounded reads for CDC
 
-**Status**: Not started.
+**Status**: Done.
 **Plan reference**: `architecture/planning/done/cdc-row-bounded-reads.md`, which resolves
 `architecture/planning/todo/mssql-cdc-source-batching-and-guaranteed-delivery.md`'s "Follow-up 1" and
 the fix `change-queue-fairness-investigation.md` (`architecture/planning/todo/`) proposed independently.

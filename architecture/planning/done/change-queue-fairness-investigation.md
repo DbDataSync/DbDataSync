@@ -1,6 +1,23 @@
 # Investigation: does a large-backlog table starve other tables in the change queue?
 
-**Status: investigated, findings recorded. No implementation phase — reporting only, per instruction.**
+**Resolved 2026-09-13 — became `architecture/implementation/done/phase-084-cdc-row-bounded-reads.md`.**
+That phase's own header names this doc directly: "the fix `change-queue-fairness-investigation.md`
+proposed independently." It built exactly what "What would fix it, if built" (below) describes —
+`MsSqlCdcReader` gained the same `BoundedRead` mechanism `MsSqlChangeTrackingReader` already had, the
+cap defaults **on** (`BoundedRead.DefaultMaxRows = 50_000`) for both instead of staying opt-in, and a
+capped read persists its position and re-enqueues for the remainder, so a large backlog now becomes
+many bounded `WorkItem`s that interleave with other due mappings through the existing `TryClaimNext`
+ordering rather than occupying one worker slot indefinitely. Phase 84 also verified this composes
+correctly with phase 75's polling gate (the interaction flagged below) with a dedicated test, rather
+than assuming it.
+
+Separately, `ProcessSupervisor.BuildStartInfo` (`src/DbDataSync.Api/Services/ProcessSupervisor.cs:127`)
+now passes a real, per-replication `--degree-of-parallelism` — sourced from the replication's own
+`ChangeProcessingConfig.DegreeOfParallelism`, falling back to the default only when unset — rather than
+the API always spawning workers at the previously-unconfigurable default of 4 this doc's "What this is,
+precisely" section describes.
+
+The rest of this document is kept as the original investigation record.
 
 ## What was checked
 
@@ -60,5 +77,4 @@ committed plan. If this is picked up later, it needs its own default-cap-size de
 `architecture/planning/todo/mssql-cdc-source-batching-and-guaranteed-delivery.md`, which is already
 sitting in the backlog and touches the same reader.
 
-**Next step**: none scheduled. Revisit if this becomes a real operational problem, or pick up
-deliberately alongside the CDC batching doc above.
+**Next step**: none — resolved by phase 84, above.
