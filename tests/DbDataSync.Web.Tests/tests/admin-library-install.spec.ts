@@ -12,7 +12,7 @@ const screenshotsDir = screenshotDir('admin-library-install')
  * is about the install/trust/remove mechanics, not about a working DbProviderFactory.
  */
 test.describe.serial('admin: install and remove a non-curated library', () => {
-  test('installing it requires a factory type, opens the trust dialog, and installs on confirm', async ({ page }) => {
+  test('installing it with an explicit factory type opens the trust dialog and installs on confirm', async ({ page }) => {
     await page.goto('/admin/libraries')
 
     const searchInput = page.getByTestId('admin-libraries-search-input')
@@ -31,10 +31,12 @@ test.describe.serial('admin: install and remove a non-curated library', () => {
     const command = page.getByTestId('admin-libraries-install-command')
     await expect(command).toContainText("isn't one of the bundled")
 
+    // Since phase 122, a non-curated package's Install button no longer waits on a factory type —
+    // the server tries reflection-assist first. It's enabled as soon as a version is selected; typing
+    // one here exercises the explicit-override path instead of auto-detect.
     const installButton = page.getByTestId('admin-libraries-install-button')
-    await expect(installButton).toBeDisabled()
-    await page.getByTestId('admin-libraries-command-factory-type').fill('System.Data.Odbc.OdbcFactory, System.Data.Odbc')
     await expect(installButton).toBeEnabled()
+    await page.getByTestId('admin-libraries-command-factory-type').fill('System.Data.Odbc.OdbcFactory, System.Data.Odbc')
 
     await installButton.click()
     await expect(page.getByTestId('admin-libraries-trust-dialog')).toBeVisible()
