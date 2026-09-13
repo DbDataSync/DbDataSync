@@ -1,7 +1,21 @@
 # SCD2 delete detection — closing a version via the `KeyReconcile` signal
 
-**Status: proposal, not agreed.** Draft for review. Would be a single implementation phase once
-agreed (next available number after 128).
+**Resolved 2026-09-12.** The three open questions were settled (see *Open questions* below, now
+answered inline). The design builds as one phase:
+
+| phase | what |
+| --- | --- |
+| **129** — `architecture/implementation/todo/phase-129-scd2-delete-detection.md` | `KeyReconcileScd2CloseWriter` + `KeyReconcileScd2CloseStatement`, `GenericDriverKinds.KeyReconcileScd2Close`, engine registration on MsSql/Postgres, the `RunExecutor`/`PipelineResolution`/`ConfigValidation` changes that make the pairing resolvable and legal, and the SPA copy fix `ReconcileConfigCard`'s hardcoded pair-name text needs once the resolved writer can vary |
+
+Two real gaps this session's research found in the design below, both corrected in the phase doc
+rather than carried forward: the *Validation* section's proposed reuse of
+`NaturalKeyDerivation.Derive` from `ConfigValidation` does not compile — `DbDataSync.Core` has no
+project reference to `DbDataSync.Drivers.Generic` at all, for the same layering reason this doc's own
+*Validation* section already gives for using Kind string literals instead of `GenericDriverKinds`
+constants — so the phase doc derives the equivalent natural key inline over `CachedColumn`/
+`ColumnMapping` instead; and the *SPA* section's claim that `ReconcileConfigCard` has "the writer
+picker it already has (phase 125)" is not true — that component has no reader/writer picker at all,
+only a static hint string naming the fixed pair, which is what the phase doc changes instead.
 
 Builds directly on phase 124/125 (`architecture/planning/done/watermark-delete-detection.md`,
 `architecture/implementation/done/phase-124-key-reconcile-delete-detection.md`,
@@ -217,19 +231,37 @@ the updated pairing check — its cadence/after-change rules are already writer-
   have one.** MSSQL's Change Tracking/CDC readers keep working exactly as they do today; this is
   purely a second path for sources that have no such reader.
 
-## Open questions
+## Open questions — resolved 2026-09-12
 
-1. **The writer's `Kind` name.** `KeyReconcileScd2Close` is used throughout this doc as a working
-   name — matches the `KeyReconcile<Ending>` shape its sibling already set, but worth confirming
-   before it's persisted anywhere (a `Kind` string is effectively permanent once a real config or a
-   `TaskRuns` row has used it).
-2. **SPA copy** — see the *SPA* section above. Leave "Reconcile deletes" as the label everywhere, or
-   make it conditional on the resolved writer.
-3. **Whether the mismatch check (natural key vs. source primary key) belongs in
-   `ValidateKeyReconcilePairing` itself or a new `ValidateScd2ReconcilePairing` sibling** — the
-   existing function already branches on `readerIsKeyReconcile`; whether adding an
-   `Scd2`-specific branch there reads clearly or wants its own function is an implementation-time
-   call, not a design one.
+1. **The writer's `Kind` name.** → **resolved**: `KeyReconcileScd2Close`, exactly the working name
+   used throughout this doc — it matches the `KeyReconcile<Ending>` shape `KeyReconcileDelete` already
+   set, and is unambiguous about which writer family's version it closes. No reason found during
+   phase-doc research to prefer an alternative.
+2. **SPA copy** — see the *SPA* section above. → **resolved**: leave "Reconcile deletes" as the label,
+   the hook name (`useReconcileDeletes`), and the request type (`ReconcileDeletesRequest`) everywhere —
+   the concept stays honest even where the literal word "delete" is inexact for an `Scd2` mapping, and
+   renaming touches too much SPA/controller surface for a wording-only reason; the run's own log lines
+   and `RunKindBadge` already say what actually happened. One narrower thing does need to change,
+   found only by reading `ReconcileConfigCard.tsx` and `ReconcileDeletesForm.tsx` in full rather than
+   assuming the plan's own description of them: `ReconcileConfigCard.tsx` has no writer picker at all
+   (this doc's *SPA* section above was wrong about that) — it has a static hint sentence naming the
+   fixed `KeyReconcile`/`KeyReconcileDelete` pair, which becomes factually wrong once the resolved
+   writer can be `KeyReconcileScd2Close`, and `ReconcileDeletesForm.tsx`'s hint sentence ("removes
+   target rows... never inserts or updates") is also factually wrong for an `Scd2`-resolved mapping.
+   Both need to become conditional on the resolved writer — a copy-accuracy fix, not the renaming this
+   question was actually asking about. See phase 129's doc, §8, for the precise wording.
+3. **Where the mismatch check lives.** → **resolved**: inside `ValidateKeyReconcilePairing` itself, as
+   an added branch — not a new `ValidateScd2ReconcilePairing` sibling. The function is already called
+   from two places (`ConfigRepository.SaveTableMapping` directly, and again inside `ValidateReconcile`)
+   and both already compute the mapping's primary writer for another check
+   (`ValidateHistorizedTarget`) at the same call site, so both can supply it to the widened signature
+   with no new lookup — a separate sibling would need its own call added at both sites, the same
+   "who remembers to call the second validator" risk `ValidateReconcile`'s own doc comment already
+   flags as the reason it reuses `ValidateKeyReconcilePairing` "verbatim" rather than re-implementing
+   the check. See phase 129's doc, §7, including a real gap this reasoning surfaced: the mismatch
+   check itself cannot be built exactly as originally worded here (see the note under "Resolved
+   2026-09-12" above) because `ConfigValidation` cannot reference `NaturalKeyDerivation` across the
+   Core/driver-layer boundary.
 
 ## References
 
