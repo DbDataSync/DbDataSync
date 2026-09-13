@@ -161,8 +161,14 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
     /// table is the surrogate — there is nothing in the schema to infer a business key from, which is
     /// why it is declared.
     /// </para>
+    /// <para>
+    /// <c>internal</c> rather than <c>private</c> since phase 129: <see cref="KeyReconcileScd2CloseWriter"/>,
+    /// in the same assembly, calls this directly for its own key half rather than duplicating the
+    /// required-option and unmapped-key checks. No behavior change — still invisible outside this
+    /// assembly.
+    /// </para>
     /// </summary>
-    private static (IReadOnlyList<string> Keys, IReadOnlyList<string> Values) SplitColumns(
+    internal static (IReadOnlyList<string> Keys, IReadOnlyList<string> Values) SplitColumns(
         IReadOnlyDictionary<string, string> options,
         IReadOnlyList<ColumnMapping> columnMappings,
         TableRef target)

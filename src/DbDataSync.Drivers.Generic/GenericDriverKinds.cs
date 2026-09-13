@@ -25,6 +25,11 @@ public static class GenericDriverKinds
     /// set — never inserts or updates. Always paired with <see cref="KeyReconcile"/>.</summary>
     public const string KeyReconcileDelete = "KeyReconcileDelete";
 
+    /// <summary>Closes the open SCD2 version of every key absent from the staged key set — never deletes
+    /// a row. Always paired with <see cref="KeyReconcile"/>, and only legal when the mapping's own writer
+    /// is <see cref="Scd2"/>.</summary>
+    public const string KeyReconcileScd2Close = "KeyReconcileScd2Close";
+
     /// <summary>Appends a complete copy per pass, marked with when it ran. Keeps history by keeping
     /// every copy.</summary>
     public const string Snapshot = "Snapshot";

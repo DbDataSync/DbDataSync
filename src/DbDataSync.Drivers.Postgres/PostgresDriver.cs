@@ -48,6 +48,7 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
     [
         new DeleteInsertWriter(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
         new KeyReconcileDeleteWriter(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
+        new KeyReconcileScd2CloseWriter(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
         new SnapshotWriter(PostgresDialect.Instance, PostgresCatalog.Instance),
         new Scd2Writer(PostgresDialect.Instance, PostgresCatalog.Instance),
     ];

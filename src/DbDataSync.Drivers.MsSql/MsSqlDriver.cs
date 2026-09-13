@@ -51,6 +51,7 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         new MsSqlDeleteInsertWriter(),
         new DeleteInsertWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
         new KeyReconcileDeleteWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
+        new KeyReconcileScd2CloseWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
             new SnapshotWriter(MsSqlDialect.Instance, MsSqlCatalog.Instance),
         new Scd2Writer(MsSqlDialect.Instance, MsSqlCatalog.Instance),
     ];
