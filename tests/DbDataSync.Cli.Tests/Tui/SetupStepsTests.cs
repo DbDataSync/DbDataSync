@@ -117,4 +117,15 @@ public sealed class SetupStepsTests : IDisposable
         Assert.Equal("localhost", config["DbDataSync:Auth:Passkeys:RelyingPartyId"]);
         Assert.False(config.ContainsKey("DbDataSync:Auth:Disabled"));
     }
+
+    /// <summary>Phase 130 — printed, not invoked, matching every other certificate step in this
+    /// walk-through; the trust caveat has to be in the printed lines, not only in docs.</summary>
+    [Fact]
+    public void SelfSignedCertificateInstructions_NamesTheRepoAndTheTrustCaveat()
+    {
+        var lines = SetupSteps.SelfSignedCertificateInstructions(_root);
+
+        Assert.Contains(lines, line => line.Contains("new-self-signed") && line.Contains(_root));
+        Assert.Contains(lines, line => line.Contains("trust this certificate once"));
+    }
 }

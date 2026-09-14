@@ -15,14 +15,16 @@ namespace DbDataSync.Cli;
 /// bootstrapping it cannot depend on a browser reaching it first, the same reasoning phase 51 applied to
 /// <c>dbdatasync service install</c>.
 /// <para>
-/// **Windows-only except <c>use-pem</c>/<c>use-pfx</c>/<c>status</c> (phase 113).** Everything else —
-/// issuance from the Windows certificate store or an AD CS enterprise CA, and binding a store-installed
-/// certificate by thumbprint — has no equivalent off Windows and keeps its own
-/// <see cref="SupportedOSPlatformAttribute"/>. The three exceptions work with a certificate *file*
-/// instead (<see cref="System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile"/> /
+/// **Windows-only except <c>use-pem</c>/<c>use-pfx</c>/<c>status</c> (phase 113) and
+/// <c>new-self-signed</c> (phase 130).** Everything else — issuance from the Windows certificate store
+/// or an AD CS enterprise CA, and binding a store-installed certificate by thumbprint — has no
+/// equivalent off Windows and keeps its own <see cref="SupportedOSPlatformAttribute"/>. The file-based
+/// exceptions work with a certificate *file* instead
+/// (<see cref="System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile"/> /
 /// <see cref="System.Security.Cryptography.X509Certificates.X509CertificateLoader"/>, both genuine
 /// cross-platform .NET cryptography, the same reasoning <see cref="CertificateBuilder"/>'s own doc
-/// comment gives for why it isn't gated either) — the answer for Linux and macOS this phase adds.
+/// comment gives for why it isn't gated either) — the answer for Linux and macOS phase 113 (a file
+/// someone else supplies) and phase 130 (a file this codebase generates and renews itself) add.
 /// </para>
 /// </summary>
 public static class CertCommand
@@ -65,8 +67,8 @@ public static class CertCommand
             "status" => Status(rest),
             "use-pem" => UsePem(rest),
             "use-pfx" => UsePfx(rest),
-            "list" or "new-self-signed" or "enroll" or "renew" or "retrieve" or "templates" or "bind" =>
-                WindowsOnlyRefusal(),
+            "new-self-signed" => NewSelfSignedFile(rest),
+            "list" or "enroll" or "renew" or "retrieve" or "templates" or "bind" => WindowsOnlyRefusal(),
             var other => Unknown(other),
         };
     }
@@ -503,6 +505,66 @@ public static class CertCommand
         DbDataSyncConfigFile.RemoveValue(root, CertificateBinding.Section, "AllowInvalid");
     }
 
+    /// <summary>
+    /// Phase 130, tier 2 — the non-Windows counterpart to <see cref="NewSelfSigned"/>: generates the
+    /// identical keypair/SAN shape but writes it to <see cref="ManagedSelfSignedCertificate.PfxPath"/>
+    /// instead of the Windows store, then points Kestrel at it the same way <see cref="UsePfx"/> does.
+    /// SANs are the console URL's host plus <c>localhost</c> — no <c>--dns</c> to fill in, unlike the
+    /// Windows path, since there is no store entry to look up by name later.
+    /// </summary>
+    private static int NewSelfSignedFile(string[] args)
+    {
+        var root = DbDataSyncRoot.Resolve(args);
+        var days = int.TryParse(CliOptions.Read(args, "--days"), out var parsedDays) ? parsedDays : 397;
+        var host = ResolveConsoleHost(root, args);
+
+        X509Certificate2 certificate;
+        try
+        {
+            certificate = ManagedSelfSignedCertificate.Generate(host, days);
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+
+        ManagedSelfSignedCertificate.Write(root, certificate);
+
+        ClearStoreBasedBinding(root);
+        // A PFX carries its own private key — no separate KeyPath, same as UsePfx.
+        DbDataSyncConfigFile.RemoveValue(root, CertificateBinding.Section, "KeyPath");
+        DbDataSyncConfigFile.SetValue(root, CertificateBinding.Section, "Path", ManagedSelfSignedCertificate.PfxPath(root));
+        // Required for Kestrel to accept a self-signed chain — the same flag `cert bind` defaults to
+        // true for a self-signed certificate on a first bind.
+        DbDataSyncConfigFile.SetValue(root, CertificateBinding.Section, "AllowInvalid", "true");
+        new GitCommitService(root).CommitChanges(
+            [DbDataSyncConfigFile.PathIn(root)],
+            $"Generate a self-signed certificate for '{host}'",
+            CurrentUser.SystemAuthor);
+
+        Console.WriteLine("Generated and configured a self-signed certificate:");
+        PrintCertificateSummary(certificate);
+        Console.WriteLine($"  file        {ManagedSelfSignedCertificate.PfxPath(root)}");
+        Console.WriteLine();
+        Console.WriteLine(
+            "Every client reaching this console will need to trust this certificate once — there is no " +
+            "CA behind it. A daily background check renews it automatically before it expires; nothing " +
+            "takes effect until the DbDataSync service restarts.");
+        return 0;
+    }
+
+    /// <summary>The host tier 2's SANs are built from — <c>--url</c> if given (matching <c>serve</c>'s
+    /// own override), else whatever <c>DbDataSync:Url</c> is already configured to, else the same
+    /// localhost default every other command falls back to.</summary>
+    private static string ResolveConsoleHost(string root, string[] args)
+    {
+        var url = CliOptions.Read(args, "--url")
+            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:Url")
+            ?? "http://localhost:5080";
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : "localhost";
+    }
+
     /// <summary>Loads whatever <see cref="CertificateBinding.Section"/>'s file-based keys currently
     /// name — PEM (cert + key) when <paramref name="keyPath"/> is given, else PFX. Shared by
     /// <c>status</c>'s file-reporting path and phase 113's readiness check
@@ -742,8 +804,9 @@ public static class CertCommand
             Usage: dbdatasync config cert use-pem --cert <path> --key <path> [--repo <path>]     (any OS)
                    dbdatasync config cert use-pfx --pfx <path> [--repo <path>]                    (any OS)
                    dbdatasync config cert status [--account <account>]                            (any OS; --account is Windows-only)
+                   dbdatasync config cert new-self-signed [--days <n>] [--repo <path>]             (any OS; writes <repo>/tls/dbdatasync.pfx)
+                   dbdatasync config cert new-self-signed --dns <names> [--days <n>] [--account <account>]  (Windows only; installs into the certificate store instead)
                    dbdatasync config cert list [--location LocalMachine|CurrentUser]               (Windows only)
-                   dbdatasync config cert new-self-signed --dns <names> [--days <n>] [--account <account>]  (Windows only)
                    dbdatasync config cert enroll --dns <names> [--ca <config>] [--template <name>] [--account <account>]  (Windows only)
                    dbdatasync config cert renew [--ca <config>] [--template <name>] [--account <account>] [--days <n>]    (Windows only)
                    dbdatasync config cert retrieve --request-id <id> [--account <account>]        (Windows only)

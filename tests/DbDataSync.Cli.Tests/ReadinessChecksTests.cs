@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using ClrKernel.Core.Secrets;
@@ -145,6 +146,80 @@ public sealed class ReadinessChecksTests : IDisposable
         var check = Find(results, "Certificate");
         Assert.Equal(CheckStatus.Fail, check.Status);
         Assert.Contains("does not cover", check.Detail);
+    }
+
+    /// <summary>Phase 130 — a certificate at the well-known managed path, current, reports the
+    /// distinguishing "self-signed (managed)" marker rather than a plain date.</summary>
+    [Fact]
+    public async Task ManagedSelfSignedCertificate_Current_CertificateCheckReportsTheManagedMarker()
+    {
+        ServeCommand.Prepare(_root);
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+
+        Assert.Equal(0, CertCommand.Run(["new-self-signed", "--repo", _root, "--days", "90"]));
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Certificate");
+        Assert.Equal(CheckStatus.Ok, check.Status);
+        Assert.Contains("self-signed (managed)", check.Detail);
+    }
+
+    /// <summary>Phase 130 — a managed certificate past its own <c>NotAfter</c> still fails, with the
+    /// marker carried through so the message names what actually needs attention.</summary>
+    [Fact]
+    public async Task ManagedSelfSignedCertificate_Expired_CertificateCheckFailsWithTheManagedMarker()
+    {
+        ServeCommand.Prepare(_root);
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+        CertCommand.Run(["new-self-signed", "--repo", _root, "--days", "90"]);
+
+        using (var expired = WriteAgedSelfSigned("console.local", DateTimeOffset.UtcNow.AddDays(-10), DateTimeOffset.UtcNow.AddDays(-1)))
+            ManagedSelfSignedCertificate.Write(_root, expired);
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Certificate");
+        Assert.Equal(CheckStatus.Fail, check.Status);
+        Assert.Contains("self-signed (managed)", check.Detail);
+        Assert.Contains("expired", check.Detail);
+    }
+
+    /// <summary>Phase 130 — a self-signed certificate at any path *other* than the managed one keeps
+    /// today's plain, date-based report: no generic self-signed caution existed here before this phase
+    /// (checked directly), so there is none to add for the unmanaged case.</summary>
+    [Fact]
+    public async Task SelfSignedCertificate_AtAnUnmanagedPath_CertificateCheckHasNoManagedMarker()
+    {
+        ServeCommand.Prepare(_root);
+        var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "Path", certPath);
+        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "KeyPath", keyPath);
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Certificate");
+        Assert.Equal(CheckStatus.Ok, check.Status);
+        Assert.DoesNotContain("managed", check.Detail);
+    }
+
+    /// <summary>
+    /// Builds a certificate with an explicit, arbitrary <c>NotBefore</c>/<c>NotAfter</c> window —
+    /// <see cref="ManagedSelfSignedCertificate.Generate"/> always anchors <c>NotBefore</c> a few minutes
+    /// before "now" (absorbing clock skew), so it cannot itself produce an already-expired certificate.
+    /// </summary>
+    private static X509Certificate2 WriteAgedSelfSigned(string host, DateTimeOffset notBefore, DateTimeOffset notAfter)
+    {
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest($"CN={host}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var sanBuilder = new SubjectAlternativeNameBuilder();
+        sanBuilder.AddDnsName(host);
+        request.CertificateExtensions.Add(sanBuilder.Build());
+        return request.CreateSelfSigned(notBefore, notAfter);
     }
 
     /// <summary>Writes a fresh self-signed PEM cert+key pair for <paramref name="dnsName"/>, valid 90

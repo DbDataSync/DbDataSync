@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authentication;
 using DbDataSync.Api.Auth;
 using DbDataSync.Api.Hubs;
+using DbDataSync.Certificates;
 using DbDataSync.Api.Services;
 using DbDataSync.Api.State;
 using DbDataSync.State.Remote;
@@ -248,6 +249,22 @@ public static class DbDataSyncHost
         // end to end (phase 82), so a Linux host never constructs this hosted service at all.
         if (OperatingSystem.IsWindows())
             builder.Services.AddHostedService<CertificateExpiryService>();
+
+        // Phase 130, tier 2: registered only when Kestrel:Certificates:Default:Path actually names this
+        // phase's own well-known managed-certificate path — not gated by OS, unlike the Windows-only
+        // service just above; tier 2's whole point is a certificate story that works on Linux. Read
+        // directly off builder.Configuration, the same way InsertConfigFile resolves RepoRoot above:
+        // this decision has to be made before the DI container exists, so ApiOptions (which comes from
+        // DI) isn't resolvable yet.
+        var certificateRepoRoot = builder.Configuration["DbDataSync:RepoRoot"]
+            ?? Path.Combine(Directory.GetCurrentDirectory(), "dbdatasync-repo");
+        if (string.Equals(
+                builder.Configuration["Kestrel:Certificates:Default:Path"],
+                ManagedSelfSignedCertificate.PfxPath(certificateRepoRoot),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            builder.Services.AddHostedService<SelfSignedCertificateService>();
+        }
 
         // One scheme for every request — controllers and the hub alike — so there is one answer to
         // "who is this". Negotiate is registered alongside it and used by exactly one endpoint, which

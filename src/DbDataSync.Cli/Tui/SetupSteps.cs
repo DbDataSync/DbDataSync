@@ -208,6 +208,21 @@ internal static class SetupSteps
         $"    dbdatasync config cert use-pem --cert \"{certPath}\" --key \"{keyPath}\" --repo \"{root}\"",
     ];
 
+    /// <summary>Phase 130, tier 2 — printed rather than invoked, the same choice phase 113 made for
+    /// every certificate step in this walk-through ("Consistency with the rest of that walk-through's
+    /// certificate handling won out over exploiting the one case where direct invocation was
+    /// possible"). The trust caveat is stated here, not only in docs — an operator choosing this option
+    /// should not discover it by having a browser refuse the console afterward.</summary>
+    internal static IReadOnlyList<string> SelfSignedCertificateInstructions(string root) =>
+    [
+        "Run this to finish:",
+        $"    dbdatasync config cert new-self-signed --repo \"{root}\"",
+        "",
+        "Every client reaching this console will need to trust this certificate once — there is no CA " +
+        "behind it. A daily background check renews it automatically before it expires (a restart is " +
+        "still needed to pick up a renewal).",
+    ];
+
     /// <summary>One commit for the whole session, however many sections were saved — the same "one
     /// clean commit" shape the console walk-through's own finish step produced.</summary>
     internal static void CommitChanges(string root) =>

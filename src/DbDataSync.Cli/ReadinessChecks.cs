@@ -355,6 +355,11 @@ internal sealed class AuthCheck : IReadinessCheck
 /// (<c>Kestrel:Certificates:Default:Subject</c>) isn't covered here — <c>CertificateExpiryService</c>
 /// already watches that path independently, and duplicating it would mean two different answers for
 /// the same certificate if they ever disagreed.
+/// <para>
+/// Phase 130: a certificate at <see cref="ManagedSelfSignedCertificate.PfxPath"/> is reported as
+/// "self-signed (managed)" rather than a plain date, since <c>SelfSignedCertificateService</c> already
+/// owns keeping it current.
+/// </para>
 /// </summary>
 internal sealed class CertificateCheck : IReadinessCheck
 {
@@ -397,18 +402,37 @@ internal sealed class CertificateCheck : IReadinessCheck
                 $"'{path}' does not cover '{host}' — SANs: {string.Join(", ", dnsNames)}."));
         }
 
+        // Phase 130: a certificate at this well-known path is generated and kept renewed by this
+        // codebase's own SelfSignedCertificateService — a marker so an operator sees "self-signed
+        // (managed)" rather than a report indistinguishable from a certificate bound by accident. Any
+        // other path — including one that happens to be self-signed — keeps exactly the plain,
+        // date-based report below; checked directly, no such distinction existed here before this
+        // phase, so there is no pre-existing generic self-signed caution to preserve.
+        var isManaged = string.Equals(
+            Path.GetFullPath(path), ManagedSelfSignedCertificate.PfxPath(context.Root), StringComparison.OrdinalIgnoreCase);
+
         var daysRemaining = (int)Math.Floor((certificate.NotAfter - DateTimeOffset.UtcNow).TotalDays);
         if (daysRemaining <= 0)
-            return Task.FromResult(new CheckResult("Certificate", CheckStatus.Fail, $"Expired {-daysRemaining} day(s) ago."));
+        {
+            return Task.FromResult(new CheckResult(
+                "Certificate", CheckStatus.Fail,
+                isManaged ? $"self-signed (managed) — expired {-daysRemaining} day(s) ago." : $"Expired {-daysRemaining} day(s) ago."));
+        }
 
         if (daysRemaining <= context.CertificateOptions.ExpiryWarningDays)
         {
             return Task.FromResult(new CheckResult(
-                "Certificate", CheckStatus.Warn, $"Expires in {daysRemaining} day(s) — renew soon.",
-                "Run `dbdatasync config cert use-pem`/`use-pfx` again with the renewed file."));
+                "Certificate", CheckStatus.Warn,
+                isManaged
+                    ? $"self-signed (managed) — expires in {daysRemaining} day(s); the managed renewal " +
+                      "service will regenerate it automatically (a restart is still needed to pick it up)."
+                    : $"Expires in {daysRemaining} day(s) — renew soon.",
+                isManaged ? null : "Run `dbdatasync config cert use-pem`/`use-pfx` again with the renewed file."));
         }
 
-        return Task.FromResult(new CheckResult("Certificate", CheckStatus.Ok, $"Valid for {daysRemaining} more day(s)."));
+        return Task.FromResult(new CheckResult(
+            "Certificate", CheckStatus.Ok,
+            isManaged ? $"self-signed (managed) — valid for {daysRemaining} more day(s)." : $"Valid for {daysRemaining} more day(s)."));
     }
 }
 
