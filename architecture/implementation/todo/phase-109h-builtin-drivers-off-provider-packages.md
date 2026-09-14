@@ -175,8 +175,9 @@ triggers genuinely differ, not duplicated by accident.
    drivers as well even though they aren't loaded as plugins in the separate-assembly sense.
    `architecture/implementation/todo/phase-109j-library-compatibility-checking.md` answers this: a
    no-execution static check (`MetadataLoadContext` against the driver's own extracted member surface)
-   at `library install`/`sync` and `config check` time, plus an isolated runtime smoke-test an operator
-   can trigger from the Libraries screen. Not gated on 109h landing first — either order is fine.
+   at `library install`/`sync` and `config check` time, plus a connection-scoped "Validate library"
+   action on the Connections page that stages and writes real synthetic rows through the driver's own
+   real pipeline, against a real server. Not gated on 109h landing first — either order is fine.
 2. **The connection-creation seeding hook (#3's second seam)** — `ApplyStateDatabase`'s own hook is
    fully specified above; the connection-path one names the candidate call sites but still needs
    confirming against the real current save flow at implementation time.
