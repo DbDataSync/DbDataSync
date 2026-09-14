@@ -45,6 +45,18 @@ public interface IChangeReader
     /// </summary>
     bool DetectsDeletes => false;
 
+    /// <summary>
+    /// Whether this reader can state each row's true source order and time — see
+    /// <see cref="ChangeOrdering"/>. False by default, the same "overstating is what loses data"
+    /// reasoning as <see cref="DetectsDeletes"/>: a reader that has not thought about it says no.
+    /// <para>
+    /// Only <c>MsSqlCdcReader</c> declares this true (phase 132). It is what lets
+    /// <c>Scd2Writer</c> process a key that staged more than one row in one pass — a real CDC
+    /// outcome, not an edge case — without the two rows colliding on the same pass-wide surrogate key.
+    /// </para>
+    /// </summary>
+    bool CapturesChangeOrder => false;
+
     /// <param name="columnMappings">
     /// What this read is being asked to produce. A reader projects these columns rather than selecting
     /// everything, and applies each one's <see cref="ColumnMapping.Transform"/> — a SQL expression in

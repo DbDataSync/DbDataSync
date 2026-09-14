@@ -86,17 +86,47 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
 
         var now = DateTimeOffset.UtcNow.UtcDateTime;
         // One prefix per pass, so two versions of one key opened by the same pass cannot collide and
-        // two opened by different passes cannot either.
+        // two opened by different passes cannot either. Still what every singleton-key row uses — the
+        // only keys phase 132's duplicate handling below ever touches are the ones this prefix cannot
+        // protect: more than one staged row for the same key, in the same pass, which would compute the
+        // identical surrogate key here and collide on the target's own primary key.
         var prefix = $"{now:yyyyMMddHHmmssfff}-";
 
         await using var transaction = await targetConnection.BeginTransactionAsync(cancellationToken);
         try
         {
+            // Only when the staged batch can tell rows apart in true order — every other pairing (the
+            // overwhelming majority) never even issues the extra query below, let alone the per-row loop.
+            List<object?[]> duplicateKeys = [];
+            long openedFromDuplicates = 0;
+            if (staged.HasChangeOrdering)
+            {
+                duplicateKeys = await FindKeysWithMultipleStagedRowsAsync(
+                    targetConnection, transaction, staged, keys, cancellationToken);
+                if (duplicateKeys.Count > 0)
+                    openedFromDuplicates = await ApplyDuplicateKeysInOrderAsync(
+                        targetConnection, transaction, shape, staged, keys, values, columnMappings,
+                        duplicateKeys, cancellationToken);
+            }
+
+            // The bulk statements: every key but the ones just processed one row at a time, exactly as
+            // before this phase — singleton keys, the common case, pay nothing extra. A real per-row
+            // source time is used for ValidFrom/ValidTo instead of the pass-wide @now whenever the batch
+            // can state one, whether or not that particular key had a duplicate: it is strictly better
+            // information when it is available.
+            var duplicateExclusion = duplicateKeys.Count > 0
+                ? HistorizedStatement.BuildDuplicateKeyExclusion(dialect, staged.StagingLocation, keys)
+                : null;
+            var changedAtColumn = staged.HasChangeOrdering
+                ? $"s.{dialect.QuoteIdentifier(ChangeOrdering.ChangedAtColumn)}"
+                : null;
+
             using (var close = targetConnection.CreateTimedCommand())
             {
                 close.Transaction = transaction;
                 close.CommandText = HistorizedStatement.BuildCloseChanged(
-                    dialect, shape.QuotedTarget, staged.StagingLocation, keys, values);
+                    dialect, shape.QuotedTarget, staged.StagingLocation, keys, values,
+                    validToExpression: changedAtColumn, stagingFilter: duplicateExclusion);
                 close.AddParameter(dialect.ParameterName("now"), now);
                 await close.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -106,7 +136,8 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
             {
                 open.Transaction = transaction;
                 open.CommandText = HistorizedStatement.BuildOpenVersions(
-                    dialect, shape.QuotedTarget, staged.StagingLocation, keys, columnMappings);
+                    dialect, shape.QuotedTarget, staged.StagingLocation, keys, columnMappings,
+                    validFromExpression: changedAtColumn, stagingFilter: duplicateExclusion);
                 open.AddParameter(dialect.ParameterName("now"), now);
                 open.AddParameter(dialect.ParameterName("versionKeyPrefix"), prefix);
                 opened = await open.ExecuteNonQueryAsync(cancellationToken);
@@ -116,13 +147,120 @@ public sealed class Scd2Writer(SqlDialect dialect, ITableCatalog catalog) : ICha
 
             // Versions opened. A closed version is not a row written — it is a row amended — and
             // counting both would report a single changed key as two.
-            return new WriteResult(opened);
+            return new WriteResult(opened + openedFromDuplicates);
         }
         catch
         {
             await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
+    }
+
+    /// <summary>
+    /// The natural keys with more than one row staged this pass — see
+    /// <see cref="HistorizedStatement.BuildFindDuplicateKeys"/>. Read back as actual values, not merely
+    /// counted, because <see cref="ApplyDuplicateKeysInOrderAsync"/> needs them to look up each key's
+    /// own staged rows afterwards.
+    /// </summary>
+    private async Task<List<object?[]>> FindKeysWithMultipleStagedRowsAsync(
+        DbConnection targetConnection,
+        DbTransaction transaction,
+        StagedChangeSet staged,
+        IReadOnlyList<string> keys,
+        CancellationToken cancellationToken)
+    {
+        using var cmd = targetConnection.CreateTimedCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = HistorizedStatement.BuildFindDuplicateKeys(dialect, staged.StagingLocation, keys);
+
+        var result = new List<object?[]>();
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var row = new object?[keys.Count];
+            for (var i = 0; i < row.Length; i++)
+                row[i] = reader.GetValue(i);
+            result.Add(row);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Each duplicate key's own staged rows, one at a time, in true source order — reusing
+    /// <see cref="HistorizedStatement.BuildCloseChanged"/>/<see cref="HistorizedStatement.BuildOpenVersions"/>
+    /// scoped to a single staged row rather than any new SQL.
+    /// <para>
+    /// The surrogate key for a row processed here is <c>{OrderingColumn}|{naturalKey}</c>, not
+    /// <c>{prefix}|{naturalKey}</c>: <see cref="ChangeOrdering.OrderingColumn"/> is unique per row by
+    /// construction (LSN and seqval), so two versions of one key opened in the same pass can no longer
+    /// compute the same value — the actual fix a duplicate key needs. <see cref="ChangeOrdering.ChangedAtColumn"/>
+    /// is used for <c>ValidFrom</c>/<c>ValidTo</c> instead of the pass time, for the same reason every
+    /// other row in this pass gets it when available: a real per-row source time beats the pass time.
+    /// </para>
+    /// <para>
+    /// Scoped by <c>s.{OrderingColumn} = @ordering</c> alone — the ordering value is unique across the
+    /// *whole* staged batch, not merely within this key, so it identifies exactly one staged row without
+    /// needing the key's own values re-bound into the statement.
+    /// </para>
+    /// </summary>
+    private async Task<long> ApplyDuplicateKeysInOrderAsync(
+        DbConnection targetConnection,
+        DbTransaction transaction,
+        TargetShape shape,
+        StagedChangeSet staged,
+        IReadOnlyList<string> keys,
+        IReadOnlyList<string> values,
+        IReadOnlyList<ColumnMapping> columnMappings,
+        IReadOnlyList<object?[]> duplicateKeys,
+        CancellationToken cancellationToken)
+    {
+        var quotedOrdering = dialect.QuoteIdentifier(ChangeOrdering.OrderingColumn);
+        var quotedChangedAt = $"s.{dialect.QuoteIdentifier(ChangeOrdering.ChangedAtColumn)}";
+        var versionKeyPrefix = dialect.Concat([$"s.{quotedOrdering}", "'|'"]);
+
+        long opened = 0;
+        foreach (var keyValues in duplicateKeys)
+        {
+            var orderings = new List<string>();
+            using (var orderingsCmd = targetConnection.CreateTimedCommand())
+            {
+                orderingsCmd.Transaction = transaction;
+                orderingsCmd.CommandText = HistorizedStatement.BuildStagedOrderingsForKey(dialect, staged.StagingLocation, keys);
+                for (var i = 0; i < keys.Count; i++)
+                    orderingsCmd.AddParameter(dialect.ParameterName($"key{i}"), keyValues[i]);
+
+                await using var reader = await orderingsCmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                    orderings.Add(reader.GetString(0));
+            }
+
+            foreach (var ordering in orderings)
+            {
+                var stagingFilter = $"s.{quotedOrdering} = {dialect.ParameterReference("ordering")}";
+
+                using (var close = targetConnection.CreateTimedCommand())
+                {
+                    close.Transaction = transaction;
+                    close.CommandText = HistorizedStatement.BuildCloseChanged(
+                        dialect, shape.QuotedTarget, staged.StagingLocation, keys, values,
+                        validToExpression: quotedChangedAt, stagingFilter: stagingFilter);
+                    close.AddParameter(dialect.ParameterName("ordering"), ordering);
+                    await close.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                using (var open = targetConnection.CreateTimedCommand())
+                {
+                    open.Transaction = transaction;
+                    open.CommandText = HistorizedStatement.BuildOpenVersions(
+                        dialect, shape.QuotedTarget, staged.StagingLocation, keys, columnMappings,
+                        versionKeyPrefixExpression: versionKeyPrefix, validFromExpression: quotedChangedAt,
+                        stagingFilter: stagingFilter);
+                    open.AddParameter(dialect.ParameterName("ordering"), ordering);
+                    opened += await open.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+        }
+        return opened;
     }
 
     public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(

@@ -54,6 +54,13 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
     public bool DetectsDeletes => true;
 
     /// <summary>
+    /// Phase 132: every row carries <c>(__$start_lsn, __$seqval)</c> as a sortable, per-row-unique
+    /// key, and CDC's own <c>sys.fn_cdc_map_lsn_to_time</c> as its real change time — both projected by
+    /// <see cref="MsSqlCdcStatement.BuildRead"/>. No other reader in this codebase can state either.
+    /// </summary>
+    public bool CapturesChangeOrder => true;
+
+    /// <summary>
     /// All three that remain declarable per phase 101's retarget (<c>InitialLoad</c> is no longer a
     /// per-reader question — see <see cref="IReadIntentDeclaring"/>).
     /// <see cref="ReadIntent.ChangesFromEarliest"/> is the one this design exists for: it reads from
@@ -451,7 +458,11 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var columns = ColumnsFor(instance, columnMappings);
-        var schema = new ChangeSchema(columns);
+        // The two ordering columns are appended after the mapped ones and before any bounded position
+        // column — see BuildRead — and are real, schema-visible data (unlike the position column,
+        // which stays out-of-band): this is what lets a staging provider find them by name and what
+        // lets Scd2Writer process a key with more than one staged row in true source order.
+        var schema = new ChangeSchema([.. columns, ChangeOrdering.OrderingColumn, ChangeOrdering.ChangedAtColumn]);
 
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = MsSqlCdcStatement.BuildRead(

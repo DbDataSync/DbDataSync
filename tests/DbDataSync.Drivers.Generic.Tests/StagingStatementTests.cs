@@ -90,6 +90,53 @@ public sealed class StagingStatementTests
             StagingStatement.RowsPerStatement(BracketDialect.Instance, 5));
     }
 
+    // ---- Phase 132: staged ordering columns ------------------------------------------------------
+
+    [Fact]
+    public void Create_WithChangeOrdering_AddsBothColumnsAheadOfTheOperationMarker()
+    {
+        var sql = StagingStatement.BuildCreate(
+            BracketDialect.Instance, "[dbo].[DS_STG_x]", ["Id", "Name"], Types, includeChangeOrdering: true);
+
+        Assert.Equal(
+            "CREATE TABLE [dbo].[DS_STG_x] ([Id] int NULL, [Name] nvarchar(50) NULL, " +
+            "[__DS_ChangeOrdering] VARCHAR(64) NULL, [__DS_ChangedAtUtc] DATETIME2 NULL, " +
+            "[__Operation] CHAR(1) NOT NULL, " +
+            "[__Ordinal] BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY);",
+            sql);
+    }
+
+    /// <summary>Omitted by default — every existing call site, and every pairing that is not CDC, gets
+    /// exactly the table it got before this phase.</summary>
+    [Fact]
+    public void Create_WithoutChangeOrdering_IsByteForByteUnchanged()
+    {
+        Assert.Equal(
+            StagingStatement.BuildCreate(BracketDialect.Instance, "[dbo].[DS_STG_x]", ["Id", "Name"], Types),
+            StagingStatement.BuildCreate(
+                BracketDialect.Instance, "[dbo].[DS_STG_x]", ["Id", "Name"], Types, includeChangeOrdering: false));
+    }
+
+    [Fact]
+    public void Insert_WithChangeOrdering_BindsBothColumnsAheadOfTheOperationMarker()
+    {
+        var sql = StagingStatement.BuildInsert(
+            BracketDialect.Instance, "t", ["Id"], rowCount: 1, includeChangeOrdering: true);
+
+        Assert.Equal(
+            "INSERT INTO t ([Id], [__DS_ChangeOrdering], [__DS_ChangedAtUtc], [__Operation]) VALUES " +
+            "(@__s0_0, @__s0_1, @__s0_2, @__s0_3);",
+            sql);
+    }
+
+    [Fact]
+    public void Insert_WithoutChangeOrdering_IsByteForByteUnchanged()
+    {
+        Assert.Equal(
+            StagingStatement.BuildInsert(BracketDialect.Instance, "t", ["Id"], rowCount: 2),
+            StagingStatement.BuildInsert(BracketDialect.Instance, "t", ["Id"], rowCount: 2, includeChangeOrdering: false));
+    }
+
     [Fact]
     public void EveryParameterInABatchIsDistinct()
     {

@@ -1,5 +1,6 @@
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Sql;
+using DbDataSync.Drivers.Abstractions;
 
 namespace DbDataSync.Drivers.Generic;
 
@@ -42,12 +43,30 @@ public static class HistorizedStatement
     /// trusted.
     /// </para>
     /// </summary>
+    /// <param name="validToExpression">
+    /// What closes the version — <c>@now</c>, the pass-wide time, by default. Phase 132 passes
+    /// <c>s.{ChangeOrdering.ChangedAtColumn}</c> instead whenever the staged batch can state a real
+    /// per-row source time: a scalar subquery correlated the same way the <c>EXISTS</c> clause already
+    /// is, safe because <paramref name="stagingFilter"/> (or, for the unscoped bulk statement, the
+    /// caller's own guarantee that a key excluded from the duplicate set has exactly one staged row)
+    /// keeps it to at most one matching row.
+    /// </param>
+    /// <param name="stagingFilter">
+    /// An extra condition ANDed onto the staging side, evaluated in the same scope as the join and the
+    /// "changed" check. Phase 132 uses this two ways: excluding a duplicate key from the bulk statement
+    /// (a self-join back onto <paramref name="staging"/> counting how many rows share this row's key),
+    /// and scoping the whole statement to one staged row at a time (<c>s.{OrderingColumn} = @ordering</c>)
+    /// when a key has more than one. Null — the default — adds nothing, which is the unmodified
+    /// statement every pairing but CDC still gets.
+    /// </param>
     public static string BuildCloseChanged(
         SqlDialect dialect,
         string quotedTarget,
         string staging,
         IReadOnlyList<string> keyColumns,
-        IReadOnlyList<string> valueColumns)
+        IReadOnlyList<string> valueColumns,
+        string? validToExpression = null,
+        string? stagingFilter = null)
     {
         var isCurrent = dialect.QuoteIdentifier(HistorizedColumns.IsCurrent);
         var join = string.Join(" AND ", keyColumns.Select(
@@ -59,15 +78,33 @@ public static class HistorizedStatement
             ? "1 = 0"
             : string.Join(" OR ", valueColumns.Select(c => NullSafeDiffers(dialect, quotedTarget, c)));
 
+        // The predicate the EXISTS clause already needed, with phase 132's extra staging-side condition
+        // folded in when the caller supplies one — unchanged (no trailing AND at all) for every pairing
+        // that does not.
+        var changedPredicate = stagingFilter is null
+            ? $"(s.{operation} = 'D' OR ({differs}))"
+            : $"(s.{operation} = 'D' OR ({differs})) AND {stagingFilter}";
+
+        // The unmodified shape when no real per-row time is available: a bound parameter, identical to
+        // every pairing before this phase. Only when the caller supplies one does ValidTo need its own
+        // correlated scalar subquery — the SET clause has no row alias of its own to read a staged
+        // column from, so it re-states the same join and "changed" predicate the EXISTS clause below
+        // already uses. Safe as a *scalar* subquery because it can only ever match one row: either
+        // stagingFilter itself scopes it to a single staged row (the duplicate-key path), or the caller
+        // is the bulk statement, which by construction only ever reaches a key with exactly one.
+        var validTo = validToExpression is null
+            ? dialect.ParameterReference("now")
+            : $"(SELECT {validToExpression} FROM {staging} AS s WHERE {join} AND {changedPredicate})";
+
         return $"""
             UPDATE {quotedTarget}
-            SET {dialect.QuoteIdentifier(HistorizedColumns.ValidTo)} = {dialect.ParameterReference("now")},
+            SET {dialect.QuoteIdentifier(HistorizedColumns.ValidTo)} = {validTo},
                 {isCurrent} = {dialect.FalseLiteral}
             WHERE {isCurrent} = {dialect.TrueLiteral}
               AND EXISTS (
                 SELECT 1 FROM {staging} AS s
                 WHERE {join}
-                  AND (s.{operation} = 'D' OR ({differs}))
+                  AND {changedPredicate}
               );
             """;
     }
@@ -81,12 +118,31 @@ public static class HistorizedStatement
     /// nothing has to round-trip an identity column.
     /// </para>
     /// </summary>
+    /// <param name="versionKeyPrefixExpression">
+    /// What the surrogate key's non-natural-key half is built from — <c>@versionKeyPrefix</c>, the
+    /// pass-wide prefix, by default. Phase 132 passes <c>s.{OrderingColumn} + '|'</c> instead when
+    /// scoping this statement to one staged row of a key that has more than one: <c>OrderingColumn</c>
+    /// is unique per row by construction (LSN and seqval), so two versions of one key opened in the
+    /// same pass can no longer collide — the actual fix a duplicate key needs. Every other key keeps
+    /// the pass-wide prefix, unchanged.
+    /// </param>
+    /// <param name="validFromExpression">
+    /// What opens the version — <c>@now</c> by default, the pass-wide time. Phase 132 passes
+    /// <c>s.{ChangeOrdering.ChangedAtColumn}</c> instead whenever the staged batch can state one: unlike
+    /// <see cref="BuildCloseChanged"/>'s <c>ValidTo</c>, this needs no correlated subquery — the
+    /// statement already selects per staged row, so each row simply carries its own value through.
+    /// </param>
+    /// <param name="stagingFilter">See the identical parameter on <see cref="BuildCloseChanged"/> — the
+    /// same two uses, duplicate-key exclusion and single-row scoping.</param>
     public static string BuildOpenVersions(
         SqlDialect dialect,
         string quotedTarget,
         string staging,
         IReadOnlyList<string> keyColumns,
-        IReadOnlyList<ColumnMapping> columnMappings)
+        IReadOnlyList<ColumnMapping> columnMappings,
+        string? versionKeyPrefixExpression = null,
+        string? validFromExpression = null,
+        string? stagingFilter = null)
     {
         var isCurrent = dialect.QuoteIdentifier(HistorizedColumns.IsCurrent);
         var mapped = columnMappings.Select(m => dialect.QuoteIdentifier(m.TargetColumn)).ToList();
@@ -99,27 +155,85 @@ public static class HistorizedStatement
             isCurrent,
         ]);
 
+        var versionKeyPrefix = versionKeyPrefixExpression ?? dialect.ParameterReference("versionKeyPrefix");
+        var validFrom = validFromExpression ?? dialect.ParameterReference("now");
+
         var selected = string.Join(", ",
         [
-            dialect.Concat([dialect.ParameterReference("versionKeyPrefix"), SurrogateKeySource(dialect, keyColumns)]),
+            dialect.Concat([versionKeyPrefix, SurrogateKeySource(dialect, keyColumns)]),
             .. mapped.Select(c => $"s.{c}"),
-            dialect.ParameterReference("now"),
+            validFrom,
             dialect.TrueLiteral,
         ]);
 
         var operation = dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn);
         var openMatch = string.Join(" AND ", keyColumns.Select(
             k => $"t.{dialect.QuoteIdentifier(k)} = s.{dialect.QuoteIdentifier(k)}"));
+        var filterClause = stagingFilter is null ? "" : $" AND {stagingFilter}";
 
         return $"""
             INSERT INTO {quotedTarget} ({columns})
             SELECT {selected}
             FROM {staging} AS s
-            WHERE s.{operation} <> 'D'
+            WHERE s.{operation} <> 'D'{filterClause}
               AND NOT EXISTS (
                 SELECT 1 FROM {quotedTarget} AS t
                 WHERE {openMatch} AND t.{isCurrent} = {dialect.TrueLiteral}
               );
+            """;
+    }
+
+    /// <summary>
+    /// The natural keys with more than one row staged in this pass — phase 132's whole reason for
+    /// existing. Meaningful only when the staged batch carries <see cref="ChangeOrdering"/> (i.e.
+    /// <c>StagedChangeSet.HasChangeOrdering</c>): a pairing that cannot state a true per-row order has
+    /// no way to process such a key any better than colliding on it, and no way to detect one either.
+    /// <para>
+    /// Cheap relative to the pass it belongs to — the staged set is already bounded by the reader's own
+    /// row cap, and this is one aggregate scan of it, not a per-row query.
+    /// </para>
+    /// </summary>
+    public static string BuildFindDuplicateKeys(SqlDialect dialect, string staging, IReadOnlyList<string> keyColumns)
+    {
+        var columns = string.Join(", ", keyColumns.Select(dialect.QuoteIdentifier));
+        return $"""
+            SELECT {columns}
+            FROM {staging}
+            GROUP BY {columns}
+            HAVING COUNT(*) > 1;
+            """;
+    }
+
+    /// <summary>
+    /// Excludes a duplicate key from the bulk close/open statements — a self-referencing count rather
+    /// than a list of literal key values, so the bulk statement's own shape never depends on how many
+    /// keys happened to collide this pass, and a composite key never has to be rebuilt as a parameter
+    /// list at the call site.
+    /// </summary>
+    public static string BuildDuplicateKeyExclusion(SqlDialect dialect, string staging, IReadOnlyList<string> keyColumns)
+    {
+        var match = string.Join(" AND ", keyColumns.Select(
+            k => $"dup.{dialect.QuoteIdentifier(k)} = s.{dialect.QuoteIdentifier(k)}"));
+        return $"(SELECT COUNT(*) FROM {staging} AS dup WHERE {match}) = 1";
+    }
+
+    /// <summary>
+    /// The staged rows of one specific key, in true source order — what a duplicate key's own per-row
+    /// loop drives itself from. Only <see cref="ChangeOrdering.OrderingColumn"/> is read back: it is
+    /// unique per row across the *whole* staged batch, not merely within this key, which is what lets
+    /// <c>BuildCloseChanged</c>/<c>BuildOpenVersions</c> scope themselves to exactly one staged row via
+    /// <c>s.{OrderingColumn} = @ordering</c> alone.
+    /// </summary>
+    public static string BuildStagedOrderingsForKey(SqlDialect dialect, string staging, IReadOnlyList<string> keyColumns)
+    {
+        var ordering = dialect.QuoteIdentifier(ChangeOrdering.OrderingColumn);
+        var match = string.Join(" AND ", keyColumns.Select(
+            (k, i) => $"{dialect.QuoteIdentifier(k)} = {dialect.ParameterReference($"key{i}")}"));
+        return $"""
+            SELECT {ordering}
+            FROM {staging}
+            WHERE {match}
+            ORDER BY {ordering};
             """;
     }
 

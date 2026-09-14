@@ -58,20 +58,28 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
             c => c, c => targetColumns.RequireColumn(mappingName, "target", c).NativeType,
             StringComparer.OrdinalIgnoreCase);
 
+        // Phase 132: the two ordering columns cannot be known from the target's own schema — they are
+        // reader-only pass-through columns, present only when the reader stated them — so the only way
+        // to know whether to add them to this table's DDL is to look at the first staged row itself.
+        // The staging table is created before any row is read below, so that first row has to be
+        // peeked and replayed rather than merely inspected.
+        var (hasChangeOrdering, effectiveRows) = await ChangeOrdering.DetectAsync(rows, cancellationToken);
+
         // In the target's own schema, because there is no portable scratch namespace. The GUID is what
         // keeps concurrent runs — and concurrent segments of one run — from colliding.
         var stagingTable = dialect.QualifyTable(target.Schema, $"DS_STG_{Guid.NewGuid():N}");
 
         using (var createCmd = targetConnection.CreateTimedCommand())
         {
-            createCmd.CommandText = StagingStatement.BuildCreate(dialect, stagingTable, mappedTargetColumns, typeByName);
+            createCmd.CommandText = StagingStatement.BuildCreate(dialect, stagingTable, mappedTargetColumns, typeByName, hasChangeOrdering);
             await createCmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
         try
         {
-            var rowCount = await InsertAllAsync(targetConnection, stagingTable, mappedTargetColumns, columnMappings, rows, cancellationToken);
-            return new StagedChangeSet(stagingTable, rowCount);
+            var rowCount = await InsertAllAsync(
+                targetConnection, stagingTable, mappedTargetColumns, columnMappings, effectiveRows, hasChangeOrdering, cancellationToken);
+            return new StagedChangeSet(stagingTable, rowCount, hasChangeOrdering);
         }
         catch
         {
@@ -147,11 +155,13 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
         IReadOnlyList<string> mappedTargetColumns,
         IReadOnlyList<ColumnMapping> columnMappings,
         IAsyncEnumerable<ChangeRow> rows,
+        bool includeChangeOrdering,
         CancellationToken cancellationToken)
     {
         var sourceColumnByTarget = columnMappings.ToDictionary(m => m.TargetColumn, m => m.SourceColumn);
-        // +1 for the operation marker, which is bound like any other value.
-        var valuesPerRow = mappedTargetColumns.Count + 1;
+        // +1 for the operation marker, which is bound like any other value; +2 more for the ordering
+        // columns (phase 132) when the staged batch carries them.
+        var valuesPerRow = mappedTargetColumns.Count + (includeChangeOrdering ? 2 : 0) + 1;
         var rowsPerStatement = StagingStatement.RowsPerStatement(dialect, valuesPerRow);
 
         var batch = new List<object?[]>(rowsPerStatement);
@@ -161,28 +171,39 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
         // separately from its rows. Looking columns up by name per cell would put a hash lookup back
         // in the hot path this design exists to keep out of it.
         int[]? sourceOrdinalByTarget = null;
+        int orderingOrdinal = -1, changedAtOrdinal = -1;
 
         await foreach (var row in rows.WithCancellation(cancellationToken))
         {
             sourceOrdinalByTarget ??= mappedTargetColumns
                 .Select(c => row.Schema.GetOrdinal(sourceColumnByTarget[c]))
                 .ToArray();
+            if (includeChangeOrdering && orderingOrdinal < 0)
+            {
+                orderingOrdinal = row.Schema.GetOrdinal(ChangeOrdering.OrderingColumn);
+                changedAtOrdinal = row.Schema.GetOrdinal(ChangeOrdering.ChangedAtColumn);
+            }
 
             var values = new object?[valuesPerRow];
             for (var i = 0; i < mappedTargetColumns.Count; i++)
                 values[i] = row.Values[sourceOrdinalByTarget[i]];
+            if (includeChangeOrdering)
+            {
+                values[mappedTargetColumns.Count] = row.Values[orderingOrdinal];
+                values[mappedTargetColumns.Count + 1] = row.Values[changedAtOrdinal];
+            }
             values[^1] = OperationCode(row.Operation);
             batch.Add(values);
 
             if (batch.Count == rowsPerStatement)
             {
-                total += await FlushAsync(connection, stagingTable, mappedTargetColumns, batch, cancellationToken);
+                total += await FlushAsync(connection, stagingTable, mappedTargetColumns, batch, includeChangeOrdering, cancellationToken);
                 batch.Clear();
             }
         }
 
         if (batch.Count > 0)
-            total += await FlushAsync(connection, stagingTable, mappedTargetColumns, batch, cancellationToken);
+            total += await FlushAsync(connection, stagingTable, mappedTargetColumns, batch, includeChangeOrdering, cancellationToken);
 
         return total;
     }
@@ -192,10 +213,11 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
         string stagingTable,
         IReadOnlyList<string> mappedTargetColumns,
         IReadOnlyList<object?[]> batch,
+        bool includeChangeOrdering,
         CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateTimedCommand();
-        cmd.CommandText = StagingStatement.BuildInsert(dialect, stagingTable, mappedTargetColumns, batch.Count);
+        cmd.CommandText = StagingStatement.BuildInsert(dialect, stagingTable, mappedTargetColumns, batch.Count, includeChangeOrdering);
 
         for (var r = 0; r < batch.Count; r++)
         {
@@ -232,24 +254,40 @@ public static class StagingStatement
         Math.Max(1, (dialect.MaxParametersPerStatement - 1) / valuesPerRow);
 
     public static string BuildCreate(
-        SqlDialect dialect, string qualifiedTable, IReadOnlyList<string> columns, IReadOnlyDictionary<string, string> typeByName)
+        SqlDialect dialect, string qualifiedTable, IReadOnlyList<string> columns, IReadOnlyDictionary<string, string> typeByName,
+        bool includeChangeOrdering = false)
     {
         // Every staged column is nullable regardless of the target's constraint: staging holds what the
         // source produced, and a deleted row carries only its key. Constraints are the target's to
         // enforce when the writer applies the change set, not staging's to re-impose on the way in.
-        var defs = columns.Select(c => $"{dialect.QuoteIdentifier(c)} {typeByName[c]} NULL");
+        var defs = columns.Select(c => $"{dialect.QuoteIdentifier(c)} {typeByName[c]} NULL").ToList();
+        // Phase 132: nullable for the same reason as every other staged column.
+        if (includeChangeOrdering)
+        {
+            defs.Add($"{dialect.QuoteIdentifier(ChangeOrdering.OrderingColumn)} {dialect.ChangeOrderingColumnType} NULL");
+            defs.Add($"{dialect.QuoteIdentifier(ChangeOrdering.ChangedAtColumn)} {dialect.ChangedAtColumnType} NULL");
+        }
         return $"CREATE TABLE {qualifiedTable} ({string.Join(", ", defs)}, " +
                $"{dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} {dialect.OperationMarkerColumnType} NOT NULL, " +
                $"{dialect.RenderStagingOrdinalColumn(BatchInsertStagingProvider.OrdinalColumn)});";
     }
 
-    public static string BuildInsert(SqlDialect dialect, string qualifiedTable, IReadOnlyList<string> columns, int rowCount)
+    public static string BuildInsert(
+        SqlDialect dialect, string qualifiedTable, IReadOnlyList<string> columns, int rowCount,
+        bool includeChangeOrdering = false)
     {
+        var allColumns = new List<string>(columns);
+        if (includeChangeOrdering)
+        {
+            allColumns.Add(ChangeOrdering.OrderingColumn);
+            allColumns.Add(ChangeOrdering.ChangedAtColumn);
+        }
+
         var columnList = string.Join(", ",
-            columns.Select(dialect.QuoteIdentifier)
+            allColumns.Select(dialect.QuoteIdentifier)
                 .Append(dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)));
 
-        var valuesPerRow = columns.Count + 1;
+        var valuesPerRow = allColumns.Count + 1;
         var tuples = Enumerable.Range(0, rowCount)
             .Select(r => "(" + string.Join(", ",
                 Enumerable.Range(0, valuesPerRow).Select(v => dialect.ParameterReference(ParameterName(r, v)))) + ")")

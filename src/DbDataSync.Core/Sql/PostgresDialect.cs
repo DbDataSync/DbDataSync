@@ -26,6 +26,9 @@ public sealed class PostgresDialect : SqlDialect
 
     public override string OperationMarkerColumnType => "char(1)";
 
+    /// <summary>Postgres has no <c>datetime2</c>; <c>timestamp</c> is its equivalent.</summary>
+    public override string ChangedAtColumnType => "timestamp";
+
     /// <summary>
     /// A Postgres connection is bound to one database for its lifetime — <c>ChangeDatabase</c> would
     /// have to close and reopen it, which silently discards the transaction and any open cursor the

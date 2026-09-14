@@ -53,17 +53,25 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
                     $"Target column '{column}' was not found on '{target.Schema}.{target.Table}'.");
         }
 
+        // Phase 132: the two ordering columns cannot be known from the target's own schema — they are
+        // reader-only pass-through columns, present only when the reader stated them — so the only way
+        // to know whether to add them to this table's DDL is to look at the first staged row itself.
+        // The staging table is created before any row is read (bulk copy has not started yet), so that
+        // first row has to be peeked and replayed rather than merely inspected.
+        var (hasChangeOrdering, effectiveRows) = await ChangeOrdering.DetectAsync(rows, cancellationToken);
+
         var stagingTable = $"#Staging_{Guid.NewGuid():N}";
 
         using (var createCmd = targetConnection.CreateTimedCommand())
         {
-            createCmd.CommandText = BuildCreateStagingTable(stagingTable, mappedTargetColumns, typeByName);
+            createCmd.CommandText = BuildCreateStagingTable(stagingTable, mappedTargetColumns, typeByName, hasChangeOrdering);
             await createCmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        var rowCount = await BulkCopyAsync(targetConnection, stagingTable, mappedTargetColumns, columnMappings, rows, cancellationToken);
+        var rowCount = await BulkCopyAsync(
+            targetConnection, stagingTable, mappedTargetColumns, columnMappings, effectiveRows, hasChangeOrdering, cancellationToken);
 
-        return new StagedChangeSet(stagingTable, rowCount);
+        return new StagedChangeSet(stagingTable, rowCount, hasChangeOrdering);
     }
 
     /// <summary>
@@ -111,13 +119,20 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
 
     /// <summary>One builder for the DDL, so the preview and the run cannot disagree about it.</summary>
     private static string BuildCreateStagingTable(
-        string stagingTable, IReadOnlyList<string> columns, IReadOnlyDictionary<string, string> typeByName)
+        string stagingTable, IReadOnlyList<string> columns, IReadOnlyDictionary<string, string> typeByName,
+        bool includeChangeOrdering = false)
     {
         var columnDefs = string.Join(", ", columns.Select(c => $"{SqlIdentifier.Quote(c)} {typeByName[c]} NULL"));
+        // Phase 132: nullable, like every staged column — a delete's non-key values are already null by
+        // the reader's own convention, and these two are no different.
+        var orderingDefs = includeChangeOrdering
+            ? $"{SqlIdentifier.Quote(ChangeOrdering.OrderingColumn)} {MsSqlDialect.Instance.ChangeOrderingColumnType} NULL, " +
+              $"{SqlIdentifier.Quote(ChangeOrdering.ChangedAtColumn)} {MsSqlDialect.Instance.ChangedAtColumnType} NULL, "
+            : "";
         // The ordinal is what MsSqlMergeWriter's chunked apply ranges over, and SqlBulkCopy fills it
         // in for free: the column is not in ColumnMappings, and KeepIdentity is off, so the engine
         // numbers each row as it lands.
-        return $"CREATE TABLE {stagingTable} ({columnDefs}, {OperationColumn} CHAR(1) NOT NULL, " +
+        return $"CREATE TABLE {stagingTable} ({columnDefs}, {orderingDefs}{OperationColumn} CHAR(1) NOT NULL, " +
                $"{MsSqlDialect.Instance.RenderStagingOrdinalColumn(OrdinalColumn)});";
     }
 
@@ -137,9 +152,25 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
         IReadOnlyList<string> mappedTargetColumns,
         IReadOnlyList<ColumnMapping> columnMappings,
         IAsyncEnumerable<ChangeRow> rows,
+        bool includeChangeOrdering,
         CancellationToken cancellationToken)
     {
         var sourceColumnByTarget = columnMappings.ToDictionary(m => m.TargetColumn, m => m.SourceColumn);
+
+        // Phase 132: the two ordering columns are self-mapped — same name in the reader's schema as in
+        // the staging table — so ChangeRowDataReader needs no change at all; it already resolves each
+        // "target" column's ordinal by looking up sourceColumnByTarget[targetColumn] against the row's
+        // schema, and an identity entry does exactly that.
+        var readerColumns = mappedTargetColumns;
+        if (includeChangeOrdering)
+        {
+            readerColumns = [.. mappedTargetColumns, ChangeOrdering.OrderingColumn, ChangeOrdering.ChangedAtColumn];
+            sourceColumnByTarget = new Dictionary<string, string>(sourceColumnByTarget)
+            {
+                [ChangeOrdering.OrderingColumn] = ChangeOrdering.OrderingColumn,
+                [ChangeOrdering.ChangedAtColumn] = ChangeOrdering.ChangedAtColumn,
+            };
+        }
 
         using var bulkCopy = new SqlBulkCopy((SqlConnection)targetConnection)
         {
@@ -151,11 +182,11 @@ public sealed class MsSqlStagingTableProvider : IStagingProvider, IStatementPrev
             // "how long may work against this target run" rather than adding a second one.
             BulkCopyTimeout = ConnectionTimeouts.CommandTimeoutOf(targetConnection),
         };
-        foreach (var column in mappedTargetColumns)
+        foreach (var column in readerColumns)
             bulkCopy.ColumnMappings.Add(column, column);
         bulkCopy.ColumnMappings.Add(OperationColumn, OperationColumn);
 
-        await using var dataReader = new ChangeRowDataReader(rows, mappedTargetColumns, sourceColumnByTarget, cancellationToken);
+        await using var dataReader = new ChangeRowDataReader(rows, readerColumns, sourceColumnByTarget, cancellationToken);
         await bulkCopy.WriteToServerAsync(dataReader, cancellationToken);
         return dataReader.RowsProduced;
     }

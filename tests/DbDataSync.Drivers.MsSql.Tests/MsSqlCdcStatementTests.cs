@@ -1,3 +1,4 @@
+using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.MsSql;
 
 namespace DbDataSync.Drivers.MsSql.Tests;
@@ -168,7 +169,8 @@ public sealed class MsSqlCdcStatementTests
     {
         var sql = Bounded(MsSqlCdcStatement.CdcFunction.AllChanges);
 
-        Assert.Contains("SELECT __$operation, [Id], [Name], [__DS_Position]", sql);
+        Assert.Contains(
+            "SELECT __$operation, [Id], [Name], [__DS_ChangeOrdering], [__DS_ChangedAtUtc], [__DS_Position]", sql);
         // __$seqval is carried inside the derived table only, for the outer ORDER BY to use.
         Assert.Contains("__$seqval", InnerQuery(sql));
         Assert.DoesNotContain("__$seqval", sql[..sql.IndexOf("FROM (", StringComparison.Ordinal)]);
@@ -191,6 +193,94 @@ public sealed class MsSqlCdcStatementTests
             column => $"UPPER([{column}]) AS [{column}]", bounded: true);
 
         Assert.Contains("UPPER([Name]) AS [Name]", sql);
-        Assert.Contains("SELECT __$operation, [Name], [__DS_Position]", sql);
+        Assert.Contains(
+            "SELECT __$operation, [Name], [__DS_ChangeOrdering], [__DS_ChangedAtUtc], [__DS_Position]", sql);
+    }
+
+    // ---- Phase 132: per-row source order and time ------------------------------------------------
+
+    /// <summary>Both new columns appear in the unbounded shape, right after the mapped columns.</summary>
+    [Fact]
+    public void Unbounded_ProjectsBothOrderingColumns()
+    {
+        var sql = Read(MsSqlCdcStatement.CdcFunction.AllChanges);
+
+        Assert.Contains("SELECT __$operation, [Id], [Name],", sql);
+        Assert.Contains(") AS [__DS_ChangeOrdering]", sql);
+        Assert.Contains("sys.fn_cdc_map_lsn_to_time(__$start_lsn) AS [__DS_ChangedAtUtc]", sql);
+        Assert.Contains("CONVERT(varchar(20), __$start_lsn, 2)", sql);
+        // Appended right after the mapped columns, ahead of the changed-at column, in that order.
+        Assert.True(
+            sql.IndexOf("AS [__DS_ChangeOrdering]", StringComparison.Ordinal) <
+            sql.IndexOf("AS [__DS_ChangedAtUtc]", StringComparison.Ordinal));
+    }
+
+    /// <summary>And in the bounded shape too, ahead of the position column — see
+    /// <see cref="Bounded_AppendsThePositionColumnLast_AndProjectsNothingElseExtra"/> for the exact
+    /// ordering.</summary>
+    [Fact]
+    public void Bounded_ProjectsBothOrderingColumns()
+    {
+        var sql = Bounded(MsSqlCdcStatement.CdcFunction.AllChanges);
+
+        Assert.Contains("[__DS_ChangeOrdering]", sql);
+        Assert.Contains("[__DS_ChangedAtUtc]", sql);
+    }
+
+    /// <summary>
+    /// Net changes has no <c>__$seqval</c> to read — the function does not return it at all, not merely
+    /// null — so referencing it would be the same "Invalid column name" trap the existing ORDER BY
+    /// already avoids. A literal zero stands in for the missing half instead.
+    /// </summary>
+    [Fact]
+    public void NetChanges_UsesALiteralZeroForTheMissingSeqvalHalf()
+    {
+        var sql = Read(); // NetChanges by default
+
+        Assert.Contains("CONVERT(varchar(20), 0x00000000000000000000, 2)", sql);
+        Assert.DoesNotContain("__$seqval", sql);
+    }
+
+    /// <summary>All-changes has a real <c>__$seqval</c>, null-guarded the same way the existing
+    /// <c>ISNULL(__$seqval, ...)</c> pattern would be used anywhere else in this statement.</summary>
+    [Fact]
+    public void AllChanges_UsesTheRealSeqvalForTheOrderingColumn()
+    {
+        var sql = Read(MsSqlCdcStatement.CdcFunction.AllChanges);
+
+        Assert.Contains("ISNULL(__$seqval, 0x00000000000000000000)", sql);
+    }
+
+    /// <summary>
+    /// Ordinal math: the two new columns are real, schema-visible columns (unlike the position column),
+    /// so a schema built from <c>[mapped columns] + [ordering, changedAt]</c> is what <c>PositionOrdinal</c>
+    /// has to account for once a bounded read appends its own column after them. Confirmed for both a
+    /// 2-mapped-column and a 0-mapped-column schema, cap on and off — <c>PositionOrdinal</c> itself is
+    /// pure arithmetic (<c>columnCount + 1</c>), so this is really confirming the reader's own schema
+    /// (mapped count + 2) is what gets passed to it, not a property of the statement text.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(2, 3)]
+    [InlineData(5, 6)]
+    public void PositionOrdinal_AccountsForTheSchemaItIsGivenIncludingTheTwoOrderingColumns(
+        int schemaColumnCount, int expectedPositionOrdinal) =>
+        Assert.Equal(expectedPositionOrdinal, MsSqlCdcStatement.PositionOrdinal(schemaColumnCount));
+
+    /// <summary>The reader's own schema — what it actually hands <c>PositionOrdinal</c> — is the mapped
+    /// columns plus the two ordering columns, never just the mapped ones.</summary>
+    [Fact]
+    public void TheReadersSchema_IsMappedColumnsPlusBothOrderingColumns()
+    {
+        IReadOnlyList<string> mapped = ["Id", "Name"];
+        var schema = new ChangeSchema([.. mapped, ChangeOrdering.OrderingColumn, ChangeOrdering.ChangedAtColumn]);
+
+        Assert.Equal(4, schema.Count);
+        // Past __$operation: the position column (were this read bounded) lands right after these four.
+        Assert.Equal(5, MsSqlCdcStatement.PositionOrdinal(schema.Count));
+        Assert.True(schema.TryGetOrdinal(ChangeOrdering.OrderingColumn, out var orderingOrdinal));
+        Assert.Equal(2, orderingOrdinal);
+        Assert.True(schema.TryGetOrdinal(ChangeOrdering.ChangedAtColumn, out var changedAtOrdinal));
+        Assert.Equal(3, changedAtOrdinal);
     }
 }

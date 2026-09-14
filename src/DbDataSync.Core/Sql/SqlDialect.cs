@@ -134,6 +134,16 @@ public abstract class SqlDialect
     /// scope, but spelled as a type name, which is the part that varies.</summary>
     public virtual string OperationMarkerColumnType => "CHAR(1)";
 
+    /// <summary>Column type for the staging table's ordering marker (phase 132) — text long enough for
+    /// CDC's <c>(__$start_lsn, __$seqval)</c> hex encoding (40 characters) with headroom, portable
+    /// everywhere without truncation.</summary>
+    public virtual string ChangeOrderingColumnType => "VARCHAR(64)";
+
+    /// <summary>Column type for the staging table's per-row changed-at marker (phase 132) — a real
+    /// per-row source time, when the reader supplies one, so <c>ValidFrom</c>/<c>ValidTo</c> can use it
+    /// instead of the pass time. SQL Server's <c>datetime2</c> by default; Postgres overrides.</summary>
+    public virtual string ChangedAtColumnType => "DATETIME2";
+
     /// <summary>
     /// The two fragments that cap an ordered query at a row count *without splitting ties*: whatever
     /// goes right after <c>SELECT</c>, and whatever goes at the end of the statement. One of the two is

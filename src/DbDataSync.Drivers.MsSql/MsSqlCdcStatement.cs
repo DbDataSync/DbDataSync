@@ -119,6 +119,21 @@ public static class MsSqlCdcStatement
 
         var selected = new List<string> { OperationColumn };
         selected.AddRange(columns.Select(renderColumn));
+        // Phase 132: a per-row source order and a per-row source time, appended after the mapped
+        // columns and before any bounded position column, so the reader's ordinal math for the mapped
+        // columns is untouched and the position column (which stays out-of-band) is still last. Both
+        // CDC functions expose __$start_lsn; only all-changes also has __$seqval, since net changes has
+        // already collapsed the transaction it would order inside — the same "Invalid column name" trap
+        // the existing ORDER BY already avoids, avoided here the same way: a literal zero stands in for
+        // the missing seqval half rather than referencing a column that mode does not return.
+        var seqvalHex = hasSeqval
+            ? $"CONVERT(varchar(20), ISNULL({SeqvalColumn}, 0x00000000000000000000), 2)"
+            : "CONVERT(varchar(20), 0x00000000000000000000, 2)";
+        var changeOrdering =
+            $"CONVERT(varchar(20), {StartLsnColumn}, 2) + {seqvalHex} AS {SqlIdentifier.Quote(ChangeOrdering.OrderingColumn)}";
+        var changedAt = $"sys.fn_cdc_map_lsn_to_time({StartLsnColumn}) AS {SqlIdentifier.Quote(ChangeOrdering.ChangedAtColumn)}";
+        selected.Add(changeOrdering);
+        selected.Add(changedAt);
 
         // 'all' for net changes means "give me the net row and tell me the operation"; 'all' for all
         // changes means "every change, without before-images". Same literal, and both are what this
@@ -146,6 +161,8 @@ public static class MsSqlCdcStatement
 
         var outer = new List<string> { OperationColumn };
         outer.AddRange(columns.Select(SqlIdentifier.Quote));
+        outer.Add(SqlIdentifier.Quote(ChangeOrdering.OrderingColumn));
+        outer.Add(SqlIdentifier.Quote(ChangeOrdering.ChangedAtColumn));
         outer.Add(position);
 
         return $"""

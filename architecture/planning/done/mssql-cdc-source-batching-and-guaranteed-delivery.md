@@ -1,9 +1,10 @@
 # SQL Server CDC: source-side batching, and a guaranteed-delivery mode for SCD
 
-**Resolved 2026-09-13 — both follow-ups now have phases.** Follow-up 1 (row-bounded CDC reads) shipped
-as `architecture/implementation/done/phase-084-cdc-row-bounded-reads.md`, already noted below in the
-2026-09-01 update. Follow-up 2 (the guaranteed-delivery mode and its PK-collision prerequisite) is
-`architecture/implementation/todo/phase-132-cdc-guaranteed-delivery-for-scd2.md`, which resolves this
+**Resolved 2026-09-13 — both follow-ups now have phases, and both are done.** Follow-up 1 (row-bounded
+CDC reads) shipped as `architecture/implementation/done/phase-084-cdc-row-bounded-reads.md`, already
+noted below in the 2026-09-01 update. Follow-up 2 (the guaranteed-delivery mode and its PK-collision
+prerequisite) shipped as
+`architecture/implementation/done/phase-132-cdc-guaranteed-delivery-for-scd2.md`, which resolves this
 document's four open questions: the fix ships as one phase, not a narrow fix followed by a broader mode
 (question 2 is moot under the chosen design); the writer processes same-key duplicates itself, in
 source order (question 3), composed from the *existing* single-row statements rather than a rewrite; a
