@@ -2,8 +2,8 @@ import type {
   AdminCertificateStatus,
   AdminConfigEntry,
   ApplyResult,
-  BackfillBatchProgress,
-  BackfillRequest,
+  BulkLoadBatchProgress,
+  BulkLoadRequest,
   ReconcileDeletesRequest,
   SegmentCandidate,
   SegmentingStrategyConfig,
@@ -199,9 +199,9 @@ export const api = {
     // Every mapping's lag and the range across them, in one call — see phase 86. The per-mapping
     // endpoint below still exists for a caller that wants exactly one.
     lag: (name: string) => request<ReplicationLag>(`/api/replications/${encodeURIComponent(name)}/lag`),
-    backfills: (name: string, limit?: number) =>
-      request<BackfillBatchProgress[]>(
-        `/api/replications/${encodeURIComponent(name)}/backfills${limit ? `?limit=${limit}` : ''}`,
+    bulkLoads: (name: string, limit?: number) =>
+      request<BulkLoadBatchProgress[]>(
+        `/api/replications/${encodeURIComponent(name)}/bulk-loads${limit ? `?limit=${limit}` : ''}`,
       ),
   },
   tableMappings: {
@@ -507,12 +507,12 @@ export const api = {
           `/segmenting/preview`,
         { method: 'POST', body: JSON.stringify(strategy) },
       ),
-    backfill: (replicationName: string, mappingName: string, body: BackfillRequest) =>
+    bulkLoad: (replicationName: string, mappingName: string, body: BulkLoadRequest) =>
       request<TriggerResponse>(
-        `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}/backfill`,
+        `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}/bulk-load`,
         { method: 'POST', body: JSON.stringify(body) },
       ),
-    /** Phase 124's delete-diff sweep trigger — same shape as `backfill` above (one RunId per segment),
+    /** Phase 124's delete-diff sweep trigger — same shape as `bulkLoad` above (one RunId per segment),
      * always through KeyReconcile/KeyReconcileDelete. */
     reconcileDeletes: (replicationName: string, mappingName: string, body: ReconcileDeletesRequest) =>
       request<TriggerResponse>(

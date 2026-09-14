@@ -85,7 +85,7 @@ export function RunDetailsDialog({ run, times, onClose }: {
             <div className="hint" style={{ marginBottom: 4 }}>Watermark</div>
             {/* The same cell the history row renders, so the two cannot disagree about what this
                 run's position did. It says its own "—" when the run moved no watermark at all — a
-                backfill, a verification, or a pass that failed before it made one durable. */}
+                bulk load, a verification, or a pass that failed before it made one durable. */}
             <WatermarkCell run={run} times={times} />
           </div>
 

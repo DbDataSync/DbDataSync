@@ -258,10 +258,10 @@ public sealed class SchedulerService(
     /// mapping is still held.
     /// </para>
     /// <para>
-    /// **Does not touch a Backfill.** This filter only ever runs over mappings due for a scheduled
-    /// Primary pass — a Backfill is enqueued by <c>BackfillService</c>, an entirely separate path this
-    /// method never sees. That is deliberate: a Backfill does not use the cursor a hold exists to
-    /// protect, and refusing to let an operator recover a held mapping by backfilling it would be a
+    /// **Does not touch a BulkLoad.** This filter only ever runs over mappings due for a scheduled
+    /// Primary pass — a BulkLoad is enqueued by <c>BulkLoadService</c>, an entirely separate path this
+    /// method never sees. That is deliberate: a BulkLoad does not use the cursor a hold exists to
+    /// protect, and refusing to let an operator recover a held mapping by bulk loading it would be a
     /// second, worse kind of stuck.
     /// </para>
     /// </summary>

@@ -108,7 +108,7 @@ public sealed class SegmentingPreviewTests(TestApiFactory factory) : IClassFixtu
         Assert.Empty(task!.SegmentingStrategies);
     }
 
-    /// <summary>The whole claim of testing before saving: what the editor shows and what a backfill
+    /// <summary>The whole claim of testing before saving: what the editor shows and what a bulk load
     /// later proposes are produced by the same code.</summary>
     [Fact]
     public async Task TheUnsavedPreview_AgreesWithTheSavedOne()

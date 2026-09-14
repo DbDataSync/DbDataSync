@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import {
-  useBackfill,
+  useBulkLoad,
   useReplication,
   useReplicationCapabilities,
   useSegmentingPreview,
@@ -19,16 +19,16 @@ import { readerNotes } from '../../api/readerNotes'
  *
  * Opens pre-filled from the mapping's own default segmenting, so a table that is always reloaded the
  * same way does not have to be re-described every time. Everything stays editable for this one
- * backfill: ad hoc means ad hoc, and nothing typed here writes back to the mapping.
+ * bulk load: ad hoc means ad hoc, and nothing typed here writes back to the mapping.
  */
-export function BackfillForm({ replicationName, onQueued, onClose }: {
+export function BulkLoadForm({ replicationName, onQueued, onClose }: {
   replicationName: string
   onQueued: (runIds: string[]) => void
   onClose: () => void
 }) {
   const { data: mappingNames } = useTableMappings(replicationName)
   const capabilities = useReplicationCapabilities(replicationName)
-  const backfill = useBackfill(replicationName)
+  const bulkLoad = useBulkLoad(replicationName)
   const { data: replication } = useReplication(replicationName)
 
   const [mappingName, setMappingName] = useState<string | null>(null)
@@ -139,7 +139,7 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const result = await backfill.mutateAsync({
+    const result = await bulkLoad.mutateAsync({
       mappingName: selectedMapping,
       request: {
         readerKind: selectedReader,
@@ -154,22 +154,22 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
   const nothingChosen = mode === 'custom' && chosen.length === 0
 
   return (
-    <form className="card" style={{ width: 288, flex: 'none' }} onSubmit={submit} data-testid="backfill-form">
+    <form className="card" style={{ width: 288, flex: 'none' }} onSubmit={submit} data-testid="bulk-load-form">
       <div className="card-head tight">
-        <span className="card-title sm">Backfill</span>
+        <span className="card-title sm">Bulk Load</span>
         <button type="button" className="btn-link quiet spacer" onClick={onClose}>Close</button>
       </div>
       <div className="card-body" style={{ gap: 10 }}>
-        <ErrorBanner error={backfill.error ?? capabilities.error} />
+        <ErrorBanner error={bulkLoad.error ?? capabilities.error} />
 
         <Field label="Table mapping">
-          <select className="select" value={selectedMapping} onChange={(e) => setMappingName(e.target.value)} data-testid="backfill-mapping-select">
+          <select className="select" value={selectedMapping} onChange={(e) => setMappingName(e.target.value)} data-testid="bulk-load-mapping-select">
             {(mappingNames ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </Field>
 
         <Field label="Segment">
-          <select className="select" value={mode} onChange={(e) => setMode(e.target.value as SegmentMode)} data-testid="backfill-mode-select">
+          <select className="select" value={mode} onChange={(e) => setMode(e.target.value as SegmentMode)} data-testid="bulk-load-mode-select">
             <option value="full">Full — whole table</option>
             <option value="list">List — specific values</option>
             <option value="range">Range — between bounds</option>
@@ -180,21 +180,21 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
 
         {mode !== 'full' && mode !== 'custom' && (
           <Field label="Source column">
-            <input className="input" required value={column} onChange={(e) => setColumn(e.target.value)} data-testid="backfill-column-input" />
+            <input className="input" required value={column} onChange={(e) => setColumn(e.target.value)} data-testid="bulk-load-column-input" />
           </Field>
         )}
         {mode === 'list' && (
           <Field label="Values (comma-separated)">
-            <input className="input" required value={values} onChange={(e) => setValues(e.target.value)} data-testid="backfill-values-input" />
+            <input className="input" required value={values} onChange={(e) => setValues(e.target.value)} data-testid="bulk-load-values-input" />
           </Field>
         )}
         {mode === 'range' && (
           <>
             <Field label="From (inclusive)">
-              <input className="input" required value={rangeMin} onChange={(e) => setRangeMin(e.target.value)} data-testid="backfill-min-input" />
+              <input className="input" required value={rangeMin} onChange={(e) => setRangeMin(e.target.value)} data-testid="bulk-load-min-input" />
             </Field>
             <Field label="To (exclusive)">
-              <input className="input" required value={rangeMax} onChange={(e) => setRangeMax(e.target.value)} data-testid="backfill-max-input" />
+              <input className="input" required value={rangeMax} onChange={(e) => setRangeMax(e.target.value)} data-testid="bulk-load-max-input" />
             </Field>
           </>
         )}
@@ -203,7 +203,7 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
             <input
               className="input" type="number" min={1} value={bucketCount}
               onChange={(e) => setBucketCount(Number(e.target.value))}
-              data-testid="backfill-buckets-input"
+              data-testid="bulk-load-buckets-input"
             />
           </Field>
         )}
@@ -215,7 +215,7 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
                 className="select"
                 value={strategyName ?? ''}
                 onChange={(e) => setStrategyName(e.target.value || null)}
-                data-testid="backfill-strategy-select"
+                data-testid="bulk-load-strategy-select"
               >
                 <option value="">Pick a strategy…</option>
                 {strategies.map((s) => <option key={s.name} value={s.name}>{s.name} — {s.kind}</option>)}
@@ -223,13 +223,13 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
             </Field>
 
             {strategies.length === 0 && (
-              <span className="hint" data-testid="backfill-no-strategies">
+              <span className="hint" data-testid="bulk-load-no-strategies">
                 This replication defines no segmenting strategies yet.
               </span>
             )}
 
             {strategy && runsAgainstAConnection(strategy.kind) && (
-              <span className="hint" data-testid="backfill-strategy-connection-note">
+              <span className="hint" data-testid="bulk-load-strategy-connection-note">
                 Running this strategy queries the {strategy.kind === 'TargetSql' ? 'target' : 'source'} database.
               </span>
             )}
@@ -238,13 +238,13 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
             {preview.isFetching && <span className="hint">Running the strategy…</span>}
 
             {candidates.length > 0 && (
-              <div data-testid="backfill-candidates">
+              <div data-testid="bulk-load-candidates">
                 <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
                   <button
                     type="button"
                     className="btn-link quiet"
                     onClick={() => setChecked(Object.fromEntries(candidates.map((_, i) => [i, true])))}
-                    data-testid="backfill-select-all"
+                    data-testid="bulk-load-select-all"
                   >
                     Select all
                   </button>
@@ -252,7 +252,7 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
                     type="button"
                     className="btn-link quiet"
                     onClick={() => setChecked({})}
-                    data-testid="backfill-select-none"
+                    data-testid="bulk-load-select-none"
                   >
                     None
                   </button>
@@ -265,7 +265,7 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
                         type="checkbox"
                         checked={checked[i] ?? false}
                         onChange={(e) => setChecked((prev) => ({ ...prev, [i]: e.target.checked }))}
-                        data-testid={`backfill-candidate-${i}`}
+                        data-testid={`bulk-load-candidate-${i}`}
                       />
                       <span className="mono sm">{candidate.label}</span>
                     </label>
@@ -275,7 +275,7 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
             )}
 
             {strategyName && !preview.isFetching && candidates.length === 0 && !preview.error && (
-              <span className="hint" data-testid="backfill-no-candidates">
+              <span className="hint" data-testid="bulk-load-no-candidates">
                 This strategy proposed no segments.
               </span>
             )}
@@ -283,19 +283,19 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
         )}
 
         <Field label="Reader">
-          <select className="select" value={selectedReader} onChange={(e) => setReaderKind(e.target.value)} data-testid="backfill-reader-select">
+          <select className="select" value={selectedReader} onChange={(e) => setReaderKind(e.target.value)} data-testid="bulk-load-reader-select">
             {availableReaders.map((r) => (
               <option key={r.kind} value={r.kind}>{[r.kind, ...readerNotes(r)].join(' — ')}</option>
             ))}
           </select>
         </Field>
         <Field label="Staging">
-          <select className="select" value={selectedCache} onChange={(e) => setCacheKind(e.target.value)} data-testid="backfill-cache-select">
+          <select className="select" value={selectedCache} onChange={(e) => setCacheKind(e.target.value)} data-testid="bulk-load-cache-select">
             {capabilities.stagingProviders.map((p) => <option key={p.kind} value={p.kind}>{p.kind}</option>)}
           </select>
         </Field>
         <Field label="Writer">
-          <select className="select" value={selectedWriter} onChange={(e) => setWriterKind(e.target.value)} data-testid="backfill-writer-select">
+          <select className="select" value={selectedWriter} onChange={(e) => setWriterKind(e.target.value)} data-testid="bulk-load-writer-select">
             {availableWriters.map((w) => (
               <option key={w.kind} value={w.kind}>{w.supportsReconciliation ? `${w.kind} — reconciling` : `${w.kind} — upsert-only`}</option>
             ))}
@@ -303,7 +303,7 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
         </Field>
 
         {writer && !writer.supportsReconciliation && (
-          <span className="hint" data-testid="backfill-upsert-note">
+          <span className="hint" data-testid="bulk-load-upsert-note">
             <span className="mono">{writer.kind}</span> only adds and updates rows — rows deleted at the source
             will stay in the target.
           </span>
@@ -313,14 +313,14 @@ export function BackfillForm({ replicationName, onQueued, onClose }: {
           type="submit"
           className="btn btn-primary"
           style={{ alignSelf: 'flex-start' }}
-          disabled={backfill.isPending || !selectedMapping || nothingChosen}
-          data-testid="backfill-submit-button"
+          disabled={bulkLoad.isPending || !selectedMapping || nothingChosen}
+          data-testid="bulk-load-submit-button"
         >
-          {backfill.isPending
+          {bulkLoad.isPending
             ? 'Queueing…'
             : mode === 'custom' && chosen.length > 0
               ? `Queue ${chosen.length} segment${chosen.length === 1 ? '' : 's'}`
-              : 'Queue backfill'}
+              : 'Queue bulk load'}
         </button>
       </div>
     </form>

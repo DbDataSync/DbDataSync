@@ -22,10 +22,10 @@ public sealed class RunHistoryCursorCodecTests
     [Fact]
     public void EncodeThenDecode_WithTheSameFilters_RoundTrips()
     {
-        var token = RunHistoryCursorCodec.Encode(Cursor, "crm-sync", RunKind.Backfill, "orders", RunStatus.Failed);
+        var token = RunHistoryCursorCodec.Encode(Cursor, "crm-sync", RunKind.BulkLoad, "orders", RunStatus.Failed);
 
         var decoded = RunHistoryCursorCodec.Decode(
-            token, "crm-sync", RunKind.Backfill, "orders", RunStatus.Failed);
+            token, "crm-sync", RunKind.BulkLoad, "orders", RunStatus.Failed);
 
         Assert.Equal(Cursor, decoded);
     }
@@ -58,14 +58,14 @@ public sealed class RunHistoryCursorCodecTests
     /// things a cursor is scoped to.
     /// </summary>
     [Theory]
-    [InlineData("other-sync", "Backfill", "orders", "Failed")] // different replication
-    [InlineData("crm-sync", "Primary", "orders", "Failed")] // different kind (was Backfill)
-    [InlineData("crm-sync", "Backfill", "customers", "Failed")] // different mapping (was orders)
-    [InlineData("crm-sync", "Backfill", "orders", "Succeeded")] // different status (was Failed)
+    [InlineData("other-sync", "BulkLoad", "orders", "Failed")] // different replication
+    [InlineData("crm-sync", "Primary", "orders", "Failed")] // different kind (was BulkLoad)
+    [InlineData("crm-sync", "BulkLoad", "customers", "Failed")] // different mapping (was orders)
+    [InlineData("crm-sync", "BulkLoad", "orders", "Succeeded")] // different status (was Failed)
     public void Decode_UnderDifferentFilters_ResetsToPageOne(
         string taskName, string? kind, string? mappingName, string? status)
     {
-        var token = RunHistoryCursorCodec.Encode(Cursor, "crm-sync", RunKind.Backfill, "orders", RunStatus.Failed);
+        var token = RunHistoryCursorCodec.Encode(Cursor, "crm-sync", RunKind.BulkLoad, "orders", RunStatus.Failed);
 
         var decoded = RunHistoryCursorCodec.Decode(
             token, taskName,

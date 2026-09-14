@@ -25,7 +25,7 @@ import type { ReplicationTaskConfig, ScheduleMode } from '../../api/types'
  * **Concurrency sits here too, not on the Pipeline tab.** How many mappings the worker processes at
  * once is a fact about *how this replication runs*, the same kind of fact as how often it runs and
  * when its worker gives up — not about which reader/staging/writer the pipeline uses. The worker runs
- * two independent lanes (phase-108): incremental passes, and backfills-plus-verifications. Each gets
+ * two independent lanes (phase-108): incremental passes, and bulk loads-plus-verifications. Each gets
  * its own number, so a large reload can no longer take a slot an incremental pass needs. Like the
  * other fields here (and unlike the Enabled toggle), both belong to the batched Save.
  */
@@ -39,7 +39,7 @@ export function ScheduleCard({ draft, enabled, onChange }: {
     onChange({ ...draft, scheduling: { ...draft.scheduling, ...patch } })
 
   const setParallelism = (patch: Partial<Pick<
-    ReplicationTaskConfig['changeProcessing'], 'degreeOfParallelism' | 'backfillDegreeOfParallelism'>>) =>
+    ReplicationTaskConfig['changeProcessing'], 'degreeOfParallelism' | 'bulkLoadDegreeOfParallelism'>>) =>
     onChange({ ...draft, changeProcessing: { ...draft.changeProcessing, ...patch } })
 
   const mode = draft.scheduling.mode
@@ -117,11 +117,11 @@ export function ScheduleCard({ draft, enabled, onChange }: {
             style={{ width: 44 }}
             type="number"
             min={1}
-            value={draft.changeProcessing.backfillDegreeOfParallelism ?? 4}
-            onChange={(e) => setParallelism({ backfillDegreeOfParallelism: Number(e.target.value) || 1 })}
-            data-testid="schedule-backfill-parallelism-input"
+            value={draft.changeProcessing.bulkLoadDegreeOfParallelism ?? 4}
+            onChange={(e) => setParallelism({ bulkLoadDegreeOfParallelism: Number(e.target.value) || 1 })}
+            data-testid="schedule-bulk-load-parallelism-input"
           />
-          <span className="hint" title="Backfill segments and verifications run on their own lane, so a large reload never takes a slot an incremental pass needs.">backfill(s), at once</span>
+          <span className="hint" title="Bulk Load segments and verifications run on their own lane, so a large reload never takes a slot an incremental pass needs.">bulk load(s), at once</span>
         </span>
 
         <span

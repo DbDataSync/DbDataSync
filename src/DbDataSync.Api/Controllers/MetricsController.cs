@@ -23,7 +23,7 @@ public sealed class MetricsController(RunMetricsStore metrics) : ControllerBase
     /// different questions, and a fixed window answers only one.
     /// </param>
     /// <param name="kind">
-    /// Defaults to <c>Primary</c>. A backfill moving ten million rows next to incremental passes
+    /// Defaults to <c>Primary</c>. A bulk load moving ten million rows next to incremental passes
     /// moving hundreds dominates every total it is added to, so the two are asked about separately
     /// rather than summed into a number that describes neither.
     /// </param>

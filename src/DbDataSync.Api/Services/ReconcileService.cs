@@ -9,10 +9,10 @@ namespace DbDataSync.Api.Services;
 /// <summary>
 /// Turns an on-demand delete-reconcile request into queued work — phase 124's
 /// <c>POST /api/replications/{r}/mappings/{m}/reconcile-deletes</c>. Near-identical to
-/// <see cref="BackfillService"/>: expand any <see cref="AutoSegment"/> against the real source table,
+/// <see cref="BulkLoadService"/>: expand any <see cref="AutoSegment"/> against the real source table,
 /// then enqueue one independently-scheduled <see cref="RunKind.ReconcileDeletes"/> unit of work per
 /// resulting segment, always through the <c>KeyReconcile</c>/<c>StagingTable</c> reader/cache pair —
-/// there is no per-request reader/cache choice to make here, unlike a backfill.
+/// there is no per-request reader/cache choice to make here, unlike a bulk load.
 /// <para>
 /// **The writer ending is resolved, not fixed**, since phase 129: <see cref="PipelineResolution.ReconcileWriterKind"/>
 /// says <c>KeyReconcileDelete</c> for an ordinary mapping and <c>KeyReconcileScd2Close</c> for one
@@ -86,7 +86,7 @@ public sealed class ReconcileService(
                 segment.Describe(),
                 SegmentSerializer.Serialize(segment),
                 kinds,
-                backfillBatchId: null,
+                bulkLoadBatchId: null,
                 deleteGuardJson: guardJson))
             .ToList();
 
@@ -151,7 +151,7 @@ public sealed class ReconcileService(
                 segment.Describe(),
                 SegmentSerializer.Serialize(segment),
                 kinds,
-                backfillBatchId: null,
+                bulkLoadBatchId: null,
                 deleteGuardJson: guardJson))
             .ToList();
 
@@ -159,7 +159,7 @@ public sealed class ReconcileService(
         return ensureResult.Outcome == TriggerOutcome.FailedToStart ? ensureResult : TriggerResult.Started(runIds);
     }
 
-    /// <summary>Mirrors <see cref="BackfillService"/>'s own segment expansion, but the reader is always
+    /// <summary>Mirrors <see cref="BulkLoadService"/>'s own segment expansion, but the reader is always
     /// <c>KeyReconcile</c> — there is no per-request reader Kind to resolve.</summary>
     private async Task<IReadOnlyList<BatchReloadSegment>> ExpandAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, IReadOnlyList<BatchReloadSegment> requested,

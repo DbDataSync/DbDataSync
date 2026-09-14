@@ -4,7 +4,7 @@ import { api } from './client'
 import type {
   BulkCreateRequest,
   DriverType,
-  ScriptDefinition, ScriptTestRequest, MetricsWindow, BackfillRequest, ReconcileDeletesRequest, ConnectionInput, ReplicationTaskConfig,
+  ScriptDefinition, ScriptTestRequest, MetricsWindow, BulkLoadRequest, ReconcileDeletesRequest, ConnectionInput, ReplicationTaskConfig,
   RunHistoryFilters,
   SegmentingStrategyConfig, SetMappingReadStateRequest, TableMappingConfig } from './types'
 
@@ -52,7 +52,7 @@ const keys = {
   metrics: (replicationName: string, window: string) =>
     ['replications', replicationName, 'metrics', window] as const,
   replicationLag: (replicationName: string) => ['replications', replicationName, 'lag'] as const,
-  backfills: (replicationName: string) => ['replications', replicationName, 'backfills'] as const,
+  bulkLoads: (replicationName: string) => ['replications', replicationName, 'bulk-loads'] as const,
   mappingReadState: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'read-state'] as const,
   verificationResults: (replicationName: string, mappingName: string) =>
@@ -638,16 +638,16 @@ export function useTriggerRun(replicationName: string) {
  * Queues a reload of one table mapping. Returns one RunId per segment — an Auto segment is expanded
  * server-side, so a single submission can produce many independently-scheduled runs.
  */
-export function useBackfill(replicationName: string) {
+export function useBulkLoad(replicationName: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ mappingName, request }: { mappingName: string; request: BackfillRequest }) =>
-      api.runs.backfill(replicationName, mappingName, request),
+    mutationFn: ({ mappingName, request }: { mappingName: string; request: BulkLoadRequest }) =>
+      api.runs.bulkLoad(replicationName, mappingName, request),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.runHistory(replicationName) }),
   })
 }
 
-/** Phase 124's delete-diff sweep trigger — same shape as {@link useBackfill}. */
+/** Phase 124's delete-diff sweep trigger — same shape as {@link useBulkLoad}. */
 export function useReconcileDeletes(replicationName: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -843,16 +843,16 @@ export function useReplicationLag(replicationName: string | undefined) {
 }
 
 /**
- * Recent backfills for the Monitoring screen's "Batch reload" card.
+ * Recent bulk loads for the Monitoring screen's "Batch reload" card.
  *
  * Polls faster while one is running — its "rows copied" and segment counts only move as segments
  * finish, so a couple of seconds is plenty to feel live, and once nothing is running it drops back to
  * the tab's ordinary cadence so an idle replication isn't polled every two seconds forever.
  */
-export function useRecentBackfills(replicationName: string | undefined) {
+export function useRecentBulkLoads(replicationName: string | undefined) {
   return useQuery({
-    queryKey: keys.backfills(replicationName ?? ''),
-    queryFn: () => api.replications.backfills(replicationName!),
+    queryKey: keys.bulkLoads(replicationName ?? ''),
+    queryFn: () => api.replications.bulkLoads(replicationName!),
     enabled: !!replicationName,
     refetchInterval: (query) =>
       query.state.data?.some((b) => b.state === 'Running') ? 2_000 : MONITORING_REFRESH_MS,

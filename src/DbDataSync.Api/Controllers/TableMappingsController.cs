@@ -150,7 +150,7 @@ public sealed class TableMappingsController(
         }
 
         if (runLocks.IsLocked(replicationName, RunKind.Primary, mappingName)
-            || runLocks.IsLocked(replicationName, RunKind.Backfill, mappingName))
+            || runLocks.IsLocked(replicationName, RunKind.BulkLoad, mappingName))
         {
             return Conflict(new
             {
@@ -219,7 +219,11 @@ public sealed class TableMappingsController(
             // Beside the endpoint and hook checks SaveTableMapping already makes, and for the same
             // reason: a per-stage override naming a Kind or a setting that cannot work is caught while
             // somebody is still looking at the edit, not on the first pass (phase 68).
-            parameterCheck.ThrowIfInvalid(configRepository.LoadReplicationTask(replicationName), mapping);
+            var replicationTask = configRepository.LoadReplicationTask(replicationName);
+            parameterCheck.ThrowIfInvalid(replicationTask, mapping);
+            // The mapping's fully-resolved Bulk Load pipeline (phase 133) — checked unconditionally,
+            // since even the replication-level default can be one the source driver does not offer.
+            parameterCheck.ThrowIfBulkLoadInvalid(replicationTask, mapping);
 
             // What a save may do to the cached column metadata, which is very little — see
             // MappingMetadataCapture. A mapping being created has nothing stored to reconcile against.

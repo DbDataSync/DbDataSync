@@ -126,7 +126,7 @@ public sealed class RunWatermarkTimeTests(TestApiFactory factory) : IClassFixtur
         var (task, database) = await SetUpAsync();
         RecordCheck(database, "100", Origin);
 
-        // A failed pass, or a backfill, or a verification: all three store null for both watermarks
+        // A failed pass, or a bulk load, or a verification: all three store null for both watermarks
         // because none of them committed a new position. There is nothing to date, and an entry
         // holding two nulls would say the same thing at more length.
         var runId = CompleteRun(task.Name, null, null, RunStatus.Failed);

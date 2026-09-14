@@ -15,13 +15,13 @@ public enum RunStatus
 /// <summary>
 /// Distinguishes a replication's ongoing incremental sync (Primary — one per table mapping, driven by
 /// its own schedule, the only kind that ever advances a ChangeWatermarks row) from an on-demand
-/// reload/backfill of one table mapping (Backfill — never touches the incremental watermark). See
+/// reload/bulk-load of one table mapping (BulkLoad — never touches the incremental watermark). See
 /// architecture/implementation/done/phase-008-work-queue-schema.md.
 /// </summary>
 public enum RunKind
 {
     Primary,
-    Backfill,
+    BulkLoad,
 
     /// <summary>
     /// A comparison between a mapping's source and target — see phase 43. A run like any other, so it
@@ -34,7 +34,7 @@ public enum RunKind
     /// A key-diff delete sweep — see phase 124 (<c>architecture/planning/done/watermark-delete-detection.md</c>).
     /// Reads only a segment's source primary-key values and deletes target rows whose key is absent
     /// from that set; never inserts or updates and never advances the incremental watermark, the same
-    /// posture <see cref="Backfill"/> already has. On-demand in this phase, and — from phase 125 — also
+    /// posture <see cref="BulkLoad"/> already has. On-demand in this phase, and — from phase 125 — also
     /// scheduled.
     /// </summary>
     ReconcileDeletes,
@@ -52,11 +52,11 @@ public enum RunLane
     /// lane: its passes are scheduled and an operator watching lag expects them to keep up.</summary>
     ChangeProcessing,
 
-    /// <summary>On-demand, non-incremental work — <see cref="RunKind.Backfill"/>,
+    /// <summary>On-demand, non-incremental work — <see cref="RunKind.BulkLoad"/>,
     /// <see cref="RunKind.Verification"/> and <see cref="RunKind.ReconcileDeletes"/>. All three read
     /// whole tables (or a segment of one) and can run for a long time; keeping them off the
     /// change-processing lane is the point of the split.</summary>
-    Backfill,
+    BulkLoad,
 }
 
 /// <summary>Which <see cref="RunKind"/>s belong to which <see cref="RunLane"/> — the one place the
@@ -66,12 +66,12 @@ public static class RunLanes
     public static IReadOnlyList<RunKind> KindsFor(RunLane lane) => lane switch
     {
         RunLane.ChangeProcessing => [RunKind.Primary],
-        RunLane.Backfill => [RunKind.Backfill, RunKind.Verification, RunKind.ReconcileDeletes],
+        RunLane.BulkLoad => [RunKind.BulkLoad, RunKind.Verification, RunKind.ReconcileDeletes],
         _ => throw new ArgumentOutOfRangeException(nameof(lane), lane, null),
     };
 
     public static RunLane LaneFor(RunKind kind) =>
-        kind == RunKind.Primary ? RunLane.ChangeProcessing : RunLane.Backfill;
+        kind == RunKind.Primary ? RunLane.ChangeProcessing : RunLane.BulkLoad;
 }
 
 // Deliberately not named LogLevel — avoids ambiguity wherever this is used alongside
@@ -148,7 +148,7 @@ public sealed record TaskRunRecord(
     /// <summary>
     /// Where this run's watermark started and where it ended — the history behind
     /// <c>ChangeWatermarks</c>' single current value (phase 71). Both null for a run that made no new
-    /// position durable: a Backfill or Verification, or any failed run.
+    /// position durable: a BulkLoad or Verification, or any failed run.
     /// </summary>
     string? PreviousWatermark = null,
     string? NewWatermark = null,

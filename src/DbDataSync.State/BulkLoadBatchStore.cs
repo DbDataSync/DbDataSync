@@ -2,8 +2,8 @@ using System.Data.Common;
 
 namespace DbDataSync.State;
 
-/// <summary>Where a backfill is, taken as a whole rather than one segment at a time.</summary>
-public enum BackfillState
+/// <summary>Where a bulk load is, taken as a whole rather than one segment at a time.</summary>
+public enum BulkLoadState
 {
     /// <summary>At least one segment is still queued or running.</summary>
     Running,
@@ -15,7 +15,7 @@ public enum BackfillState
     CompletedWithFailures,
 }
 
-/// <param name="SegmentCount">How many segments this backfill was split into, recorded at enqueue —
+/// <param name="SegmentCount">How many segments this bulk load was split into, recorded at enqueue —
 /// not <c>COUNT</c> of the runs, which can undercount if an equivalent segment was already in flight
 /// when this batch was queued.</param>
 /// <param name="RowsCopied">Rows written to the target across the segments that have finished. Segment
@@ -26,7 +26,7 @@ public enum BackfillState
 /// <param name="EstimateCaveat">Why the estimate should be read loosely, if it should — e.g.
 /// <c>"ignores row filter"</c> when the mapping narrows its source but the estimate counts the whole
 /// table. Null when the estimate is clean.</param>
-public sealed record BackfillBatchProgress(
+public sealed record BulkLoadBatchProgress(
     string BatchId,
     string MappingName,
     DateTimeOffset CreatedAtUtc,
@@ -41,19 +41,19 @@ public sealed record BackfillBatchProgress(
     DateTimeOffset? StartedAtUtc,
     DateTimeOffset? LastActivityUtc)
 {
-    public BackfillState State =>
-        SegmentsSucceeded + SegmentsFailed < SegmentCount ? BackfillState.Running
-        : SegmentsFailed > 0 ? BackfillState.CompletedWithFailures
-        : BackfillState.Completed;
+    public BulkLoadState State =>
+        SegmentsSucceeded + SegmentsFailed < SegmentCount ? BulkLoadState.Running
+        : SegmentsFailed > 0 ? BulkLoadState.CompletedWithFailures
+        : BulkLoadState.Completed;
 }
 
 /// <summary>
-/// The batch view over a backfill's segment runs. <c>BackfillBatches</c> holds what a segment doesn't
+/// The batch view over a bulk load's segment runs. <c>BulkLoadBatches</c> holds what a segment doesn't
 /// carry — the planned segment count and one whole-table row estimate — and the per-segment progress
 /// is aggregated from <c>TaskRuns</c>, which already records every segment's status and final row
 /// counts. This is the query nobody had written, the same way <see cref="RunMetricsStore"/> was.
 /// </summary>
-public sealed class BackfillBatchStore(StateDatabase database)
+public sealed class BulkLoadBatchStore(StateDatabase database)
 {
     public void CreateBatch(
         string batchId, string taskName, string mappingName, int segmentCount,
@@ -62,7 +62,7 @@ public sealed class BackfillBatchStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, """
-                INSERT INTO BackfillBatches
+                INSERT INTO BulkLoadBatches
                     (BatchId, TaskName, MappingName, CreatedAtUtc, SegmentCount, EstimatedRows, EstimateCaveat)
                 VALUES ($batchId, $taskName, $mappingName, $createdAt, $segmentCount, $estimatedRows, $estimateCaveat);
                 """);
@@ -77,7 +77,7 @@ public sealed class BackfillBatchStore(StateDatabase database)
         });
 
     /// <summary>
-    /// The most recent backfills for one replication, newest first — one row per batch with its
+    /// The most recent bulk loads for one replication, newest first — one row per batch with its
     /// segments rolled up. The Monitoring card reads only the first; the wider list is what a future
     /// Batch Load History screen is for, which is why this takes a limit rather than returning one.
     /// <para>
@@ -85,7 +85,7 @@ public sealed class BackfillBatchStore(StateDatabase database)
     /// <c>DateTimeOffset.UtcNow.ToString("O")</c> — the assumption the rest of this store makes too.
     /// </para>
     /// </summary>
-    public IReadOnlyList<BackfillBatchProgress> GetRecentBackfills(string taskName, int limit) =>
+    public IReadOnlyList<BulkLoadBatchProgress> GetRecentBulkLoads(string taskName, int limit) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
@@ -99,8 +99,8 @@ public sealed class BackfillBatchStore(StateDatabase database)
                        SUM(r.RowsWritten)  AS RowsCopied,
                        MIN(r.StartedAtUtc) AS StartedAtUtc,
                        MAX(r.EndedAtUtc)   AS LastActivityUtc
-                FROM BackfillBatches b
-                LEFT JOIN TaskRuns r ON r.BackfillBatchId = b.BatchId
+                FROM BulkLoadBatches b
+                LEFT JOIN TaskRuns r ON r.BulkLoadBatchId = b.BatchId
                 WHERE b.TaskName = $taskName
                 GROUP BY b.BatchId, b.MappingName, b.CreatedAtUtc, b.SegmentCount,
                          b.EstimatedRows, b.EstimateCaveat
@@ -110,10 +110,10 @@ public sealed class BackfillBatchStore(StateDatabase database)
             cmd.Bind(database, "limit", limit);
 
             using var reader = cmd.ExecuteReader();
-            var results = new List<BackfillBatchProgress>();
+            var results = new List<BulkLoadBatchProgress>();
             while (reader.Read())
             {
-                results.Add(new BackfillBatchProgress(
+                results.Add(new BulkLoadBatchProgress(
                     BatchId: reader.GetString(0),
                     MappingName: reader.GetString(1),
                     CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(2)),
@@ -128,6 +128,6 @@ public sealed class BackfillBatchStore(StateDatabase database)
                     StartedAtUtc: reader.IsDBNull(11) ? null : DateTimeOffset.Parse(reader.GetString(11)),
                     LastActivityUtc: reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12))));
             }
-            return (IReadOnlyList<BackfillBatchProgress>)results;
+            return (IReadOnlyList<BulkLoadBatchProgress>)results;
         });
 }

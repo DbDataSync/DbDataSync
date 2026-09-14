@@ -17,7 +17,7 @@ if (!TaskRunnerOptions.TryParse(args, out var options, out var parseError))
     Console.Error.WriteLine($"Argument error: {parseError}");
     Console.Error.WriteLine(
         "Usage: DbDataSync.TaskRunner --repo-root <path> --state-db <path> --replication <name> " +
-        "[--degree-of-parallelism <n>] [--backfill-parallelism <n>]");
+        "[--degree-of-parallelism <n>] [--bulk-load-parallelism <n>]");
     return (int)ExitCode.ConfigError;
 }
 

@@ -67,7 +67,7 @@ public sealed class StateOwnershipTests
         };
 
         var startInfo = ProcessSupervisor.BuildStartInfo(
-            options, "sales", "http://127.0.0.1:5891", token, changeParallelism: 4, backfillParallelism: 4);
+            options, "sales", "http://127.0.0.1:5891", token, changeParallelism: 4, bulkLoadParallelism: 4);
 
         Assert.DoesNotContain(token, startInfo.ArgumentList);
         Assert.DoesNotContain(token, startInfo.Arguments);
@@ -95,16 +95,16 @@ public sealed class StateOwnershipTests
         };
 
         var startInfo = ProcessSupervisor.BuildStartInfo(
-            options, "sales", "http://127.0.0.1:5891", "token", changeParallelism: 9, backfillParallelism: 3);
+            options, "sales", "http://127.0.0.1:5891", "token", changeParallelism: 9, bulkLoadParallelism: 3);
 
         var args = startInfo.ArgumentList;
         var change = args.IndexOf("--degree-of-parallelism");
         Assert.InRange(change, 0, args.Count - 2);
         Assert.Equal("9", args[change + 1]);
 
-        var backfill = args.IndexOf("--backfill-parallelism");
-        Assert.InRange(backfill, 0, args.Count - 2);
-        Assert.Equal("3", args[backfill + 1]);
+        var bulkLoad = args.IndexOf("--bulk-load-parallelism");
+        Assert.InRange(bulkLoad, 0, args.Count - 2);
+        Assert.Equal("3", args[bulkLoad + 1]);
     }
 
     private static string RepoRoot

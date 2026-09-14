@@ -28,7 +28,7 @@ public static class PipelineResolution
     /// <summary>
     /// The Kind a pass actually runs, most specific first.
     /// <para>
-    /// <paramref name="workItemKind"/> is the transient per-work-item override a Backfill already uses
+    /// <paramref name="workItemKind"/> is the transient per-work-item override a BulkLoad already uses
     /// — it stays the most specific, applied on top of the resolved stage exactly as it was applied on
     /// top of the replication's before mappings could override anything.
     /// </para>
@@ -51,6 +51,40 @@ public static class PipelineResolution
 
     public static BindingLevel LevelOfWriter(TableMappingConfig? mapping) =>
         mapping?.WriterOverride is null ? BindingLevel.Replication : BindingLevel.Mapping;
+
+    public static ReaderConfig BulkLoadReader(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        mapping?.BulkLoadReaderOverride ?? task.BulkLoad.Reader;
+
+    /// <summary>Null at both the mapping override and the replication's <see cref="BulkLoadConfig.Cache"/>
+    /// falls through to the fully-resolved Change Processing cache — see <see cref="BulkLoadConfig"/>'s
+    /// own doc comment for why that is the right default.</summary>
+    public static CacheConfig BulkLoadCache(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        mapping?.BulkLoadCacheOverride ?? task.BulkLoad.Cache ?? Cache(task, mapping);
+
+    public static WriterConfig BulkLoadWriter(ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        mapping?.BulkLoadWriterOverride ?? task.BulkLoad.Writer ?? Writer(task, mapping);
+
+    public static string BulkLoadReaderKind(string? workItemKind, ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        workItemKind ?? BulkLoadReader(task, mapping).Kind;
+
+    public static string BulkLoadCacheKind(string? workItemKind, ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        workItemKind ?? BulkLoadCache(task, mapping).Kind;
+
+    public static string BulkLoadWriterKind(string? workItemKind, ReplicationTaskConfig task, TableMappingConfig? mapping) =>
+        workItemKind ?? BulkLoadWriter(task, mapping).Kind;
+
+    /// <summary>Where a resolved Bulk Load stage came from, for a UI that wants to show INHERITED. Only
+    /// reports mapping-vs-replication, the same granularity <see cref="LevelOfReader"/> does — it does not
+    /// distinguish "replication's own BulkLoad.Cache" from "fell through to ChangeProcessing.Cache", which
+    /// is an internal resolution detail, not something an operator overrides differently.</summary>
+    public static BindingLevel LevelOfBulkLoadReader(TableMappingConfig? mapping) =>
+        mapping?.BulkLoadReaderOverride is null ? BindingLevel.Replication : BindingLevel.Mapping;
+
+    public static BindingLevel LevelOfBulkLoadCache(TableMappingConfig? mapping) =>
+        mapping?.BulkLoadCacheOverride is null ? BindingLevel.Replication : BindingLevel.Mapping;
+
+    public static BindingLevel LevelOfBulkLoadWriter(TableMappingConfig? mapping) =>
+        mapping?.BulkLoadWriterOverride is null ? BindingLevel.Replication : BindingLevel.Mapping;
 
     /// <summary>The resolved <see cref="ReconcileConfig"/> itself — phase 125's two-level override,
     /// same rule as <see cref="Reader"/>/<see cref="Cache"/>/<see cref="Writer"/> above.</summary>

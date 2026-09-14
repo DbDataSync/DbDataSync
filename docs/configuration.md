@@ -348,7 +348,7 @@ argument parser; an unrecognized flag is a hard error, not a silent ignore.
 | `--state-db <path>` | yes | — |
 | `--replication <name>` | yes | — |
 | `--degree-of-parallelism <n>` | no | `4` |
-| `--backfill-parallelism <n>` | no | `4` |
+| `--bulk-load-parallelism <n>` | no | `4` |
 | `--state-endpoint <url>` | no | falls back to the `DBDATASYNC_STATE_ENDPOINT` environment variable |
 | `--state-grace-seconds <n>` | no | `60` |
 
@@ -356,11 +356,11 @@ The worker runs **two independent lanes** (phase-108), each with its own bounded
 pool of consumers:
 
 - `--degree-of-parallelism` sizes the **change-processing lane** — incremental (`Primary`) passes.
-- `--backfill-parallelism` sizes the **backfill lane** — backfill segments and verifications.
+- `--bulk-load-parallelism` sizes the **bulk load lane** — bulk load segments and verifications.
 
-A long-running reload on the backfill lane can no longer take a slot an incremental pass needs. When
+A long-running reload on the bulk load lane can no longer take a slot an incremental pass needs. When
 the API spawns the runner it always passes both, from `changeProcessing.degreeOfParallelism` and
-`changeProcessing.backfillDegreeOfParallelism` in `task.yaml` (both on the replication's Schedule
+`changeProcessing.bulkLoadDegreeOfParallelism` in `task.yaml` (both on the replication's Schedule
 card in the UI); the `4`s above are the fallback for a runner started by hand and for a replication
 whose config does not set them. Each number is table mappings processed at once within that lane;
 a single mapping never occupies more than one slot in a lane regardless of the number, and the total
@@ -371,6 +371,44 @@ the parent API when it spawns a runner, never something an operator sets by hand
 
 - `DBDATASYNC_STATE_ENDPOINT` — the loopback address of the process that owns the state store.
 - `DBDATASYNC_RUNNER_TOKEN` — the runner's auth token for that loopback connection.
+
+### The Bulk Load pipeline (`task.yaml` `bulkLoad:`)
+
+A second pipeline beside `changeProcessing:` — phase 133 — used for an on-demand reload (what the
+Bulk Load trigger queues) and, from phase 134, for an initial load:
+
+```yaml
+bulkLoad:
+  reader:
+    kind: BatchReload
+  cache:      # optional — null inherits changeProcessing.cache
+  writer:     # optional — null inherits changeProcessing.writer
+```
+
+- `reader` defaults to the `BatchReload` Kind every driver is expected to offer for a whole-table
+  read, so a replication that writes nothing under `bulkLoad:` still gets a working pipeline.
+- `cache` and `writer` default to unset (`null`) and, when unset, inherit the replication's resolved
+  `changeProcessing.cache`/`changeProcessing.writer` — a bulk (re)load into the same target table
+  naturally uses the same staging and write mechanism as change processing unless an operator wants
+  something different (typically an upsert-only writer for a first load).
+- Same per-mapping override shape as `changeProcessing:` — a table mapping can set its own
+  `bulkLoadReaderOverride`/`bulkLoadCacheOverride`/`bulkLoadWriterOverride`, each independent and each
+  atomic (Kind and options together, never merged).
+- The writer is warned about, not constrained, when it does not support reconciliation: an upsert-only
+  writer is correct and cheaper for a first load into a table that was just created, since there is
+  nothing yet to remove. The mapping editor's Pipeline card surfaces the capability; saving does not
+  refuse it.
+- Segmenting is **not** part of this — it stays on the table mapping's own `defaultSegmenting`, because
+  how a table divides is a fact about the table, not about a pipeline.
+
+**Breaking rename, no migration.** Phase 133 renamed `Backfill` to `BulkLoad` everywhere — the
+`RunKind`/`RunLane` enum members, the `BulkLoadBatches` table and `TaskRuns.BulkLoadBatchId` column,
+and `changeProcessing.backfillDegreeOfParallelism` (now `changeProcessing.bulkLoadDegreeOfParallelism`,
+see above). There is deliberately no schema migration and no old-key fallback: an existing state
+database still has a table and column named `Backfill*`, which the renamed code no longer recognizes,
+and an existing `task.yaml` carrying the old `backfillDegreeOfParallelism` key simply has that key
+ignored by the deserializer. **Every existing state database, and any config using the old key, must
+be recreated rather than upgraded.**
 
 ## Secrets
 

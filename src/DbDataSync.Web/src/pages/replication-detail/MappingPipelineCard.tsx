@@ -23,17 +23,31 @@ const STAGES: { id: Stage; label: string }[] = [
   { id: 'writer', label: 'Writer' },
 ]
 
-/** The three overrides, as the mapping stores them. Null on any one of them means inherit. */
+/** Which of the two pipelines is being edited — Change Processing (the ongoing incremental sync) or
+ * Bulk Load (an on-demand reload, and — from phase 134 — an initial load). */
+type Pipeline = 'changeProcessing' | 'bulkLoad'
+
+const PIPELINES: { id: Pipeline; label: string }[] = [
+  { id: 'changeProcessing', label: 'Change Processing' },
+  { id: 'bulkLoad', label: 'Bulk Load' },
+]
+
+/** The six overrides, as the mapping stores them — three per pipeline. Null on any one of them means
+ * inherit. */
 export interface PipelineOverrides {
   readerOverride: ReaderConfig | null
   cacheOverride: CacheConfig | null
   writerOverride: WriterConfig | null
+  bulkLoadReaderOverride: ReaderConfig | null
+  bulkLoadCacheOverride: CacheConfig | null
+  bulkLoadWriterOverride: WriterConfig | null
 }
 
-const FIELD_OF: Record<Stage, keyof PipelineOverrides> = {
-  reader: 'readerOverride',
-  cache: 'cacheOverride',
-  writer: 'writerOverride',
+const FIELD_OF: Record<Pipeline, Record<Stage, keyof PipelineOverrides>> = {
+  changeProcessing: { reader: 'readerOverride', cache: 'cacheOverride', writer: 'writerOverride' },
+  bulkLoad: {
+    reader: 'bulkLoadReaderOverride', cache: 'bulkLoadCacheOverride', writer: 'bulkLoadWriterOverride',
+  },
 }
 
 /**
@@ -66,6 +80,7 @@ export function MappingPipelineCard({
   defaultReadIntent: ReadIntent | null
   onChangeDefaultReadIntent: (next: ReadIntent | null) => void
 }) {
+  const [pipeline, setPipeline] = useState<Pipeline>('changeProcessing')
   const [stage, setStage] = useState<Stage>('writer')
   const { data: scripts } = useScripts()
 
@@ -75,20 +90,33 @@ export function MappingPipelineCard({
   const sourceCapabilities = useCapabilities(source.connectionName || undefined)
   const targetCapabilities = useCapabilities(target.connectionName || undefined)
 
-  const inherited = task?.changeProcessing
-  const override = overrides[FIELD_OF[stage]]
+  // The Bulk Load pipeline's cache/writer fall through to Change Processing's resolved values when
+  // the replication's own `bulkLoad.cache`/`.writer` are null — mirroring what `PipelineResolution`
+  // does server-side (`BulkLoadCache`/`BulkLoadWriter`), so the INHERITED hint text stays accurate.
+  // The reader has no such fallback: it already defaults to `BatchReload` at the replication level.
+  const inherited = task && (
+    pipeline === 'changeProcessing'
+      ? task.changeProcessing
+      : {
+          reader: task.bulkLoad.reader,
+          cache: task.bulkLoad.cache ?? task.changeProcessing.cache,
+          writer: task.bulkLoad.writer ?? task.changeProcessing.writer,
+        }
+  )
+  const field = FIELD_OF[pipeline][stage]
+  const override = overrides[field]
   const effective = override ?? (inherited ? inherited[stage] : undefined)
   const overriding = override !== null
 
   const setStageValue = (patch: object) =>
-    onChange({ ...overrides, [FIELD_OF[stage]]: { ...effective, ...patch } })
+    onChange({ ...overrides, [field]: { ...effective, ...patch } })
 
   const toggleOverride = () =>
     onChange({
       ...overrides,
       // Off drops back to inheriting; on starts from whatever is currently in effect, so it is a
       // starting point rather than a reset. The same gesture `InheritableToggle` makes for a boolean.
-      [FIELD_OF[stage]]: overriding ? null : structuredClone(effective ?? { kind: '', options: {} }),
+      [field]: overriding ? null : structuredClone(effective ?? { kind: '', options: {} }),
     })
 
   // KeyReconcile/KeyReconcileDelete (phase 124) exist only for the delete-diff sweep's own trigger —
@@ -107,11 +135,14 @@ export function MappingPipelineCard({
 
   /** What each stage actually runs, for the strip along the top — this mapping's, or the one it inherits. */
   const kindOf = (id: Stage) =>
-    (overrides[FIELD_OF[id]] ?? (inherited ? inherited[id] : undefined))?.kind || '…'
+    (overrides[FIELD_OF[pipeline][id]] ?? (inherited ? inherited[id] : undefined))?.kind || '…'
+
+  const writerField = FIELD_OF[pipeline].writer
+  const writerOverride = overrides[writerField]
 
   // Presence, not emptiness: an override toggled on and not yet typed into is still an override
   // somebody is in the middle of making, and collapsing it to "inherit" would undo the click.
-  const stated = overrides.writerOverride?.options !== undefined && NATURAL_KEY in overrides.writerOverride.options
+  const stated = writerOverride?.options !== undefined && NATURAL_KEY in writerOverride.options
 
   /**
    * Stating a natural key *is* overriding the writer — there is nowhere else for the value to live —
@@ -119,12 +150,12 @@ export function MappingPipelineCard({
    * key back out, which is what makes the stage derive again.
    */
   const setNaturalKey = (next: string | null) => {
-    const base = overrides.writerOverride ?? structuredClone(inherited!.writer)
+    const base = writerOverride ?? structuredClone(inherited!.writer)
     const options = { ...base.options }
     if (next === null) delete options[NATURAL_KEY]
     else options[NATURAL_KEY] = next
 
-    onChange({ ...overrides, writerOverride: { ...base, options } })
+    onChange({ ...overrides, [writerField]: { ...base, options } })
   }
 
   const kinds = kindsFor(stage)
@@ -141,25 +172,43 @@ export function MappingPipelineCard({
     <>
       <ErrorBanner error={sourceCapabilities.error ?? targetCapabilities.error} />
       <div className="card" data-testid="mapping-pipeline">
-        <div className="card-head" style={{ alignItems: 'flex-start', paddingTop: 11 }}>
-          <span className="card-title" style={{ width: 64, flex: 'none', paddingTop: 10 }}>Pipeline</span>
-          <div className="stages">
-            {STAGES.map((s, i) => (
-              <span key={s.id} style={{ display: 'contents' }}>
-                {i > 0 && <span className="arrow">→</span>}
-                <button
-                  type="button"
-                  className={`stage ${stage === s.id ? 'active' : ''}`}
-                  onClick={() => setStage(s.id)}
-                  data-testid={`mapping-stage-${s.id}`}
-                >
-                  <span className="stage-name">{s.label}</span>
-                  <span className="stage-impl">{kindOf(s.id)}</span>
-                </button>
-              </span>
+        <div className="card-head" style={{ alignItems: 'flex-start', paddingTop: 11, flexDirection: 'column', gap: 10 }}>
+          <div className="row" style={{ gap: 6, alignSelf: 'center' }}>
+            {PIPELINES.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`stage ${pipeline === p.id ? 'active' : ''}`}
+                // Switching pipelines lands on Writer, same as the card's own initial stage — the
+                // stage most operators come here to change (a reload's writer is usually the one
+                // thing that differs from Change Processing's).
+                onClick={() => { setPipeline(p.id); setStage('writer') }}
+                data-testid={`mapping-pipeline-${p.id}`}
+              >
+                <span className="stage-name">{p.label}</span>
+              </button>
             ))}
           </div>
-          <span style={{ width: 64, flex: 'none' }} />
+          <div className="row" style={{ width: '100%', alignItems: 'flex-start' }}>
+            <span className="card-title" style={{ width: 64, flex: 'none', paddingTop: 10 }}>Pipeline</span>
+            <div className="stages">
+              {STAGES.map((s, i) => (
+                <span key={s.id} style={{ display: 'contents' }}>
+                  {i > 0 && <span className="arrow">→</span>}
+                  <button
+                    type="button"
+                    className={`stage ${stage === s.id ? 'active' : ''}`}
+                    onClick={() => setStage(s.id)}
+                    data-testid={`mapping-stage-${s.id}`}
+                  >
+                    <span className="stage-name">{s.label}</span>
+                    <span className="stage-impl">{kindOf(s.id)}</span>
+                  </button>
+                </span>
+              ))}
+            </div>
+            <span style={{ width: 64, flex: 'none' }} />
+          </div>
         </div>
 
         <div className="card-body" style={{ padding: 14, gap: 12 }}>
@@ -229,7 +278,7 @@ export function MappingPipelineCard({
             <NaturalKeyField
               replicationName={replicationName}
               mappingName={mappingName}
-              value={overrides.writerOverride?.options?.[NATURAL_KEY] ?? ''}
+              value={writerOverride?.options?.[NATURAL_KEY] ?? ''}
               stated={stated}
               onChange={setNaturalKey}
             />

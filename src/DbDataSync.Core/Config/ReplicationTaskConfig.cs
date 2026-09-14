@@ -25,6 +25,11 @@ public sealed class ReplicationTaskConfig
     public required SchedulingConfig Scheduling { get; set; }
     public required ChangeProcessingConfig ChangeProcessing { get; set; }
 
+    /// <summary>The Bulk Load pipeline — phase 133. Defaults to a working pipeline (BatchReload reader,
+    /// cache/writer inherited from <see cref="ChangeProcessing"/>) so no existing replication config needs
+    /// to add anything for this to keep working.</summary>
+    public BulkLoadConfig BulkLoad { get; set; } = new();
+
     /// <summary>
     /// The source and target this replication's table mappings read from and write to. A mapping
     /// inherits these unless it sets its own — see <see cref="TableSpec"/>.

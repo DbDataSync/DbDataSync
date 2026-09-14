@@ -256,13 +256,13 @@ public sealed class RunMetricsStoreTests : IDisposable
     /// every total, so the two are asked about separately.
     /// </summary>
     [Fact]
-    public void RunKind_SeparatesABackfillFromTheIncrementalPasses()
+    public void RunKind_SeparatesABulkLoadFromTheIncrementalPasses()
     {
         AddRun(_now.AddHours(-1), TimeSpan.FromSeconds(1), rowsWritten: 100);
-        AddRun(_now.AddHours(-1), TimeSpan.FromMinutes(30), rowsWritten: 10_000_000, kind: RunKind.Backfill);
+        AddRun(_now.AddHours(-1), TimeSpan.FromMinutes(30), rowsWritten: 10_000_000, kind: RunKind.BulkLoad);
 
         Assert.Equal(100, Get(TimeSpan.FromHours(24)).RowsWritten);
-        Assert.Equal(10_000_000, Get(TimeSpan.FromHours(24), RunKind.Backfill).RowsWritten);
+        Assert.Equal(10_000_000, Get(TimeSpan.FromHours(24), RunKind.BulkLoad).RowsWritten);
         Assert.Equal(10_000_100, Get(TimeSpan.FromHours(24), kind: null).RowsWritten);
     }
 

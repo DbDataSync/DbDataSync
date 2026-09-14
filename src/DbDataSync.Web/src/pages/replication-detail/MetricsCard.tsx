@@ -17,7 +17,7 @@ const WINDOWS: { id: MetricsWindow; label: string }[] = [
  * zero is inventing a reading, which is why phase 15 shipped none of this rather than shipping
  * placeholders.
  *
- * **Primary passes only.** A backfill moving ten million rows next to incremental passes moving
+ * **Primary passes only.** A bulk load moving ten million rows next to incremental passes moving
  * hundreds dominates every total it is added to, so it is a different question and gets a different
  * answer. The endpoint takes the kind; this card asks the one an operator means by "is it working".
  */

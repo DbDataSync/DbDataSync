@@ -14,7 +14,7 @@ public static class PrimaryPassOutcome
 {
     /// <summary>
     /// Called once per <c>Primary</c> pass, after the target write has committed — never before, and
-    /// never for a Backfill or a Verification. A pass that read nothing new
+    /// never for a BulkLoad or a Verification. A pass that read nothing new
     /// (<paramref name="newWatermark"/> null) changes nothing here: the watermark stays where it was
     /// and so does the intent, for the same reason a failed pass leaves both alone — there is nothing
     /// new to record.

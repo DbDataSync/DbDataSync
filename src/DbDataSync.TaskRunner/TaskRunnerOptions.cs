@@ -10,7 +10,7 @@ namespace DbDataSync.TaskRunner;
 /// <param name="StateGraceSeconds">How long to keep retrying an unreachable owner before journalling
 /// and shutting down. The owner is this process's parent, so a restart should be far shorter.</param>
 /// <param name="DegreeOfParallelism">Consumers on the change-processing lane (<c>RunKind.Primary</c>).</param>
-/// <param name="BackfillDegreeOfParallelism">Consumers on the backfill lane (<c>RunKind.Backfill</c> +
+/// <param name="BulkLoadDegreeOfParallelism">Consumers on the bulk load lane (<c>RunKind.BulkLoad</c> +
 /// <c>RunKind.Verification</c>). Its own budget so a big reload never takes a slot an incremental pass
 /// needs — see phase-108.</param>
 public sealed record TaskRunnerOptions(
@@ -18,7 +18,7 @@ public sealed record TaskRunnerOptions(
     string StateDbPath,
     string Replication,
     int DegreeOfParallelism = 4,
-    int BackfillDegreeOfParallelism = 4,
+    int BulkLoadDegreeOfParallelism = 4,
     string? StateEndpoint = null,
     int StateGraceSeconds = 60)
 {
@@ -28,7 +28,7 @@ public sealed record TaskRunnerOptions(
     /// DbDataSync.Core.Config.ConfigPaths uses.</summary>
     public string ConfigRoot => Path.Combine(RepoRoot, "config");
 
-    public WorkerLanes Lanes => new(DegreeOfParallelism, BackfillDegreeOfParallelism);
+    public WorkerLanes Lanes => new(DegreeOfParallelism, BulkLoadDegreeOfParallelism);
 
     public static bool TryParse(string[] args, out TaskRunnerOptions? options, out string? error)
     {
@@ -36,7 +36,7 @@ public sealed record TaskRunnerOptions(
         string? stateDbPath = null;
         string? replication = null;
         int? degreeOfParallelism = null;
-        int? backfillDegreeOfParallelism = null;
+        int? bulkLoadDegreeOfParallelism = null;
         string? stateEndpoint = null;
         int? graceSeconds = null;
 
@@ -74,14 +74,14 @@ public sealed record TaskRunnerOptions(
                     }
                     degreeOfParallelism = parsedDop;
                     break;
-                case "--backfill-parallelism" when i + 1 < args.Length:
-                    if (!int.TryParse(args[++i], out var parsedBackfillDop) || parsedBackfillDop < 1)
+                case "--bulk-load-parallelism" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], out var parsedBulkLoadDop) || parsedBulkLoadDop < 1)
                     {
                         options = null;
-                        error = $"'--backfill-parallelism' value '{args[i]}' must be a positive integer.";
+                        error = $"'--bulk-load-parallelism' value '{args[i]}' must be a positive integer.";
                         return false;
                     }
-                    backfillDegreeOfParallelism = parsedBackfillDop;
+                    bulkLoadDegreeOfParallelism = parsedBulkLoadDop;
                     break;
                 default:
                     options = null;
@@ -104,7 +104,7 @@ public sealed record TaskRunnerOptions(
         options = new TaskRunnerOptions(
             repoRoot!, stateDbPath!, replication!,
             degreeOfParallelism ?? DefaultDegreeOfParallelism,
-            backfillDegreeOfParallelism ?? DefaultDegreeOfParallelism,
+            bulkLoadDegreeOfParallelism ?? DefaultDegreeOfParallelism,
             // The endpoint may also arrive by environment, beside the token — see StateProtocol.
             stateEndpoint ?? Environment.GetEnvironmentVariable(DbDataSync.State.Remote.StateProtocol.EndpointEnvironmentVariable),
             graceSeconds ?? 60);

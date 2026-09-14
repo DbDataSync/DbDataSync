@@ -102,6 +102,9 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     readerOverride: structuredClone(existing?.readerOverride ?? null),
     cacheOverride: structuredClone(existing?.cacheOverride ?? null),
     writerOverride: structuredClone(existing?.writerOverride ?? null),
+    bulkLoadReaderOverride: structuredClone(existing?.bulkLoadReaderOverride ?? null),
+    bulkLoadCacheOverride: structuredClone(existing?.bulkLoadCacheOverride ?? null),
+    bulkLoadWriterOverride: structuredClone(existing?.bulkLoadWriterOverride ?? null),
   })
   // Null inherits the replication's DefaultReadIntent — see phase 100/102.
   const [defaultReadIntent, setDefaultReadIntent] = useState<ReadIntent | null>(
@@ -214,6 +217,9 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     readerOverride: pipeline.readerOverride,
     cacheOverride: pipeline.cacheOverride,
     writerOverride: pipeline.writerOverride,
+    bulkLoadReaderOverride: pipeline.bulkLoadReaderOverride,
+    bulkLoadCacheOverride: pipeline.bulkLoadCacheOverride,
+    bulkLoadWriterOverride: pipeline.bulkLoadWriterOverride,
   })
   const savedShape = existing && canonicalJson({
     name: existing.name,
@@ -229,6 +235,9 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     readerOverride: existing.readerOverride ?? null,
     cacheOverride: existing.cacheOverride ?? null,
     writerOverride: existing.writerOverride ?? null,
+    bulkLoadReaderOverride: existing.bulkLoadReaderOverride ?? null,
+    bulkLoadCacheOverride: existing.bulkLoadCacheOverride ?? null,
+    bulkLoadWriterOverride: existing.bulkLoadWriterOverride ?? null,
   })
   const dirty = !existing || draftShape !== savedShape
 
@@ -546,7 +555,7 @@ export function MappingPipelineTab() {
  * What this mapping measures about its own passes — phase 62, surfacing phase 59's opt-in trace.
  *
  * **Its own tab rather than folded into one of the others**, and the reason is what the other tabs
- * are: Column Mapping, Custom Transforms, Backfill and Provisioning all describe what this
+ * are: Column Mapping, Custom Transforms, Bulk Load and Provisioning all describe what this
  * mapping *is* and what it will do. Tracing describes how it is *observed* — it changes no behaviour
  * and produces no different result, only numbers about the pass. It sits beside Preview SQL and
  * Verify, which are the other two answers to "what is this mapping actually doing", and it is where

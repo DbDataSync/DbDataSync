@@ -143,3 +143,22 @@ off the value being renamed.
 - **Whether the work-item transient Kind override is still needed** once a real configured default
   exists. A one-off "reload this segment with a different writer" may or may not be a thing anyone
   does; if not, it is dead weight that this phase could remove rather than re-point.
+
+## Implementation notes
+
+- **`BulkLoadConfig` is not `required` on `ReplicationTaskConfig`**, unlike `ChangeProcessingConfig` —
+  it defaults to a working pipeline so no existing replication config needs to change for this to keep
+  working. `Reader` defaults to `BatchReload`; `Cache`/`Writer` default to `null` and fall through to
+  `ChangeProcessingConfig`'s resolved values (`PipelineResolution.BulkLoadCache`/`BulkLoadWriter`).
+- **`ThrowIfBulkLoadInvalid` validates the mapping's fully *resolved* Bulk Load pipeline
+  unconditionally** — not only when a mapping overrides it — since even the replication-level default
+  (a reader defaulting to `BatchReload`) can be one a given driver does not support.
+- **`RunLane` stays two-valued** (`ChangeProcessing`/`BulkLoad`), renamed but not split further, despite
+  `Verification` and `ReconcileDeletes` also riding the `BulkLoad` lane — this was one of the open
+  questions above; resolved as "keep as-is, the name still describes what dominates the lane's usage."
+- **The work-item transient Kind override mechanism (`WorkItemKinds`) is kept, not removed** — the
+  other open question above — because it is still how a one-off Bulk Load trigger picks a different
+  reader/cache/writer than the mapping's configured default, which the UI form still needs.
+- **`BackfillBatchStore.GetRecentBackfills` was renamed to `GetRecentBulkLoads`** for full-rename
+  consistency, even though the phase 134 doc (written the same day) cites the old method name — phase
+  134's implementer should expect `BulkLoadBatchStore.GetRecentBulkLoads`, not `GetRecentBackfills`.

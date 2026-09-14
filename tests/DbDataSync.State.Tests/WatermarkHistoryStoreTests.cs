@@ -81,7 +81,7 @@ public sealed class WatermarkHistoryStoreTests : IDisposable
 
     /// <summary>A run kind that produces no position at all leaves both columns alone.</summary>
     [Theory]
-    [InlineData(RunKind.Backfill)]
+    [InlineData(RunKind.BulkLoad)]
     [InlineData(RunKind.Verification)]
     public void ARunKindWithNoWatermark_LeavesBothColumnsNull(RunKind kind)
     {

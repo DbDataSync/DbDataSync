@@ -323,4 +323,75 @@ public sealed class ParameterCheckTests(TestApiFactory factory) : IClassFixture<
 
         response.EnsureSuccessStatusCode();
     }
+
+    // ---- The Bulk Load pipeline (phase 133) ----
+
+    private async Task<string> SaveDuckDbConnectionAsync()
+    {
+        var name = $"param-duck-{Guid.NewGuid():N}";
+        (await _client.PutAsJsonAsync($"/api/connections/{name}", new ConnectionInput
+        {
+            Name = name,
+            DriverType = DriverIds.DuckDb,
+            ConnectionString = ":memory:",
+            AuthMode = AuthMode.None,
+        }, JsonOptions)).EnsureSuccessStatusCode();
+        return name;
+    }
+
+    /// <summary>
+    /// Phase 133: the mapping's fully-resolved Bulk Load pipeline is checked unconditionally, unlike
+    /// the Change Processing override check above — so even the replication-level default (a reader
+    /// defaulting to <c>BatchReload</c>) is refused when the source driver does not offer it. DuckDB's
+    /// only reader is its own query reader; it has no <c>BatchReload</c> equivalent, matching the
+    /// phase doc's own example of a scripted source.
+    /// </summary>
+    [Fact]
+    public async Task AMappingsDefaultBulkLoadReader_WhenTheSourceDriverDoesNotOfferIt_IsRefusedNamingTheMapping()
+    {
+        var sourceConnection = await SaveDuckDbConnectionAsync();
+        var targetConnection = await SaveConnectionAsync();
+        var replicationName = $"param-repl-{Guid.NewGuid():N}";
+        (await _client.PutAsJsonAsync($"/api/replications/{replicationName}", new ReplicationTaskConfig
+        {
+            Name = replicationName,
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
+            Endpoints = new TaskEndpoints
+            {
+                Source = new EndpointRef { ConnectionName = sourceConnection, Database = "main" },
+                Target = new EndpointRef { ConnectionName = targetConnection, Database = "App" },
+            },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = "DuckDbQuery", Options = { ["query"] = "select 1 as Id" } },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+            },
+            // BulkLoad says nothing — it defaults to Reader = BatchReload, which DuckDB does not offer.
+        }, JsonOptions)).EnsureSuccessStatusCode();
+
+        var response = await SaveMappingAsync(replicationName, _ => { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("dbo.Orders", body);
+        Assert.Contains("BatchReload", body);
+    }
+
+    /// <summary>
+    /// The writer is warned about, not constrained, when it does not support reconciliation (the phase
+    /// doc's own decision): an upsert-only writer is correct and cheaper for a first load into a table
+    /// that was just created, so a resolved Bulk Load writer without <c>SupportsReconciliation</c> —
+    /// <c>MsSqlMerge</c>, inherited here from Change Processing since Bulk Load names no writer of its
+    /// own — still saves cleanly.
+    /// </summary>
+    [Fact]
+    public async Task AResolvedBulkLoadWriterWithoutReconciliation_StillSavesCleanly()
+    {
+        var replicationName = await SaveReplicationForMappingsAsync(await SaveConnectionAsync());
+
+        var response = await SaveMappingAsync(replicationName, _ => { });
+
+        response.EnsureSuccessStatusCode();
+    }
 }

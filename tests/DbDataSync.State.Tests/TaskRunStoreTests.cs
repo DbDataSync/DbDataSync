@@ -194,15 +194,15 @@ public sealed class TaskRunStoreTests : IDisposable
     public void GetRunHistory_FilteredByRunKind_ExcludesTheOtherKind()
     {
         var primary = QueueAndBegin("crm-sync", "orders", runKind: RunKind.Primary);
-        var backfill = QueueAndBegin("crm-sync", "orders", runKind: RunKind.Backfill);
+        var bulkLoad = QueueAndBegin("crm-sync", "orders", runKind: RunKind.BulkLoad);
 
         var primaryOnly = _store.GetRunHistory("crm-sync", RunKind.Primary);
         Assert.Single(primaryOnly);
         Assert.Equal(primary, primaryOnly[0].RunId);
 
-        var backfillOnly = _store.GetRunHistory("crm-sync", RunKind.Backfill);
-        Assert.Single(backfillOnly);
-        Assert.Equal(backfill, backfillOnly[0].RunId);
+        var bulkLoadOnly = _store.GetRunHistory("crm-sync", RunKind.BulkLoad);
+        Assert.Single(bulkLoadOnly);
+        Assert.Equal(bulkLoad, bulkLoadOnly[0].RunId);
 
         Assert.Equal(2, _store.GetRunHistory("crm-sync").Count);
     }
@@ -238,13 +238,13 @@ public sealed class TaskRunStoreTests : IDisposable
     [Fact]
     public void GetRunHistory_CombinesKindMappingAndStatusFilters()
     {
-        var match = QueueAndBegin("crm-sync", "orders", runKind: RunKind.Backfill);
+        var match = QueueAndBegin("crm-sync", "orders", runKind: RunKind.BulkLoad);
         _store.CompleteRun(match, RunStatus.Failed, 0, 0, "boom");
 
         var wrongKind = QueueAndBegin("crm-sync", "orders", runKind: RunKind.Primary);
         _store.CompleteRun(wrongKind, RunStatus.Failed, 0, 0, "boom");
 
-        var wrongMapping = QueueAndBegin("crm-sync", "customers", runKind: RunKind.Backfill);
+        var wrongMapping = QueueAndBegin("crm-sync", "customers", runKind: RunKind.BulkLoad);
         _store.CompleteRun(wrongMapping, RunStatus.Failed, 0, 0, "boom");
 
         // A distinct segment label, not just QueueAndBegin again with the same (kind, mapping): the
@@ -252,12 +252,12 @@ public sealed class TaskRunStoreTests : IDisposable
         // match's key here — the one dimension this row is deliberately identical to it on — would
         // dedupe onto match's own still-open WorkQueue row and silently overwrite its status instead of
         // creating a second run.
-        var wrongStatus = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-2");
+        var wrongStatus = _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "seg-2");
         _store.BeginRun(wrongStatus, pid: null);
         _store.CompleteRun(wrongStatus, RunStatus.Succeeded, 1, 1, null);
 
         var combined = _store.GetRunHistory(
-            "crm-sync", runKind: RunKind.Backfill, mappingName: "orders", status: RunStatus.Failed);
+            "crm-sync", runKind: RunKind.BulkLoad, mappingName: "orders", status: RunStatus.Failed);
 
         Assert.Single(combined);
         Assert.Equal(match, combined[0].RunId);
@@ -420,7 +420,7 @@ public sealed class TaskRunStoreTests : IDisposable
         Thread.Sleep(5);
         var latestOrders = QueueAndBegin("crm-sync", "orders");
         QueueAndBegin("crm-sync", "customers");
-        QueueAndBegin("crm-sync", "products", runKind: RunKind.Backfill); // Backfill excluded
+        QueueAndBegin("crm-sync", "products", runKind: RunKind.BulkLoad); // BulkLoad excluded
 
         var lastEnqueues = _store.GetLastPrimaryEnqueueByMapping("crm-sync");
 

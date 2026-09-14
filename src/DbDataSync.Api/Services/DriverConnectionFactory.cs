@@ -23,8 +23,8 @@ public interface IConnectionFactory
 /// <summary>
 /// Opens a driver connection for a configured connection name, resolving its credential through
 /// SecretStore at connect time. The API process legitimately opens driver connections for work that
-/// isn't data movement — schema browsing (<see cref="MetadataService"/>) and computing a backfill's
-/// segment bounds (<see cref="BackfillService"/>) — and this is the one place that happens, so
+/// isn't data movement — schema browsing (<see cref="MetadataService"/>) and computing a bulk load's
+/// segment bounds (<see cref="BulkLoadService"/>) — and this is the one place that happens, so
 /// credential resolution isn't repeated per caller.
 /// </summary>
 public sealed class DriverConnectionFactory(
@@ -84,7 +84,7 @@ public sealed class DriverConnectionFactory(
     /// The auto-seed half of phase 109h's item 3: this is "the connection-creation path" the phase
     /// doc's own open question named — resolved, at implementation time, as *opening* a connection
     /// (this method, the one seam every real use of a connection already goes through: the Test button,
-    /// schema browsing, backfill segmenting, and every provisioning check) rather than *saving* one
+    /// schema browsing, bulk load segmenting, and every provisioning check) rather than *saving* one
     /// (<c>ConnectionsController.Upsert</c>). Saving a connection's config never touches the driver's
     /// typed provider types at all — nothing breaks until something actually opens it — and hooking
     /// Upsert instead would have charged a real <c>dotnet publish</c>-backed install to every test that

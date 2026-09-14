@@ -109,7 +109,7 @@ public sealed record CustomSegment(string StrategyName) : BatchReloadSegment
 /// <summary>
 /// The one place <see cref="BatchReloadSegment"/> is serialized, so the polymorphic discriminator is
 /// configured identically at every round-trip point: the ephemeral <c>options["segment"]</c> channel
-/// (injected per work item) and the array a backfill request carries over HTTP.
+/// (injected per work item) and the array a bulk load request carries over HTTP.
 /// <para>
 /// The persisted form is no longer one of them. A mapping's stored segmenting is YAML now — see
 /// <see cref="BatchReloadSegmentYamlConverter"/> — because it gained a real editor and stopped being

@@ -185,15 +185,15 @@ public sealed class SchedulerServiceHoldTests(TestApiFactory factory) : IClassFi
     }
 
     /// <summary>
-    /// The open question resolved: a hold stops a scheduled <c>Primary</c> pass, never a <c>Backfill</c>
-    /// — a backfill does not use the cursor a hold protects, and is a legitimate way to recover a held
+    /// The open question resolved: a hold stops a scheduled <c>Primary</c> pass, never a <c>BulkLoad</c>
+    /// — a bulk load does not use the cursor a hold protects, and is a legitimate way to recover a held
     /// mapping. <see cref="SchedulerService.FilterHeld"/> only ever runs over mappings due for a
-    /// scheduled Primary pass; <c>BackfillService</c>'s own enqueue path is untouched and never
+    /// scheduled Primary pass; <c>BulkLoadService</c>'s own enqueue path is untouched and never
     /// consults <see cref="ReadHold"/> at all, so this needs no scheduler involvement to prove — a
-    /// direct enqueue is the same one <c>BackfillService</c> makes.
+    /// direct enqueue is the same one <c>BulkLoadService</c> makes.
     /// </summary>
     [Fact]
-    public async Task AHeldMappings_BackfillStillEnqueues()
+    public async Task AHeldMappings_BulkLoadStillEnqueues()
     {
         var (task, mapping) = await SetUpHeldMappingAsync();
         var watermarks = factory.Services.GetRequiredService<ChangeWatermarkStore>();
@@ -201,7 +201,7 @@ public sealed class SchedulerServiceHoldTests(TestApiFactory factory) : IClassFi
         var key = WatermarkKeyFor(task, mapping);
         watermarks.SetReadHold(task.Name, mapping.Name, key, ReadHold.PositionExpired);
 
-        var runId = workQueue.Enqueue(task.Name, RunKind.Backfill, mapping.Name, "full");
+        var runId = workQueue.Enqueue(task.Name, RunKind.BulkLoad, mapping.Name, "full");
 
         var run = factory.Services.GetRequiredService<TaskRunStore>().GetRun(runId);
         Assert.NotNull(run);

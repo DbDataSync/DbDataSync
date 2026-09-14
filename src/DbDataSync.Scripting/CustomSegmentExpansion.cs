@@ -59,7 +59,7 @@ public sealed class CustomSegmentExpansion(SegmentingStrategyRunner runner)
         return expanded;
     }
 
-    /// <summary>Every candidate, selected or not — what a Backfill checklist renders, before an
+    /// <summary>Every candidate, selected or not — what a Bulk Load checklist renders, before an
     /// operator has said which of them to run.</summary>
     public async Task<IReadOnlyList<SegmentCandidate>> ProposeAsync(
         SegmentingStrategyConfig strategy,
@@ -95,7 +95,7 @@ public sealed class CustomSegmentExpansion(SegmentingStrategyRunner runner)
 
 /// <summary>
 /// What a strategy may be given to work with. Bundled rather than passed as four arguments because
-/// every one of them is optional in some caller — a Backfill preview of a DuckDB strategy has none of
+/// every one of them is optional in some caller — a Bulk Load preview of a DuckDB strategy has none of
 /// them, and correctly does not need them.
 /// </summary>
 /// <param name="SourceColumnsOrNull">Only consulted by a C# strategy; see the note at its one use.</param>

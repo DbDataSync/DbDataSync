@@ -151,11 +151,11 @@ public static class ConfigValidation
                 $"{changeProcessing.DegreeOfParallelism}. It has to be at least 1 — that is how many table " +
                 "mappings the worker processes at once.");
 
-        if (changeProcessing.BackfillDegreeOfParallelism < 1)
+        if (changeProcessing.BulkLoadDegreeOfParallelism < 1)
             throw new ConfigValidationException(
-                $"Replication '{replicationName}' sets a backfill degree of parallelism of " +
-                $"{changeProcessing.BackfillDegreeOfParallelism}. It has to be at least 1 — that is how many " +
-                "backfill segments and verifications the worker processes at once.");
+                $"Replication '{replicationName}' sets a bulk load degree of parallelism of " +
+                $"{changeProcessing.BulkLoadDegreeOfParallelism}. It has to be at least 1 — that is how many " +
+                "bulk load segments and verifications the worker processes at once.");
     }
 
     public static void ValidateScheduling(SchedulingConfig scheduling, string replicationName)

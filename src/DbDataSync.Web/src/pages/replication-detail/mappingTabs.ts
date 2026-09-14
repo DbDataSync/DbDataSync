@@ -28,7 +28,7 @@ export function useMappingTabs(
     { path: null, label: 'Notes', testId: 'mapping-tab-notes' },
     { path: 'columns', label: 'Column Mapping', testId: 'mapping-tab-columns' },
     { path: 'transforms', label: 'Custom Transforms', testId: 'mapping-tab-transforms' },
-    { path: 'segmenting', label: 'Backfill', testId: 'mapping-tab-segmenting' },
+    { path: 'segmenting', label: 'Bulk Load', testId: 'mapping-tab-segmenting' },
     { path: 'provisioning', label: 'Provisioning', testId: 'mapping-tab-provisioning', badge: pendingSteps },
     { path: 'pipeline', label: 'Pipeline', testId: 'mapping-tab-pipeline' },
     { path: 'diagnostics', label: 'Diagnostics', testId: 'mapping-tab-diagnostics' },

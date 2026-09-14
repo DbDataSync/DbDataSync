@@ -83,7 +83,7 @@ public interface IChangeReader
     /// Where the last successful <c>Primary</c> pass got to, or null when there is none — a mapping
     /// that has never run, one whose source table changed, one a resync cleared, or one whose
     /// <paramref name="intent"/> asks for a floor or a latest position this pass has not yet resolved.
-    /// A Backfill is always handed null.
+    /// A BulkLoad is always handed null.
     /// </param>
     /// <param name="intent">
     /// What this pass is asked to do — see <see cref="ReadIntent"/> and

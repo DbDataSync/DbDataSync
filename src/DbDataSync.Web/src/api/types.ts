@@ -115,9 +115,9 @@ export interface ChangeProcessingConfig {
   /** Consumers on the worker's change-processing lane — how many incremental (Primary) passes run at
    * once. The server defaults it to 4 when config says nothing. */
   degreeOfParallelism: number
-  /** Consumers on the worker's backfill lane — backfill segments and verifications. Its own budget so
+  /** Consumers on the worker's bulk load lane — bulk load segments and verifications. Its own budget so
    * a large reload never takes a slot an incremental pass needs. Defaults to 4. */
-  backfillDegreeOfParallelism: number
+  bulkLoadDegreeOfParallelism: number
 }
 
 // Where a replication reads from and writes to. Every table mapping inherits these unless it sets
@@ -132,11 +132,26 @@ export interface TaskEndpoints {
   target: EndpointRef | null
 }
 
+/**
+ * The Bulk Load pipeline — phase 133, a second pipeline beside `ChangeProcessingConfig` used for an
+ * on-demand reload and, from phase 134, an initial load. `reader` defaults to `BatchReload` server-side
+ * so a replication that says nothing here still has a working pipeline; `cache`/`writer` default to
+ * null and, when null, inherit the replication's resolved Change Processing cache/writer.
+ */
+export interface BulkLoadConfig {
+  reader: ReaderConfig
+  cache: CacheConfig | null
+  writer: WriterConfig | null
+}
+
 export interface ReplicationTaskConfig {
   name: string
   enabled: boolean
   scheduling: SchedulingConfig
   changeProcessing: ChangeProcessingConfig
+  /** The Bulk Load pipeline — phase 133. Always present; a fresh replication gets the server's default
+   * (`BatchReload` reader, cache/writer inherited from `changeProcessing`). */
+  bulkLoad: BulkLoadConfig
   endpoints: TaskEndpoints
   scripts?: ScriptBindings
   hooks?: Hooks
@@ -305,6 +320,14 @@ export interface TableMappingConfig {
   readerOverride?: ReaderConfig | null
   cacheOverride?: CacheConfig | null
   writerOverride?: WriterConfig | null
+
+  /**
+   * This mapping's own Bulk Load pipeline stages, in place of the replication's `bulkLoad` — phase 133.
+   * Null or absent inherits, same atomic-per-stage rule as the Change Processing overrides above.
+   */
+  bulkLoadReaderOverride?: ReaderConfig | null
+  bulkLoadCacheOverride?: CacheConfig | null
+  bulkLoadWriterOverride?: WriterConfig | null
 
   /**
    * The source and target tables' shape as of the last capture — phase 90.
@@ -984,7 +1007,7 @@ export interface SegmentingStrategyConfig {
   parameters?: Record<string, string>
 }
 
-/** One row of a strategy's proposal, as the Backfill checklist renders it. */
+/** One row of a strategy's proposal, as the Bulk Load checklist renders it. */
 export interface SegmentCandidate {
   label: string
   segment: BatchReloadSegment
@@ -1000,17 +1023,17 @@ export function runsAgainstAConnection(kind: SegmentingStrategyKind): boolean {
   return kind !== 'DuckDb'
 }
 
-// A backfill is a run, not a config change — it produces no git commit, unlike every other write in
-// this API. Kinds are null to mean "use the replication's own configured pipeline"; a backfill of an
+// A bulk load is a run, not a config change — it produces no git commit, unlike every other write in
+// this API. Kinds are null to mean "use the replication's own configured pipeline"; a bulk load of an
 // incrementally-synced replication has to override at least the reader.
-export interface BackfillRequest {
+export interface BulkLoadRequest {
   readerKind?: string | null
   cacheKind?: string | null
   writerKind?: string | null
   segments: BatchReloadSegment[]
 }
 
-/** `POST .../reconcile-deletes` (phase 124) — no reader/cache/writer Kinds, unlike `BackfillRequest`:
+/** `POST .../reconcile-deletes` (phase 124) — no reader/cache/writer Kinds, unlike `BulkLoadRequest`:
  * a delete-diff sweep always runs KeyReconcile/StagingTable/KeyReconcileDelete, so there is nothing
  * else to pick. */
 export interface ReconcileDeletesRequest {
@@ -1021,11 +1044,11 @@ export interface ReconcileDeletesRequest {
 }
 
 export type RunStatus = 'Queued' | 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'
-export type RunKind = 'Primary' | 'Backfill' | 'ReconcileDeletes'
+export type RunKind = 'Primary' | 'BulkLoad' | 'ReconcileDeletes'
 
 /** Phase 124's `KeyReconcile`/`KeyReconcileDelete` pair — and phase 129's `KeyReconcileScd2Close`,
  * the same pair's ending for a mapping whose own writer is `Scd2` — exist only for a delete-diff
- * sweep, never offered in an ordinary Change Processing or Backfill reader/writer picker, which is
+ * sweep, never offered in an ordinary Change Processing or Bulk Load reader/writer picker, which is
  * what every `capabilities.readers`/`.writers` list gets filtered against before rendering one. */
 export const RECONCILE_ONLY_KINDS: ReadonlySet<string> = new Set([
   'KeyReconcile',
@@ -1097,22 +1120,22 @@ export interface TaskRunRecord {
    * them in. Not a time and not readable as one, which is why the run list dates them through
    * `useRunWatermarkTimes` and keeps these as the tooltip.
    *
-   * Both null for a run that made no new position durable — a backfill, a verification, or any
+   * Both null for a run that made no new position durable — a bulk load, a verification, or any
    * failed pass.
    */
   previousWatermark: string | null
   newWatermark: string | null
 }
 
-/** Where a backfill is, taken as a whole rather than one segment at a time. */
-export type BackfillState = 'Running' | 'Completed' | 'CompletedWithFailures'
+/** Where a bulk load is, taken as a whole rather than one segment at a time. */
+export type BulkLoadState = 'Running' | 'Completed' | 'CompletedWithFailures'
 
 /**
- * A backfill rolled up across its segment runs — the Monitoring screen's "Batch reload" card. A
- * backfill enqueues one independently-scheduled run per segment; this ties them back together by the
+ * A bulk load rolled up across its segment runs — the Monitoring screen's "Batch reload" card. A
+ * bulk load enqueues one independently-scheduled run per segment; this ties them back together by the
  * batch id minted at enqueue.
  */
-export interface BackfillBatchProgress {
+export interface BulkLoadBatchProgress {
   batchId: string
   mappingName: string
   createdAtUtc: string
@@ -1134,7 +1157,7 @@ export interface BackfillBatchProgress {
   estimateCaveat: string | null
   startedAtUtc: string | null
   lastActivityUtc: string | null
-  state: BackfillState
+  state: BulkLoadState
 }
 
 /**

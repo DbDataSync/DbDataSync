@@ -57,13 +57,34 @@ public sealed class CrossEngineStateTests : IClassFixture<LibraryInstallFixture>
         {
             "Tasks", "TaskRuns", "ChangeWatermarks", "Logs", "RunLocks", "WorkQueue",
             "VerificationResults", "Users", "UserCredentials", "Sessions", "Invites", "PauseEvents",
-            "BackfillBatches",
+            "BulkLoadBatches",
         })
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, $"SELECT COUNT(*) FROM {table};");
             Assert.Equal(0, Convert.ToInt32(cmd.ExecuteScalar()));
         }
+    }
+
+    /// <summary>
+    /// Phase 133: <c>BulkLoadBatches</c> and <c>TaskRuns.BulkLoadBatchId</c> exist under their renamed
+    /// names on a freshly created database — the migration templates were edited in place rather than
+    /// appended to (see the phase doc's "No migration" section), so this only proves correct for a
+    /// database created after the rename, never for one upgraded from before it.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Engines))]
+    public void BulkLoadBatchesAndItsColumnExistUnderTheirRenamedNames(string engine)
+    {
+        var database = Open(engine);
+
+        using (var connection = database.OpenConnection())
+        using (var cmd = database.Command(connection, "SELECT COUNT(*) FROM BulkLoadBatches;"))
+            Assert.Equal(0, Convert.ToInt32(cmd.ExecuteScalar()));
+
+        using (var connection = database.OpenConnection())
+        using (var cmd = database.Command(connection, "SELECT BulkLoadBatchId FROM TaskRuns;"))
+            cmd.ExecuteScalar();
     }
 
     /// <summary>Reopening applies nothing twice — the version is recorded, wherever each engine keeps
@@ -375,16 +396,16 @@ public sealed class CrossEngineStateTests : IClassFixture<LibraryInstallFixture>
         var queue = new WorkQueueStore(database);
         var store = new TaskRunStore(database);
 
-        var match = queue.Enqueue("crm-sync", RunKind.Backfill, "orders");
+        var match = queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders");
         store.BeginRun(match, pid: null);
         store.CompleteRun(match, RunStatus.Failed, 0, 0, "boom");
 
-        var wrongMapping = queue.Enqueue("crm-sync", RunKind.Backfill, "customers");
+        var wrongMapping = queue.Enqueue("crm-sync", RunKind.BulkLoad, "customers");
         store.BeginRun(wrongMapping, pid: null);
         store.CompleteRun(wrongMapping, RunStatus.Failed, 0, 0, "boom");
 
         var combined = store.GetRunHistory(
-            "crm-sync", runKind: RunKind.Backfill, mappingName: "orders", status: RunStatus.Failed);
+            "crm-sync", runKind: RunKind.BulkLoad, mappingName: "orders", status: RunStatus.Failed);
         Assert.Single(combined);
         Assert.Equal(match, combined[0].RunId);
 

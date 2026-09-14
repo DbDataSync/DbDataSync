@@ -13,7 +13,7 @@ namespace DbDataSync.Api.Services;
 /// </para>
 /// <para>
 /// **Carries the filters it was issued under.** A cursor minted while filtering to Failed runs means
-/// nothing replayed against Backfill runs — the two keyset windows are different pages of different
+/// nothing replayed against BulkLoad runs — the two keyset windows are different pages of different
 /// data, and applying one's cursor to the other would produce a page that looks coherent and is not.
 /// The alternative was trusting every caller to reset the cursor whenever a filter changes, which is
 /// the kind of discipline that holds until somebody adds a filter and forgets — so the filters travel

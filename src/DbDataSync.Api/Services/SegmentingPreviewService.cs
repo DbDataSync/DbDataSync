@@ -12,7 +12,7 @@ public sealed record SegmentingPreviewResult(
     IReadOnlyList<SegmentCandidateDto>? Candidates, string? Error, bool NotFound = false);
 
 /// <summary>
-/// Runs one segmenting strategy and hands back everything it proposes, for the Backfill form's
+/// Runs one segmenting strategy and hands back everything it proposes, for the Bulk Load form's
 /// checklist — see phase 58.
 /// <para>
 /// **Every candidate, not just the selected ones.** The scheduled path filters to what the strategy

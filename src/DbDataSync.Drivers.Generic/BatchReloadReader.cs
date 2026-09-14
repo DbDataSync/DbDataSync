@@ -73,7 +73,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
     /// <summary>
     /// The read as it would be issued for whatever segment the options carry — which, for a preview
     /// taken from a mapping's saved config, is normally none. A reload's statement depends on its
-    /// segment, so an unsegmented preview says so rather than implying a backfill would run this.
+    /// segment, so an unsegmented preview says so rather than implying a bulk load would run this.
     /// </summary>
     public async Task<IReadOnlyList<PreviewStatement>> DescribeAsync(
         PreviewRequest request, CancellationToken cancellationToken)
@@ -95,7 +95,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
                     SourceProjection.Render(dialect, request.ColumnMappings)),
                 PreviewOrigin.BuiltIn,
                 segment is null
-                    ? "A backfill supplies its own segment, which narrows this further — this is the " +
+                    ? "A bulk load supplies its own segment, which narrows this further — this is the " +
                       "unsegmented form the mapping's own config would run."
                     : null),
         ];

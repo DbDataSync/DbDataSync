@@ -176,14 +176,14 @@ public sealed class MappingReadStateTests(TestApiFactory factory) : IClassFixtur
         response.EnsureSuccessStatusCode();
     }
 
-    /// <summary>A Backfill lock is refused on the same footing as a Primary one — a reload in progress
+    /// <summary>A BulkLoad lock is refused on the same footing as a Primary one — a reload in progress
     /// is still a pass acting on this mapping.</summary>
     [Fact]
-    public async Task SetReadState_WhileABackfillLockIsHeld_IsRefused()
+    public async Task SetReadState_WhileABulkLoadLockIsHeld_IsRefused()
     {
         var (replication, mapping) = await SetUpAsync();
         var runLocks = factory.Services.GetRequiredService<RunLockStore>();
-        Assert.True(runLocks.TryAcquire(replication, RunKind.Backfill, mapping, Guid.NewGuid()));
+        Assert.True(runLocks.TryAcquire(replication, RunKind.BulkLoad, mapping, Guid.NewGuid()));
 
         var response = await SetReadStateAsync(replication, mapping, ReadIntent.ChangesFromEarliest, ReadHold.None);
 

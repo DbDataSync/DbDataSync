@@ -179,6 +179,16 @@ public sealed class TableMappingConfig
     /// </summary>
     public WriterConfig? WriterOverride { get; set; }
 
+    /// <summary>This mapping's own Bulk Load reader, in place of the replication's <see cref="ReplicationTaskConfig.BulkLoad"/>.
+    /// Null inherits. Atomic like <see cref="ReaderOverride"/> — Kind and Options together.</summary>
+    public ReaderConfig? BulkLoadReaderOverride { get; set; }
+
+    /// <summary>This mapping's own Bulk Load staging provider, in place of the replication's. Null inherits.</summary>
+    public CacheConfig? BulkLoadCacheOverride { get; set; }
+
+    /// <summary>This mapping's own Bulk Load writer, in place of the replication's. Null inherits.</summary>
+    public WriterConfig? BulkLoadWriterOverride { get; set; }
+
     /// <summary>This mapping's own delete-reconciliation settings, in place of the replication's. Null
     /// inherits <see cref="ReplicationTaskConfig.Reconcile"/> entirely — phase 125.</summary>
     public ReconcileConfig? ReconcileOverride { get; set; }
@@ -191,10 +201,10 @@ public sealed class TableMappingConfig
 
     /// <summary>
     /// How this table divides for a reload — the mapping's own answer, used both as what a scheduled
-    /// <c>BatchReload</c> pass processes and as what the Backfill form starts from.
+    /// <c>BatchReload</c> pass processes and as what the Bulk Load form starts from.
     /// <para>
     /// **Empty means Full, no segmenting** — naming what already happened rather than changing it. A
-    /// mapping that configures nothing reloads its whole table, which is what the Backfill form has
+    /// mapping that configures nothing reloads its whole table, which is what the Bulk Load form has
     /// always defaulted to.
     /// </para>
     /// <para>

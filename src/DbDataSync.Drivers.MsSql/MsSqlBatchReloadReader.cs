@@ -83,7 +83,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
                     request.Source.Filter, SourceProjection.Render(MsSqlDialect.Instance, request.ColumnMappings)),
                 PreviewOrigin.BuiltIn,
                 segment is null
-                    ? "A backfill supplies its own segment, which narrows this further — this is the " +
+                    ? "A bulk load supplies its own segment, which narrows this further — this is the " +
                       "unsegmented form the mapping's own config would run."
                     : null),
         ];

@@ -75,15 +75,15 @@ public sealed class RunsControllerTests(TestApiFactory factory) : IClassFixture<
             return runId;
         }
 
-        var match = Complete(RunKind.Backfill, "orders", RunStatus.Failed);
+        var match = Complete(RunKind.BulkLoad, "orders", RunStatus.Failed);
         Complete(RunKind.Primary, "orders", RunStatus.Failed); // wrong kind
-        Complete(RunKind.Backfill, "customers", RunStatus.Failed); // wrong mapping
+        Complete(RunKind.BulkLoad, "customers", RunStatus.Failed); // wrong mapping
         // Same (kind, mapping) as `match` — a distinct segment keeps this from deduping onto match's
         // own work-queue row (WorkQueueStore's in-flight uniqueness is keyed on all four).
-        Complete(RunKind.Backfill, "orders", RunStatus.Succeeded, segment: "seg-2"); // wrong status
+        Complete(RunKind.BulkLoad, "orders", RunStatus.Succeeded, segment: "seg-2"); // wrong status
 
         var combined = await GetHistoryAsync(
-            taskName, kind: "Backfill", mappingName: "orders", status: "Failed");
+            taskName, kind: "BulkLoad", mappingName: "orders", status: "Failed");
 
         Assert.Single(combined.Runs);
         Assert.Equal(match, combined.Runs[0].RunId);

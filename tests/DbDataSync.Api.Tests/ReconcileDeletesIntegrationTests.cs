@@ -16,7 +16,7 @@ namespace DbDataSync.Api.Tests;
 /// <summary>
 /// Phase 124's <c>POST .../reconcile-deletes</c> driven end to end through real HTTP, a real spawned
 /// DbDataSync.TaskRunner worker, and a real SQL Server — the same shape
-/// <see cref="BackfillIntegrationTests"/> already establishes for the backfill trigger, since a
+/// <see cref="BulkLoadIntegrationTests"/> already establishes for the bulk load trigger, since a
 /// reconcile sweep is enqueued and drained through the identical worker/lane machinery.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -95,7 +95,7 @@ public sealed class ReconcileDeletesIntegrationTests : IClassFixture<TestApiFact
         Assert.Equal(2, await CountAsync());
 
         // Never touches the incremental watermark or shows up as a Primary in history — a reconcile
-        // sweep is on-demand, non-incremental work, the same posture a Backfill already has.
+        // sweep is on-demand, non-incremental work, the same posture a BulkLoad already has.
         var history = await _client.GetFromJsonAsync<JsonElement>(
             $"/api/replications/{_replicationName}/runs?kind=ReconcileDeletes&limit=50", JsonOptions);
         Assert.Single(history.GetProperty("runs").EnumerateArray());

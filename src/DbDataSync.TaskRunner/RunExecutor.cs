@@ -24,11 +24,11 @@ namespace DbDataSync.TaskRunner;
 /// architecture/implementation/done/phase-008-work-queue-schema.md. One process (spawned by
 /// DbDataSync.Api.Services.ProcessSupervisor) claims and drains a replication's pending WorkQueue items
 /// with bounded internal concurrency, rather than one process being spawned per triggered run: a
-/// replication can have hundreds of table mappings, and backfills for many of them can be queued
+/// replication can have hundreds of table mappings, and bulk loads for many of them can be queued
 /// continuously, so a fixed-collection fan-out (Parallel.ForEach/Task.WhenAll over an enumerated list)
 /// doesn't fit — new work keeps arriving while the queue is being drained.
 /// <para>
-/// Each table mapping's own unit of work (a Primary pass, or one segment of a Backfill) is independent
+/// Each table mapping's own unit of work (a Primary pass, or one segment of a BulkLoad) is independent
 /// — its own RunId, its own (TaskName, RunKind, MappingName) lock, its own TaskRuns row — not one
 /// shared run/lock/row for the whole replication. This is what lets one slow or locked mapping stop
 /// blocking every other mapping.
@@ -68,7 +68,7 @@ public sealed class RunExecutor(
     /// <summary>
     /// Claims and processes this replication's pending WorkQueue items until the queue is drained,
     /// running <b>two independent lanes</b> — <see cref="RunLane.ChangeProcessing"/>
-    /// (<c>RunKind.Primary</c>) and <see cref="RunLane.Backfill"/> (<c>RunKind.Backfill</c> +
+    /// (<c>RunKind.Primary</c>) and <see cref="RunLane.BulkLoad"/> (<c>RunKind.BulkLoad</c> +
     /// <c>RunKind.Verification</c>) — each with its own bounded channel and its own pool of consumers,
     /// sized by <paramref name="lanes"/>. A long-running reload in one lane can never occupy a slot the
     /// other lane needs. Per-item outcomes live in TaskRuns/WorkQueue, not this method's return value —
@@ -76,10 +76,10 @@ public sealed class RunExecutor(
     /// itself failed to start".
     /// <para>
     /// The change-processing lane owns the process lifetime — it runs today's continuous idle-timeout
-    /// / periodic-drain logic. The backfill lane rides the process: under a continuous replication it
+    /// / periodic-drain logic. The bulk load lane rides the process: under a continuous replication it
     /// keeps polling for reloads rather than exiting on its own, and winds down only once the
     /// change-processing lane has (its producer's <c>finally</c> cancels <c>winddown</c>). That is
-    /// what keeps a backfill enqueued mid-life from sitting unclaimed until the worker respawns.
+    /// what keeps a bulk load enqueued mid-life from sitting unclaimed until the worker respawns.
     /// </para>
     /// </summary>
     public async Task<ExitCode> ExecuteWorkerAsync(string taskName, WorkerLanes lanes, CancellationToken cancellationToken)
@@ -111,15 +111,15 @@ public sealed class RunExecutor(
             finally
             {
                 // The process's lifetime is the change lane's. Whether it drained cleanly or crashed,
-                // the backfill lane — which otherwise rides a continuous replication's process
+                // the bulk load lane — which otherwise rides a continuous replication's process
                 // forever — is now free to do its last drain and stop.
                 winddown.Cancel();
             }
         }
 
         var change = ChangeLane();
-        var backfill = RunLaneAsync(
-            taskName, task.Scheduling, RunLane.Backfill, lanes.Backfill,
+        var bulkLoad = RunLaneAsync(
+            taskName, task.Scheduling, RunLane.BulkLoad, lanes.BulkLoad,
             workerId, winddown: winddown.Token, hardStop: cancellationToken);
 
         // WhenAll waits for both even if one faults, so a lane failing still lets the other finish
@@ -130,7 +130,7 @@ public sealed class RunExecutor(
         ExceptionDispatchInfo? failure = null;
         try
         {
-            await Task.WhenAll(change, backfill);
+            await Task.WhenAll(change, bulkLoad);
         }
         catch (Exception ex)
         {
@@ -203,11 +203,11 @@ public sealed class RunExecutor(
     /// timeout without a <c>Primary</c> pass reading anything.
     /// </para>
     /// <para>
-    /// The <b>backfill lane</b> follows the change lane. Under a periodic replication it drains and
-    /// exits the same way. Under a continuous one it never exits on its own — an empty backfill queue
+    /// The <b>bulk load lane</b> follows the change lane. Under a periodic replication it drains and
+    /// exits the same way. Under a continuous one it never exits on its own — an empty bulk load queue
     /// is the normal state and the process is staying up for the change lane anyway — so it keeps
     /// polling until <paramref name="winddown"/> is cancelled (the change lane's producer finished),
-    /// then does one last drain and stops. Without that, a backfill enqueued while the worker is alive
+    /// then does one last drain and stops. Without that, a bulk load enqueued while the worker is alive
     /// would sit unclaimed until the worker respawned.
     /// </para></summary>
     private async Task ProduceAsync(
@@ -215,7 +215,7 @@ public sealed class RunExecutor(
         ChannelWriter<WorkItem> writer, CancellationToken winddown, CancellationToken hardStop)
     {
         var runsContinuously = scheduling.Mode == ScheduleMode.Continuous;
-        var ridesTheProcess = lane == RunLane.Backfill && runsContinuously;
+        var ridesTheProcess = lane == RunLane.BulkLoad && runsContinuously;
         var consecutiveEmptyPolls = 0;
         try
         {
@@ -229,7 +229,7 @@ public sealed class RunExecutor(
                     continue;
                 }
 
-                // The backfill lane winds down with the process. Checked here — after one last claim
+                // The bulk load lane winds down with the process. Checked here — after one last claim
                 // sweep, before anything that could wait — so a Running row we do not own (an orphan
                 // the reconciler will release, or the other lane's item) cannot keep this lane alive
                 // past the change lane's own exit.
@@ -349,7 +349,7 @@ public sealed class RunExecutor(
             // A verification run reads both sides and writes nothing, so the reader/staging/writer
             // stages this traces do not exist for it. Null rather than zeros: it was not measured.
             RunTiming? timing = null;
-            // Null for anything that did not advance a durable position — a Verification, a Backfill,
+            // Null for anything that did not advance a durable position — a Verification, a BulkLoad,
             // or a pass that found nothing new. See WatermarkChange.
             WatermarkChange? watermark = null;
             if (item.RunKind == RunKind.Verification)
@@ -377,8 +377,8 @@ public sealed class RunExecutor(
             // straight through a live load. A pass that read nothing leaves the clock running.
             //
             // Only a Primary pass counts: the idle timeout is the *change-processing* lane's, and a
-            // backfill or a verification reading rows says nothing about whether incremental changes
-            // are still arriving. A continuous worker held up purely by backfills running is exactly
+            // bulk load or a verification reading rows says nothing about whether incremental changes
+            // are still arriving. A continuous worker held up purely by bulk loads running is exactly
             // the coupling this phase removed.
             if (rowsRead > 0 && item.RunKind == RunKind.Primary)
                 MarkProductive();
@@ -588,7 +588,7 @@ public sealed class RunExecutor(
         var effectiveCache = PipelineResolution.Cache(task, mapping);
         var effectiveWriter = PipelineResolution.Writer(task, mapping);
 
-        // Then the unit of work's own, which is the most specific. It's how a Backfill of an
+        // Then the unit of work's own, which is the most specific. It's how a BulkLoad of an
         // incrementally-synced replication reloads a segment at all: the configured reader reports
         // changes since a watermark, which is not what reloading a segment means.
         var readerKind = item.Kinds.ReaderKind ?? effectiveReader.Kind;
@@ -607,9 +607,9 @@ public sealed class RunExecutor(
         var reader = driverRegistry.FindReader(sourceDriverForResolution.DriverType, readerKind)
             ?? throw new InvalidOperationException($"Source driver does not support reader kind '{readerKind}'.");
 
-        // Only a Primary pass ever reads or advances the incremental cursor — a Backfill must never be
+        // Only a Primary pass ever reads or advances the incremental cursor — a BulkLoad must never be
         // able to disturb the watermark or the intent a replication's ongoing incremental sync depends
-        // on, regardless of which reader/writer Kind it happens to use internally. A Backfill's reader
+        // on, regardless of which reader/writer Kind it happens to use internally. A BulkLoad's reader
         // is asked for an InitialLoad — a reload's own definition — since it never consults the cursor
         // either way; it is not a live ReadIntent so much as the closest description of what a reload
         // pass does.
@@ -952,7 +952,7 @@ public sealed class RunExecutor(
 
     /// <summary>
     /// What this unit of work should read, in order. Either exactly one segment carried on the work
-    /// item itself (a Backfill — the API expanded and enqueued one item per segment), or the static
+    /// item itself (a BulkLoad — the API expanded and enqueued one item per segment), or the static
     /// segment list a standalone reload replication configures on its reader (iterated within this
     /// one pass), or a single null meaning "no segment, read the whole thing" — every ordinary
     /// incremental pass.
@@ -1357,7 +1357,7 @@ public sealed class RunExecutor(
             $"The '{driver.DriverType}' driver does not name a SQL dialect.");
 
     /// <summary>
-    /// What this pass processes, in order: the one segment a Backfill work item carries, or the
+    /// What this pass processes, in order: the one segment a BulkLoad work item carries, or the
     /// mapping's own configured default segmenting, or a single null meaning "the whole thing".
     /// <para>
     /// **Read from the mapping, not from <c>readerOptions["segments"]</c>.** That option is no longer
@@ -1465,7 +1465,7 @@ public sealed class RunExecutor(
 
     /// <summary>Phase 124: injects a work item's <c>DeleteGuard</c> override into a per-iteration copy
     /// of the writer's options, mirroring <see cref="WithSegment"/> exactly — null (no override, the
-    /// overwhelming majority of items, including every Primary/Backfill/Verification one) leaves the
+    /// overwhelming majority of items, including every Primary/BulkLoad/Verification one) leaves the
     /// options untouched, so <see cref="DeleteGuardOption.Read"/> falls back to whatever the writer's
     /// own configured/default guard is.</summary>
     private static IReadOnlyDictionary<string, string> WithGuard(

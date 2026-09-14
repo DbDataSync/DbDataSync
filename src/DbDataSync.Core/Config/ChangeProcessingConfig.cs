@@ -37,9 +37,9 @@ public sealed class ChangeProcessingConfig
     /// number of consumers <c>RunExecutor</c> runs on that lane, passed to the runner as
     /// <c>--degree-of-parallelism</c> by <c>DbDataSync.Api.Services.ProcessSupervisor</c>.
     /// <para>
-    /// The worker runs two independent lanes (phase-108): this one, and a <b>backfill lane</b>
-    /// (<c>RunKind.Backfill</c> + <c>RunKind.Verification</c>) sized by
-    /// <see cref="BackfillDegreeOfParallelism"/>. A long reload on the backfill lane can no longer
+    /// The worker runs two independent lanes (phase-108): this one, and a <b>bulk load lane</b>
+    /// (<c>RunKind.BulkLoad</c> + <c>RunKind.Verification</c>) sized by
+    /// <see cref="BulkLoadDegreeOfParallelism"/>. A long reload on the bulk load lane can no longer
     /// take a consumer slot an incremental pass needs — but the total concurrency ceiling for the
     /// replication is now the two numbers added, not one shared value.
     /// </para>
@@ -59,14 +59,14 @@ public sealed class ChangeProcessingConfig
     public int DegreeOfParallelism { get; set; } = DefaultDegreeOfParallelism;
 
     /// <summary>
-    /// How many table mappings the worker's <b>backfill lane</b> processes at once —
-    /// <c>RunKind.Backfill</c> (a segment of an on-demand reload) and <c>RunKind.Verification</c> (a
+    /// How many table mappings the worker's <b>bulk load lane</b> processes at once —
+    /// <c>RunKind.BulkLoad</c> (a segment of an on-demand reload) and <c>RunKind.Verification</c> (a
     /// source/target comparison). Both read whole tables and can run for a long time; giving them
     /// their own budget, separate from <see cref="DegreeOfParallelism"/>, is what stops a big reload
-    /// from starving incremental sync. Passed to the runner as <c>--backfill-parallelism</c>.
+    /// from starving incremental sync. Passed to the runner as <c>--bulk-load-parallelism</c>.
     /// </summary>
     [DefaultValue(DefaultDegreeOfParallelism)]
-    public int BackfillDegreeOfParallelism { get; set; } = DefaultDegreeOfParallelism;
+    public int BulkLoadDegreeOfParallelism { get; set; } = DefaultDegreeOfParallelism;
 
     /// <summary>The value a lane takes when config says nothing — matches
     /// <c>DbDataSync.TaskRunner.TaskRunnerOptions</c>'s own default so a worker launched by hand and

@@ -192,7 +192,7 @@ public sealed class RunWatermarkTimeService(
 
     /// <summary>
     /// The watermarks a run actually stored. Both are null for a run that made no new position
-    /// durable — a backfill, a verification, or any failed pass — which is most of what a filtered
+    /// durable — a bulk load, a verification, or any failed pass — which is most of what a filtered
     /// history shows and none of what this has to look up.
     /// </summary>
     private static List<string> Watermarks(TaskRunRecord run)

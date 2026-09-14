@@ -29,11 +29,21 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **133** — the Bulk Load pipeline as configuration | the rename gets harder every phase that ships; 134 cannot start without it |
-| 2 | **134** — an initial load becomes a bulk load | the behaviour change, and the first caller `IPositionCapturing` has ever had |
-| 3 | **034** — PostgreSQL logical replication | |
-| 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **134** — an initial load becomes a bulk load | the behaviour change, and the first caller `IPositionCapturing` has ever had |
+| 2 | **034** — PostgreSQL logical replication | |
+| 3 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-14 (latest of all): **133 is done and removed** — the full `Backfill` → `BulkLoad`
+rename, plus the `BulkLoadConfig` pipeline it was for: a reader (defaulting to `BatchReload`), a cache
+and a writer, at the replication with a per-mapping override, resolved through `PipelineResolution`
+independently of `ChangeProcessingConfig` (cache/writer fall through to it when unset). Save-time
+validation (`ParameterCheck.ThrowIfBulkLoadInvalid`) checks the mapping's fully resolved pipeline
+unconditionally, not just an override, since even the `BatchReload` default can be unsupported by a
+given driver. As decided 2026-09-14 (see below), no migration and no backwards compatibility: existing
+state databases and any config carrying the old `backfillDegreeOfParallelism` key must be recreated.
+134 is next — expect `BulkLoadBatchStore.GetRecentBulkLoads`, not `GetRecentBackfills` as its own doc
+still says; the method was renamed here for full-rename consistency.
 
 Updated 2026-09-14 (later than the note below): **137 is done and removed** — it was never added to the
 table above; it was written as a `todo/` doc mid-session (see the 2026-09-14 note below) and picked up
@@ -300,6 +310,42 @@ the former is a lettered add-on, the latter is its own numbered phase.
    additional `todo/` phase files for the remaining scope (numbered after the current highest, same as
    any new phase) rather than silently absorbing unplanned scope into what was originally described as
    one phase.
+
+## CI-gated multi-session handoff
+
+Adopted 2026-09-14, for a problem this project ran into directly: a phase big enough to span more than
+one working session (a large rename, a schema change) used to mean either one session blocking for
+however long the full Docker-backed integration suite takes to run locally, or trusting a session's own
+"tests passed" self-report and committing straight to `main`. Neither holds up — the first wastes a
+session's whole turn babysitting `dotnet test` (and, tried by hand once, produced redundant polling
+loops against the same log file instead of one session cleanly waiting on the other), and the second
+means a broken `main` is discovered by whoever pulls next, not by the session that broke it.
+
+So, for any phase substantial enough to risk spanning more than one session:
+
+1. **One branch per phase**, `phase-NNN-short-title` (same slug as the doc), cut from `main` when work
+   starts. Nothing about a phase in progress touches `main` until it merges.
+2. **A session implements, runs the fast local checks only** (build, unit tests — not the Docker-backed
+   integration suite; running that to completion is CI's job, not a session's), and before ending:
+   - appends a `## Handoff — <date>` section to the phase's `todo/` doc: what's done, what's left, any
+     decisions or deviations made, the branch name, and current CI status (or "not yet pushed"). This
+     is the one file a later session — with no memory of this one — needs to read to pick the phase
+     back up; there is no separate in-progress folder or ticket system, because the doc already is that
+     record (see "Why this exists" below).
+   - commits the doc and the code together, pushes the branch, and opens a PR if none exists yet (a
+     draft PR is fine mid-iteration).
+   - ends its turn. It does not wait on CI.
+3. **CI is watched asynchronously** by whichever session is orchestrating — polled or subscribed to,
+   never by a session blocking on a local `dotnet test` run against the Docker containers, which is the
+   pattern that produced the redundant polling loops above.
+4. **On a red run**, a session (the same one resumed, or a fresh one) reads the Handoff section plus the
+   actual CI failure output, fixes it, updates Handoff, commits, pushes, and ends. Repeat.
+5. **On green**, merge the PR, and move `todo/` → `done/` in that same merge — exactly step 3 of
+   "Workflow" above, just gated on CI's answer instead of a session's own say-so.
+
+A phase small enough to implement, verify locally, and commit within one session does not need any of
+this — it is for the case this section exists to name: a phase that will outlive the session that
+started it.
 
 ## Phase doc structure
 

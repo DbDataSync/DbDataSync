@@ -34,7 +34,7 @@ public enum SegmentingStrategyKind
 
 /// <summary>
 /// A named, reusable way of dividing a table for reload, referenced from a mapping's default
-/// segmenting or picked ad hoc at backfill time.
+/// segmenting or picked ad hoc at bulk load time.
 /// <para>
 /// Shaped like <see cref="VerificationCheckConfig"/> deliberately: this is the same problem phase 43
 /// already solved — "how does an operator author one of these" — and an operator who has written a

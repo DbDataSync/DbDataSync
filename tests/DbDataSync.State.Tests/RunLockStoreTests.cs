@@ -57,12 +57,12 @@ public sealed class RunLockStoreTests : IDisposable
     }
 
     [Fact]
-    public void PrimaryAndBackfill_OfTheSameMapping_LockIndependently()
+    public void PrimaryAndBulkLoad_OfTheSameMapping_LockIndependently()
     {
         Assert.True(_store.TryAcquire("crm-sync", RunKind.Primary, "orders", Guid.NewGuid()));
-        Assert.True(_store.TryAcquire("crm-sync", RunKind.Backfill, "orders", Guid.NewGuid()));
+        Assert.True(_store.TryAcquire("crm-sync", RunKind.BulkLoad, "orders", Guid.NewGuid()));
 
         Assert.True(_store.IsLocked("crm-sync", RunKind.Primary, "orders"));
-        Assert.True(_store.IsLocked("crm-sync", RunKind.Backfill, "orders"));
+        Assert.True(_store.IsLocked("crm-sync", RunKind.BulkLoad, "orders"));
     }
 }

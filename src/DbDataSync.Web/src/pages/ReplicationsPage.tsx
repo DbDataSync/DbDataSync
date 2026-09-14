@@ -103,8 +103,12 @@ export function ReplicationsPage() {
         cache: { kind: defaults!.cache!, options: {} },
         writer: { kind: defaults!.writer!, options: {} },
         degreeOfParallelism: 4,
-        backfillDegreeOfParallelism: 4,
+        bulkLoadDegreeOfParallelism: 4,
       },
+      // The server's own default (BatchReload reader, cache/writer inherited from changeProcessing) —
+      // stated explicitly here only because the type requires the field; a new replication has no
+      // reason to want anything else yet.
+      bulkLoad: { reader: { kind: 'BatchReload', options: {} }, cache: null, writer: null },
       // Disabled by default, same reasoning as `enabled` above — delete reconciliation (phase 125) is
       // an opt-in an operator turns on once mappings are actually configured.
       reconcile: { enabled: false, every: null, afterChange: { mode: 'none' }, deleteGuard: { mode: 'ratio', maxRatio: 0.5 } },

@@ -79,9 +79,9 @@ public sealed class ProcessSupervisor(
         if (_workers.TryGetValue(taskName, out var existing) && !existing.HasExited)
             return TriggerResult.Started([]);
 
-        var (changeParallelism, backfillParallelism) = ResolveParallelism(taskName);
+        var (changeParallelism, bulkLoadParallelism) = ResolveParallelism(taskName);
         var startInfo = BuildStartInfo(
-            options, taskName, stateHost.BaseAddress, runnerToken.Value, changeParallelism, backfillParallelism);
+            options, taskName, stateHost.BaseAddress, runnerToken.Value, changeParallelism, bulkLoadParallelism);
 
         // Anything this runner spilled while a previous incarnation could not reach us is applied
         // before it starts working again — so a re-run never races the record of the run before it.
@@ -109,7 +109,7 @@ public sealed class ProcessSupervisor(
     /// </summary>
     public static ProcessStartInfo BuildStartInfo(
         ApiOptions options, string taskName, string stateEndpoint, string token,
-        int changeParallelism, int backfillParallelism)
+        int changeParallelism, int bulkLoadParallelism)
     {
         var startInfo = new ProcessStartInfo { FileName = "dotnet", UseShellExecute = false };
         startInfo.ArgumentList.Add("exec");
@@ -126,8 +126,8 @@ public sealed class ProcessSupervisor(
         // they belong on the command line where an operator debugging a worker can see them.
         startInfo.ArgumentList.Add("--degree-of-parallelism");
         startInfo.ArgumentList.Add(changeParallelism.ToString());
-        startInfo.ArgumentList.Add("--backfill-parallelism");
-        startInfo.ArgumentList.Add(backfillParallelism.ToString());
+        startInfo.ArgumentList.Add("--bulk-load-parallelism");
+        startInfo.ArgumentList.Add(bulkLoadParallelism.ToString());
 
         // The endpoint and the token go in the *environment*, not in ArgumentList. On Linux a
         // process's command line is world-readable (/proc/<pid>/cmdline) and its environment is not
@@ -143,18 +143,18 @@ public sealed class ProcessSupervisor(
     }
 
     /// <summary>
-    /// The replication's configured lane sizes — change-processing and backfill — or the built-in
+    /// The replication's configured lane sizes — change-processing and bulk load — or the built-in
     /// defaults when its config cannot be read. A missing task file is not this method's problem to
     /// report — the worker it is about to spawn exits <c>ConfigError</c> for exactly that, and callers
     /// that care (<see cref="TriggerReplication"/>) already load the config first — so this just falls
     /// back and lets that path run.
     /// </summary>
-    private (int Change, int Backfill) ResolveParallelism(string taskName)
+    private (int Change, int BulkLoad) ResolveParallelism(string taskName)
     {
         try
         {
             var cp = configRepository.LoadReplicationTask(taskName).ChangeProcessing;
-            return (cp.DegreeOfParallelism, cp.BackfillDegreeOfParallelism);
+            return (cp.DegreeOfParallelism, cp.BulkLoadDegreeOfParallelism);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {

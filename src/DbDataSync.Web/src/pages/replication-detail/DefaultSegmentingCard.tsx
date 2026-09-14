@@ -4,7 +4,7 @@ import { runsAgainstAConnection } from '../../api/types'
 
 /**
  * How this mapping divides for a reload, by default — what a scheduled `BatchReload` pass processes,
- * and what the Backfill form opens pre-filled to.
+ * and what the Bulk Load form opens pre-filled to.
  *
  * A list, because that is genuinely what it is: any number of List entries and any number of Range
  * entries side by side. Full, Auto and Custom are the other shape — one entry that expands into many

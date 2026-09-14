@@ -13,7 +13,7 @@ import { runsAgainstAConnection } from '../../api/types'
 
 /**
  * Queues an ad-hoc delete-diff sweep of one table mapping — phase 124. Same segment-picker shape as
- * {@link BackfillForm} (opens pre-filled from the mapping's own default segmenting), but with no
+ * {@link BulkLoadForm} (opens pre-filled from the mapping's own default segmenting), but with no
  * reader/cache/writer pickers: a sweep always runs KeyReconcile/StagingTable, ending in either
  * KeyReconcileDelete or, since phase 129, KeyReconcileScd2Close when the selected mapping's own writer
  * is Scd2 — there is nothing else this action means, but which of the two endings it means is worth
@@ -59,7 +59,7 @@ export function ReconcileDeletesForm({ replicationName, onQueued, onClose }: {
   const { data: mapping } = useTableMapping(replicationName, selectedMapping || undefined)
 
   // Pre-fill from the mapping's stored default whenever the chosen mapping changes — see
-  // BackfillForm's identical effect for why isMappingChange guards the very first load.
+  // BulkLoadForm's identical effect for why isMappingChange guards the very first load.
   const seededFor = useRef<string | null>(null)
   useEffect(() => {
     const name = mapping?.name

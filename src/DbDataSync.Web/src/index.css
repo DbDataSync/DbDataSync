@@ -482,7 +482,7 @@ select.select {
 }
 .badge-accent { border-color: #cdd8d2; color: #4d7a66; }
 .badge-primary { background: #f4f3f0; border-color: #e2dfd8; color: #75726a; }
-.badge-backfill { background: #f4f0f8; border-color: #e0d6ec; color: #665081; }
+.badge-bulk-load { background: #f4f0f8; border-color: #e0d6ec; color: #665081; }
 .badge-reconcile { background: #fbf0ef; border-color: #ecd6d3; color: #8a5650; }
 
 .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; display: inline-block; }

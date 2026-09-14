@@ -102,10 +102,10 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await selectWhenReady(page, 'task-target-connection-select', TGT_CONNECTION_NAME)
     await selectWhenReady(page, 'task-target-database-select', DB_NAME)
 
-    // The worker's two lane sizes — incremental passes, and backfills — on the Schedule card,
+    // The worker's two lane sizes — incremental passes, and bulk loads — on the Schedule card,
     // committed by the same Save as the endpoints above.
     await page.getByTestId('schedule-degree-of-parallelism-input').fill('6')
-    await page.getByTestId('schedule-backfill-parallelism-input').fill('2')
+    await page.getByTestId('schedule-bulk-load-parallelism-input').fill('2')
     await shot(page, '04-replication-endpoints.png')
 
     await page.getByTestId('save-settings-button').click()
@@ -114,11 +114,11 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('tab-overview').click()
     await expect(page.getByTestId('task-source-connection-select')).toHaveValue(SRC_CONNECTION_NAME, { timeout: 15_000 })
     await expect(page.getByTestId('schedule-degree-of-parallelism-input')).toHaveValue('6')
-    await expect(page.getByTestId('schedule-backfill-parallelism-input')).toHaveValue('2')
+    await expect(page.getByTestId('schedule-bulk-load-parallelism-input')).toHaveValue('2')
 
     const saved = await (await page.request.get(`/api/replications/${REPLICATION_NAME}`)).json()
     expect(saved.changeProcessing.degreeOfParallelism).toBe(6)
-    expect(saved.changeProcessing.backfillDegreeOfParallelism).toBe(2)
+    expect(saved.changeProcessing.bulkLoadDegreeOfParallelism).toBe(2)
   })
 
   test('04b - the Overview leads with what a replication is, not with an advanced customisation', async ({ page }) => {
@@ -242,7 +242,7 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     expect(output.trim().split('\n').filter((l) => l.trim())).toHaveLength(2)
   })
 
-  test('09 - an ad-hoc backfill repairs the target through the UI', async ({ page }) => {
+  test('09 - an ad-hoc bulk load repairs the target through the UI', async ({ page }) => {
     // Diverge the target from the source behind the replication's back. An incremental pass can't fix
     // this — Change Tracking has nothing new to report, since nothing changed at the *source* — which
     // is exactly the situation a reload exists for.
@@ -250,40 +250,40 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     expect(querySql(`SET NOCOUNT ON; SELECT Name FROM dbo.[${TARGET_TABLE}];`, DB_NAME)).not.toContain(NAMES.widget)
 
     await page.goto(`/replications/${REPLICATION_NAME}`)
-    await page.getByTestId('backfill-button').click()
-    await expect(page.getByTestId('backfill-form')).toBeVisible()
+    await page.getByTestId('bulk-load-button').click()
+    await expect(page.getByTestId('bulk-load-form')).toBeVisible()
 
     // The Kind pickers are populated from the live capabilities endpoint, and default by capability:
     // a reader that can be scoped to a segment, and a writer that reconciles rather than only upserts.
-    await expect(page.getByTestId('backfill-reader-select')).toHaveValue('MsSqlBatchReload', { timeout: 20_000 })
-    await expect(page.getByTestId('backfill-writer-select')).toHaveValue('MsSqlMergeReconcile', { timeout: 20_000 })
+    await expect(page.getByTestId('bulk-load-reader-select')).toHaveValue('MsSqlBatchReload', { timeout: 20_000 })
+    await expect(page.getByTestId('bulk-load-writer-select')).toHaveValue('MsSqlMergeReconcile', { timeout: 20_000 })
     // Its own query (useTableMappings), not the capabilities one the two above share — on a loaded
     // CI runner it can land after the default 5s even when the Kind pickers are already populated.
-    await expect(page.getByTestId('backfill-mapping-select')).toHaveValue(MAPPING_NAME, { timeout: 20_000 })
-    await shot(page, '11-backfill-form.png')
+    await expect(page.getByTestId('bulk-load-mapping-select')).toHaveValue(MAPPING_NAME, { timeout: 20_000 })
+    await shot(page, '11-bulk-load-form.png')
 
-    await page.getByTestId('backfill-submit-button').click()
+    await page.getByTestId('bulk-load-submit-button').click()
 
     await expect(page.getByTestId('live-run-panel')).toBeVisible()
     // Spawning a worker and running a segmented reload against real SQL Server is slower to finish
     // on a CI runner than a dev box — the same headroom the config's per-test timeout already grants.
     await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 60_000 })
-    await shot(page, '12-backfill-completed.png')
+    await shot(page, '12-bulk-load-completed.png')
 
     // Distinguishable from the replication's own incremental passes in history.
-    await expect(page.getByTestId('run-history-table')).toContainText('BACKFILL', { timeout: 20_000 })
+    await expect(page.getByTestId('run-history-table')).toContainText('BULKLOAD', { timeout: 20_000 })
     await expect(page.getByTestId('run-history-table')).toContainText('full')
-    await shot(page, '13-run-history-with-backfill.png')
+    await shot(page, '13-run-history-with-bulk-load.png')
 
     const query = `SET NOCOUNT ON; SELECT Id, Name FROM dbo.[${TARGET_TABLE}] ORDER BY Id;`
     await expect.poll(() => querySql(query, DB_NAME), { timeout: 15_000 }).toContain(NAMES.widget)
     expect(querySql(query, DB_NAME)).toContain(NAMES.gadget)
   })
 
-  test('10 - the backfill left the incremental sync\'s watermark alone', async ({ page }) => {
+  test('10 - the bulk load left the incremental sync\'s watermark alone', async ({ page }) => {
     // Nothing has changed at the source since test 05, so the next incremental pass must read nothing.
-    // Had the backfill disturbed the watermark, this pass would re-read the whole table instead — the
-    // single most important consequence of Backfill runs never calling SetWatermark.
+    // Had the bulk load disturbed the watermark, this pass would re-read the whole table instead — the
+    // single most important consequence of BulkLoad runs never calling SetWatermark.
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('tab-monitoring').click()
     await page.getByTestId('trigger-run-button').click()
@@ -2020,21 +2020,21 @@ public sealed class Shout : IValueColumnExpression
     await page.getByTestId('cancel-strategy-button').click()
     await expect(page.getByTestId('strategy-editor')).toHaveCount(0)
 
-    // And it closes the loop: the strategy authored here is selectable in the Backfill form and
+    // And it closes the loop: the strategy authored here is selectable in the Bulk Load form and
     // proposes the same candidates the editor's Test button showed.
     runSql(`DELETE FROM dbo.[${TARGET_TABLE}];`, DB_NAME)
 
     await page.goto(`/replications/${REPLICATION_NAME}`)
-    await page.getByTestId('backfill-button').click()
-    await expect(page.getByTestId('backfill-mode-select')).toBeVisible({ timeout: 20_000 })
-    await page.getByTestId('backfill-mode-select').selectOption('custom')
-    await page.getByTestId('backfill-strategy-select').selectOption('by-id-band')
+    await page.getByTestId('bulk-load-button').click()
+    await expect(page.getByTestId('bulk-load-mode-select')).toBeVisible({ timeout: 20_000 })
+    await page.getByTestId('bulk-load-mode-select').selectOption('custom')
+    await page.getByTestId('bulk-load-strategy-select').selectOption('by-id-band')
 
-    await expect(page.getByTestId('backfill-candidate-0')).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByTestId('backfill-candidate-1')).toBeVisible()
-    await shot(page, '46-strategy-in-backfill.png')
+    await expect(page.getByTestId('bulk-load-candidate-0')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId('bulk-load-candidate-1')).toBeVisible()
+    await shot(page, '46-strategy-in-bulk-load.png')
 
-    await page.getByTestId('backfill-submit-button').click()
+    await page.getByTestId('bulk-load-submit-button').click()
     await expect(page.getByTestId('live-run-panel')).toContainText('succeeded', { timeout: 40_000 })
 
     // The strategy's own labels become the runs' segment labels, which is what makes a segmented

@@ -19,24 +19,24 @@ public sealed class TaskRunnerOptionsTests
         Assert.Equal("crm-sync", options.Replication);
         Assert.Equal(Path.Combine("/repo", "config"), options.ConfigRoot);
         Assert.Equal(4, options.DegreeOfParallelism);
-        Assert.Equal(4, options.BackfillDegreeOfParallelism);
+        Assert.Equal(4, options.BulkLoadDegreeOfParallelism);
         Assert.Equal(new WorkerLanes(4, 4), options.Lanes);
     }
 
     [Fact]
-    public void TryParse_WithExplicitBackfillParallelism_UsesIt_Independently()
+    public void TryParse_WithExplicitBulkLoadParallelism_UsesIt_Independently()
     {
         var args = new[]
         {
             "--repo-root", "/repo", "--state-db", "/repo/state.db", "--replication", "crm-sync",
-            "--degree-of-parallelism", "6", "--backfill-parallelism", "2",
+            "--degree-of-parallelism", "6", "--bulk-load-parallelism", "2",
         };
 
         var ok = TaskRunnerOptions.TryParse(args, out var options, out _);
 
         Assert.True(ok);
         Assert.Equal(6, options!.DegreeOfParallelism);
-        Assert.Equal(2, options.BackfillDegreeOfParallelism);
+        Assert.Equal(2, options.BulkLoadDegreeOfParallelism);
         Assert.Equal(new WorkerLanes(6, 2), options.Lanes);
     }
 
@@ -44,19 +44,19 @@ public sealed class TaskRunnerOptionsTests
     [InlineData("not-a-number")]
     [InlineData("0")]
     [InlineData("-1")]
-    public void TryParse_InvalidBackfillParallelism_Fails(string value)
+    public void TryParse_InvalidBulkLoadParallelism_Fails(string value)
     {
         var args = new[]
         {
             "--repo-root", "/repo", "--state-db", "/repo/state.db", "--replication", "crm-sync",
-            "--backfill-parallelism", value,
+            "--bulk-load-parallelism", value,
         };
 
         var ok = TaskRunnerOptions.TryParse(args, out var options, out var error);
 
         Assert.False(ok);
         Assert.Null(options);
-        Assert.Contains("--backfill-parallelism", error);
+        Assert.Contains("--bulk-load-parallelism", error);
     }
 
     [Fact]

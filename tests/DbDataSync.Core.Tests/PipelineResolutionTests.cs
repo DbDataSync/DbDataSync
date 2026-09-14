@@ -83,7 +83,7 @@ public sealed class PipelineResolutionTests
     }
 
     /// <summary>
-    /// A Backfill's per-work-item Kind stays the most specific — over a mapping's override exactly as
+    /// A BulkLoad's per-work-item Kind stays the most specific — over a mapping's override exactly as
     /// it was already over the replication's configured Kind.
     /// </summary>
     [Fact]
@@ -121,5 +121,99 @@ public sealed class PipelineResolutionTests
         mapping.WriterOverride = new WriterConfig { Kind = "MappingWriter" };
         Assert.Equal(BindingLevel.Replication, PipelineResolution.LevelOfReader(mapping));
         Assert.Equal(BindingLevel.Mapping, PipelineResolution.LevelOfWriter(mapping));
+    }
+
+    /// <summary>
+    /// Phase 133: the Bulk Load pipeline resolves through the same two-level shape as Change
+    /// Processing, but independently of it — a mapping's Change Processing overrides say nothing about
+    /// what its Bulk Load pipeline runs, and vice versa.
+    /// </summary>
+    [Fact]
+    public void A_mapping_with_no_bulk_load_overrides_runs_the_replications_bulk_load_kinds()
+    {
+        var task = Task();
+        task.BulkLoad = new BulkLoadConfig
+        {
+            Reader = new ReaderConfig { Kind = "TaskBulkReader", Options = { ["batch"] = "500" } },
+            Cache = new CacheConfig { Kind = "TaskBulkCache" },
+            Writer = new WriterConfig { Kind = "TaskBulkWriter" },
+        };
+        var mapping = Mapping();
+
+        Assert.Equal("TaskBulkReader", PipelineResolution.BulkLoadReader(task, mapping).Kind);
+        Assert.Equal("500", PipelineResolution.BulkLoadReader(task, mapping).Options["batch"]);
+        Assert.Equal("TaskBulkCache", PipelineResolution.BulkLoadCache(task, mapping).Kind);
+        Assert.Equal("TaskBulkWriter", PipelineResolution.BulkLoadWriter(task, mapping).Kind);
+    }
+
+    /// <summary>A replication that says nothing about Bulk Load still has a working pipeline — the
+    /// reader defaults to BatchReload, and the cache/writer fall through to the resolved Change
+    /// Processing ones (<see cref="PipelineResolution.BulkLoadCache"/>/<see cref="PipelineResolution.BulkLoadWriter"/>).</summary>
+    [Fact]
+    public void An_unconfigured_bulk_load_pipeline_defaults_to_BatchReload_and_falls_through_to_change_processing()
+    {
+        var task = Task();
+        var mapping = Mapping();
+
+        Assert.Equal("BatchReload", PipelineResolution.BulkLoadReader(task, mapping).Kind);
+        Assert.Equal("TaskCache", PipelineResolution.BulkLoadCache(task, mapping).Kind);
+        Assert.Equal("TaskWriter", PipelineResolution.BulkLoadWriter(task, mapping).Kind);
+    }
+
+    /// <summary>Overriding only the Bulk Load reader on a mapping leaves the Bulk Load cache/writer
+    /// resolving from the replication (or its Change Processing fallback) unaffected — the same
+    /// per-stage independence Change Processing already has.</summary>
+    [Fact]
+    public void Overriding_only_the_mappings_bulk_load_reader_leaves_bulk_load_cache_and_writer_inherited()
+    {
+        var task = Task();
+        task.BulkLoad = new BulkLoadConfig
+        {
+            Reader = new ReaderConfig { Kind = "TaskBulkReader" },
+            Cache = new CacheConfig { Kind = "TaskBulkCache" },
+            Writer = null,
+        };
+        var mapping = Mapping();
+        mapping.BulkLoadReaderOverride = new ReaderConfig { Kind = "MappingBulkReader" };
+
+        Assert.Equal("MappingBulkReader", PipelineResolution.BulkLoadReader(task, mapping).Kind);
+        Assert.Equal("TaskBulkCache", PipelineResolution.BulkLoadCache(task, mapping).Kind);
+        // The replication's own BulkLoad.Writer is null, so this still falls all the way through to
+        // Change Processing's writer.
+        Assert.Equal("TaskWriter", PipelineResolution.BulkLoadWriter(task, mapping).Kind);
+    }
+
+    /// <summary>A mapping overriding all three Bulk Load stages independently gets each override, and
+    /// none of it leaks onto the mapping's Change Processing resolution.</summary>
+    [Fact]
+    public void A_mapping_can_override_all_three_bulk_load_stages_independently_of_change_processing()
+    {
+        var task = Task();
+        var mapping = Mapping();
+        mapping.BulkLoadReaderOverride = new ReaderConfig { Kind = "MappingBulkReader" };
+        mapping.BulkLoadCacheOverride = new CacheConfig { Kind = "MappingBulkCache" };
+        mapping.BulkLoadWriterOverride = new WriterConfig { Kind = "MappingBulkWriter" };
+
+        Assert.Equal("MappingBulkReader", PipelineResolution.BulkLoadReader(task, mapping).Kind);
+        Assert.Equal("MappingBulkCache", PipelineResolution.BulkLoadCache(task, mapping).Kind);
+        Assert.Equal("MappingBulkWriter", PipelineResolution.BulkLoadWriter(task, mapping).Kind);
+
+        // Change Processing resolution is untouched by the Bulk Load overrides above.
+        Assert.Equal("TaskReader", PipelineResolution.Reader(task, mapping).Kind);
+        Assert.Equal("TaskCache", PipelineResolution.Cache(task, mapping).Kind);
+        Assert.Equal("TaskWriter", PipelineResolution.Writer(task, mapping).Kind);
+    }
+
+    [Fact]
+    public void The_level_a_bulk_load_stage_resolved_at_is_reportable()
+    {
+        var mapping = Mapping();
+        Assert.Equal(BindingLevel.Replication, PipelineResolution.LevelOfBulkLoadReader(mapping));
+        Assert.Equal(BindingLevel.Replication, PipelineResolution.LevelOfBulkLoadCache(mapping));
+        Assert.Equal(BindingLevel.Replication, PipelineResolution.LevelOfBulkLoadWriter(mapping));
+
+        mapping.BulkLoadWriterOverride = new WriterConfig { Kind = "MappingBulkWriter" };
+        Assert.Equal(BindingLevel.Replication, PipelineResolution.LevelOfBulkLoadReader(mapping));
+        Assert.Equal(BindingLevel.Mapping, PipelineResolution.LevelOfBulkLoadWriter(mapping));
     }
 }

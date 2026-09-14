@@ -40,11 +40,11 @@ public sealed class WorkQueueStoreTests : IDisposable
     [Fact]
     public void Enqueue_DifferentSegmentLabels_AreIndependent()
     {
-        var range1 = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "1-1000");
-        var range2 = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "1001-2000");
+        var range1 = _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "1-1000");
+        var range2 = _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "1001-2000");
 
         Assert.NotEqual(range1, range2);
-        Assert.Equal(2, _taskRunStore.GetRunHistory("crm-sync", RunKind.Backfill).Count);
+        Assert.Equal(2, _taskRunStore.GetRunHistory("crm-sync", RunKind.BulkLoad).Count);
     }
 
     [Fact]
@@ -84,10 +84,10 @@ public sealed class WorkQueueStoreTests : IDisposable
     [Fact]
     public void TryClaimNext_SkipsAMapping_WhoseOtherItemIsAlreadyClaimedOrRunning()
     {
-        // Two segments of the same mapping's backfill queued at once — only one should be claimable
+        // Two segments of the same mapping's bulk load queued at once — only one should be claimable
         // while the other is in flight, even though both are independently Pending rows.
-        _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-1");
-        _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-2");
+        _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "seg-1");
+        _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "seg-2");
 
         var firstClaim = _queue.TryClaimNext("crm-sync", "worker-1");
         var secondClaim = _queue.TryClaimNext("crm-sync", "worker-1");
@@ -100,31 +100,31 @@ public sealed class WorkQueueStoreTests : IDisposable
     public void TryClaimNext_WithALane_OnlyReturnsThatLanesKinds()
     {
         _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
-        _queue.Enqueue("crm-sync", RunKind.Backfill, "customers", segmentLabel: "seg-1");
+        _queue.Enqueue("crm-sync", RunKind.BulkLoad, "customers", segmentLabel: "seg-1");
         _queue.Enqueue("crm-sync", RunKind.Verification, "products");
 
         var change1 = _queue.TryClaimNext("crm-sync", "w", RunLane.ChangeProcessing);
         var change2 = _queue.TryClaimNext("crm-sync", "w", RunLane.ChangeProcessing);
         Assert.Equal("orders", change1!.MappingName);
-        Assert.Null(change2); // the Backfill and the Verification are not this lane's
+        Assert.Null(change2); // the BulkLoad and the Verification are not this lane's
 
-        var backfill = new List<string?>
+        var bulkLoad = new List<string?>
         {
-            _queue.TryClaimNext("crm-sync", "w", RunLane.Backfill)?.MappingName,
-            _queue.TryClaimNext("crm-sync", "w", RunLane.Backfill)?.MappingName,
-            _queue.TryClaimNext("crm-sync", "w", RunLane.Backfill)?.MappingName,
+            _queue.TryClaimNext("crm-sync", "w", RunLane.BulkLoad)?.MappingName,
+            _queue.TryClaimNext("crm-sync", "w", RunLane.BulkLoad)?.MappingName,
+            _queue.TryClaimNext("crm-sync", "w", RunLane.BulkLoad)?.MappingName,
         };
-        Assert.Equal(["customers", "products"], backfill.Where(m => m is not null).Order());
+        Assert.Equal(["customers", "products"], bulkLoad.Where(m => m is not null).Order());
     }
 
     [Fact]
-    public void TryClaimNext_AChangeProcessingClaim_IsNotBlockedByAPinnedBackfill()
+    public void TryClaimNext_AChangeProcessingClaim_IsNotBlockedByAPinnedBulkLoad()
     {
-        // A backfill segment claimed and Running is exactly the "long reload holding a slot" case the
+        // A bulk load segment claimed and Running is exactly the "long reload holding a slot" case the
         // lane split exists for. The change-processing lane must not so much as notice it.
-        _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-1");
-        var backfill = _queue.TryClaimNext("crm-sync", "backfill-worker", RunLane.Backfill)!;
-        _queue.MarkRunning(backfill.Id);
+        _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "seg-1");
+        var bulkLoad = _queue.TryClaimNext("crm-sync", "bulk-load-worker", RunLane.BulkLoad)!;
+        _queue.MarkRunning(bulkLoad.Id);
 
         _queue.Enqueue("crm-sync", RunKind.Primary, "orders");
 
@@ -137,10 +137,10 @@ public sealed class WorkQueueStoreTests : IDisposable
     [Fact]
     public void HasOutstandingWork_IsPerLane()
     {
-        _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-1");
+        _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "seg-1");
 
         Assert.False(_queue.HasOutstandingWork("crm-sync", RunLane.ChangeProcessing));
-        Assert.True(_queue.HasOutstandingWork("crm-sync", RunLane.Backfill));
+        Assert.True(_queue.HasOutstandingWork("crm-sync", RunLane.BulkLoad));
         Assert.True(_queue.HasOutstandingWork("crm-sync")); // no lane = anything at all
     }
 
@@ -224,7 +224,7 @@ public sealed class WorkQueueStoreTests : IDisposable
     }
 
     /// <summary>
-    /// A backfill has to run a different pipeline from the replication it belongs to — a reload
+    /// A bulk load has to run a different pipeline from the replication it belongs to — a reload
     /// reader and usually a reconciling writer — so which Kinds to use is carried per work item and
     /// has to survive the round trip through the queue intact.
     /// </summary>
@@ -233,7 +233,7 @@ public sealed class WorkQueueStoreTests : IDisposable
     {
         var kinds = new WorkItemKinds("SomeBatchReload", "SomeStaging", "SomeReconcilingWriter");
 
-        _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", "Region in (EU)", "{\"mode\":\"full\"}", kinds);
+        _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", "Region in (EU)", "{\"mode\":\"full\"}", kinds);
 
         var claimed = _queue.TryClaimNext("crm-sync", "worker-1")!;
         Assert.Equal(kinds, claimed.Kinds);
@@ -255,14 +255,14 @@ public sealed class WorkQueueStoreTests : IDisposable
     /// <summary>
     /// Two segments of the same mapping are distinct units of work, unlike two enqueues of the same
     /// segment — the in-flight uniqueness constraint is per segment, not per mapping, or a segmented
-    /// backfill could never queue more than one of its own segments.
+    /// bulk load could never queue more than one of its own segments.
     /// </summary>
     [Fact]
     public void Enqueue_DifferentSegmentsOfOneMapping_AreSeparateItems()
     {
-        var first = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", "Id [1, 100)", "{}");
-        var second = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", "Id [100, 200)", "{}");
-        var duplicate = _queue.Enqueue("crm-sync", RunKind.Backfill, "orders", "Id [1, 100)", "{}");
+        var first = _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", "Id [1, 100)", "{}");
+        var second = _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", "Id [100, 200)", "{}");
+        var duplicate = _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", "Id [1, 100)", "{}");
 
         Assert.NotEqual(first, second);
         Assert.Equal(first, duplicate);

@@ -537,9 +537,9 @@ public sealed class TaskRunStore(StateDatabase database)
     /// <summary>
     /// Run history for a task, filtered and paged — see phase 104.
     /// <para>
-    /// A null <paramref name="runKind"/> (the default) mixes Primary and Backfill rows — what the
+    /// A null <paramref name="runKind"/> (the default) mixes Primary and BulkLoad rows — what the
     /// SPA's run-history view wants; scheduling due-ness checks must always pass RunKind.Primary
-    /// explicitly so a Backfill run never perturbs the incremental schedule's timing.
+    /// explicitly so a BulkLoad run never perturbs the incremental schedule's timing.
     /// <paramref name="mappingName"/> and <paramref name="status"/> are ordinary equality filters on
     /// the general query — <b>not</b> a second call path: see <see cref="GetMappingRunHistory"/> for
     /// why a mapping's history has to stay one method rather than two that could drift apart.

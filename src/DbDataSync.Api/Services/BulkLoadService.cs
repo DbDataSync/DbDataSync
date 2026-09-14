@@ -7,7 +7,7 @@ using DbDataSync.State;
 namespace DbDataSync.Api.Services;
 
 /// <summary>
-/// Turns a backfill request into queued work: expand any <see cref="AutoSegment"/> against the real
+/// Turns a bulk load request into queued work: expand any <see cref="AutoSegment"/> against the real
 /// source table, then enqueue one independently-scheduled unit of work per resulting segment.
 /// <para>
 /// Nothing spawns a process on this request's critical path. Enqueueing is a handful of SQLite writes,
@@ -15,16 +15,16 @@ namespace DbDataSync.Api.Services;
 /// merely nudged into existence afterwards, and that's a no-op if one is already draining.
 /// </para>
 /// </summary>
-public sealed class BackfillService(
+public sealed class BulkLoadService(
     ConfigRepository configRepository,
     DriverConnectionFactory connections,
     WorkQueueStore workQueueStore,
-    BackfillBatchStore batchStore,
+    BulkLoadBatchStore batchStore,
     ProcessSupervisor supervisor,
     CustomSegmentExpansion customSegments)
 {
     public async Task<TriggerResult> EnqueueAsync(
-        string replicationName, string mappingName, BackfillRequest request, CancellationToken cancellationToken)
+        string replicationName, string mappingName, BulkLoadRequest request, CancellationToken cancellationToken)
     {
         ReplicationTaskConfig task;
         TableMappingConfig mapping;
@@ -43,7 +43,7 @@ public sealed class BackfillService(
 
         if (mapping.Sources.Count != 1)
             return TriggerResult.Invalid(
-                $"Table mapping '{mappingName}' has {mapping.Sources.Count} sources; backfill supports 1:1 mappings in v1.");
+                $"Table mapping '{mappingName}' has {mapping.Sources.Count} sources; bulk load supports 1:1 mappings in v1.");
 
         IReadOnlyList<BatchReloadSegment> segments;
         try
@@ -70,7 +70,7 @@ public sealed class BackfillService(
         var runIds = segments
             .Select(segment => workQueueStore.Enqueue(
                 replicationName,
-                RunKind.Backfill,
+                RunKind.BulkLoad,
                 mappingName,
                 segment.Describe(),
                 SegmentSerializer.Serialize(segment),
@@ -127,7 +127,7 @@ public sealed class BackfillService(
     /// its own queue row so segments can be scheduled, retried and observed independently.
     /// </summary>
     private async Task<IReadOnlyList<BatchReloadSegment>> ExpandAsync(
-        ReplicationTaskConfig task, TableMappingConfig mapping, BackfillRequest request, CancellationToken cancellationToken)
+        ReplicationTaskConfig task, TableMappingConfig mapping, BulkLoadRequest request, CancellationToken cancellationToken)
     {
         var needsAuto = request.Segments.OfType<AutoSegment>().Any();
         var needsCustom = request.Segments.OfType<CustomSegment>().Any();

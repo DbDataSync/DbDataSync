@@ -29,7 +29,7 @@ public sealed class ChangeProcessingParallelismTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
-    private static ReplicationTaskConfig Task(int? degreeOfParallelism = null, int? backfillDegreeOfParallelism = null) => new()
+    private static ReplicationTaskConfig Task(int? degreeOfParallelism = null, int? bulkLoadDegreeOfParallelism = null) => new()
     {
         Name = "sales",
         Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 30 },
@@ -39,7 +39,7 @@ public sealed class ChangeProcessingParallelismTests : IDisposable
             Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
             Writer = new WriterConfig { Kind = "MsSqlMerge" },
             DegreeOfParallelism = degreeOfParallelism ?? ChangeProcessingConfig.DefaultDegreeOfParallelism,
-            BackfillDegreeOfParallelism = backfillDegreeOfParallelism ?? ChangeProcessingConfig.DefaultDegreeOfParallelism,
+            BulkLoadDegreeOfParallelism = bulkLoadDegreeOfParallelism ?? ChangeProcessingConfig.DefaultDegreeOfParallelism,
         },
     };
 
@@ -123,23 +123,23 @@ public sealed class ChangeProcessingParallelismTests : IDisposable
     }
 
     [Fact]
-    public void TheBackfillLaneHasItsOwnDegree_RoundTrippedIndependently()
+    public void TheBulkLoadLaneHasItsOwnDegree_RoundTrippedIndependently()
     {
-        _config.SaveReplicationTask(Task(degreeOfParallelism: 8, backfillDegreeOfParallelism: 2), Author);
+        _config.SaveReplicationTask(Task(degreeOfParallelism: 8, bulkLoadDegreeOfParallelism: 2), Author);
 
         var loaded = _config.LoadReplicationTask("sales").ChangeProcessing;
         Assert.Equal(8, loaded.DegreeOfParallelism);
-        Assert.Equal(2, loaded.BackfillDegreeOfParallelism);
-        Assert.Contains("backfillDegreeOfParallelism: 2", TaskYaml());
+        Assert.Equal(2, loaded.BulkLoadDegreeOfParallelism);
+        Assert.Contains("bulkLoadDegreeOfParallelism: 2", TaskYaml());
     }
 
     [Theory]
     [InlineData(0)]
     [InlineData(-3)]
-    public void ABackfillDegreeBelowOne_IsRefused(int degree)
+    public void ABulkLoadDegreeBelowOne_IsRefused(int degree)
     {
         var problem = Assert.Throws<ConfigValidationException>(
-            () => _config.SaveReplicationTask(Task(backfillDegreeOfParallelism: degree), Author));
+            () => _config.SaveReplicationTask(Task(bulkLoadDegreeOfParallelism: degree), Author));
 
         Assert.Contains("at least 1", problem.Message);
     }

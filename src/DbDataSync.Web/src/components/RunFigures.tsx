@@ -21,7 +21,7 @@ import type { RunTiming, RunWatermarkTimes, TaskRunRecord } from '../api/types'
  * comparing this against a query on the source needs.
  *
  * **Three different dashes, and they mean three different things.** A run with no watermarks at all
- * is a backfill, a verification or a failed pass — it made no position durable, and the whole cell
+ * is a bulk load, a verification or a failed pass — it made no position durable, and the whole cell
  * is one dash. A watermark whose time did not resolve has aged out of the polling history's
  * retention window, or names a position the source has not been observed at yet; it gets a dash of
  * its own with the raw value still on it. Neither is an error, and neither invents a time.

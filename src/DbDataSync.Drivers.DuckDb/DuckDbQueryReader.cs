@@ -118,7 +118,7 @@ public sealed class DuckDbQueryReader : IChangeReader, IStatementPreview
                 // The operator's, not ours — the whole statement, not a filter spliced into one.
                 PreviewOrigin.OperatorSql,
                 segment is null
-                    ? "Unsegmented, so any {{segment…}} tokens are shown as written. A backfill supplies a " +
+                    ? "Unsegmented, so any {{segment…}} tokens are shown as written. A bulk load supplies a " +
                       "segment, and substitutes them before running this."
                     : null),
         ]);

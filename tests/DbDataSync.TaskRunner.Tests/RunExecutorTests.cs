@@ -451,7 +451,7 @@ public sealed class RunExecutorTests : IDisposable
     }
 
     /// <summary>
-    /// One worker, two lanes: a Primary pass and a Backfill segment queued together are both claimed
+    /// One worker, two lanes: a Primary pass and a BulkLoad segment queued together are both claimed
     /// and both driven to a terminal state in a single invocation. (Both fail for want of a database,
     /// which is beside the point — they were each picked up, in their own lane.)
     /// </summary>
@@ -477,23 +477,23 @@ public sealed class RunExecutorTests : IDisposable
         }, Author);
 
         var primaryRunId = _workQueueStore.Enqueue("crm-sync", RunKind.Primary, "orders");
-        var backfillRunId = _workQueueStore.Enqueue(
-            "crm-sync", RunKind.Backfill, "orders", segmentLabel: "full", segmentJson: "{\"mode\":\"full\"}");
+        var bulkLoadRunId = _workQueueStore.Enqueue(
+            "crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "full", segmentJson: "{\"mode\":\"full\"}");
 
         await _executor.ExecuteWorkerAsync("crm-sync", WorkerLanes.Uniform(1), CancellationToken.None);
 
         Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(primaryRunId)!.Status);
-        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(backfillRunId)!.Status);
+        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(bulkLoadRunId)!.Status);
     }
 
     /// <summary>
-    /// The point of the split: a backfill segment already Running — the "long reload holding a slot"
+    /// The point of the split: a bulk load segment already Running — the "long reload holding a slot"
     /// case — does not keep a Primary pass from being claimed and finished, and does not keep the
-    /// worker alive past its idle timeout either (the backfill lane winds down with the change lane
+    /// worker alive past its idle timeout either (the bulk load lane winds down with the change lane
     /// even while a Running row it does not own is still on the books).
     /// </summary>
     [Fact]
-    public async Task ExecuteWorkerAsync_ABusyBackfillLane_DoesNotBlockChangeProcessing()
+    public async Task ExecuteWorkerAsync_ABusyBulkLoadLane_DoesNotBlockChangeProcessing()
     {
         SaveTask("crm-sync"); // continuous, 2s idle timeout
         _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
@@ -513,19 +513,19 @@ public sealed class RunExecutorTests : IDisposable
             Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
         }, Author);
 
-        // Pin a backfill segment Running and never finish it — a stand-in for a reload that takes
+        // Pin a bulk load segment Running and never finish it — a stand-in for a reload that takes
         // hours. Claimed by a different "worker", so the worker under test never touches it.
-        _workQueueStore.Enqueue("crm-sync", RunKind.Backfill, "orders", segmentLabel: "seg-1");
-        var pinned = _workQueueStore.TryClaimNext("crm-sync", "slow-backfill", RunLane.Backfill)!;
+        _workQueueStore.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "seg-1");
+        var pinned = _workQueueStore.TryClaimNext("crm-sync", "slow-bulk-load", RunLane.BulkLoad)!;
         _workQueueStore.MarkRunning(pinned.Id);
 
         var primaryRunId = _workQueueStore.Enqueue("crm-sync", RunKind.Primary, "orders");
 
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await _executor.ExecuteWorkerAsync(
-            "crm-sync", new WorkerLanes(ChangeProcessing: 1, Backfill: 1), cancellation.Token);
+            "crm-sync", new WorkerLanes(ChangeProcessing: 1, BulkLoad: 1), cancellation.Token);
 
-        Assert.False(cancellation.IsCancellationRequested, "the worker did not exit on its own — the backfill lane hung.");
+        Assert.False(cancellation.IsCancellationRequested, "the worker did not exit on its own — the bulk load lane hung.");
         Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(primaryRunId)!.Status);
         // The worker under test never claimed the pinned segment — it belongs to another worker — so
         // it recorded no outcome for it.

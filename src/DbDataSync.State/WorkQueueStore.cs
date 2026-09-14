@@ -30,7 +30,7 @@ public sealed record WorkItem(
 /// <summary>
 /// Which reader/cache/writer this unit of work should use, when that isn't simply the replication's
 /// configured pipeline. Every component is null for a Primary pass — an incremental replication runs
-/// the pipeline it was configured with. A Backfill sets them, because reloading a segment needs a
+/// the pipeline it was configured with. A BulkLoad sets them, because reloading a segment needs a
 /// reload reader and (usually) a reconciling writer regardless of what the replication does for its
 /// ongoing sync.
 /// </summary>
@@ -42,7 +42,7 @@ public sealed record WorkItemKinds(string? ReaderKind = null, string? CacheKind 
 
 /// <summary>
 /// Durable, SQLite-backed cross-process work queue (architecture/implementation/done/phase-008-work-queue-schema.md).
-/// The API process (handling backfill triggers and scheduled due-ness) and the TaskRunner worker
+/// The API process (handling bulk load triggers and scheduled due-ness) and the TaskRunner worker
 /// process(es) it spawns communicate exclusively through DbDataSync.State — this table is the mechanism,
 /// not an in-memory queue, since the API can't reach into a separate OS process directly.
 /// </summary>
@@ -58,7 +58,7 @@ public sealed class WorkQueueStore(StateDatabase database)
     private const string InFlightStatuses = "Status IN ('Pending','Claimed','Running')";
 
     /// <summary>Sentinel for WorkQueue.SegmentLabel when a unit of work has no segment (every Primary
-    /// item, and a Backfill's single Full-mode segment) — NOT NULL because this column participates in
+    /// item, and a BulkLoad's single Full-mode segment) — NOT NULL because this column participates in
     /// a uniqueness constraint, where SQL's every-NULL-is-distinct rule would silently defeat it.</summary>
     public const string NoSegment = "";
 
@@ -76,7 +76,7 @@ public sealed class WorkQueueStore(StateDatabase database)
         string segmentLabel = NoSegment,
         string? segmentJson = null,
         WorkItemKinds? kinds = null,
-        string? backfillBatchId = null,
+        string? bulkLoadBatchId = null,
         // Phase 124: a serialized DeleteGuard override — see WorkItem.DeleteGuardJson.
         string? deleteGuardJson = null) =>
         database.Retry(() =>
@@ -122,7 +122,7 @@ public sealed class WorkQueueStore(StateDatabase database)
             }
 
             using (var cmd = database.Command(connection, transaction, """
-                    INSERT INTO TaskRuns (RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, EnqueuedAtUtc, RowsRead, RowsWritten, BackfillBatchId)
+                    INSERT INTO TaskRuns (RunId, TaskName, Pid, Status, RunKind, MappingName, SegmentLabel, EnqueuedAtUtc, RowsRead, RowsWritten, BulkLoadBatchId)
                     VALUES ($runId, $taskName, NULL, $status, $runKind, $mapping, $segment, $enqueuedAt, 0, 0, $batchId);
                     """))
             {
@@ -132,7 +132,7 @@ public sealed class WorkQueueStore(StateDatabase database)
                 cmd.Bind(database, "runKind", runKind.ToString());
                 cmd.Bind(database, "mapping", mappingName);
                 cmd.Bind(database, "segment", segmentLabel == NoSegment ? (object)DBNull.Value : segmentLabel);
-                cmd.Bind(database, "batchId", (object?)backfillBatchId ?? DBNull.Value);
+                cmd.Bind(database, "batchId", (object?)bulkLoadBatchId ?? DBNull.Value);
                 // EnqueuedAtUtc, and nothing else: a queued run has not been claimed and has not
                 // started, so ClaimedAtUtc and StartedAtUtc stay null until the moments they name
                 // actually happen (phase 73). Before that, this wrote the enqueue time into
@@ -355,7 +355,7 @@ public sealed class WorkQueueStore(StateDatabase database)
 
     /// <summary>Whether this mapping already has a <see cref="RunKind.ReconcileDeletes"/> item
     /// in flight — phase 125's scheduler dedup, mapping-scoped rather than lane-scoped like
-    /// <see cref="HasOutstandingWork"/> (which cannot distinguish "some other mapping's backfill is
+    /// <see cref="HasOutstandingWork"/> (which cannot distinguish "some other mapping's bulk load is
     /// running" from "this mapping's own sweep already is"). A dedicated method rather than reusing
     /// <see cref="HasOutstandingWork"/>: the scheduler needs to know about *this* mapping specifically,
     /// and stretching that method with an optional mapping parameter would make its one existing

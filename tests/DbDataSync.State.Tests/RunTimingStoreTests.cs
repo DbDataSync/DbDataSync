@@ -59,7 +59,7 @@ public sealed class RunTimingStoreTests : IDisposable
 
     /// <summary>
     /// The Kinds are stored beside the numbers because a unit of work may override the replication's
-    /// configured pipeline — a backfill reloads through a different reader — so "which reader produced
+    /// configured pipeline — a bulk load reloads through a different reader — so "which reader produced
     /// this number" cannot be recovered from config afterwards.
     /// </summary>
     [Fact]

@@ -14,13 +14,13 @@ using Xunit;
 namespace DbDataSync.Api.Tests;
 
 /// <summary>
-/// The backfill trigger endpoint driven end to end through real HTTP, a real spawned
+/// The bulk load trigger endpoint driven end to end through real HTTP, a real spawned
 /// DbDataSync.TaskRunner worker, and a real SQL Server — proving the properties the whole per-mapping
 /// run model was built for, rather than asserting them against the stores directly (which is what
 /// WorkQueueStoreTests already does, and which can't observe two processes racing).
 /// </summary>
 [Trait("Category", "Integration")]
-public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IAsyncLifetime
+public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IAsyncLifetime
 {
     private const int RowsPerTable = 9;
 
@@ -36,11 +36,11 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
 
     private readonly HttpClient _client;
     private readonly SecretStore _secrets;
-    private readonly string _databaseName = $"DbDataSyncBackfillTest_{Guid.NewGuid():N}";
+    private readonly string _databaseName = $"DbDataSyncBulkLoadTest_{Guid.NewGuid():N}";
     private readonly string _connectionName = $"bf-conn-{Guid.NewGuid():N}";
     private readonly string _replicationName;
 
-    public BackfillIntegrationTests(TestApiFactory factory)
+    public BulkLoadIntegrationTests(TestApiFactory factory)
     {
         _client = factory.CreateClient();
         _secrets = factory.Services.GetRequiredService<SecretStore>();
@@ -95,26 +95,26 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
     /// </para>
     /// </summary>
     [Fact]
-    public async Task PrimaryAndBackfill_TriggeredConcurrently_BothSucceed()
+    public async Task PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed()
     {
         var primaryTask = _client.PostAsync(
             $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json"));
-        var backfillTask = PostBackfillAsync("map-1", new FullSegment());
+        var bulkLoadTask = PostBulkLoadAsync("map-1", new FullSegment());
 
         var primaryRunIds = await ReadRunIdsAsync(await primaryTask);
-        var backfillRunIds = await ReadRunIdsAsync(await backfillTask);
+        var bulkLoadRunIds = await ReadRunIdsAsync(await bulkLoadTask);
 
         Assert.Equal(2, primaryRunIds.Count);   // one Primary pass per table mapping
-        Assert.Single(backfillRunIds);
+        Assert.Single(bulkLoadRunIds);
 
-        var runs = await Task.WhenAll(primaryRunIds.Concat(backfillRunIds).Select(PollUntilTerminalAsync));
+        var runs = await Task.WhenAll(primaryRunIds.Concat(bulkLoadRunIds).Select(PollUntilTerminalAsync));
         AssertAllSucceeded(runs);
 
-        // The Backfill row is distinguishable in history, which is what the SPA's badge renders from.
-        var backfillRun = runs.Single(r => r.GetProperty("runId").GetString() == backfillRunIds[0].ToString());
-        Assert.Equal("Backfill", backfillRun.GetProperty("runKind").GetString());
-        Assert.Equal("map-1", backfillRun.GetProperty("mappingName").GetString());
-        Assert.Equal("full", backfillRun.GetProperty("segmentLabel").GetString());
+        // The BulkLoad row is distinguishable in history, which is what the SPA's badge renders from.
+        var bulkLoadRun = runs.Single(r => r.GetProperty("runId").GetString() == bulkLoadRunIds[0].ToString());
+        Assert.Equal("BulkLoad", bulkLoadRun.GetProperty("runKind").GetString());
+        Assert.Equal("map-1", bulkLoadRun.GetProperty("mappingName").GetString());
+        Assert.Equal("full", bulkLoadRun.GetProperty("segmentLabel").GetString());
 
         Assert.Equal(RowsPerTable, await CountAsync("Tgt_1"));
         Assert.Equal(RowsPerTable, await CountAsync("Tgt_2"));
@@ -127,10 +127,10 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
     /// second request's own enqueue.
     /// </summary>
     [Fact]
-    public async Task TwoIdenticalBackfillTriggers_CollapseIntoOneRun()
+    public async Task TwoIdenticalBulkLoadTriggers_CollapseIntoOneRun()
     {
         var segment = new RangeSegment("Id", "1", "5");
-        var responses = await Task.WhenAll(PostBackfillAsync("map-2", segment), PostBackfillAsync("map-2", segment));
+        var responses = await Task.WhenAll(PostBulkLoadAsync("map-2", segment), PostBulkLoadAsync("map-2", segment));
 
         var first = await ReadRunIdsAsync(responses[0]);
         var second = await ReadRunIdsAsync(responses[1]);
@@ -140,7 +140,7 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
 
         // Phase 104: this endpoint returns a page ({ runs, nextCursor }), not a bare array.
         var history = await _client.GetFromJsonAsync<JsonElement>(
-            $"/api/replications/{_replicationName}/runs?kind=Backfill&limit=50", JsonOptions);
+            $"/api/replications/{_replicationName}/runs?kind=BulkLoad&limit=50", JsonOptions);
         Assert.Single(history.GetProperty("runs").EnumerateArray());
 
         // Half-open [1, 5) — reloaded exactly once, and nothing outside it was touched.
@@ -153,9 +153,9 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
     /// returns many RunIds.
     /// </summary>
     [Fact]
-    public async Task AutoSegmentBackfill_ExpandsIntoOneRunPerBucket_AndEveryRowLandsOnce()
+    public async Task AutoSegmentBulkLoad_ExpandsIntoOneRunPerBucket_AndEveryRowLandsOnce()
     {
-        var response = await PostBackfillAsync("map-1", new AutoSegment("Id", 3));
+        var response = await PostBulkLoadAsync("map-1", new AutoSegment("Id", 3));
         var runIds = await ReadRunIdsAsync(response);
 
         Assert.Equal(3, runIds.Count);
@@ -172,19 +172,19 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
     }
 
     /// <summary>
-    /// The Monitoring screen's "Batch reload" card reads <c>/backfills</c>: one row per backfill,
+    /// The Monitoring screen's "Batch reload" card reads <c>/bulk-loads</c>: one row per bulk load,
     /// rolled up across its segment runs, with a catalog-statistics estimate of the whole table as
     /// the denominator (<c>sys.partitions</c>, never a COUNT(*)).
     /// </summary>
     [Fact]
-    public async Task Backfills_RollsUpTheSegmentsAndCarriesACatalogEstimate()
+    public async Task BulkLoads_RollsUpTheSegmentsAndCarriesACatalogEstimate()
     {
-        var runIds = await ReadRunIdsAsync(await PostBackfillAsync("map-1", new AutoSegment("Id", 3)));
+        var runIds = await ReadRunIdsAsync(await PostBulkLoadAsync("map-1", new AutoSegment("Id", 3)));
         Assert.Equal(3, runIds.Count);
 
         // Before the segments finish: the batch exists, knows its planned segment count, and already
         // carries the estimate read once at enqueue.
-        var midway = await GetLatestBackfillAsync();
+        var midway = await GetLatestBulkLoadAsync();
         Assert.Equal("map-1", midway.GetProperty("mappingName").GetString());
         Assert.Equal(3, midway.GetProperty("segmentCount").GetInt32());
         Assert.Equal(RowsPerTable, midway.GetProperty("estimatedRows").GetInt64());
@@ -192,16 +192,16 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
 
         AssertAllSucceeded(await Task.WhenAll(runIds.Select(PollUntilTerminalAsync)));
 
-        var done = await GetLatestBackfillAsync();
+        var done = await GetLatestBulkLoadAsync();
         Assert.Equal("Completed", done.GetProperty("state").GetString());
         Assert.Equal(3, done.GetProperty("segmentsSucceeded").GetInt32());
         Assert.Equal(RowsPerTable, done.GetProperty("rowsCopied").GetInt64());
     }
 
     [Fact]
-    public async Task Backfill_ForAnUnknownMapping_Is404()
+    public async Task BulkLoad_ForAnUnknownMapping_Is404()
     {
-        var response = await PostBackfillAsync("no-such-mapping", new FullSegment());
+        var response = await PostBulkLoadAsync("no-such-mapping", new FullSegment());
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -209,9 +209,9 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
     /// <summary>Rejected up front rather than queued: a segment naming a column that doesn't exist
     /// can only ever fail, and the caller is right there to be told why.</summary>
     [Fact]
-    public async Task Backfill_WithASegmentColumnThatDoesNotExist_Is400()
+    public async Task BulkLoad_WithASegmentColumnThatDoesNotExist_Is400()
     {
-        var response = await PostBackfillAsync("map-1", new AutoSegment("NoSuchColumn", 2));
+        var response = await PostBulkLoadAsync("map-1", new AutoSegment("NoSuchColumn", 2));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -219,10 +219,10 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
     }
 
     [Fact]
-    public async Task Backfill_WithNoSegments_Is400()
+    public async Task BulkLoad_WithNoSegments_Is400()
     {
         var response = await _client.PostAsJsonAsync(
-            $"/api/replications/{_replicationName}/mappings/map-1/backfill",
+            $"/api/replications/{_replicationName}/mappings/map-1/bulk-load",
             new { readerKind = "MsSqlBatchReload", segments = Array.Empty<object>() },
             JsonOptions);
 
@@ -231,7 +231,7 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
 
     // ---- helpers -----------------------------------------------------------------------------
 
-    private Task<HttpResponseMessage> PostBackfillAsync(string mappingName, BatchReloadSegment segment)
+    private Task<HttpResponseMessage> PostBulkLoadAsync(string mappingName, BatchReloadSegment segment)
     {
         // Serialized through SegmentSerializer so the polymorphic "mode" discriminator on the wire is
         // built exactly the way every other producer of segment JSON builds it.
@@ -244,7 +244,7 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
             }
             """;
         return _client.PostAsync(
-            $"/api/replications/{_replicationName}/mappings/{mappingName}/backfill",
+            $"/api/replications/{_replicationName}/mappings/{mappingName}/bulk-load",
             new StringContent(body, Encoding.UTF8, "application/json"));
     }
 
@@ -276,10 +276,10 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
         Assert.True(failures.Count == 0, "Expected every run to succeed, but got:\n" + string.Join("\n", failures));
     }
 
-    private async Task<JsonElement> GetLatestBackfillAsync()
+    private async Task<JsonElement> GetLatestBulkLoadAsync()
     {
         var batches = await _client.GetFromJsonAsync<JsonElement>(
-            $"/api/replications/{_replicationName}/backfills", JsonOptions);
+            $"/api/replications/{_replicationName}/bulk-loads", JsonOptions);
         var list = batches.EnumerateArray().ToList();
         Assert.NotEmpty(list);
         return list[0];
@@ -345,7 +345,7 @@ public sealed class BackfillIntegrationTests : IClassFixture<TestApiFactory>, IA
         (await _client.PutAsJsonAsync($"/api/replications/{_replicationName}", new ReplicationTaskConfig
         {
             Name = _replicationName,
-            // Deliberately configured for *incremental* sync: a backfill of this replication must
+            // Deliberately configured for *incremental* sync: a bulk load of this replication must
             // override the pipeline entirely, which is the whole point of the per-item Kinds.
             Enabled = false,
             Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },

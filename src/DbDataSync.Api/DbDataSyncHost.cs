@@ -127,7 +127,7 @@ public static class DbDataSyncHost
         });
         builder.Services.AddSingleton(sp => new TaskRunStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunMetricsStore(sp.GetRequiredService<StateDatabase>()));
-        builder.Services.AddSingleton(sp => new BackfillBatchStore(sp.GetRequiredService<StateDatabase>()));
+        builder.Services.AddSingleton(sp => new BulkLoadBatchStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new VerificationResultStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new UserStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new SessionStore(sp.GetRequiredService<StateDatabase>()));
@@ -225,7 +225,7 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<LibraryValidationLauncher>();
         builder.Services.AddSingleton<SegmentingStrategyRunner>();
         builder.Services.AddSingleton<CustomSegmentExpansion>();
-        builder.Services.AddSingleton<BackfillService>();
+        builder.Services.AddSingleton<BulkLoadService>();
         builder.Services.AddSingleton<ReconcileService>();
         builder.Services.AddSingleton<SegmentingPreviewService>();
         builder.Services.AddSingleton<ResyncService>();

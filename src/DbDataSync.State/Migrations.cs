@@ -138,7 +138,7 @@ internal static class Migrations
         CREATE INDEX IX_Logs_RunId ON Logs(RunId);
 
         -- No sentinel MappingName: RunKind.Primary is now scoped to one table mapping's own
-        -- incremental pass, exactly like RunKind.Backfill is scoped to one mapping's reload — neither
+        -- incremental pass, exactly like RunKind.BulkLoad is scoped to one mapping's reload — neither
         -- kind is "the whole replication" anymore. See phase-008-work-queue-schema.md.
         CREATE TABLE RunLocks (
             TaskName {{key}} NOT NULL,
@@ -149,7 +149,7 @@ internal static class Migrations
             PRIMARY KEY (TaskName, RunKind, MappingName)
         );
 
-        -- Durable, SQLite-backed cross-process work queue: the API (handling backfill triggers and
+        -- Durable, SQLite-backed cross-process work queue: the API (handling bulk load triggers and
         -- scheduled due-ness) and the TaskRunner worker process(es) it spawns communicate exclusively
         -- through DbDataSync.State, so enqueueing has to be a table, not an in-memory structure. Claim
         -- logic (Pending -> Claimed -> Running -> Done/Failed/Cancelled) lands in a later phase; this
@@ -158,7 +158,7 @@ internal static class Migrations
         -- in UX_WorkQueue_InFlight below, and SQLite (like standard SQL) treats every NULL as
         -- distinct for uniqueness purposes, which would silently defeat "only one in-flight Primary
         -- row per mapping" (Primary rows have no segment). '' is the sentinel for "no segment"
-        -- (Primary rows, and a Backfill's single Full-mode segment); real segments get a real label.
+        -- (Primary rows, and a BulkLoad's single Full-mode segment); real segments get a real label.
         CREATE TABLE WorkQueue (
             {{identity:Id}},
             TaskName {{key}} NOT NULL,
@@ -181,11 +181,11 @@ internal static class Migrations
         """,
 
         """
-        -- Per-item reader/cache/writer Kind overrides. A Backfill is not merely "the replication's
+        -- Per-item reader/cache/writer Kind overrides. A BulkLoad is not merely "the replication's
         -- own pipeline, run again over a segment": a replication configured for incremental sync
         -- reads with MsSqlChangeTracking and writes with the upsert-only MsSqlMerge, and reloading a
         -- segment through those would be meaningless (the reader would report the segment's *changes
-        -- since a watermark* rather than its rows). A backfill has to select a reload reader and a
+        -- since a watermark* rather than its rows). A bulk load has to select a reload reader and a
         -- reconciling writer for itself, so which Kinds to use is a property of the unit of work, not
         -- of the replication. NULL means "use whatever the replication's ChangeProcessing config
         -- says", which is every Primary item. See phase-010-batch-reload-trigger-and-spa.md.
@@ -396,7 +396,7 @@ internal static class Migrations
         -- moments anyway, since the previous row may have been pruned or may belong to a run that
         -- never advanced the watermark.
         --
-        -- Null for a run that did not produce a durable watermark: a Backfill or Verification, or any
+        -- Null for a run that did not produce a durable watermark: a BulkLoad or Verification, or any
         -- failed run. A failure that had already computed a position must not record one, because the
         -- position was never made durable — the watermark advances only after the write commits.
         ALTER TABLE TaskRuns {{addcolumn}} PreviousWatermark {{text}} NULL;
@@ -743,9 +743,9 @@ internal static class Migrations
         """,
 
         """
-        -- Groups the segment runs of one backfill so the Monitoring screen can show "this reload, so
-        -- far" rather than a scatter of independent rows. A backfill enqueues one work item per
-        -- segment (BackfillService), each its own RunId with its own final RowsRead/RowsWritten; this
+        -- Groups the segment runs of one bulk load so the Monitoring screen can show "this reload, so
+        -- far" rather than a scatter of independent rows. A bulk load enqueues one work item per
+        -- segment (BulkLoadService), each its own RunId with its own final RowsRead/RowsWritten; this
         -- is the id minted once per enqueue that ties them back together.
         --
         -- A table of its own rather than columns on TaskRuns because a batch has facts of its own that
@@ -758,7 +758,7 @@ internal static class Migrations
         -- the mapping narrows its source but the estimate counts the whole table anyway — surfaced
         -- rather than hidden, since the alternative is a denominator the operator can't trust and
         -- can't see why.
-        CREATE TABLE BackfillBatches (
+        CREATE TABLE BulkLoadBatches (
             BatchId {{key}} PRIMARY KEY,
             TaskName {{key}} NOT NULL,
             MappingName {{key}} NOT NULL,
@@ -769,13 +769,13 @@ internal static class Migrations
             EstimatedRows {{int}} NULL,
             EstimateCaveat {{text}} NULL
         );
-        CREATE INDEX IX_BackfillBatches_TaskName_CreatedAt ON BackfillBatches(TaskName, CreatedAtUtc);
+        CREATE INDEX IX_BulkLoadBatches_TaskName_CreatedAt ON BulkLoadBatches(TaskName, CreatedAtUtc);
 
-        -- Nullable, no backfill: a Primary pass and every backfill segment run queued before this
+        -- Nullable, no backfill: a Primary pass and every bulk load segment run queued before this
         -- shipped simply has no batch, and the Monitoring card that reads this only ever asks about
         -- batches that exist. Same reasoning every migration from phase 72 on has used here.
-        ALTER TABLE TaskRuns {{addcolumn}} BackfillBatchId {{key}} NULL;
-        CREATE INDEX IX_TaskRuns_BackfillBatchId ON TaskRuns(BackfillBatchId);
+        ALTER TABLE TaskRuns {{addcolumn}} BulkLoadBatchId {{key}} NULL;
+        CREATE INDEX IX_TaskRuns_BulkLoadBatchId ON TaskRuns(BulkLoadBatchId);
         """,
 
         """
@@ -785,7 +785,7 @@ internal static class Migrations
         -- unit of work (an operator's override for one sweep), not of the replication's own config, so
         -- it travels on the queue row rather than through ChangeProcessing options. NULL means "no
         -- override" — RunExecutor.WithGuard leaves the writer's configured/default guard alone, which
-        -- is every row before this column existed and every Primary/Backfill/Verification item after.
+        -- is every row before this column existed and every Primary/BulkLoad/Verification item after.
         ALTER TABLE WorkQueue {{addcolumn}} DeleteGuardJson {{text}} NULL;
         """,
 

@@ -144,7 +144,7 @@ export function ReconcileConfigCard({ reconcile, writerKind, onChange }: {
           <span className="hint" data-testid="reconcile-pair-hint">
             Always the <span className="mono">KeyReconcile</span>/
             <span className="mono">{writerKind === 'Scd2' ? 'KeyReconcileScd2Close' : 'KeyReconcileDelete'}</span> pair —
-            a segment is scoped from each table mapping's own default segmenting, the same as a Backfill.
+            a segment is scoped from each table mapping's own default segmenting, the same as a Bulk Load.
           </span>
         </div>
       )}

@@ -13,7 +13,7 @@ import {
 import type {
   MappingLag, ReadHold, ReplicationTaskConfig, TableMappingConfig, TableSpec,
 } from '../../api/types'
-import { BackfillProgressCard } from './BackfillProgressCard'
+import { BulkLoadProgressCard } from './BulkLoadProgressCard'
 import { holdStateOf, HOLD_INFO } from './holdState'
 import { formatLag, lagStateOf } from './lag'
 import { INTENT_INFO, offeredIntents } from './readIntent'
@@ -113,7 +113,7 @@ export function MonitoringPanel({ replicationName }: { replicationName: string }
       {/* Above the lag cards because it answers a more urgent question than they do — "is the reload
           I started still going, and how far in is it" — and unlike them it is only here at all while
           that question has an answer. */}
-      <BackfillProgressCard replicationName={replicationName} />
+      <BulkLoadProgressCard replicationName={replicationName} />
 
       <div className="card" data-testid="monitoring-range">
         <div className="card-head tight">

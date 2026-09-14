@@ -27,7 +27,7 @@ const TABS: { path: string; label: string; testId: string }[] = [
  * A layout route: the four tabs are four routes sharing this chrome, rendered through the `Outlet`.
  * Five until phase 103 folded Runs under Monitoring as a sub-tab.
  *
- * The chrome does not unmount when the tab changes, which is what lets the Backfill…/Run Now buttons
+ * The chrome does not unmount when the tab changes, which is what lets the Bulk Load…/Run Now buttons
  * live up here and still reach the run history — see `RunsCommand`. That still holds after phase 103:
  * the panel they reach is two levels down a routed outlet now (Monitoring's Run History sub-tab)
  * rather than one, and nothing about the plumbing needed to change to get there.
@@ -164,10 +164,10 @@ export function ReplicationDetailPage() {
             {isAdmin && (
               <button
                 className="btn btn-chrome"
-                onClick={() => send('backfill')}
-                data-testid="backfill-button"
+                onClick={() => send('bulkLoad')}
+                data-testid="bulk-load-button"
               >
-                Backfill…
+                Bulk Load…
               </button>
             )}
             {isAdmin && (

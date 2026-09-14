@@ -277,9 +277,9 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Equal(24, hour.Buckets.Count);
         Assert.Equal(1, hour.Buckets.Sum(b => b.Runs));
 
-        // A backfill is a different question and is not folded into the incremental figures.
-        var backfill = await GetMetricsAsync(kind: "Backfill");
-        Assert.Equal(0, backfill.Runs);
+        // A bulk load is a different question and is not folded into the incremental figures.
+        var bulkLoad = await GetMetricsAsync(kind: "BulkLoad");
+        Assert.Equal(0, bulkLoad.Runs);
     }
 
     [Fact]

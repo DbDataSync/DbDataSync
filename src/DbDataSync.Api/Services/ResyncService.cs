@@ -77,7 +77,7 @@ public sealed class ResyncService(
         // call cannot.
         watermarks.SetReadIntentAndHold(run.TaskName, run.MappingName, watermarkKey, ReadIntent.InitialLoad, ReadHold.None);
 
-        // An ordinary Primary pass, not a Backfill: InitialLoad is a read intent like any other, and any
+        // An ordinary Primary pass, not a BulkLoad: InitialLoad is a read intent like any other, and any
         // Primary pass can resolve to it — that is the entire point of an intent rather than a
         // special-cased reload path. Enqueued immediately rather than left for the mapping's own
         // schedule: an operator who just asked for this should not have to wait out its interval to see

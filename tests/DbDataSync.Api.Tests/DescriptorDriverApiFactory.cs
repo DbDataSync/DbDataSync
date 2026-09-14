@@ -47,7 +47,7 @@ public sealed class DescriptorDriverApiFactory : TestApiFactory
           "varchar(n)": { kind: String, length: n, unicode: true }
           datetime: Timestamp
         capabilities:
-          readers: [Watermark]
+          readers: [Watermark, BatchReload]
           staging: [StagingTable]
           writers: [DeleteInsert]
         """;

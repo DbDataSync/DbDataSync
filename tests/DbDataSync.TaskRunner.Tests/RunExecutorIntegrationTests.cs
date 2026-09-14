@@ -517,13 +517,13 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The guarantee the whole per-mapping run model exists for: a backfill re-reads and re-applies
+    /// The guarantee the whole per-mapping run model exists for: a bulk load re-reads and re-applies
     /// data the incremental sync has already processed, using a completely different reader and
     /// writer, and the incremental sync's watermark comes out of it untouched. If it didn't, running
-    /// a backfill would silently make the replication re-process (or skip) changes afterwards.
+    /// a bulk load would silently make the replication re-process (or skip) changes afterwards.
     /// </summary>
     [Fact]
-    public async Task Backfill_UsesItsOwnPipelineOverSegment_AndLeavesTheIncrementalWatermarkAlone()
+    public async Task BulkLoad_UsesItsOwnPipelineOverSegment_AndLeavesTheIncrementalWatermarkAlone()
     {
         await ExecuteAsync(_adminConnection,
             $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (7, 'Seven');");
@@ -538,12 +538,12 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         // Reload Ids [1, 5) only, with a reload reader and a reconciling writer — neither of which is
         // what this replication is configured to use for its ongoing sync.
         var segment = new RangeSegment("Id", "1", "5");
-        var backfillRunId = _workQueueStore.Enqueue(
-            "e2e-sync", RunKind.Backfill, "main", segment.Describe(), SegmentSerializer.Serialize(segment),
+        var bulkLoadRunId = _workQueueStore.Enqueue(
+            "e2e-sync", RunKind.BulkLoad, "main", segment.Describe(), SegmentSerializer.Serialize(segment),
             new WorkItemKinds(MsSqlDriverKinds.BatchReload, MsSqlDriverKinds.StagingTable, MsSqlDriverKinds.MergeReconcile));
         await _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
 
-        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(backfillRunId)!.Status);
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(bulkLoadRunId)!.Status);
 
         var rows = await GetRowsAsync(_targetTable);
         Assert.Equal("One", rows[1]);                 // repaired
@@ -1073,7 +1073,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     /// The core promise of phase 124: a sweep removes exactly the target rows whose key the source no
     /// longer has, and does nothing else — an updated source value is not picked up (that is what an
     /// ordinary Primary pass is for) and an untouched row stays untouched. Also proves the sweep never
-    /// touches the incremental watermark, the same posture a Backfill already has.
+    /// touches the incremental watermark, the same posture a BulkLoad already has.
     /// </summary>
     [Fact]
     public async Task ReconcileDeletes_RemovesAbsentKeys_ButNeverUpdatesOrTouchesTheWatermark()
@@ -1101,7 +1101,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>An <see cref="AutoSegment"/> in a reconcile request expands against the real source,
-    /// exactly like a Backfill's, and each resulting bucket's sweep only ever deletes within its own
+    /// exactly like a BulkLoad's, and each resulting bucket's sweep only ever deletes within its own
     /// range — a row outside every requested segment is never a candidate for removal.</summary>
     [Fact]
     public async Task ReconcileDeletes_ASegmentedSweep_OnlyDeletesWithinItsOwnRange()

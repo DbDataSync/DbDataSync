@@ -47,11 +47,18 @@ public sealed class ParameterCheck(DriverRegistry driverRegistry, ConfigReposito
     public void ThrowIfInvalid(ReplicationTaskConfig task)
     {
         var problems = new List<string>();
+        var source = ResolveDriver(task.Endpoints?.Source?.ConnectionName);
+        var target = ResolveDriver(task.Endpoints?.Target?.ConnectionName);
         Check(
-            ResolveDriver(task.Endpoints?.Source?.ConnectionName),
-            ResolveDriver(task.Endpoints?.Target?.ConnectionName),
+            source, target,
             task.ChangeProcessing.Reader, task.ChangeProcessing.Cache, task.ChangeProcessing.Writer,
             prefix: "", requireKnownKind: false, problems);
+        Check(
+            source, target,
+            PipelineResolution.BulkLoadReader(task, mapping: null),
+            PipelineResolution.BulkLoadCache(task, mapping: null),
+            PipelineResolution.BulkLoadWriter(task, mapping: null),
+            prefix: "Bulk Load ", requireKnownKind: false, problems);
 
         Throw(problems);
     }
@@ -81,6 +88,27 @@ public sealed class ParameterCheck(DriverRegistry driverRegistry, ConfigReposito
                 task.Endpoints?.Target?.ConnectionName, mapping.Targets.Count)),
             mapping.ReaderOverride, mapping.CacheOverride, mapping.WriterOverride,
             prefix: $"'{mapping.Name}' ", requireKnownKind: true, problems);
+
+        Throw(problems);
+    }
+
+    /// <summary>
+    /// The Bulk Load pipeline this mapping would actually run, resolved the way <c>RunExecutor</c> resolves
+    /// it (phase 133/134) — checked unconditionally, unlike the override-only check above, because even the
+    /// replication-level default (a reader defaulting to <c>BatchReload</c>) can be one the source driver
+    /// does not offer, e.g. a scripted source with no <c>BatchReload</c> equivalent.
+    /// </summary>
+    public void ThrowIfBulkLoadInvalid(ReplicationTaskConfig task, TableMappingConfig mapping)
+    {
+        var problems = new List<string>();
+        Check(
+            ResolveDriver(ConnectionOf(() => EndpointResolution.ResolveSource(task, mapping.Sources[0]).ConnectionName,
+                task.Endpoints?.Source?.ConnectionName, mapping.Sources.Count)),
+            ResolveDriver(ConnectionOf(() => EndpointResolution.ResolveTarget(task, mapping.Targets[0]).ConnectionName,
+                task.Endpoints?.Target?.ConnectionName, mapping.Targets.Count)),
+            PipelineResolution.BulkLoadReader(task, mapping), PipelineResolution.BulkLoadCache(task, mapping),
+            PipelineResolution.BulkLoadWriter(task, mapping),
+            prefix: $"'{mapping.Name}' Bulk Load ", requireKnownKind: true, problems);
 
         Throw(problems);
     }

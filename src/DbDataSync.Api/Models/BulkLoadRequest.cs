@@ -9,13 +9,13 @@ namespace DbDataSync.Api.Models;
 /// <c>GET /api/connections/{name}/capabilities</c>, never from a hardcoded list) and describes
 /// segments structurally, with no SQL and no engine-specific terminology.
 /// <para>
-/// A backfill is a *run*, not a configuration change: this never reaches ConfigRepository and so never
+/// A bulk load is a *run*, not a configuration change: this never reaches ConfigRepository and so never
 /// produces a git commit, unlike everything the replication/mapping endpoints accept.
 /// </para>
 /// </summary>
-public sealed class BackfillRequest
+public sealed class BulkLoadRequest
 {
-    /// <summary>Null means "use the replication's own configured Kind". In practice a backfill of an
+    /// <summary>Null means "use the replication's own configured Kind". In practice a bulk load of an
     /// incrementally-synced replication must set at least <see cref="ReaderKind"/>, since an
     /// incremental reader reports changes since a watermark rather than reading a segment's rows.</summary>
     public string? ReaderKind { get; set; }

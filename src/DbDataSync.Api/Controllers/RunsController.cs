@@ -12,10 +12,10 @@ namespace DbDataSync.Api.Controllers;
 [Route("api")]
 public sealed class RunsController(
     ProcessSupervisor supervisor,
-    BackfillService backfillService,
+    BulkLoadService bulkLoadService,
     ReconcileService reconcileService,
     TaskRunStore taskRunStore,
-    BackfillBatchStore backfillBatchStore,
+    BulkLoadBatchStore bulkLoadBatchStore,
     ResyncService resyncService,
     SegmentingPreviewService segmentingPreview,
     ConfigRepository configRepository,
@@ -37,15 +37,15 @@ public sealed class RunsController(
     /// <summary>
     /// Queues a reload of one table mapping. Deliberately a separate endpoint from the bodyless
     /// "Run Now" trigger above rather than a mode of it: different request shape, different scope (one
-    /// mapping, not the replication), and different semantics — a backfill never advances the
+    /// mapping, not the replication), and different semantics — a bulk load never advances the
     /// incremental watermark, so it can run alongside the replication's own schedule without
     /// disturbing it. Returns one RunId per segment, since each segment is scheduled independently.
     /// </summary>
-    [HttpPost("replications/{name}/mappings/{mappingName}/backfill")]
-    public async Task<IActionResult> Backfill(
-        string name, string mappingName, [FromBody] BackfillRequest request, CancellationToken cancellationToken)
+    [HttpPost("replications/{name}/mappings/{mappingName}/bulk-load")]
+    public async Task<IActionResult> BulkLoad(
+        string name, string mappingName, [FromBody] BulkLoadRequest request, CancellationToken cancellationToken)
     {
-        var result = await backfillService.EnqueueAsync(name, mappingName, request, cancellationToken);
+        var result = await bulkLoadService.EnqueueAsync(name, mappingName, request, cancellationToken);
         return result.Outcome switch
         {
             TriggerOutcome.Started => Accepted(new { runIds = result.RunIds }),
@@ -56,7 +56,7 @@ public sealed class RunsController(
     }
 
     /// <summary>
-    /// Queues a delete-diff sweep of one table mapping — phase 124. Same shape as <see cref="Backfill"/>
+    /// Queues a delete-diff sweep of one table mapping — phase 124. Same shape as <see cref="BulkLoad"/>
     /// (a separate endpoint from the bodyless trigger, one RunId per segment, never touches the
     /// incremental watermark), but always through the <c>KeyReconcile</c>/<c>KeyReconcileDelete</c>
     /// pair rather than an operator-chosen reader/writer — there is nothing else this action means.
@@ -76,17 +76,17 @@ public sealed class RunsController(
     }
 
     /// <summary>
-    /// Recent backfills for one replication, each rolled up across its segment runs — the source for
+    /// Recent bulk loads for one replication, each rolled up across its segment runs — the source for
     /// the Monitoring screen's "Batch reload" card. Newest first; the card reads only the first, the
     /// <paramref name="limit"/> is for a future Batch Load History view.
     /// </summary>
     [Authorize(Policies.Viewer)]
-    [HttpGet("replications/{name}/backfills")]
-    public ActionResult<IReadOnlyList<BackfillBatchProgress>> Backfills(string name, [FromQuery] int limit = 5) =>
-        Ok(backfillBatchStore.GetRecentBackfills(name, Math.Clamp(limit, 1, 20)));
+    [HttpGet("replications/{name}/bulk-loads")]
+    public ActionResult<IReadOnlyList<BulkLoadBatchProgress>> BulkLoads(string name, [FromQuery] int limit = 5) =>
+        Ok(bulkLoadBatchStore.GetRecentBulkLoads(name, Math.Clamp(limit, 1, 20)));
 
     /// <summary>
-    /// What a segmenting strategy proposes for this mapping, right now — the Backfill form's
+    /// What a segmenting strategy proposes for this mapping, right now — the Bulk Load form's
     /// checklist. Every candidate, selected or not: the operator is being shown a proposal to
     /// disagree with, not told what will happen.
     /// <para>
@@ -113,7 +113,7 @@ public sealed class RunsController(
     /// <para>
     /// A POST rather than a GET only because the strategy travels in the body: a DuckDB query does not
     /// fit in a path segment. It writes nothing, and runs exactly the code the saved-strategy preview
-    /// above runs, so what the editor shows and what a backfill later proposes cannot disagree.
+    /// above runs, so what the editor shows and what a bulk load later proposes cannot disagree.
     /// </para>
     /// <para>
     /// A mapping is still required, and not incidentally: a strategy proposes ranges over one table's
@@ -178,7 +178,7 @@ public sealed class RunsController(
     /// <para>
     /// Keyed by run id, and a run with no timestamp at all is simply absent: it aged out of
     /// <c>ChangeCheckHistory</c>'s window, or it never made a position durable in the first place —
-    /// a backfill, a verification, or a failed pass.
+    /// a bulk load, a verification, or a failed pass.
     /// </para>
     /// </summary>
     [Authorize(Policies.Viewer)]
