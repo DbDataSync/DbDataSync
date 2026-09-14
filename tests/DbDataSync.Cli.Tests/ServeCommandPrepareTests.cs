@@ -61,4 +61,27 @@ public sealed class ServeCommandPrepareTests : IDisposable
 
         Assert.False(File.Exists(DbDataSyncConfigFile.PathIn(_root)));
     }
+
+    /// <summary>Phase 135 — no service ever registered against this directory, so the plain exception
+    /// message is all there is to say.</summary>
+    [Fact]
+    public void PrepareFailureMessage_NoServiceRegistered_IsJustTheExceptionMessage()
+    {
+        var message = ServeCommand.PrepareFailureMessage(_root, new IOException("disk full"));
+
+        Assert.Equal($"Could not prepare the config repository at '{_root}': disk full", message);
+    }
+
+    /// <summary>Phase 135's own motivating scenario: an ownership failure, with a service registration
+    /// on record — the message should name the account/platform it was set up for.</summary>
+    [Fact]
+    public void PrepareFailureMessage_ServiceRegistered_AppendsTheAccountAndPlatform()
+    {
+        ServiceRegistration.Write(_root, "LocalSystem", "windows");
+
+        var message = ServeCommand.PrepareFailureMessage(_root, new IOException("not owned by current user"));
+
+        Assert.Contains("not owned by current user", message);
+        Assert.Contains("registered for the 'LocalSystem' windows service account", message);
+    }
 }

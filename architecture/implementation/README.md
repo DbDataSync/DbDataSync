@@ -44,6 +44,16 @@ project never triggered the API project's own SPA build target. `ci.yml`'s `pack
 real assertions (packed nupkg content, running containers' `/` response) so this class of bug fails CI
 next time rather than shipping unnoticed again.
 
+Updated 2026-09-14 (later than the note below): **135 is done and removed** — same situation as 137
+above: never added to the table, written as a `todo/` doc mid-session, picked up directly. `service
+install`'s `GrantDataDirectoryAccess` now takes ownership (`icacls /setowner ... /T /C`, then a
+now-recursive `/grant`) for every account including `LocalSystem`, not just named ones — the actual Error
+1053 fix. Also picked up, agreed before implementation started: a `ServiceRegistration` marker
+(`service-registration.json`, gitignored, at the data directory root) records which account/platform a
+service was registered as, consumed by both the `Prepare()` ownership-failure message and a new
+`ServiceRegistrationCheck` in `config check`. 136 (Windows service startup diagnostics reaching the Event
+Log) is the one phase from that same mid-session doc that is still in `todo/`, untouched.
+
 Updated 2026-09-14: **133 and 134 go to the top**, and the reason they are only being queued now is
 worth recording. `planning/done/bulk-load-pipeline-and-the-initial-load-rule.md` was resolved on
 2026-09-04 but named its phases A, B and C rather than numbering them — deliberately, to avoid claiming

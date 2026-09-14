@@ -163,12 +163,27 @@ public sealed class SystemdServiceTests : IDisposable
     {
         var env = new FakeSystemdEnvironment();
 
-        var exitCode = SystemdService.Uninstall(env);
+        var exitCode = SystemdService.Uninstall(["--repo", _root], env);
 
         Assert.Equal(0, exitCode);
         Assert.Contains(env.SystemctlCalls, call => call is ["disable", "--now", SystemdService.UnitName]);
         Assert.Contains(SystemdService.UnitPath, env.DeletedUnitPaths);
         Assert.Contains(env.SystemctlCalls, call => call is ["daemon-reload"]);
+    }
+
+    [Fact]
+    public void Install_ThenUninstall_WritesThenClearsTheServiceRegistrationMarker()
+    {
+        var env = new FakeSystemdEnvironment();
+
+        SystemdService.Install(["--repo", _root, "--user", "testsvc"], env);
+        var afterInstall = ServiceRegistration.Read(_root);
+        Assert.NotNull(afterInstall);
+        Assert.Equal("testsvc", afterInstall!.Account);
+        Assert.Equal("linux", afterInstall.Platform);
+
+        SystemdService.Uninstall(["--repo", _root], env);
+        Assert.Null(ServiceRegistration.Read(_root));
     }
 
     [Fact]

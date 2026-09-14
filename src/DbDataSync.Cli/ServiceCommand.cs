@@ -35,7 +35,7 @@ public static class ServiceCommand
             return args[0].ToLowerInvariant() switch
             {
                 "install" => Install(args),
-                "uninstall" => Sc("delete", ServiceName),
+                "uninstall" => Uninstall(args),
                 "status" => Sc("query", ServiceName),
                 var other => Unknown(other),
             };
@@ -52,7 +52,7 @@ public static class ServiceCommand
             return args[0].ToLowerInvariant() switch
             {
                 "install" => SystemdService.Install(args),
-                "uninstall" => SystemdService.Uninstall(),
+                "uninstall" => SystemdService.Uninstall(args),
                 "status" => SystemdService.Status(),
                 var other => Unknown(other),
             };
@@ -131,8 +131,19 @@ public static class ServiceCommand
 
         var exitCode = Sc([.. arguments]);
         if (exitCode == 0)
+        {
+            ServiceRegistration.Write(root, account ?? "LocalSystem", "windows");
             Console.WriteLine("Next: `dbdatasync config check`.");
+        }
+
         return exitCode;
+    }
+
+    private static int Uninstall(string[] args)
+    {
+        var root = Path.GetFullPath(CliOptions.Read(args, "--repo") ?? CliOptions.DefaultRoot);
+        ServiceRegistration.Clear(root);
+        return Sc("delete", ServiceName);
     }
 
     /// <summary>
@@ -140,33 +151,53 @@ public static class ServiceCommand
     /// phase 82 applied to a certificate's private key. Phase 112 made the data directory machine-wide
     /// (<c>%ProgramData%\DbDataSync</c> by default) rather than per-user, so a named service account
     /// is no longer guaranteed to have write access to it the way a person's own profile directory
-    /// would be. <c>LocalSystem</c> needs no grant — its access already covers a directory anyone just
-    /// created, the same as before this phase.
+    /// would be.
+    /// <para>
+    /// Phase 135: this runs for every account, including <c>LocalSystem</c> — libgit2's ownership-safety
+    /// check (the same protection as git's own CVE-2022-24765 <c>safe.directory</c> fix) cares about the
+    /// directory's <b>owner</b>, not its ACL, and a directory created by an earlier interactive run is
+    /// not owned by <c>LocalSystem</c> just because <c>LocalSystem</c> already has access rights to it.
+    /// <c>/setowner</c> runs before <c>/grant</c>, not instead of it — taking ownership alone gives the
+    /// new owner implicit <c>WRITE_DAC</c> (the right to change permissions), not necessarily explicit
+    /// data access. icacls's own recognized name for <c>LocalSystem</c> is <c>SYSTEM</c>, not the string
+    /// used everywhere else in this file.
+    /// </para>
     /// </summary>
-    private static void GrantDataDirectoryAccess(string root, string? account)
+    internal static void GrantDataDirectoryAccess(string root, string? account)
     {
-        if (account is null || string.Equals(account, "LocalSystem", StringComparison.OrdinalIgnoreCase))
-            return;
-
         Directory.CreateDirectory(root);
+        var effectiveAccount = string.Equals(account, "LocalSystem", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : account;
+        effectiveAccount ??= "SYSTEM";
 
+        RunIcacls(root, ["/setowner", effectiveAccount, "/T", "/C"],
+            $"take ownership of '{root}' for '{effectiveAccount}'");
+        RunIcacls(root, ["/grant", $"{effectiveAccount}:(OI)(CI)M", "/T"],
+            $"grant '{effectiveAccount}' access to '{root}'");
+    }
+
+    /// <summary>Warns rather than fails — same non-fatal posture as before phase 135: an icacls failure
+    /// here is surfaced but does not block <c>service install</c> from registering the service.</summary>
+    private static void RunIcacls(string root, IReadOnlyList<string> arguments, string description)
+    {
         var startInfo = new ProcessStartInfo("icacls") { UseShellExecute = false };
         startInfo.ArgumentList.Add(root);
-        startInfo.ArgumentList.Add("/grant");
-        startInfo.ArgumentList.Add($"{account}:(OI)(CI)M");
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
 
         using var process = Process.Start(startInfo);
         if (process is null)
         {
-            Console.Error.WriteLine($"  Warning: could not start icacls to grant '{account}' access to '{root}'.");
+            Console.Error.WriteLine($"  Warning: could not start icacls to {description}.");
             return;
         }
 
         process.WaitForExit();
         Console.WriteLine(process.ExitCode == 0
-            ? $"  Granted '{account}' access to '{root}'."
-            : $"  Warning: icacls exited {process.ExitCode} granting '{account}' access to '{root}' — " +
-              "grant it manually before starting the service.");
+            ? $"  Ran icacls to {description}."
+            : $"  Warning: icacls exited {process.ExitCode} trying to {description} — do this manually " +
+              "before starting the service.");
     }
 
     private static int Unknown(string command)

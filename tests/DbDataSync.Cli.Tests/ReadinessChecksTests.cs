@@ -37,6 +37,36 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Equal(CheckStatus.Ok, Find(results, "Auth").Status);
     }
 
+    /// <summary>Phase 135's own marker — informational only, so it's always Ok, but the detail text
+    /// names the recorded account/platform when one was written.</summary>
+    [Fact]
+    public async Task ServiceRegistrationCheck_NoMarker_ReportsNotRegistered()
+    {
+        ServeCommand.Prepare(_root);
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Service registration");
+        Assert.Equal(CheckStatus.Ok, check.Status);
+        Assert.Contains("Not registered", check.Detail);
+    }
+
+    [Fact]
+    public async Task ServiceRegistrationCheck_MarkerPresent_ReportsTheAccountAndPlatform()
+    {
+        ServeCommand.Prepare(_root);
+        ServiceRegistration.Write(_root, "LocalSystem", "windows");
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Service registration");
+        Assert.Equal(CheckStatus.Ok, check.Status);
+        Assert.Contains("LocalSystem", check.Detail);
+        Assert.Contains("windows", check.Detail);
+    }
+
     /// <summary>Phase 123's own "passes on the dev/CI box" requirement, against the real environment
     /// (no faking) — this Linux sandbox has a real <c>/etc/dotnet/install_location</c>, which is
     /// exactly the common case this check exists to recognize.</summary>
@@ -254,6 +284,7 @@ public sealed class ReadinessChecksTests : IDisposable
         using var document = JsonDocument.Parse(output);
         var names = document.RootElement.EnumerateArray().Select(e => e.GetProperty("Name").GetString()).ToList();
         Assert.Contains("Repo", names);
+        Assert.Contains("Service registration", names);
         Assert.Contains("State store", names);
         Assert.Contains("Libraries / drivers", names);
         Assert.Contains("Runtime", names);

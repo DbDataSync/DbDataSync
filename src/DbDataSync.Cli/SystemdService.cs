@@ -168,6 +168,8 @@ internal static class SystemdService
         if (enableExit != 0)
             return enableExit;
 
+        ServiceRegistration.Write(root, user, "linux");
+
         // Enabled, not started — the same "registers but does not start" shape
         // `sc create ... start= auto` leaves Windows in, so the operator sees the first start's own
         // output rather than it scrolling by during `install`.
@@ -177,9 +179,12 @@ internal static class SystemdService
         return 0;
     }
 
-    internal static int Uninstall(ISystemdEnvironment? environment = null)
+    internal static int Uninstall(string[] args, ISystemdEnvironment? environment = null)
     {
         var env = environment ?? new RealSystemdEnvironment();
+
+        var root = Path.GetFullPath(CliOptions.Read(args, "--repo") ?? CliOptions.DefaultRoot);
+        ServiceRegistration.Clear(root);
 
         var disableExit = env.RunSystemctl("disable", "--now", UnitName);
         env.DeleteUnitFile(UnitPath);

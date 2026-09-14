@@ -75,6 +75,7 @@ internal static class ReadinessChecks
     internal static readonly IReadOnlyList<IReadinessCheck> Checks =
     [
         new RepoCheck(),
+        new ServiceRegistrationCheck(),
         new StateStoreCheck(),
         new LibrariesAndDriversCheck(),
         new LibraryCompatibilityCheck(),
@@ -176,6 +177,27 @@ internal sealed class RepoCheck : IReadinessCheck
         }
 
         return Task.FromResult(new CheckResult("Repo", CheckStatus.Ok, context.Root));
+    }
+}
+
+/// <summary>
+/// Phase 135: purely informational, not a pass/fail judgment — reports whether
+/// <see cref="ServiceRegistration"/> has a marker for this directory and, if so, which account/platform
+/// registered it and when. Always <see cref="CheckStatus.Ok"/> deliberately: comparing the recorded
+/// account against the process's own *current* identity would false-positive constantly, since
+/// <c>config check</c> is normally run interactively by an admin, not by the service account itself.
+/// </summary>
+internal sealed class ServiceRegistrationCheck : IReadinessCheck
+{
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
+    {
+        var registration = ServiceRegistration.Read(context.Root);
+        return Task.FromResult(registration is null
+            ? new CheckResult("Service registration", CheckStatus.Ok, "Not registered as a service.")
+            : new CheckResult(
+                "Service registration", CheckStatus.Ok,
+                $"Registered for the '{registration.Account}' {registration.Platform} service account " +
+                $"on {registration.RegisteredAtUtc:u}."));
     }
 }
 

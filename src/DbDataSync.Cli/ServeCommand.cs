@@ -46,7 +46,7 @@ public static class ServeCommand
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or LibGit2SharpException)
         {
-            Console.Error.WriteLine($"Could not prepare the config repository at '{root}': {ex.Message}");
+            Console.Error.WriteLine(PrepareFailureMessage(root, ex));
             return 1;
         }
 
@@ -144,6 +144,29 @@ public static class ServeCommand
                 "DuckDB-backed segmenting strategies will not work until `dbdatasync config library " +
                 "sync` completes it; replication itself is unaffected.");
         }
+    }
+
+    /// <summary>
+    /// Phase 135: a plain <c>ex.Message</c> here is usually the ownership-safety error this phase's own
+    /// bug produced ("repository path ... is not owned by current user") — which names nothing about
+    /// what the directory *was* set up for. A registered service's own account/platform, if
+    /// <see cref="ServiceRegistration"/> has one recorded for <paramref name="root"/>, appends a second
+    /// line naming it — a pure, separately-testable helper rather than inline in the catch block, since
+    /// nothing here needs a real host to exercise.
+    /// </summary>
+    internal static string PrepareFailureMessage(string root, Exception ex)
+    {
+        var message = $"Could not prepare the config repository at '{root}': {ex.Message}";
+
+        var registration = ServiceRegistration.Read(root);
+        if (registration is not null)
+        {
+            message += $"\n  This data directory was registered for the '{registration.Account}' " +
+                $"{registration.Platform} service account on {registration.RegisteredAtUtc:u} — check " +
+                $"that it still owns '{root}'.";
+        }
+
+        return message;
     }
 
     /// <summary>Arguments this command consumes itself, which the host would otherwise see as its
