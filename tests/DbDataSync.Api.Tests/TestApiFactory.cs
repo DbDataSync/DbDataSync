@@ -42,6 +42,7 @@ public class TestApiFactory : WebApplicationFactory<Program>
                 ["DbDataSync:RepoRoot"] = RepoRoot,
                 ["DbDataSync:StateDbPath"] = Path.Combine(RepoRoot, "state.db"),
                 ["DbDataSync:TaskRunnerDllPath"] = ResolveTaskRunnerDllPathForTests(),
+                ["DbDataSync:CliDllPath"] = ResolveSiblingDllPathForTests("DbDataSync.Cli"),
                 // Authentication off, deliberately. Every test using this factory is about what an
                 // endpoint *does*; making all of them sign in first would obscure that and test the
                 // same session plumbing a hundred times. Who may call what is
@@ -84,7 +85,13 @@ public class TestApiFactory : WebApplicationFactory<Program>
     /// TaskRunner's build output path using this assembly's own Configuration/TFM segments (both
     /// projects are built together, so they match).
     /// </summary>
-    private static string ResolveTaskRunnerDllPathForTests()
+    private static string ResolveTaskRunnerDllPathForTests() => ResolveSiblingDllPathForTests("DbDataSync.TaskRunner");
+
+    /// <summary>Same trick as <see cref="ResolveTaskRunnerDllPathForTests"/>, generalized: phase 109j's
+    /// <c>LibraryValidationLauncher</c> needs to find <c>DbDataSync.Cli.dll</c>'s own build output the
+    /// same way, and both are "some other project's own separately-built output, found by walking up to
+    /// the repo root and back down" — the same shape, different project name.</summary>
+    private static string ResolveSiblingDllPathForTests(string projectName)
     {
         var baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var tfm = Path.GetFileName(baseDir);
@@ -97,7 +104,7 @@ public class TestApiFactory : WebApplicationFactory<Program>
         if (repoRoot is null)
             throw new InvalidOperationException($"Could not locate the repo root (DbDataSync.slnx) from '{baseDir}'.");
 
-        return Path.Combine(repoRoot.FullName, "src", "DbDataSync.TaskRunner", "bin", configuration, tfm, "DbDataSync.TaskRunner.dll");
+        return Path.Combine(repoRoot.FullName, "src", projectName, "bin", configuration, tfm, $"{projectName}.dll");
     }
 }
 

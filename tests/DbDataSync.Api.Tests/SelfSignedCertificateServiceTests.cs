@@ -39,6 +39,7 @@ public sealed class SelfSignedCertificateServiceTests : IDisposable
             RepoRoot = _root,
             StateDbPath = Path.Combine(_root, "state.db"),
             TaskRunnerDllPath = "unused",
+            CliDllPath = "unused",
         };
 
         var service = new SelfSignedCertificateService(

@@ -63,6 +63,7 @@ public sealed class StateOwnershipTests
             RepoRoot = "/tmp/repo",
             StateDbPath = "/tmp/repo/state.db",
             TaskRunnerDllPath = "/tmp/DbDataSync.TaskRunner.dll",
+            CliDllPath = "/tmp/DbDataSync.Cli.dll",
         };
 
         var startInfo = ProcessSupervisor.BuildStartInfo(
@@ -90,6 +91,7 @@ public sealed class StateOwnershipTests
             RepoRoot = "/tmp/repo",
             StateDbPath = "/tmp/repo/state.db",
             TaskRunnerDllPath = "/tmp/DbDataSync.TaskRunner.dll",
+            CliDllPath = "/tmp/DbDataSync.Cli.dll",
         };
 
         var startInfo = ProcessSupervisor.BuildStartInfo(

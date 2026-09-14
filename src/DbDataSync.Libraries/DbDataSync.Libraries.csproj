@@ -8,6 +8,25 @@
 
   <ItemGroup>
     <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.0" />
+    <!--
+      Phase 109j: reads a driver's own already-built DLL's IL metadata (which members it references
+      into its required library assembly) without executing anything — the same "read, never load"
+      posture FactoryTypeReflector's MetadataLoadContext already has elsewhere in this project, for the
+      opposite direction (extraction instead of verification). Mono.Cecil chosen over AsmResolver: both
+      are real, mature choices for this (see the phase doc's own open question), but Cecil's
+      ModuleDefinition.GetMemberReferences()/GetTypeReferences() gives exactly the flat "every member
+      this module's metadata tables reference into another assembly" view this extraction step needs in
+      one call, with no need for AsmResolver's fuller (and heavier) PE/managed-image object model this
+      phase has no other use for.
+    -->
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Phase 109j: DriverLibraryCompatibility.Check takes an IDriver directly (RequiredLibraryId,
+         and the driver's own compiled assembly to extract IL from) — no circular reference, since
+         DbDataSync.Drivers.Abstractions depends only on DbDataSync.Core. -->
+    <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

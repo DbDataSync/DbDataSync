@@ -50,6 +50,13 @@ public sealed class ApiOptions
     public string? StateConnectionString { get; init; }
     public required string TaskRunnerDllPath { get; init; }
 
+    /// <summary>Phase 109j: where <c>DbDataSync.Cli.dll</c> is, for
+    /// <c>LibraryValidationLauncher</c> to spawn <c>dotnet exec &lt;this&gt; config library validate
+    /// ...</c> — the deep, connection-scoped check, isolated in its own child process for the identical
+    /// reason <see cref="TaskRunnerDllPath"/> is. Resolved the same way, for the same reason: see
+    /// <see cref="ResolveDefaultCliDllPath"/>.</summary>
+    public required string CliDllPath { get; init; }
+
     /// <summary>
     /// The loopback-only port the runner-state endpoint listens on (phase 39). 0 — the default — binds
     /// an ephemeral one.
@@ -134,11 +141,13 @@ public sealed class ApiOptions
         var repoRoot = section["RepoRoot"] ?? Path.Combine(Directory.GetCurrentDirectory(), "dbdatasync-repo");
         var stateDbPath = section["StateDbPath"] ?? Path.Combine(repoRoot, "state.db");
         var taskRunnerDllPath = section["TaskRunnerDllPath"] ?? ResolveDefaultTaskRunnerDllPath();
+        var cliDllPath = section["CliDllPath"] ?? ResolveDefaultCliDllPath();
 
         return new ApiOptions
         {
             RepoRoot = repoRoot,
             StateDbPath = stateDbPath,
+            CliDllPath = cliDllPath,
             // Not validated here — phase 109f moved that to StateDialect.For, the one place that
             // actually needs an answer (StateDatabase.FromOptions, downstream of this). An id this
             // build has never heard of is exactly as fatal as a real deployment needs it to be: with
@@ -207,6 +216,34 @@ public sealed class ApiOptions
             AppContext.BaseDirectory.Replace(
                 Path.Combine("DbDataSync.Api", "bin"),
                 Path.Combine("DbDataSync.TaskRunner", "bin")),
+            dll);
+
+        return File.Exists(devLayout) ? devLayout : beside;
+    }
+
+    /// <summary>
+    /// Same shape as <see cref="ResolveDefaultTaskRunnerDllPath"/>, for the same reason: **beside the
+    /// running assembly first** — the real deployment shape, since production actually runs as `dotnet
+    /// /app/DbDataSync.Cli.dll serve ...` (the Dockerfile's own entrypoint), which hosts
+    /// `DbDataSyncHost.Build()` *inside that same process* — so `AppContext.BaseDirectory` already *is*
+    /// `DbDataSync.Cli.dll`'s own publish output directory, with `DbDataSync.Api.dll` sitting right next
+    /// to it (a `dotnet publish` of a project pulls every `ProjectReference`'s output into one flat
+    /// directory, and `DbDataSync.Cli.csproj` references `DbDataSync.Api.csproj`). The dev-layout guess
+    /// swaps a `DbDataSync.Api/bin` segment for `DbDataSync.Cli/bin` — the one thing that's true of this
+    /// working tree's own separate per-project build outputs and nothing else.
+    /// </summary>
+    private static string ResolveDefaultCliDllPath()
+    {
+        const string dll = "DbDataSync.Cli.dll";
+
+        var beside = Path.Combine(AppContext.BaseDirectory, dll);
+        if (File.Exists(beside))
+            return beside;
+
+        var devLayout = Path.Combine(
+            AppContext.BaseDirectory.Replace(
+                Path.Combine("DbDataSync.Api", "bin"),
+                Path.Combine("DbDataSync.Cli", "bin")),
             dll);
 
         return File.Exists(devLayout) ? devLayout : beside;

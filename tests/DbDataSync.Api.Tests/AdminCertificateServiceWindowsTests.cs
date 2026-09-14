@@ -70,7 +70,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
     }
 
     private AdminCertificateService Build() =>
-        new(new ApiOptions { RepoRoot = _repoRoot, StateDbPath = "unused", TaskRunnerDllPath = "unused" },
+        new(new ApiOptions { RepoRoot = _repoRoot, StateDbPath = "unused", TaskRunnerDllPath = "unused", CliDllPath = "unused" },
             new CertificateOptions(), new GitCommitService(_repoRoot));
 
     private X509Certificate2 InstallSelfSigned(string commonName)

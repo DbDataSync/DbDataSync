@@ -8,6 +8,7 @@ using DbDataSync.Certificates;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Core.Secrets;
+using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Libraries;
 using DbDataSync.State;
@@ -76,6 +77,7 @@ internal static class ReadinessChecks
         new RepoCheck(),
         new StateStoreCheck(),
         new LibrariesAndDriversCheck(),
+        new LibraryCompatibilityCheck(),
         new RuntimeDiscoverabilityCheck(),
         new AuthCheck(),
         new CertificateCheck(),
@@ -272,6 +274,73 @@ internal sealed class LibrariesAndDriversCheck : IReadinessCheck
         return Task.FromResult(problems.Count == 0
             ? new CheckResult("Libraries / drivers", CheckStatus.Ok, "Every connection's driver resolves.")
             : new CheckResult("Libraries / drivers", CheckStatus.Fail, string.Join(" ", problems)));
+    }
+}
+
+/// <summary>
+/// Phase 109j's static, no-execution half: for every built-in driver whose
+/// <see cref="IDriver.RequiredLibraryId"/> is installed, confirms the installed version still has every
+/// member the driver's own compiled IL uses. Always <see cref="CheckStatus.Warn"/>, never
+/// <see cref="CheckStatus.Fail"/> — a missing member might sit on a code path this particular
+/// deployment never exercises, matching <c>library install</c>'s own "warning, never a refusal" posture.
+/// <para>
+/// **Per-installed-library, not per-driver** (the phase doc's own open question 4, resolved as its own
+/// lean): a library used by more than one driver would otherwise report the same finding twice. Grouped
+/// by <see cref="DriverLibraryCompatibilityResult.LibraryId"/> and every driver that library backs is
+/// named once per finding rather than once per driver.
+/// </para>
+/// </summary>
+internal sealed class LibraryCompatibilityCheck : IReadinessCheck
+{
+    public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
+    {
+        var registry = new LibraryRegistry(context.Root).LoadAll();
+
+        var results = BuiltInDrivers.All
+            .Select(driver => DriverLibraryCompatibility.Check(driver, registry, context.Root))
+            .Where(result => result is not null)
+            .Select(result => result!)
+            .ToList();
+
+        return Task.FromResult(Summarize(results));
+    }
+
+    /// <summary>
+    /// The pure grouping/formatting half, pulled out of <see cref="RunAsync"/> so the "per-library, not
+    /// per-driver" dedup logic (the phase doc's own open question 4) is unit-testable directly against
+    /// hand-built <see cref="DriverLibraryCompatibilityResult"/> values — real incompatible built-in
+    /// library versions are hard to come by (every version actually tried during this phase's own
+    /// development remained compatible), so this is what proves the *reporting* logic without needing
+    /// one.
+    /// </summary>
+    internal static CheckResult Summarize(IReadOnlyList<DriverLibraryCompatibilityResult> results)
+    {
+        var byLibrary = new Dictionary<string, (DriverLibraryCompatibilityResult Result, List<string> DriverTypes)>(StringComparer.Ordinal);
+        foreach (var result in results)
+        {
+            if (result.Compatible)
+                continue;
+
+            if (byLibrary.TryGetValue(result.LibraryId, out var existing))
+                existing.DriverTypes.Add(result.DriverType);
+            else
+                byLibrary[result.LibraryId] = (result, [result.DriverType]);
+        }
+
+        if (byLibrary.Count == 0)
+            return new CheckResult("Library compatibility", CheckStatus.Ok, "Every installed library has every member its driver(s) use.");
+
+        var details = byLibrary.Values
+            .OrderBy(v => v.Result.LibraryId, StringComparer.Ordinal)
+            .Select(v =>
+                $"'{v.Result.LibraryId}' ({v.Result.AssemblyName}), used by {string.Join("/", v.DriverTypes)}, " +
+                $"is missing: {string.Join("; ", v.Result.MissingMembers)}")
+            .ToList();
+
+        return new CheckResult(
+            "Library compatibility", CheckStatus.Warn, string.Join(" | ", details),
+            "Run `dbdatasync config library validate <id> --connection <name>` for a full, connection-scoped check, " +
+            "or install a version of the library that has these members.");
     }
 }
 

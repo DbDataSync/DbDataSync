@@ -222,6 +222,7 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<PreviewService>();
         builder.Services.AddSingleton<ScriptTestService>();
         builder.Services.AddSingleton<ProcessSupervisor>();
+        builder.Services.AddSingleton<LibraryValidationLauncher>();
         builder.Services.AddSingleton<SegmentingStrategyRunner>();
         builder.Services.AddSingleton<CustomSegmentExpansion>();
         builder.Services.AddSingleton<BackfillService>();

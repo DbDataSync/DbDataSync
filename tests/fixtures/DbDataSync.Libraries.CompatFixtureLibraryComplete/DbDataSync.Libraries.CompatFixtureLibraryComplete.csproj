@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Deliberately NOT referenced by any project in this repo and NOT part of DbDataSync.slnx's build —
+    DbDataSync.Libraries.Tests publishes this on the fly and points LibrarySurfaceChecker.Check at the
+    result, exactly as it would a real installed library's restored lib/ directory. Same shape as
+    DbDataSync.Libraries.FactoryFixtureOne/etc.
+
+    <AssemblyName> is fixed rather than derived from this project's own name so that this ("the
+    complete version") and its sibling DbDataSync.Libraries.CompatFixtureLibraryIncomplete ("the
+    version missing a member the driver uses") publish to the same simple assembly name — the whole
+    point being that they are two versions of what LibrarySurfaceExtractor/Checker treat as one library.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>DbDataSync.Libraries.CompatFixtureLibrary</AssemblyName>
+  </PropertyGroup>
+
+</Project>

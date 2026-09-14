@@ -23,6 +23,14 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
     /// rather than in the SPA, which had a table of these that a third driver would have made stale.</summary>
     public int? DefaultPort => 1433;
 
+    /// <summary>Phase 109j: the <c>KnownLibraries</c> id this driver's own <c>SqlBulkCopy</c>/
+    /// <c>SqlDbType</c>/<c>SqlConnectionStringBuilder</c> usage depends on — the same id
+    /// <see cref="DbDataSync.State.MsSqlStateDialect.LibraryId"/> and
+    /// <c>DriverConnectionFactory.BuiltInDriverLibraryIds</c> already resolve this exact package
+    /// through, restated here as a literal rather than a cross-project constant reference (this driver
+    /// project does not otherwise depend on <c>DbDataSync.State</c>).</summary>
+    public string? RequiredLibraryId => "microsoft-data-sqlclient";
+
     // The generic implementations are registered alongside this driver's own, not instead of them.
     // SQL Server's prefixed ones are faster (SqlBulkCopy, MERGE) and stay the default; the portable
     // ones are what proves the generic pipeline against a working engine, and are a real fallback on

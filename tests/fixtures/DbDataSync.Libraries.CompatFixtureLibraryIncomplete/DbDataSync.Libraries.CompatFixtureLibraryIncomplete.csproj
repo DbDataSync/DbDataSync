@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The "incompatible version" half of the fixture pair — see
+    DbDataSync.Libraries.CompatFixtureLibraryComplete's own csproj comment for the shape and why
+    <AssemblyName> is pinned to the identical simple name as that sibling project.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>DbDataSync.Libraries.CompatFixtureLibrary</AssemblyName>
+  </PropertyGroup>
+
+</Project>

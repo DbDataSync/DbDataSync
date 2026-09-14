@@ -48,6 +48,14 @@ public interface IDriver
     /// Null for a driver that has no such notion — ODBC through a DSN, for instance.</summary>
     int? DefaultPort => null;
 
+    /// <summary>The <c>DbDataSync.Libraries</c> <c>KnownLibraries</c> id this driver's typed API
+    /// surface depends on, or null — every descriptor-driven/generic driver (whose provider is resolved
+    /// by name through <see cref="System.Data.Common.DbProviderFactories"/> rather than through a
+    /// compiled driver's own typed member references) has nothing to check here. Phase 109j: what
+    /// <c>DriverLibraryCompatibility.Check</c> resolves against to find the installed library whose
+    /// surface should be compared to this driver's own compiled IL.</summary>
+    string? RequiredLibraryId => null;
+
     IReadOnlyList<IChangeReader> Readers { get; }
     IReadOnlyList<IStagingProvider> StagingProviders { get; }
     IReadOnlyList<IChangeWriter> Writers { get; }

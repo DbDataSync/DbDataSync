@@ -19,7 +19,14 @@ public sealed record DriverCapabilities(
     bool SupportsConnectionTest,
     /// <summary>Which provisioning actions (<see cref="ProvisioningActions"/>) this driver can plan
     /// (<see cref="IProvisioner"/>). Empty for a driver that implements no provisioning at all.</summary>
-    IReadOnlyList<string> SupportedProvisioningActions);
+    IReadOnlyList<string> SupportedProvisioningActions,
+    /// <summary>Phase 109j: whether <c>POST /api/connections/{name}/validate-library</c> could ever do
+    /// anything for this driver — it has a <see cref="IDriver.RequiredLibraryId"/> *and* a real staging
+    /// provider/writer to drive (true for <c>MsSql</c>/<c>Postgres</c> today; false for <c>DuckDb</c>,
+    /// which has neither registered, and for every descriptor-driven driver, which has no
+    /// <see cref="IDriver.RequiredLibraryId"/> at all). Same "hide an action that could never work"
+    /// posture as <see cref="SupportsConnectionTest"/>.</summary>
+    bool SupportsLibraryValidation = false);
 // Connection parameters used to be a field here. They moved out in phase 50, when they stopped being
 // a fixed list: what a connection takes now depends on what it has been given so far — Host is not a
 // setting once the operator picks connection-string addressing — and an answer that depends on values

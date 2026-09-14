@@ -728,6 +728,12 @@ export function useTestConnection() {
   return useMutation({ mutationFn: (name: string) => api.connections.test(name) })
 }
 
+/** Phase 109j item 4: the deep, connection-scoped check — a separate mutation from `useTestConnection`
+ * since it's slower (a real child process, a real scratch table) and needs DDL rights. */
+export function useValidateLibrary() {
+  return useMutation({ mutationFn: (name: string) => api.connections.validateLibrary(name) })
+}
+
 /** Which secret a connection resolves through. Fixed for a given name, so cached like capabilities. */
 export function useCredentialSource(connectionName: string | undefined) {
   return useQuery({

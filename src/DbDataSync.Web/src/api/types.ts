@@ -711,6 +711,21 @@ export interface ConnectionTestReport {
   probeMs: number
   serverVersion: string | null
   error: string | null
+  /**
+   * Phase 109j: set only on a successful test, when the driver's required library is missing member(s)
+   * its own compiled code uses — the static, no-execution compatibility check's result, surfaced here
+   * because it's already computed and cheap. Null when clean, not yet checkable (library not installed,
+   * or the driver has no required library), or the test itself failed.
+   */
+  libraryWarning: string | null
+}
+
+/** Phase 109j item 4's result — a real, connection-scoped check run by a spawned child process, so it
+ * can take a few seconds. `output` is the CLI command's own message, verbatim. */
+export interface LibraryValidationReport {
+  succeeded: boolean
+  libraryId: string
+  output: string
 }
 
 /** Which secret a connection resolves through. Read-only while there is one store to resolve from. */
@@ -746,6 +761,10 @@ export interface DriverCapabilities {
   /** Which provisioning actions (see ProvisioningPlan) this driver can plan. Empty for a driver that
    * implements no provisioning at all. */
   supportedProvisioningActions: string[]
+  /** Phase 109j: whether "Validate library" could ever do anything for this driver — it has a
+   * required library *and* a real staging provider/writer to drive. Same "hide an action that could
+   * never work" posture as `supportsConnectionTest`. */
+  supportsLibraryValidation: boolean
 }
 
 /** Kind-name-only view of a driver's capabilities for a catalogue listing (phase 118, the admin

@@ -41,6 +41,7 @@ public sealed class JournalRecoveryTests : IDisposable
             RepoRoot = _root,
             StateDbPath = stateDbPath,
             TaskRunnerDllPath = "unused",
+            CliDllPath = "unused",
         }, _logger);
     }
 

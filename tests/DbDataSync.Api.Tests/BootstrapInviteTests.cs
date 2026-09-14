@@ -18,7 +18,7 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
     private static BootstrapInvite Bootstrap(UserStore users, InviteStore invites, string root, bool disabled = false) =>
         new(users, invites,
             new AuthOptions { AdminGroup = "g", Disabled = disabled },
-            new ApiOptions { RepoRoot = root, StateDbPath = Path.Combine(root, "state.db"), TaskRunnerDllPath = "unused" },
+            new ApiOptions { RepoRoot = root, StateDbPath = Path.Combine(root, "state.db"), TaskRunnerDllPath = "unused", CliDllPath = "unused" },
             NullLogger<BootstrapInvite>.Instance);
 
     /// <summary>Fresh state, so "are there users" means what it says rather than what the rest of the

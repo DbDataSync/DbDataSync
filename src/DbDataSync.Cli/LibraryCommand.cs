@@ -1,3 +1,7 @@
+using ClrKernel.Core.Secrets;
+using DbDataSync.Core.Config;
+using DbDataSync.Core.Git;
+using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Libraries;
 
 namespace DbDataSync.Cli;
@@ -27,6 +31,7 @@ public static class LibraryCommand
             "sync" => await SyncAsync(repoRoot, rest),
             "list" => List(repoRoot),
             "uninstall" => Uninstall(repoRoot, rest),
+            "validate" => await ValidateAsync(repoRoot, rest),
             var other => Unknown(other),
         };
     }
@@ -109,6 +114,7 @@ public static class LibraryCommand
                     Console.WriteLine($"Factory: {manifest.FactoryType}");
                     break;
             }
+            PrintCompatibilityWarnings(repoRoot, manifest.Id);
             return 0;
         }
         catch (InvalidOperationException ex)
@@ -139,8 +145,101 @@ public static class LibraryCommand
         {
             await LibraryInstaller.SyncAsync(repoRoot, id);
             Console.WriteLine($"Synced library '{id}'.");
+            PrintCompatibilityWarnings(repoRoot, id);
         }
 
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>dbdatasync config library validate &lt;id&gt; --connection &lt;name&gt;</c> — phase 109j's
+    /// deeper, connection-scoped check: drives the connection's own driver's *native* (first-registered)
+    /// staging provider and writer against a real scratch table on the real target, with a handful of
+    /// synthetic rows. Deliberately not under <c>internal</c>: this is operator-facing (directly, or via
+    /// the API spawning this exact command as a child process — see
+    /// <c>DbDataSync.Api.Services.LibraryValidationLauncher</c>), and <c>InternalCommand</c> is
+    /// documented as build-only.
+    /// <para>
+    /// Resolves the connection through the same <see cref="ConfigRepository"/> + <see cref="SecretStore"/>
+    /// path every other CLI command already uses — no new credential-resolution mechanism.
+    /// </para>
+    /// </summary>
+    private static async Task<int> ValidateAsync(string repoRoot, string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Console.Error.WriteLine("Usage: dbdatasync config library validate <id> --connection <name>");
+            return 1;
+        }
+
+        var libraryId = args[0];
+        var connectionName = CliOptions.Read(args, "--connection");
+        if (connectionName is null)
+        {
+            Console.Error.WriteLine(
+                "Pass --connection <name> — validate needs a real, credentialed connection to prove " +
+                "staging and writing actually work against it.");
+            return 1;
+        }
+
+        var secretStore = new SecretStore("DbDataSync", true);
+        var configRepository = new ConfigRepository(
+            Path.Combine(repoRoot, "config"), new GitCommitService(repoRoot), secretStore);
+
+        ConnectionConfig connection;
+        try
+        {
+            connection = configRepository.LoadConnection(connectionName);
+        }
+        catch (FileNotFoundException)
+        {
+            Console.Error.WriteLine($"Connection '{connectionName}' does not exist.");
+            return 1;
+        }
+
+        var driver = BuiltInDrivers.All.FirstOrDefault(d => d.DriverType == connection.DriverType);
+        if (driver is null)
+        {
+            Console.Error.WriteLine(
+                $"Connection '{connectionName}' uses driver '{connection.DriverType}', which has no " +
+                "compiled staging/writer pipeline to validate (only built-in drivers do).");
+            return 1;
+        }
+
+        if (!string.Equals(driver.RequiredLibraryId, libraryId, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine(
+                $"Connection '{connectionName}' uses driver '{connection.DriverType}', which requires " +
+                $"library '{driver.RequiredLibraryId ?? "(none)"}' — not '{libraryId}'.");
+            return 1;
+        }
+
+        if (driver.StagingProviders.Count == 0 || driver.Writers.Count == 0)
+        {
+            Console.Error.WriteLine(
+                $"The '{connection.DriverType}' driver has no staging provider/writer registered — " +
+                "there is nothing to stage or write end to end for this engine. " +
+                "(Its static IL-surface compatibility check still runs from `library install`/`sync`/`config check`.)");
+            return 1;
+        }
+
+        // Arms this process's own resolver so the driver's typed provider assembly (e.g.
+        // Microsoft.Data.SqlClient) is loadable here — safe, because this whole process is the
+        // isolation boundary: it opens a real connection, exercises the real library, and exits,
+        // exactly like DbDataSync.TaskRunner's own worker process (Program.cs does the identical
+        // `new LibraryRegistry(repoRoot).LoadAll()` for the identical reason).
+        new LibraryRegistry(repoRoot).LoadAll();
+
+        var result = await LibraryValidationRunner.RunAsync(driver, connection, secretStore, CancellationToken.None);
+        if (!result.Succeeded)
+        {
+            Console.Error.WriteLine($"Validation failed: {result.Error}");
+            return 1;
+        }
+
+        Console.WriteLine(
+            $"Library '{libraryId}' validated against connection '{connectionName}': staged and wrote " +
+            $"{result.RowsWritten} row(s) via {result.StagingProviderKind}/{result.WriterKind}. Scratch table cleaned up.");
         return 0;
     }
 
@@ -199,6 +298,35 @@ public static class LibraryCommand
         return 0;
     }
 
+    /// <summary>
+    /// Phase 109j: the earliest possible feedback for the static, no-execution half of library
+    /// compatibility checking — run right after a successful install or sync, before anything tries to
+    /// actually use the library. For every built-in driver whose <see cref="IDriver.RequiredLibraryId"/>
+    /// matches <paramref name="justInstalledId"/>, prints the specific members (if any) the installed
+    /// version is missing. Never a failure: a missing member here is a warning, not a reason to fail an
+    /// install that otherwise succeeded — the same posture as this command's existing "no
+    /// --factory-type guess" behaviour.
+    /// </summary>
+    private static void PrintCompatibilityWarnings(string repoRoot, string justInstalledId)
+    {
+        var registry = new LibraryRegistry(repoRoot).LoadAll();
+        foreach (var driver in BuiltInDrivers.All)
+        {
+            if (!string.Equals(driver.RequiredLibraryId, justInstalledId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var result = DriverLibraryCompatibility.Check(driver, registry, repoRoot);
+            if (result is null || result.Compatible)
+                continue;
+
+            Console.WriteLine(
+                $"WARNING: the installed '{result.LibraryId}' ({result.AssemblyName}) is missing " +
+                $"{result.MissingMembers.Count} member(s) the '{result.DriverType}' driver uses:");
+            foreach (var member in result.MissingMembers)
+                Console.WriteLine($"    {member}");
+        }
+    }
+
     private static List<string> StripFlagValues(string[] args, params string[] flags)
     {
         var result = new List<string>();
@@ -229,6 +357,7 @@ public static class LibraryCommand
               dbdatasync config library sync [<id>]
               dbdatasync config library list
               dbdatasync config library uninstall <id>
+              dbdatasync config library validate <id> --connection <name>
             """);
     }
 }

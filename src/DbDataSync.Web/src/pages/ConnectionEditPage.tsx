@@ -4,7 +4,7 @@ import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import { ParameterForm } from '../components/ParameterForm'
-import { useCapabilities, useConnectionParameters, useConnections, useDeleteConnection, useDrivers, useTestConnection, useUpsertConnection } from '../api/hooks'
+import { useCapabilities, useConnectionParameters, useConnections, useDeleteConnection, useDrivers, useTestConnection, useUpsertConnection, useValidateLibrary } from '../api/hooks'
 import { ConnectionTestCard } from './connection-edit/ConnectionTestCard'
 import { ScriptBindingsCard } from '../components/ScriptBindings'
 import type { AuthMode, ConnectionInput, DriverType, ParameterDescriptor } from '../api/types'
@@ -116,10 +116,15 @@ export function ConnectionEditPage() {
   const upsert = useUpsertConnection()
   const del = useDeleteConnection()
   const test = useTestConnection()
+  const validateLibrary = useValidateLibrary()
   // A saved connection only: testing an unsaved draft would test whatever is on disk under that name,
   // or nothing at all.
   const capabilities = useCapabilities(isNew ? undefined : name)
   const canTest = !isNew && capabilities.data?.supportsConnectionTest === true
+  // Phase 109j: a separate action from Test — it needs DDL rights and spawns a real child process, so
+  // it's offered only for a driver that has a real staging provider/writer to actually drive (see
+  // DriverCapabilities.supportsLibraryValidation's own doc comment).
+  const canValidateLibrary = !isNew && capabilities.data?.supportsLibraryValidation === true
   const [draft, setDraft] = useState<ConnectionInput | null>(isNew ? { ...empty } : null)
 
   const values = draft ? toValues(draft) : {}
@@ -210,6 +215,17 @@ export function ConnectionEditPage() {
                 data-testid="test-connection-button"
               >
                 {test.isPending ? 'Testing…' : 'Test connection'}
+              </button>
+            )}
+            {canValidateLibrary && (
+              <button
+                className="btn btn-chrome"
+                onClick={() => validateLibrary.mutate(name!)}
+                disabled={validateLibrary.isPending}
+                title="Creates a real scratch table on this connection's target, stages and writes a few rows through the driver's real pipeline, then drops it — needs DDL rights."
+                data-testid="validate-library-button"
+              >
+                {validateLibrary.isPending ? 'Validating…' : 'Validate library'}
               </button>
             )}
             <button className="btn btn-chrome" onClick={() => navigate('/connections')}>Cancel</button>
@@ -310,6 +326,9 @@ export function ConnectionEditPage() {
                 report={test.data}
                 pending={test.isPending}
                 error={test.error}
+                validate={canValidateLibrary
+                  ? { report: validateLibrary.data, pending: validateLibrary.isPending, error: validateLibrary.error }
+                  : undefined}
               />
             )}
           </div>

@@ -18,6 +18,7 @@ import type {
   FromCatalogResult,
   KnownDriverSummary,
   KnownLibrarySummary,
+  LibraryValidationReport,
   LibraryManifest,
   LibrarySearchResponse,
   LibrarySummary,
@@ -130,6 +131,14 @@ export const api = {
       request<DriverCapabilities>(`/api/connections/${encodeURIComponent(name)}/capabilities`),
     test: (name: string) =>
       request<ConnectionTestReport>(`/api/connections/${encodeURIComponent(name)}/test`, { method: 'POST' }),
+    /** Phase 109j item 4: the deep, connection-scoped check — spawns a real child process, creates a
+     * real scratch table, stages and writes a few synthetic rows through the driver's own real
+     * pipeline, and drops it again. Slower than `test` and needs DDL rights; a deliberately separate
+     * action rather than folded into it. */
+    validateLibrary: (name: string) =>
+      request<LibraryValidationReport>(`/api/connections/${encodeURIComponent(name)}/validate-library`, {
+        method: 'POST',
+      }),
     credentialSource: (name: string) =>
       request<CredentialSource>(`/api/connections/${encodeURIComponent(name)}/credential-source`),
     /** Runs a query and returns its columns and first few rows. Takes the text in the body, so what

@@ -3,11 +3,13 @@ using System.Data.Common;
 using System.Diagnostics;
 using System.Net.Sockets;
 using ClrKernel.Core.Secrets;
+using DbDataSync.Api.Configuration;
 using DbDataSync.Api.Services;
 using DbDataSync.Core.Git;
 using DbDataSync.Core.Secrets;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Api.Auth;
+using DbDataSync.Libraries;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,7 +24,10 @@ public sealed class ConnectionsController(
     ParameterCheck parameterCheck,
     ScriptTestService testService,
     CurrentUser currentUser,
-    SecretStore secrets) : ControllerBase
+    SecretStore secrets,
+    LibraryRegistry libraryRegistry,
+    ApiOptions apiOptions,
+    LibraryValidationLauncher libraryValidationLauncher) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
@@ -150,8 +155,26 @@ public sealed class ConnectionsController(
             var connectMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
             var result = await tester.TestAsync(open, cancellationToken);
+
+            // Phase 109j item 5: the static, no-execution compatibility check's result surfaces here —
+            // it's already computed (from `library install`/`config check` time), cheap, and in-process,
+            // so a successful Test Connection is the natural place to mention it. Only on success: a
+            // connection that can't even connect has a more pressing problem than a library warning.
+            string? libraryWarning = null;
+            if (result.Succeeded)
+            {
+                var compatibility = DriverLibraryCompatibility.Check(driver, libraryRegistry, apiOptions.RepoRoot);
+                if (compatibility is { Compatible: false })
+                {
+                    libraryWarning =
+                        $"Connected, but the installed {compatibility.AssemblyName} is missing " +
+                        $"{compatibility.MissingMembers.Count} member(s) this driver uses — " +
+                        "Validate library for a full check.";
+                }
+            }
+
             return Ok(new ConnectionTestReport(
-                result.Succeeded, connectMs, result.RoundTrip.TotalMilliseconds, result.ServerVersion, result.Error));
+                result.Succeeded, connectMs, result.RoundTrip.TotalMilliseconds, result.ServerVersion, result.Error, libraryWarning));
         }
         catch (Exception ex) when (ex is DbException or InvalidOperationException or SocketException)
         {
@@ -165,6 +188,43 @@ public sealed class ConnectionsController(
             if (open is not null)
                 await open.DisposeAsync();
         }
+    }
+
+    /// <summary>
+    /// Phase 109j item 4: the deep, connection-scoped check — spawns
+    /// <c>dbdatasync config library validate &lt;id&gt; --connection &lt;name&gt;</c> as a real child
+    /// process (<see cref="LibraryValidationLauncher"/>) and waits for it. Separate from
+    /// <see cref="Test"/> deliberately: this needs DDL rights on the target and costs a real process
+    /// spawn plus a real scratch table create/write/drop, none of which belong on the cheap, frequent
+    /// "Test" click.
+    /// </summary>
+    [HttpPost("{name}/validate-library")]
+    public async Task<ActionResult<LibraryValidationReport>> ValidateLibrary(string name, CancellationToken cancellationToken)
+    {
+        ConnectionConfig connection;
+        try
+        {
+            connection = configRepository.LoadConnection(name);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+
+        if (!driverRegistry.TryGet(connection.DriverType, out var driver))
+            return NotFound(new { error = $"No driver is registered for '{connection.DriverType}'." });
+
+        if (driver.RequiredLibraryId is not { } libraryId)
+        {
+            return BadRequest(new
+            {
+                error = $"The '{connection.DriverType}' driver has no required library to validate " +
+                    "(it resolves its provider by name, not through a compiled typed API).",
+            });
+        }
+
+        var launched = await libraryValidationLauncher.RunAsync(libraryId, name, cancellationToken);
+        return Ok(new LibraryValidationReport(launched.Succeeded, libraryId, launched.Output));
     }
 
     /// <summary>
@@ -261,10 +321,21 @@ public sealed class ConnectionsController(
 /// <param name="ConnectMs">Time to open the connection — usually the dominant cost, and the part that
 /// fails when a host or port is wrong.</param>
 /// <param name="ProbeMs">Time for the driver's own round trip once connected.</param>
+/// <param name="LibraryWarning">Phase 109j: set only on a successful test, when the static
+/// compatibility check found the installed library missing member(s) this driver uses — the
+/// no-execution half's result surfacing through the flow an operator already checks. Null on any
+/// failure (a connection that can't even connect has a more pressing problem) and whenever the check is
+/// clean or has nothing to report yet (library not installed, driver has no
+/// <see cref="Drivers.Abstractions.IDriver.RequiredLibraryId"/>).</param>
 public sealed record ConnectionTestReport(
-    bool Succeeded, double ConnectMs, double ProbeMs, string? ServerVersion, string? Error);
+    bool Succeeded, double ConnectMs, double ProbeMs, string? ServerVersion, string? Error, string? LibraryWarning = null);
 
 public sealed record CredentialSource(string Store, string SecretRef, string EnvironmentVariable, bool RequiresCredential);
+
+/// <summary>Phase 109j item 4's result — <paramref name="Output"/> is the spawned CLI child process's
+/// own stdout (on success) or its own specific failure message (on stderr, or stdout if the process
+/// never got as far as writing to stderr), verbatim.</summary>
+public sealed record LibraryValidationReport(bool Succeeded, string LibraryId, string Output);
 
 /// <summary>The body of a query preview. The connection is the route's, so it is not repeated here.</summary>
 public sealed record QueryPreviewBody(string Query, int SampleRows = 20);

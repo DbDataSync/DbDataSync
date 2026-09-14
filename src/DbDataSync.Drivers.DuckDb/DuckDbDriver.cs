@@ -27,6 +27,12 @@ public sealed class DuckDbDriver : IDriver, IConnectionTester, IDialectProvider
     /// <summary>Null, not a number DuckDB would ignore: it is embedded and listens on nothing.</summary>
     public int? DefaultPort => null;
 
+    /// <summary>Phase 109j: the <c>KnownLibraries</c> id (109i) this driver's own <c>DuckDBConnection</c>
+    /// usage depends on. Unlike <c>MsSqlDriver</c>/<c>PostgresDriver</c>, this driver has no staging
+    /// provider or writer registered (see below) — the deep, connection-scoped validation half of phase
+    /// 109j has nothing to drive for this engine, but the static IL-surface check still applies.</summary>
+    public string? RequiredLibraryId => "duckdb";
+
     public IReadOnlyList<IChangeReader> Readers { get; } = [new DuckDbQueryReader()];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } = [];

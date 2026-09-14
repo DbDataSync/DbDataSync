@@ -6,6 +6,7 @@ using DbDataSync.Certificates;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Core.Secrets;
+using DbDataSync.Libraries;
 
 namespace DbDataSync.Cli.Tests;
 
@@ -260,6 +261,90 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Contains("Certificate", names);
         Assert.Contains("Binding", names);
         Assert.Contains("First admin", names);
+    }
+
+    /// <summary>Phase 109j: with no library installed at all, there is nothing to check yet — the new
+    /// check is silent (<see cref="CheckStatus.Ok"/>), not a warning about an absence
+    /// <see cref="LibrariesAndDriversCheck"/> doesn't itself flag either (no connection names an
+    /// uninstalled built-in driver here — a built-in is always "installed" as code; only its *library*
+    /// might not be).</summary>
+    [Fact]
+    public async Task NoLibrariesInstalled_LibraryCompatibilityCheckIsSilentlyOk()
+    {
+        ServeCommand.Prepare(_root);
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        Assert.Equal(CheckStatus.Ok, Find(results, "Library compatibility").Status);
+    }
+
+    /// <summary>Real-world confirmation (phase 109j's own bar): the actually-installed, currently-pinned
+    /// <c>microsoft-data-sqlclient</c>/<c>npgsql</c>/<c>duckdb</c> against the real, current
+    /// <c>MsSqlDriver</c>/<c>PostgresDriver</c>/<c>DuckDbDriver</c> IL — no real network/DB connection
+    /// needed, since this is the static, no-execution half. Passes clean: no false positive against real,
+    /// current usage.</summary>
+    [Fact]
+    public async Task EveryBuiltInLibraryInstalledAtItsPinnedVersion_LibraryCompatibilityCheckIsClean()
+    {
+        ServeCommand.Prepare(_root);
+        foreach (var id in new[] { "microsoft-data-sqlclient", "npgsql", "duckdb" })
+        {
+            var entry = KnownLibraries.TryGetById(id)!;
+            await LibraryInstaller.InstallAsync(
+                _root, entry.Id, [new PackageRef(entry.PackageId, entry.PinnedVersion)], entry.FactoryType);
+        }
+
+        var context = ReadinessChecks.BuildContext(["--repo", _root]);
+        var results = await ReadinessChecks.RunChecksAsync(context);
+
+        var check = Find(results, "Library compatibility");
+        Assert.Equal(CheckStatus.Ok, check.Status);
+    }
+
+    /// <summary>The per-library dedup this check's own doc comment promises (phase doc's open question
+    /// 4, resolved as "per-library, deduplicating drivers that share one") — proven directly against
+    /// hand-built results, since a real incompatible built-in library version was not found within
+    /// reasonable effort (every version this phase actually tried remained compatible).</summary>
+    [Fact]
+    public void Summarize_TwoDriversSharingOneIncompatibleLibrary_ReportsItOnceNamingBothDrivers()
+    {
+        var results = new[]
+        {
+            new DriverLibraryCompatibilityResult("MsSql", "shared-lib", "Shared.Assembly", Compatible: false, ["Shared.Assembly.Widget.DoThing(1 arg(s))"]),
+            new DriverLibraryCompatibilityResult("Postgres", "shared-lib", "Shared.Assembly", Compatible: false, ["Shared.Assembly.Widget.DoThing(1 arg(s))"]),
+        };
+
+        var check = LibraryCompatibilityCheck.Summarize(results);
+
+        Assert.Equal(CheckStatus.Warn, check.Status);
+        // Reported once, not twice — a single "shared-lib" mention, naming both drivers.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(check.Detail, "shared-lib"));
+        Assert.Contains("MsSql", check.Detail);
+        Assert.Contains("Postgres", check.Detail);
+        Assert.Contains("DoThing", check.Detail);
+        Assert.NotNull(check.Fix);
+    }
+
+    [Fact]
+    public void Summarize_EveryResultCompatible_IsOk()
+    {
+        var results = new[]
+        {
+            new DriverLibraryCompatibilityResult("MsSql", "microsoft-data-sqlclient", "Microsoft.Data.SqlClient", Compatible: true, []),
+        };
+
+        var check = LibraryCompatibilityCheck.Summarize(results);
+
+        Assert.Equal(CheckStatus.Ok, check.Status);
+    }
+
+    [Fact]
+    public void Summarize_NoResultsAtAll_IsOk()
+    {
+        var check = LibraryCompatibilityCheck.Summarize([]);
+
+        Assert.Equal(CheckStatus.Ok, check.Status);
     }
 
     private static CheckResult Find(IReadOnlyList<CheckResult> results, string name) =>

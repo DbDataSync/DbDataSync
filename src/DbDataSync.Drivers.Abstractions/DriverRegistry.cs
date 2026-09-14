@@ -86,6 +86,11 @@ public sealed class DriverRegistry
                 driver.StagingProviders.Select(p => new StagingCapability(p.Kind, p.Parameters)).ToList(),
                 driver.Writers.Select(w => new WriterCapability(w.Kind, w.SupportsReconciliation, w.Parameters)).ToList(),
                 driver is IConnectionTester,
-                driver is IProvisioner provisioner ? provisioner.SupportedActions : [])
+                driver is IProvisioner provisioner ? provisioner.SupportedActions : [],
+                // Phase 109j: hide "Validate library" the same way SupportsConnectionTest already
+                // hides "Test" — a driver with no RequiredLibraryId (descriptor-driven, resolved by
+                // name through DbProviderFactories) or no staging provider/writer of its own (DuckDb)
+                // has nothing this action could ever exercise.
+                driver.RequiredLibraryId is not null && driver.StagingProviders.Count > 0 && driver.Writers.Count > 0)
             : null;
 }
