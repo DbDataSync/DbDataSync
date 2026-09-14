@@ -29,9 +29,30 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **034** — PostgreSQL logical replication | |
-| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 3 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **133** — the Bulk Load pipeline as configuration | the rename gets harder every phase that ships; 134 cannot start without it |
+| 2 | **134** — an initial load becomes a bulk load | the behaviour change, and the first caller `IPositionCapturing` has ever had |
+| 3 | **034** — PostgreSQL logical replication | |
+| 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-14: **133 and 134 go to the top**, and the reason they are only being queued now is
+worth recording. `planning/done/bulk-load-pipeline-and-the-initial-load-rule.md` was resolved on
+2026-09-04 but named its phases A, B and C rather than numbering them — deliberately, to avoid claiming
+a number before the file existed. Nothing then pointed at them: no `todo/` file, no row here, and the
+only reference anywhere is the 2026-09-04 note below citing the doc as what retargeted phase 101's §1.
+Ten days of other work went past, and the design read as shipped because phase 101's retrospective
+discusses the Bulk Load pipeline at length while scoping it out. **A resolved planning doc whose phases
+are never written is invisible** — every other doc in `planning/done/` names a `phase-NNN` file, and
+this one could not.
+
+133 leads because the `Backfill` → `BulkLoad` rename gets more expensive with every phase that ships:
+107 made the word a table and a column, 108 made it a lane and a user-facing YAML key. It is a **full**
+rename carrying **no migration and no backwards compatibility** — there are no serious installations
+yet, so existing state databases and configs are recreated rather than upgraded. That is what makes the
+full rename cheap today and is precisely why it should not wait; the same decision is unavailable the
+moment anyone is running this for real. 134
+carries the behaviour change and the deletion, and is the first thing ever to call `IPositionCapturing`
+— built by phase 101, implemented by four readers, and with no caller since.
 
 Updated 2026-09-11 (latest of all): **127** is done and removed — nuget.org Trusted Publishing works
 end to end: a real stable release (`2026.9.11.532`) and two betas all shipped correctly through

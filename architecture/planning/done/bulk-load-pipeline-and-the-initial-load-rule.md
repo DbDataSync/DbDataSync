@@ -264,6 +264,19 @@ collision on 2026-09-03.
 
 ## The phases
 
+**Written up as phase docs on 2026-09-14** — ten days after this doc was resolved, because naming them
+A/B/C meant nothing in `todo/` or the build order pointed at them and the work was invisible:
+
+- **Phase A → `implementation/todo/phase-133-bulk-load-pipeline-configuration.md`**
+- **Phase B → `implementation/todo/phase-134-initial-load-becomes-a-bulk-load.md`**
+- **Phase C** — folded into 134, since phase 102 shipped without the hold or the settings and there is
+  no separate surface left to build.
+
+Two decisions below were revised when they were written up, against facts that changed in between:
+the **rename is now full rather than `RunKind`-only** (107 and 108 made "Backfill" a table, a column, a
+lane and a YAML key), and **phase 107 already built the completion tracking** this doc called the
+hardest part of the design.
+
 **Phase A — the Bulk Load pipeline as configuration.** `BulkLoadConfig` at replication level with
 per-mapping override, resolved by the `PipelineResolution` shape; save-time validation; the
 `RunKind.Backfill` → `BulkLoad` rename and its migration; the settings UI. **Backfill starts using it**
