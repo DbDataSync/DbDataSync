@@ -254,18 +254,23 @@ public sealed record VerificationResultRecord(
     string ResultPath);
 
 /// <summary>
-/// One pause or resume, as it happened. See <c>TaskRunStore.SetPaused</c>.
+/// One pause or resume, as it happened. See <c>TaskRunStore.SetPaused</c> (the replication grain) and
+/// <c>TaskRunStore.SetMappingHold</c> (the table-mapping grain, phase 131).
 /// <para>
 /// <see cref="Action"/> is a string rather than an enum for the same reason
 /// <see cref="RunFailureKinds"/> is: it is stored, and read back by things that are not this assembly.
 /// See <see cref="PauseActions"/>.
 /// </para>
 /// </summary>
+/// <param name="MappingName">Null for the replication grain — every row phase 64 ever wrote, and every
+/// row <c>SetPaused</c> still writes. Set for the table-mapping grain phase 131 adds:
+/// <c>SetMappingHold</c>'s own action against one mapping's <c>ReadHold</c>.</param>
 /// <param name="Note">Whatever the operator typed for *this* action — including nothing, which is a
 /// deliberate answer rather than a missing one, since the popup lets them clear it every time.</param>
 public sealed record PauseEventRecord(
     long Id,
     string TaskName,
+    string? MappingName,
     string Action,
     string? Note,
     DateTimeOffset PerformedAtUtc,

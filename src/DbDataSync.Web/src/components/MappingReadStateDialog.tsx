@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Field } from './Field'
 import { INTENT_INFO } from '../pages/replication-detail/readIntent'
 import type { ReadHold, ReadIntent } from '../api/types'
 
@@ -17,6 +18,11 @@ import type { ReadHold, ReadIntent } from '../api/types'
  *   do (`offered`, always including `InitialLoad`). Picking `ChangesFromLatest` — deliberate data loss
  *   — does not commit from the picker; it opens `DataLossConfirm`, which names what is being skipped
  *   rather than asking a bare "are you sure".
+ *
+ * The normal view also carries its own Pause/Resume, with a note — phase 131, wired the same way the
+ * replication-level `PauseDialog` asks for one on every action. `IntentHoldCell`'s own quick toggle
+ * beside "Manage…" is unaffected and still pauses/resumes with no note at all; this is the affordance
+ * for an operator who wants to record why.
  */
 export function MappingReadStateDialog({
   mappingName, sourceLabel, currentIntent, currentHold, offered,
@@ -36,14 +42,20 @@ export function MappingReadStateDialog({
   onRunVerification: () => void
   busy: boolean
   error?: unknown
-  onConfirm: (next: { intent: ReadIntent; hold: ReadHold }) => void
+  onConfirm: (next: { intent: ReadIntent; hold: ReadHold; note?: string | null }) => void
   onCancel: () => void
 }) {
   const recovering = currentHold === 'PositionExpired'
+  const paused = currentHold === 'Paused'
   const [draft, setDraft] = useState<ReadIntent>(currentIntent)
   // Non-null only while the ChangesFromLatest confirmation is open — a second, explicit step, because
   // that intent is deliberate data loss and a bare "are you sure" does not say what is being lost.
   const [confirmingDataLoss, setConfirmingDataLoss] = useState(false)
+  // What this dialog's own Pause/Resume records against the action — phase 131. The row's quick
+  // toggle (`IntentHoldCell.togglePause`) still exists for a fast pause with no note; this is the
+  // affordance for the operator who wants one, the same way the replication-level `PauseDialog` asks
+  // every time rather than defaulting the note to nothing.
+  const [note, setNote] = useState('')
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
@@ -130,6 +142,35 @@ export function MappingReadStateDialog({
                   data-testid="read-state-confirm"
                 >
                   {busy ? 'Saving…' : draft === 'ChangesFromLatest' ? 'Continue…' : 'Set intent'}
+                </button>
+              </div>
+
+              {/* A per-table pause/resume, independent of the intent picker above — beside it, not
+                  instead of the row's own quick toggle, which stays the fast path with no note. See
+                  phase 131: this is what makes recording *why* possible for this grain too. */}
+              <Field label="Note — recorded if pausing or resuming this table">
+                <textarea
+                  className="input"
+                  style={{ minHeight: 64, resize: 'vertical' }}
+                  value={note}
+                  placeholder={paused ? 'Anything worth recording about resuming?' : 'Why is this table being held?'}
+                  onChange={(e) => setNote(e.target.value)}
+                  data-testid="read-state-pause-note-input"
+                />
+              </Field>
+              <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => onConfirm({
+                    intent: currentIntent,
+                    hold: paused ? 'None' : 'Paused',
+                    note: note.trim() ? note : null,
+                  })}
+                  data-testid="read-state-pause-toggle"
+                >
+                  {busy ? 'Saving…' : paused ? 'Resume this table' : 'Pause this table'}
                 </button>
               </div>
             </>

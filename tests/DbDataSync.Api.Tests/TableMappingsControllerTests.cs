@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DbDataSync.Core.Config;
+using DbDataSync.Core.Git;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace DbDataSync.Api.Tests;
@@ -15,7 +17,26 @@ public sealed class TableMappingsControllerTests(TestApiFactory factory) : IClas
         Converters = { new JsonStringEnumConverter() },
     };
 
+    private static readonly GitAuthor Author = new("Test", "test@example.com");
+
     private readonly HttpClient _client = factory.CreateClient();
+
+    /// <summary>A real connection row, never opened — <c>SetReadState</c>'s watermark-key resolution
+    /// needs to load it (to find which dialect spelled the key), the same reasoning
+    /// <c>MappingReadStateTests.SetUpAsync</c> already documents. Saved directly through
+    /// <c>ConfigRepository</c> rather than the connections endpoint for the same pre-existing
+    /// environment reason that file gives (Negotiate auth throws under this sandbox's TestServer).</summary>
+    private void EnsureSourceConnection(string name = "src") =>
+        factory.Services.GetRequiredService<ConfigRepository>().SaveConnection(new ConnectionInput
+        {
+            Name = name,
+            DriverType = DriverIds.MsSql,
+            Host = "localhost",
+            Database = "App",
+            AuthMode = AuthMode.SqlAuth,
+            UserId = "sa",
+            Password = "DbDataSync_Test_Pw1",
+        }, Author);
 
     private static TableMappingConfig MakeMapping(string name) => new()
     {
@@ -362,6 +383,105 @@ public sealed class TableMappingsControllerTests(TestApiFactory factory) : IClas
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    #endregion
+
+    #region Read-state pause history (phase 131)
+
+    private async Task<string> SetReadStateAsync(
+        string replicationName, string mappingName, object body)
+    {
+        var response = await _client.PostAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/{mappingName}/read-state", body, JsonOptions);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    private async Task<List<PauseEventDto>> GetPauseHistoryAsync(string replicationName) =>
+        (await _client.GetFromJsonAsync<List<PauseEventDto>>(
+            $"/api/replications/{replicationName}/pause-history", JsonOptions))!;
+
+    /// <summary>Setting `Hold: Paused` on a mapping with no prior hold writes exactly one `PauseEvents`
+    /// row for that mapping — the boundary crossing `TableMappingsController.SetReadState` is supposed
+    /// to catch.</summary>
+    [Fact]
+    public async Task SetReadState_Pausing_WritesExactlyOnePauseEventRow()
+    {
+        var replicationName = await EnsureReplicationAsync();
+        EnsureSourceConnection();
+        await _client.PutAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/orders", MakeMapping("orders"), JsonOptions);
+
+        await SetReadStateAsync(replicationName, "orders",
+            new { intent = "Changes", hold = "Paused", note = "waiting on the DBA" });
+
+        var history = await GetPauseHistoryAsync(replicationName);
+
+        var row = Assert.Single(history);
+        Assert.Equal("orders", row.MappingName);
+        Assert.Equal("Paused", row.Action);
+        Assert.Equal("waiting on the DBA", row.Note);
+    }
+
+    /// <summary>Toggling a paused mapping back to `None` writes a `Resumed` row — the other half of the
+    /// boundary.</summary>
+    [Fact]
+    public async Task SetReadState_Resuming_WritesAResumedRow()
+    {
+        var replicationName = await EnsureReplicationAsync();
+        EnsureSourceConnection();
+        await _client.PutAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/orders", MakeMapping("orders"), JsonOptions);
+
+        await SetReadStateAsync(replicationName, "orders", new { intent = "Changes", hold = "Paused" });
+        await SetReadStateAsync(replicationName, "orders", new { intent = "Changes", hold = "None" });
+
+        var history = await GetPauseHistoryAsync(replicationName);
+
+        Assert.Equal(2, history.Count);
+        Assert.Equal("Resumed", history[0].Action);
+        Assert.Equal("Paused", history[1].Action);
+    }
+
+    /// <summary>Changing only `Intent`, with `Hold` unchanged (and never `Paused`), writes nothing —
+    /// this is not an audit trail of every call the endpoint receives, only of pause boundaries.</summary>
+    [Fact]
+    public async Task SetReadState_IntentOnlyChange_WritesNoPauseEvent()
+    {
+        var replicationName = await EnsureReplicationAsync();
+        EnsureSourceConnection();
+        await _client.PutAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/orders", MakeMapping("orders"), JsonOptions);
+
+        await SetReadStateAsync(replicationName, "orders", new { intent = "InitialLoad", hold = "None" });
+        await SetReadStateAsync(replicationName, "orders", new { intent = "Changes", hold = "None" });
+
+        Assert.Empty(await GetPauseHistoryAsync(replicationName));
+    }
+
+    /// <summary>A `PositionExpired` -&gt; `None` recovery that never crossed `Paused` writes nothing
+    /// either — the same "only a real pause boundary" rule, from the other hold value that isn't
+    /// `Paused`.</summary>
+    [Fact]
+    public async Task SetReadState_PositionExpiredRecovery_ThatNeverTouchedPaused_WritesNoPauseEvent()
+    {
+        var replicationName = await EnsureReplicationAsync();
+        EnsureSourceConnection();
+        await _client.PutAsJsonAsync(
+            $"/api/replications/{replicationName}/table-mappings/orders", MakeMapping("orders"), JsonOptions);
+
+        // The endpoint itself does not validate Hold against what actually produced it (phase 101's
+        // reader is what raises PositionExpired for real, on a failed pass), so this drives the same
+        // transition through the one call surface this controller exposes: into PositionExpired first
+        // (never Paused, so no history), then the recovery back to None (still never Paused).
+        await SetReadStateAsync(replicationName, "orders", new { intent = "Changes", hold = "PositionExpired" });
+        await SetReadStateAsync(replicationName, "orders", new { intent = "ChangesFromEarliest", hold = "None" });
+
+        Assert.Empty(await GetPauseHistoryAsync(replicationName));
+    }
+
+    private sealed record PauseEventDto(
+        long Id, string TaskName, string? MappingName, string Action, string? Note, string PerformedAtUtc, string PerformedBy);
 
     #endregion
 }

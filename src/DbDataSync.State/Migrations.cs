@@ -788,5 +788,15 @@ internal static class Migrations
         -- is every row before this column existed and every Primary/Backfill/Verification item after.
         ALTER TABLE WorkQueue {{addcolumn}} DeleteGuardJson {{text}} NULL;
         """,
+
+        """
+        -- Widens phase 64's PauseEvents to the table-mapping grain (ReadHold.Paused) alongside the
+        -- replication grain it already covered — see phase 131. NULL means the replication itself —
+        -- every existing row, and every future SetPaused row, since that INSERT does not name this
+        -- column and every engine here leaves an unlisted nullable column at its default on insert.
+        -- Nullable, no backfill: the same additive shape every migration since phase 72 has used here.
+        ALTER TABLE PauseEvents {{addcolumn}} MappingName {{key}} NULL;
+        CREATE INDEX IX_PauseEvents_TaskName_MappingName ON PauseEvents(TaskName, MappingName);
+        """,
     ];
 }

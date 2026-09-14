@@ -18,7 +18,8 @@ public sealed class TableMappingsController(
     ConfigRepository configRepository, CurrentUser currentUser, IHubContext<RunHub> hub,
     ParameterCheck parameterCheck, ReaderLagService lag,
     MappingMetadataService mappingMetadata, MappingColumnReader columnReader,
-    ChangeWatermarkStore watermarks, RunLockStore runLocks, DriverRegistry driverRegistry) : ControllerBase
+    ChangeWatermarkStore watermarks, RunLockStore runLocks, DriverRegistry driverRegistry,
+    TaskRunStore taskRunStore) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
@@ -123,6 +124,14 @@ public sealed class TableMappingsController(
     /// that has no such thing; today nothing consumes it, and once phase 101 does, it is the one that
     /// refuses to silently downgrade it.
     /// </para>
+    /// <para>
+    /// **Writes <c>PauseEvents</c> history only on a real <see cref="ReadHold.Paused"/>-boundary
+    /// crossing — phase 131.** Read before the write, the same reason <see cref="TaskRunStore.SetPaused"/>
+    /// reads before its own write: so this can tell a hold being newly applied or newly cleared from a
+    /// call that never touched <c>Paused</c> at all (an intent-only change, or a <c>PositionExpired</c>
+    /// recovery back to <c>None</c>). Those write nothing — the history is an audit trail of pause
+    /// actions, not of every call this endpoint ever receives.
+    /// </para>
     /// </summary>
     [HttpPost("{mappingName}/read-state")]
     public ActionResult<MappingReadStateDto> SetReadState(
@@ -160,7 +169,14 @@ public sealed class TableMappingsController(
             return BadRequest(new { error = ex.Message });
         }
 
+        var previousHold = watermarks.GetReadState(replicationName, mappingName, sourceTable)?.Hold ?? ReadHold.None;
         watermarks.SetReadIntentAndHold(replicationName, mappingName, sourceTable, request.Intent, request.Hold);
+
+        if (request.Hold != previousHold && (request.Hold == ReadHold.Paused || previousHold == ReadHold.Paused))
+        {
+            taskRunStore.SetMappingHold(
+                replicationName, mappingName, request.Hold == ReadHold.Paused, request.Note, currentUser.Author.Name);
+        }
 
         var stored = watermarks.GetReadState(replicationName, mappingName, sourceTable)!;
         return Ok(new MappingReadStateDto(stored.Intent, stored.Hold, stored.Watermark, stored.WatermarkTimeUtc));
@@ -552,7 +568,10 @@ public sealed record MappingLag(
 /// </summary>
 public sealed record MappingReadStateDto(ReadIntent Intent, ReadHold Hold, string? Watermark, DateTimeOffset? WatermarkTimeUtc);
 
-/// <summary>Both fields required, deliberately: the one call this backs exists so an operator recovering
-/// from a hold states the intent and the hold together, rather than in two requests with a window
+/// <summary>Intent and hold are both required, deliberately: the one call this backs exists so an
+/// operator recovering from a hold states them together, rather than in two requests with a window
 /// between them where the hold is gone and the old intent is still what the next pass would honour.</summary>
-public sealed record SetMappingReadStateRequest(ReadIntent Intent, ReadHold Hold);
+/// <param name="Note">Optional, and defaulted — phase 131. Recorded against a
+/// <see cref="ReadHold.Paused"/>-boundary crossing only (see <c>SetReadState</c>); a caller that never
+/// mentions it, like the row's own quick pause/resume toggle, still works with no note at all.</param>
+public sealed record SetMappingReadStateRequest(ReadIntent Intent, ReadHold Hold, string? Note = null);

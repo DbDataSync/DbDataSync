@@ -265,16 +265,22 @@ public sealed class TaskRunStore(StateDatabase database)
         });
 
     /// <summary>
-    /// Every pause and resume for a replication, most recent first.
+    /// Every pause and resume for a replication, most recent first — both grains phase 131 covers,
+    /// interleaved rather than grouped: the replication grain (<see cref="SetPaused"/>, <c>MappingName</c>
+    /// null) and the table-mapping grain (<see cref="SetMappingHold"/>, <c>MappingName</c> set).
+    /// <para>
+    /// One query serves both because the <c>WHERE</c> clause was never grain-specific — it already
+    /// filtered on <c>TaskName</c> alone, so widening <c>PauseEvents</c> with a nullable
+    /// <c>MappingName</c> column made this return both without changing a word of the query itself.
+    /// </para>
     /// <para>
     /// Ordered by Id rather than by PerformedAtUtc: two actions within the same clock tick are
     /// otherwise in an arbitrary order, and the sequence is the whole point of an audit trail. The
     /// autoincrement is the only monotonic thing here.
     /// </para>
     /// <para>
-    /// Nothing in the product calls this yet — the viewer is its own follow-up, see
-    /// architecture/planning/todo/pause-history-ui.md. It exists so the history is reachable, and
-    /// tested so it is reachable correctly.
+    /// Phase 131 is the viewer this doc comment used to say was a follow-up — see
+    /// <c>ReplicationsController.PauseHistory</c> and the SPA's Pause History sub-tab.
     /// </para>
     /// </summary>
     public IReadOnlyList<PauseEventRecord> GetPauseHistory(string taskName, int limit = 50) =>
@@ -282,7 +288,7 @@ public sealed class TaskRunStore(StateDatabase database)
         {
             using var connection = database.OpenConnection();
             using var cmd = database.Command(connection, $"""
-                SELECT Id, TaskName, Action, Note, PerformedAtUtc, PerformedBy
+                SELECT Id, TaskName, MappingName, Action, Note, PerformedAtUtc, PerformedBy
                 FROM PauseEvents WHERE TaskName = $name
                 ORDER BY Id DESC {database.Limit("limit")};
                 """);
@@ -294,11 +300,48 @@ public sealed class TaskRunStore(StateDatabase database)
                 results.Add(new PauseEventRecord(
                     reader.Int64(0),
                     reader.GetString(1),
-                    reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3),
-                    DateTimeOffset.Parse(reader.GetString(4)),
-                    reader.GetString(5)));
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    DateTimeOffset.Parse(reader.GetString(5)),
+                    reader.GetString(6)));
             return (IReadOnlyList<PauseEventRecord>)results;
+        });
+
+    /// <summary>
+    /// A table mapping's own pause history entry — the write phase 64 never needed a second grain for.
+    /// See <see cref="SetPaused"/>'s doc comment for the replication grain this mirrors.
+    /// <para>
+    /// **History only, no current-state upsert.** Unlike <see cref="SetPaused"/>, this mapping's
+    /// current hold already lives in <c>ChangeWatermarks</c> (phase 100/101,
+    /// <c>ChangeWatermarkStore.SetReadHold</c>/<c>SetReadIntentAndHold</c>) — writing a second copy of
+    /// it here would be a second source of truth to keep in step with the first. This writes only the
+    /// audit row.
+    /// </para>
+    /// <para>
+    /// **Deliberately no notification.** Phase 64's pause-notifies/resume-doesn't asymmetry
+    /// (<see cref="NotifyIfNewlyPaused"/>) is a considered decision for the replication grain; whether
+    /// the mapping grain should notify at all is a separate product question this method does not
+    /// answer — see the phase 131 doc's "What this does not build."
+    /// </para>
+    /// </summary>
+    /// <param name="note">Same convention as <see cref="SetPaused"/>'s own <c>note</c>: null and empty
+    /// are both stored as given, since clearing a note is a different act from never writing one.</param>
+    public void SetMappingHold(string taskName, string mappingName, bool held, string? note, string performedBy) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, """
+                INSERT INTO PauseEvents (TaskName, MappingName, Action, Note, PerformedAtUtc, PerformedBy)
+                VALUES ($name, $mapping, $action, $note, $now, $by);
+                """);
+            cmd.Bind(database, "name", taskName);
+            cmd.Bind(database, "mapping", mappingName);
+            cmd.Bind(database, "action", held ? PauseActions.Paused : PauseActions.Resumed);
+            cmd.Bind(database, "note", (object?)note ?? DBNull.Value);
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Bind(database, "by", performedBy);
+            cmd.ExecuteNonQuery();
         });
 
     /// <summary>Transitions an existing Queued row (written by WorkQueueStore.Enqueue when the work

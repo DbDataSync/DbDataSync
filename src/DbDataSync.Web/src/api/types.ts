@@ -76,6 +76,9 @@ export interface MappingReadState {
 export interface SetMappingReadStateRequest {
   intent: ReadIntent
   hold: ReadHold
+  /** Optional — phase 131. Recorded only against a `Paused`-boundary crossing; the quick pause/resume
+   * toggle sends no note at all and still works. */
+  note?: string | null
 }
 
 export type ScheduleMode = 'Continuous' | 'Periodic'
@@ -1224,6 +1227,22 @@ export interface CommitInfo {
   authorName: string
   authorEmail: string
   whenUtc: string
+}
+
+/**
+ * One pause or resume, as it happened — mirrors `PauseEventRecord`. See phase 64 (the replication
+ * grain) and phase 131 (the table-mapping grain, and the screen that reads both).
+ */
+export interface PauseEvent {
+  id: number
+  taskName: string
+  /** Null for the replication grain (phase 64's own rows, and `SetPaused`'s to this day); set for the
+   * table-mapping grain (phase 131's `SetMappingHold`). */
+  mappingName: string | null
+  action: 'Paused' | 'Resumed'
+  note: string | null
+  performedAtUtc: string
+  performedBy: string
 }
 
 // A trigger now enqueues one Primary pass per table mapping the replication has, not one run for the

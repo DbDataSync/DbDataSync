@@ -17,6 +17,7 @@ import { BackfillProgressCard } from './BackfillProgressCard'
 import { holdStateOf, HOLD_INFO } from './holdState'
 import { formatLag, lagStateOf } from './lag'
 import { INTENT_INFO, offeredIntents } from './readIntent'
+import { PauseHistoryPanel } from './PauseHistoryPanel'
 import { RunsPanel, type RunsCommand } from './RunsPanel'
 
 const COLUMNS = '1fr 1fr 190px 250px'
@@ -24,14 +25,16 @@ const COLUMNS = '1fr 1fr 190px 250px'
 const MONITORING_TABS: SubTab[] = [
   { path: null, label: 'Current Status', testId: 'monitoring-tab-current' },
   { path: 'history', label: 'Run History', testId: 'monitoring-tab-history' },
+  { path: 'pause-history', label: 'Pause History', testId: 'monitoring-tab-pause-history' },
 ]
 
 /**
- * The Monitoring section's own layout route — see phase 103.
+ * The Monitoring section's own layout route — see phase 103, and phase 131 for the third sub-tab.
  *
- * Two sub-tabs, the `SubTabs` convention Overview and the mapping editor already use: **Current
+ * Three sub-tabs, the `SubTabs` convention Overview and the mapping editor already use: **Current
  * Status** is the index, so `/replications/{name}/monitoring` opens the lag table rather than
- * requiring a segment, and **Run History** is what Runs used to be on its own top-level tab.
+ * requiring a segment; **Run History** is what Runs used to be on its own top-level tab; **Pause
+ * History** (phase 131) is who paused or resumed this replication or one of its mappings, and when.
  *
  * Takes the command down to whichever sub-tab is open, the same way the layout route above passes it
  * to this one — `RunsCommand` reaches the history panel two levels down the outlet now rather than one,
@@ -67,6 +70,11 @@ export function MonitoringCurrentStatusTab() {
 export function MonitoringRunHistoryTab() {
   const { replicationName, command } = useOutletContext<MonitoringOutletContext>()
   return <RunsPanel replicationName={replicationName} command={command} />
+}
+
+export function MonitoringPauseHistoryTab() {
+  const { replicationName } = useOutletContext<MonitoringOutletContext>()
+  return <PauseHistoryPanel replicationName={replicationName} />
 }
 
 /**

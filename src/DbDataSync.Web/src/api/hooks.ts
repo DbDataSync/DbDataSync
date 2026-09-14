@@ -29,6 +29,7 @@ const keys = {
   replications: ['replications'] as const,
   replication: (name: string) => ['replications', name] as const,
   replicationHistory: (name: string) => ['replications', name, 'history'] as const,
+  replicationPauseHistory: (name: string) => ['replications', name, 'pause-history'] as const,
   tableMappings: (replicationName: string) => ['replications', replicationName, 'table-mappings'] as const,
   tableMapping: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName] as const,
@@ -437,6 +438,9 @@ export function useSetReplicationPaused(replicationName: string) {
       api.replicationStatus.setPaused(replicationName, paused, note),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: keys.replicationStatus(replicationName) })
+      // Phase 131: every pause writes a history row now, so a Pause History tab already open
+      // elsewhere should not keep showing a list that is missing this one.
+      queryClient.invalidateQueries({ queryKey: keys.replicationPauseHistory(replicationName) })
     },
   })
 }
@@ -466,6 +470,22 @@ export function useReplicationHistory(name: string | undefined) {
     queryKey: keys.replicationHistory(name ?? ''),
     queryFn: () => api.replications.history(name!),
     enabled: !!name,
+  })
+}
+
+/**
+ * Every pause/resume this replication has recorded, over both grains — the Monitoring section's Pause
+ * History sub-tab (phase 131).
+ *
+ * Plain, on-demand — no `refetchInterval`, matching `useReplicationHistory` beside it rather than the
+ * live-polled Monitoring queries: this is a low-volume audit list of past, human-initiated actions, not
+ * an operational view that goes stale the way lag or a running pass does.
+ */
+export function useReplicationPauseHistory(replicationName: string | undefined) {
+  return useQuery({
+    queryKey: keys.replicationPauseHistory(replicationName ?? ''),
+    queryFn: () => api.replications.pauseHistory(replicationName!),
+    enabled: !!replicationName,
   })
 }
 
@@ -858,9 +878,12 @@ export function useSetMappingReadState(replicationName: string, mappingName: str
   return useMutation({
     mutationFn: (request: SetMappingReadStateRequest) =>
       api.tableMappings.setReadState(replicationName, mappingName!, request),
-    onSuccess: () => queryClient.invalidateQueries({
-      queryKey: keys.mappingReadState(replicationName, mappingName ?? ''),
-    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.mappingReadState(replicationName, mappingName ?? '') })
+      // Phase 131: a Paused-boundary crossing here writes a PauseEvents row too, over the same
+      // replication-level history a mapping-level pause now shares.
+      queryClient.invalidateQueries({ queryKey: keys.replicationPauseHistory(replicationName) })
+    },
   })
 }
 

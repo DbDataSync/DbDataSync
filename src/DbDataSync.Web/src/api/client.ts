@@ -27,6 +27,7 @@ import type {
   MappingLag,
   MappingReadState,
   MetadataRefreshResult,
+  PauseEvent,
   ReplicationLag,
   CertificateActionResult,
   CertificateCandidate,
@@ -181,6 +182,11 @@ export const api = {
       put<ReplicationTaskConfig>(`/api/replications/${encodeURIComponent(name)}`, task),
     delete: (name: string) => request<void>(`/api/replications/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     history: (name: string) => request<CommitInfo[]>(`/api/replications/${encodeURIComponent(name)}/history`),
+    /** Every pause/resume this replication has recorded, over both grains — see phase 131. */
+    pauseHistory: (name: string, limit?: number) =>
+      request<PauseEvent[]>(
+        `/api/replications/${encodeURIComponent(name)}/pause-history${limit ? `?limit=${limit}` : ''}`,
+      ),
     // Every mapping's lag and the range across them, in one call — see phase 86. The per-mapping
     // endpoint below still exists for a caller that wants exactly one.
     lag: (name: string) => request<ReplicationLag>(`/api/replications/${encodeURIComponent(name)}/lag`),

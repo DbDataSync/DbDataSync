@@ -147,6 +147,17 @@ public sealed class ReplicationsController(
     [HttpGet("{name}/history")]
     public ActionResult<IReadOnlyList<CommitInfo>> History(string name, [FromQuery] int limit = 50) =>
         Ok(configRepository.GetReplicationHistory(name, limit));
+
+    /// <summary>
+    /// Every pause/resume this replication has recorded, over both grains — see phase 131 and
+    /// <see cref="TaskRunStore.GetPauseHistory"/>. Not gated on <c>ListReplications</c> the way most
+    /// endpoints here are, matching <see cref="History"/> immediately above: an unknown name simply has
+    /// no rows, the same convention that method already uses rather than a new one.
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("{name}/pause-history")]
+    public ActionResult<IReadOnlyList<PauseEventRecord>> PauseHistory(string name, [FromQuery] int limit = 50) =>
+        Ok(taskRunStore.GetPauseHistory(name, limit));
 }
 
 /// <summary>The one field that saves on its own — see <c>SetEnabled</c>.</summary>

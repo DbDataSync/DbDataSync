@@ -112,4 +112,58 @@ public sealed class PauseStateTests : IDisposable
         Assert.Equal("note 4", history[0].Note);
         Assert.Equal("note 3", history[1].Note);
     }
+
+    // --- Phase 131: the table-mapping grain, over the same table and the same read method. ---
+
+    [Fact]
+    public void MappingHold_RoundTrips_WithMappingNameSet()
+    {
+        _store.SetMappingHold("crm-sync", "dbo.Orders", held: true, note: "recovering a bad load", performedBy: "ada");
+        _store.SetMappingHold("crm-sync", "dbo.Orders", held: false, note: null, performedBy: "grace");
+
+        var history = _store.GetPauseHistory("crm-sync");
+
+        Assert.Equal(2, history.Count);
+        Assert.All(history, e => Assert.Equal("dbo.Orders", e.MappingName));
+        Assert.Equal(PauseActions.Resumed, history[0].Action);
+        Assert.Equal("grace", history[0].PerformedBy);
+        Assert.Equal(PauseActions.Paused, history[1].Action);
+        Assert.Equal("recovering a bad load", history[1].Note);
+    }
+
+    /// <summary>The replication grain still round-trips with <c>MappingName</c> null once the column
+    /// exists — the widened schema must not disturb phase 64's own write or read.</summary>
+    [Fact]
+    public void ReplicationLevelPause_StillRoundTrips_WithMappingNameNull()
+    {
+        _store.SetPaused("crm-sync", paused: true, note: "index rebuild", performedBy: "ada");
+
+        var history = _store.GetPauseHistory("crm-sync");
+
+        Assert.Single(history);
+        Assert.Null(history[0].MappingName);
+    }
+
+    /// <summary>Both grains share one table and one read method — <see cref="TaskRunStore.GetPauseHistory"/>
+    /// has no mapping filter, so a task with both kinds of event returns them interleaved by <c>Id</c>,
+    /// not grouped by grain. This is the "one table, one screen" shape phase 131 relies on.</summary>
+    [Fact]
+    public void BothGrains_ReturnInterleavedById_NotGroupedByGrain()
+    {
+        _store.SetPaused("crm-sync", paused: true, note: "replication-wide", performedBy: "ada");
+        _store.SetMappingHold("crm-sync", "dbo.Orders", held: true, note: "one table", performedBy: "ada");
+        _store.SetPaused("crm-sync", paused: false, note: null, performedBy: "ada");
+        _store.SetMappingHold("crm-sync", "dbo.Orders", held: false, note: null, performedBy: "ada");
+
+        var history = _store.GetPauseHistory("crm-sync");
+
+        Assert.Equal(4, history.Count);
+        // Most-recent-first by Id: the four calls above in reverse order.
+        Assert.Equal("dbo.Orders", history[0].MappingName);
+        Assert.Null(history[1].MappingName);
+        Assert.Equal("dbo.Orders", history[2].MappingName);
+        Assert.Null(history[3].MappingName);
+        // Strictly descending Ids, confirming actual interleaved ordering rather than a coincidence.
+        Assert.True(history.Zip(history.Skip(1)).All(pair => pair.First.Id > pair.Second.Id));
+    }
 }

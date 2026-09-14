@@ -16,7 +16,9 @@ import { HistoryTab, MappingsTab, MonitoringTab, OverviewTab } from './pages/rep
 import {
   CustomTransformsTab, OverviewNotesTab, PipelineTab, SegmentingStrategiesTab, TargetProvisioningTab,
 } from './pages/replication-detail/OverviewPanel'
-import { MonitoringCurrentStatusTab, MonitoringRunHistoryTab } from './pages/replication-detail/MonitoringPanel'
+import {
+  MonitoringCurrentStatusTab, MonitoringPauseHistoryTab, MonitoringRunHistoryTab,
+} from './pages/replication-detail/MonitoringPanel'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
 import {
   ColumnMappingTab, MappingDiagnosticsTab, MappingNotesTab, MappingPipelineTab,
@@ -131,6 +133,10 @@ export default function App() {
         <Route path="monitoring" element={<MonitoringTab />}>
           <Route index element={<MonitoringCurrentStatusTab />} />
           <Route path="history" element={<MonitoringRunHistoryTab />} />
+          {/* Who paused or resumed this replication or one of its mappings, and when — see phase 131.
+              PauseEvents has recorded this since phase 64; this sub-tab is the first thing that reads
+              it. */}
+          <Route path="pause-history" element={<MonitoringPauseHistoryTab />} />
         </Route>
         <Route path="history" element={<HistoryTab />} />
       </Route>
