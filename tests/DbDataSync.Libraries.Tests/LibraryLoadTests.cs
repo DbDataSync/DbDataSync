@@ -34,8 +34,12 @@ public sealed class LibraryLoadTests : IAsyncLifetime
             .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                      && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
 
+        // A real <PackageReference Include="MySqlConnector" ...>, not a bare substring — MySqlConnector
+        // is this whole test suite's own canary example of "restored, never compiled against" (phase
+        // 109c), so a comment explaining that pattern elsewhere is expected to name it too, the same way
+        // DbDataSync.State.Tests.csproj's own comment on LibraryInstallFixture does.
         foreach (var path in csprojFiles)
-            Assert.DoesNotContain("MySqlConnector", File.ReadAllText(path), StringComparison.Ordinal);
+            Assert.DoesNotContain("Include=\"MySqlConnector\"", File.ReadAllText(path), StringComparison.Ordinal);
     }
 
     [Fact]
