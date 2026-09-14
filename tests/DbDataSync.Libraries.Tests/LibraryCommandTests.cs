@@ -82,8 +82,9 @@ public sealed class LibraryCommandTests : IAsyncLifetime
     }
 
     /// <summary>A real ADO.NET provider that is deliberately not one of <see cref="KnownLibraries"/>'s
-    /// seven bundled entries — <c>config library install</c>'s own version of phase 122's acceptance
-    /// criterion: no <c>--factory-type</c>, no catalog match, and it still installs correctly.</summary>
+    /// bundled entries (eight as of phase 109i's <c>duckdb</c> addition) — <c>config library
+    /// install</c>'s own version of phase 122's acceptance criterion: no <c>--factory-type</c>, no
+    /// catalog match, and it still installs correctly.</summary>
     [Fact]
     public async Task Install_ANonCatalogPackage_WithNoFactoryType_DiscoversItByReflection()
     {

@@ -18,7 +18,16 @@
       anywhere but a developer's laptop. `.Full` carries the runtime-identifier assets for linux-x64,
       win-x64 and osx, and needs no RuntimeIdentifier set here to resolve the right one.
     -->
-    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
+    <!--
+      Phase 109i: ExcludeAssets="runtime", the identical treatment 109h gave Microsoft.Data.SqlClient/
+      Npgsql. The reference assembly still compiles every DuckDBConnection/DuckDBConnectionStringBuilder
+      call site in DuckDbDriver.cs unchanged; the managed DLL and its native libduckdb asset are neither
+      copied here nor into DbDataSync.Api/.Cli's own output. At first touch, the assembly loads through
+      LibraryRegistry's AssemblyLoadContext.Default.Resolving hook instead, once ServeCommand's
+      unconditional install has put it under <repo>/libraries/duckdb/lib/ — see ServeCommand.
+      EnsureDuckDbInstalledAsync. No .cs file in this project changed.
+    -->
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <PropertyGroup>

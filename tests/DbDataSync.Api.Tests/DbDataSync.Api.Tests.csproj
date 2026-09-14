@@ -20,6 +20,11 @@
          assets. A real gap beyond the phase doc's own "two driver test projects" framing, found by
          running the full suite. -->
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <!-- Phase 109i: the identical gap, for DuckDB — DuckDbQueryPreviewTests.cs and
+         PositionCapturingContractTests.cs `new DuckDBConnection(...)` directly in their own scaffolding,
+         previously supplied transitively through DbDataSync.Drivers.DuckDb (or DbDataSync.Verification/
+         .Scripting via DbDataSync.Api) before 109i's ExcludeAssets. -->
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
   </ItemGroup>
 
   <ItemGroup>

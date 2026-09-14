@@ -63,6 +63,18 @@ public static class KnownLibraries
             "firebird-client", "FirebirdSql.Data.FirebirdClient", "FirebirdSql.Data.FirebirdClient.FirebirdClientFactory, FirebirdSql.Data.FirebirdClient",
             "Firebird (FirebirdSql.Data.FirebirdClient)", "The community ADO.NET provider for Firebird.",
             PinnedVersion: "10.3.1"),
+        // Phase 109i: unlike the seven entries above, nothing installs this "when chosen" — DuckDB
+        // backs verification's result paging and every DuckDB-kind segmenting strategy regardless of
+        // which replication engines a deployment ever configures, so ServeCommand installs it
+        // unconditionally on every `serve` start instead. Factory type confirmed by reflecting the
+        // real 1.5.5 assembly rather than guessed: DuckDB.NET.Data.Full's own DbProviderFactory
+        // subclass is DuckDBClientFactory (with a public static Instance field DbProviderFactories'
+        // string-registration path doesn't need but that's how the package itself exposes it).
+        new(
+            "duckdb", "DuckDB.NET.Data.Full", "DuckDB.NET.Data.DuckDBClientFactory, DuckDB.NET.Data",
+            "DuckDB (embedded)", "The embedded analytical engine DbDataSync's own verification and custom " +
+                "segmenting strategies run on.",
+            PinnedVersion: "1.5.5"),
     ];
 
     /// <summary>Null when the package isn't in the starter table — the caller (the CLI) then requires

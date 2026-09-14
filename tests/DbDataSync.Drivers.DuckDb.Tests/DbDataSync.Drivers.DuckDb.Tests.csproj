@@ -12,6 +12,11 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Phase 109i: this project's own tests (DuckDbDriverTests.cs) `new DuckDBConnection(...)`
+         directly, previously supplied transitively through DbDataSync.Drivers.DuckDb's own
+         PackageReference, which now excludes runtime assets. The same fix 109h made for the MsSql/
+         Postgres driver test projects. -->
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
   </ItemGroup>
 
   <ItemGroup>

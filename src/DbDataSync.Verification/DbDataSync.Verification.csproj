@@ -11,8 +11,11 @@
     <PackageReference Include="Parquet.Net" Version="6.1.0" />
     <!-- Reads the parquet a check produced, with SQL. A result can have millions of groups, and
          paging one by hand means re-implementing predicate pushdown and offset over row groups —
-         which is a lot of engineering to end up slower than a database that already does it. -->
-    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
+         which is a lot of engineering to end up slower than a database that already does it.
+         Phase 109i: ExcludeAssets="runtime" — see DbDataSync.Drivers.DuckDb.csproj's comment for the
+         mechanism. No .cs file in this project changed; VerificationResultQuery.cs still `new
+         DuckDBConnection(...)` directly. -->
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <PropertyGroup>

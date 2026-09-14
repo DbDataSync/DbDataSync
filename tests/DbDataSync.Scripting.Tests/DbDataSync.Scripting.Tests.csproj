@@ -12,6 +12,14 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Phase 109i: a real gap the original phase doc's own grep missed, because it looked for the
+         literal type name in this project's own source, which never appears here. But
+         SegmentingStrategyRunnerTests.cs exercises SegmentingStrategyRunner's DuckDb-kind path
+         (OnlyDuckDbNeedsNoConnection_AndItGetsNone and others), which `new DuckDBConnection(...)`s
+         *inside DbDataSync.Scripting* — a runtime dependency this project's tests actually hit, even
+         though no .cs file here mentions DuckDB by name. Confirmed by actually running the suite after
+         DbDataSync.Scripting.csproj's own ExcludeAssets landed, not by trusting the grep alone. -->
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
   </ItemGroup>
 
   <ItemGroup>

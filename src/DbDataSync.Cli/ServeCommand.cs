@@ -2,6 +2,7 @@ using DbDataSync.Api;
 using DbDataSync.Api.Auth;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
+using DbDataSync.Libraries;
 using LibGit2Sharp;
 
 namespace DbDataSync.Cli;
@@ -48,6 +49,8 @@ public static class ServeCommand
             Console.Error.WriteLine($"Could not prepare the config repository at '{root}': {ex.Message}");
             return 1;
         }
+
+        await EnsureDuckDbInstalledAsync(root);
 
         // Passed as configuration rather than mutated into the environment, so the same values reach
         // the host the same way they would from appsettings.json or an operator's own environment.
@@ -96,6 +99,50 @@ public static class ServeCommand
             DbDataSyncConfigFile.WriteStarter(root);
             new GitCommitService(root).CommitChanges(
                 [DbDataSyncConfigFile.PathIn(root)], "Add starter dbdatasync.config.yaml", CurrentUser.SystemAuthor);
+        }
+    }
+
+    /// <summary>
+    /// Phase 109i: DuckDB backs verification's result paging and every DuckDB-kind segmenting strategy
+    /// regardless of which replication engines this deployment ever configures — unlike 109h's two
+    /// providers, there is no "engine chosen" operator decision to hang the install off, so this
+    /// installs it unconditionally, here, on every <c>serve</c> start. This is also the one call site
+    /// both <c>dbdatasync serve</c> directly and <c>setup</c>'s own Start button reach —
+    /// <see cref="Tui.SetupScreen"/>'s Start button already calls <see cref="RunAsync"/> — so one change
+    /// covers both entry points.
+    /// <para>
+    /// Idempotent by a plain directory check, not a full <see cref="LibraryRegistry.LoadAll"/> — cheap
+    /// enough to run unconditionally on every start, and it means an ordinary restart after the first
+    /// one does no network/restore work at all: <see cref="LibraryInstaller.InstallAsync"/> is only ever
+    /// reached the first time.
+    /// </para>
+    /// <para>
+    /// Best-effort: a failed install is logged and this command still starts, the same posture
+    /// <c>CertificateExpiryService</c> already takes for "this shouldn't be allowed to take the whole
+    /// process down" — verification and DuckDB-backed segmenting degrade if DuckDB never installs, but
+    /// replication itself never depended on it.
+    /// </para>
+    /// </summary>
+    internal static async Task EnsureDuckDbInstalledAsync(string root)
+    {
+        const string libraryId = "duckdb";
+        var libDir = LibraryPaths.LibDir(LibraryPaths.LibraryDir(root, libraryId));
+        if (Directory.Exists(libDir))
+            return;
+
+        try
+        {
+            var catalogEntry = KnownLibraries.TryGetById(libraryId)!;
+            await LibraryInstaller.InstallAsync(
+                root, libraryId, [new PackageRef(catalogEntry.PackageId, catalogEntry.PinnedVersion)],
+                catalogEntry.FactoryType);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Could not install '{libraryId}' automatically: {ex.Message}. Verification and " +
+                "DuckDB-backed segmenting strategies will not work until `dbdatasync config library " +
+                "sync` completes it; replication itself is unaffected.");
         }
     }
 
