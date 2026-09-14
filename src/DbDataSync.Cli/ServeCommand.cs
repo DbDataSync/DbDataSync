@@ -50,7 +50,14 @@ public static class ServeCommand
             return 1;
         }
 
-        await EnsureDuckDbInstalledAsync(root);
+        // Fired off rather than awaited: a Windows service must report SERVICE_RUNNING to SCM
+        // within its start-pending timeout, and this method's own `dotnet publish` restore can
+        // easily run longer than that on a fresh install — the documented service-install flow
+        // (docs/install.md) never runs an interactive `serve`/`setup` first, so this is routinely
+        // the very first restore LocalSystem's own (cold) NuGet cache has ever done. The method
+        // already treats its own failure as non-fatal ("replication itself is unaffected" below),
+        // so nothing downstream needs this to have finished before the host starts listening.
+        _ = EnsureDuckDbInstalledAsync(root);
 
         // Passed as configuration rather than mutated into the environment, so the same values reach
         // the host the same way they would from appsettings.json or an operator's own environment.
