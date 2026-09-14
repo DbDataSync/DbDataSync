@@ -265,6 +265,11 @@ Two things worth being explicit about:
   empty store — it does not move anything. Choose once, at stand-up.
 - **An unrecognized `StateEngine` value falls back to `Sqlite`** rather than refusing to start — a typo
   shouldn't take down an API that has a perfectly good store already.
+- **`MsSql`/`Postgres` need their library installed.** Neither ships as a package this build carries by
+  default — each resolves its connection through the same restorable-library mechanism
+  `config driver install` uses. Run `dbdatasync config library install microsoft-data-sqlclient` (for
+  `MsSql`) or `dbdatasync config library install npgsql` (for `Postgres`) once; a `StateEngine` set to
+  either without its library installed fails at startup naming that exact command.
 
 A run failing *either* retention cap is pruned along with its log lines; a run that hasn't finished is
 never pruned regardless of age. Verification results are **not** covered by this pruning — a

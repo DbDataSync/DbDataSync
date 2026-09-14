@@ -1,5 +1,6 @@
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
+using DbDataSync.Libraries;
 using Microsoft.Data.SqlClient;
 
 namespace DbDataSync.Cli.Tests;
@@ -35,6 +36,15 @@ public sealed class InviteCommandTests : IDisposable
     public InviteCommandTests()
     {
         Execute(ServerConnectionString, $"CREATE DATABASE [{_databaseName}];");
+
+        // Phase 109g: InviteCommand resolves its MsSql connection through LibraryRegistry rather than
+        // a direct Microsoft.Data.SqlClient reference — the library has to actually be restored under
+        // _root for the command to reach the real server this test stood up, the same as an admin who
+        // ran `dbdatasync config library install microsoft-data-sqlclient` once would have.
+        var entry = KnownLibraries.TryGetById("microsoft-data-sqlclient")!;
+        LibraryInstaller.InstallAsync(
+                _root, entry.Id, [new PackageRef(entry.PackageId, entry.PinnedVersion)], entry.FactoryType)
+            .GetAwaiter().GetResult();
     }
 
     public void Dispose()

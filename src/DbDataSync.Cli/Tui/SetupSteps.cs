@@ -45,13 +45,18 @@ internal static class SetupSteps
         if (password is not null)
             new SecretStore("DbDataSync", true).Store(SecretRefs.ForAppSetting("stateConnectionString"), password);
 
-        // Installing the library itself is skipped here — before phase 109g lands,
-        // Microsoft.Data.SqlClient and Npgsql are still hard references, so there is nothing this step
-        // would need to restore. `dbdatasync config check` still reports whether the connection opens.
+        // Installing the library itself is a manual step this phase (109g) leaves as one, deliberately
+        // — see phase 109g's own retrospective for why (this step would have to become async and grow
+        // a progress affordance, an InstallMySqlDriverAsync-shaped decision bigger than this phase's
+        // scope). `dbdatasync config library install microsoft-data-sqlclient`/`npgsql` once is the
+        // documented fix; `dbdatasync config check` (and the connection attempt below) names it if it
+        // is missing.
         try
         {
+            var libraryRegistry = new LibraryRegistry(root).LoadAll();
             StateDatabase.FromOptions(
-                engine, Path.Combine(root, "state.db"), connectionString, new SecretStore("DbDataSync", true));
+                engine, Path.Combine(root, "state.db"), connectionString, new SecretStore("DbDataSync", true),
+                libraryRegistry);
             return new StepResult(false, "Connected — schema is current.");
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException

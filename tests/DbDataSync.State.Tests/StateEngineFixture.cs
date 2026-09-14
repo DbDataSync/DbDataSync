@@ -26,10 +26,18 @@ public sealed class StateEngineFixture : IDisposable
 
     public StateDatabase Database { get; }
 
-    public StateEngineFixture(string engine)
+    /// <param name="libraries">
+    /// Phase 109g: MsSql/PostgresStateDialect resolve their connection through this rather than a
+    /// direct package reference, so this fixture — which opens a real MsSql/Postgres connection twice
+    /// over (once here for the CREATE/DROP DATABASE scaffolding, once inside StateDatabase itself) —
+    /// has to register it against StateDialectRegistry.Default before either happens. See
+    /// LibraryInstallFixture, which is what every caller here actually passes.
+    /// </param>
+    public StateEngineFixture(string engine, DbDataSync.Libraries.LibraryRegistry libraries)
     {
         _engine = engine;
         _databaseName = $"dbdatasync_state_{Guid.NewGuid():N}";
+        StateDialectRegistry.Default.RegisterLibraryBackedEngines(libraries);
 
         switch (engine)
         {

@@ -14,10 +14,13 @@ namespace DbDataSync.State.Tests;
 /// </para>
 /// </summary>
 [Trait("Category", "Integration")]
-public sealed class CrossEngineStateTests : IDisposable
+public sealed class CrossEngineStateTests : IClassFixture<LibraryInstallFixture>, IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("dbdatasync-xengine-").FullName;
     private readonly List<StateEngineFixture> _fixtures = [];
+    private readonly DbDataSync.Libraries.LibraryRegistry _libraries;
+
+    public CrossEngineStateTests(LibraryInstallFixture libraries) => _libraries = libraries.Registry;
 
     public void Dispose()
     {
@@ -31,7 +34,7 @@ public sealed class CrossEngineStateTests : IDisposable
         if (engine == StateEngineIds.Sqlite)
             return new StateDatabase(Path.Combine(_tempDir, $"{Guid.NewGuid():N}.db"));
 
-        var fixture = new StateEngineFixture(engine);
+        var fixture = new StateEngineFixture(engine, _libraries);
         _fixtures.Add(fixture);
         return fixture.Database;
     }

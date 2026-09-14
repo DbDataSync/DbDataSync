@@ -12,6 +12,13 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Phase 109g: DbDataSync.State itself no longer references these two (it resolves them through
+         LibraryRegistry at runtime instead — see MsSqlStateDialect/PostgresStateDialect), but
+         StateEngineFixture still needs SqlConnectionStringBuilder/NpgsqlConnectionStringBuilder and
+         NpgsqlConnection.ClearAllPools() at compile time for its own scratch-database scaffolding,
+         which is a test concern independent of how the product resolves a connection at runtime. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Npgsql" Version="9.0.3" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,6 +27,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DbDataSync.State\DbDataSync.State.csproj" />
+    <!-- LibraryRegistry/LibraryInstaller/KnownLibraries — LibraryInstallFixture uses these to restore
+         microsoft-data-sqlclient/npgsql for real, once per test class, the same way
+         DbDataSync.Api.Tests' DescriptorDriverApiFactory does for MySqlConnector. -->
+    <ProjectReference Include="..\..\src\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
   </ItemGroup>
 
 </Project>

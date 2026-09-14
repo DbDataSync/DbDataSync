@@ -41,8 +41,10 @@ internal sealed class ReadinessContext
         try
         {
             var secrets = new SecretStore("DbDataSync", true);
+            var libraryRegistry = new LibraryRegistry(Root).LoadAll();
             var database = StateDatabase.FromOptions(
-                ApiOptions.StateEngine, ApiOptions.StateDbPath, ApiOptions.StateConnectionString, secrets);
+                ApiOptions.StateEngine, ApiOptions.StateDbPath, ApiOptions.StateConnectionString, secrets,
+                libraryRegistry);
             return (database, null);
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException

@@ -2,15 +2,20 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
+    <!-- Phase 109g: MsSql/PostgresStateDialect resolve their DbConnection through LibraryRegistry
+         instead of a direct Microsoft.Data.SqlClient/Npgsql PackageReference — see those two classes'
+         own doc comments. -->
+    <ProjectReference Include="..\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The three engines the state store can run on (phase 63). SQLite is the default and the only
-         one an unconfigured deployment ever opens; the other two are already in this solution via the
-         replication drivers, at the same versions. -->
+    <!-- SQLite is the default and the only engine an unconfigured deployment ever opens, so it stays a
+         hard reference (phase 63); it is also offline and serverless, which is why phase 109g left it
+         alone. Microsoft.Data.SqlClient and Npgsql are no longer referenced here at all — an operator
+         on StateEngine MsSql/Postgres runs `dbdatasync config library install
+         microsoft-data-sqlclient`/`npgsql` once instead (see StateDatabase.FromOptions and this
+         project's retrospective phase doc). -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
-    <PackageReference Include="Npgsql" Version="9.0.3" />
   </ItemGroup>
 
   <PropertyGroup>

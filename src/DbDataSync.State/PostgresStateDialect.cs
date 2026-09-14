@@ -1,6 +1,6 @@
 using System.Data.Common;
 using DbDataSync.Core.Sql;
-using Npgsql;
+using DbDataSync.Libraries;
 
 namespace DbDataSync.State;
 
@@ -11,18 +11,33 @@ namespace DbDataSync.State;
 /// that SQLite adopted, and <c>LIMIT</c> is shared. What differs is identity DDL and the schema
 /// version having to live in a table.
 /// </para>
+/// <para>
+/// Phase 109g moved this off a hard <c>Npgsql</c> package reference and onto the library layer — see
+/// <see cref="MsSqlStateDialect"/>'s doc comment, which explains the same change there in full.
+/// </para>
 /// </summary>
 public sealed class PostgresStateDialect : StateDialect
 {
-    public static PostgresStateDialect Instance { get; } = new();
+    /// <summary>The <see cref="KnownLibraries"/> catalog id this dialect resolves its connection
+    /// through.</summary>
+    public const string LibraryId = "npgsql";
 
-    private PostgresStateDialect() { }
+    private readonly LibraryRegistry _libraries;
+
+    public PostgresStateDialect(LibraryRegistry libraries) => _libraries = libraries;
 
     public override string Engine => StateEngineIds.Postgres;
 
     public override SqlDialect Sql => PostgresDialect.Instance;
 
-    public override DbConnection CreateConnection(string connectionString) => new NpgsqlConnection(connectionString);
+    public override DbConnection CreateConnection(string connectionString)
+    {
+        var connection = _libraries.GetFactory(LibraryId).CreateConnection()
+            ?? throw new InvalidOperationException(
+                $"The '{LibraryId}' library's factory did not produce a connection.");
+        connection.ConnectionString = connectionString;
+        return connection;
+    }
 
     public override string ParameterName(string name) => $"@{name}";
 

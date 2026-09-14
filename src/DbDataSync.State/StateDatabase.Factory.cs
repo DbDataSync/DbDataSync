@@ -1,5 +1,6 @@
 using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Secrets;
+using DbDataSync.Libraries;
 
 namespace DbDataSync.State;
 
@@ -24,9 +25,19 @@ public sealed partial class StateDatabase
     /// (via the <c>DbDataSync.Core</c> project reference), so nothing new is added to
     /// <c>DbDataSync.State.csproj</c> for this.
     /// </para>
+    /// <para>
+    /// <paramref name="libraryRegistry"/> is phase 109g's addition, required (not optional) rather than
+    /// defaulted, the same "no automatic magic" preference <c>DriverConnectionFactory</c> already
+    /// applies to <c>DriverRegistry</c>: every caller of this method already has, or can trivially build,
+    /// a <see cref="LibraryRegistry"/> for its own repo root (every one of them already constructs or
+    /// resolves one for the driver layer), so there is no case where silently defaulting to "none" would
+    /// be doing a caller a favour. Ignored for SQLite — see <see cref="StateDialectRegistry"/>'s own doc
+    /// comment for why only MsSql and Postgres need one at all.
+    /// </para>
     /// </summary>
     public static StateDatabase FromOptions(
-        string engine, string stateDbPath, string? stateConnectionString, SecretStore secrets)
+        string engine, string stateDbPath, string? stateConnectionString, SecretStore secrets,
+        LibraryRegistry libraryRegistry)
     {
         // SQLite keeps its own constructor and its own setting, so a deployment that has never heard
         // of phase 63 (or phase 79) reaches exactly the code it always did.
@@ -37,6 +48,11 @@ public sealed partial class StateDatabase
             throw new InvalidOperationException(
                 $"DbDataSync:StateEngine is '{engine}', which needs DbDataSync:StateConnectionString. " +
                 "Only SQLite is configured by path.");
+
+        // MsSql and Postgres need to be (re)registered against *this* LibraryRegistry before
+        // StateDialect.For(engine) — inside the StateDatabase constructor below — can resolve either
+        // one. See StateDialectRegistry.RegisterLibraryBackedEngines's own doc comment.
+        StateDialectRegistry.Default.RegisterLibraryBackedEngines(libraryRegistry);
 
         // The password never lives in the connection string that gets configured — it is resolved
         // through the secret store under the one fixed ref phase 79 documents, and spliced on here at

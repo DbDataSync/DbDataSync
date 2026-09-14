@@ -37,6 +37,21 @@ public sealed class FixtureStateDialect : StateDialect
 
 public sealed class StateDialectRegistryTests
 {
+    public StateDialectRegistryTests()
+    {
+        // MsSql/Postgres are no longer auto-registered by BuildDefault (phase 109g) — this test is
+        // specifically about StateDialect.For's static resolution, so it has to make the same call
+        // StateDatabase.FromOptions makes before relying on that resolution. No real library needs to
+        // be installed for this: nothing here ever asks the registry for a DbProviderFactory, only for
+        // which StateDialect *type* is registered under an id, so an empty LibraryRegistry (no
+        // restored libraries/ directory) is enough — this deliberately does not use
+        // LibraryInstallFixture, to keep this a fast, network-free unit test rather than an
+        // Integration-tagged one.
+        var libraries = new DbDataSync.Libraries.LibraryRegistry(
+            Directory.CreateTempSubdirectory("dbdatasync-dialect-registry-tests-").FullName).LoadAll();
+        StateDialectRegistry.Default.RegisterLibraryBackedEngines(libraries);
+    }
+
     [Theory]
     [InlineData(StateEngineIds.Sqlite, typeof(SqliteStateDialect))]
     [InlineData(StateEngineIds.MsSql, typeof(MsSqlStateDialect))]

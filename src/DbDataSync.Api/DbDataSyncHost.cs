@@ -117,9 +117,13 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton(sp =>
         {
             var options = sp.GetRequiredService<ApiOptions>();
+            // The same LibraryRegistry singleton the driver layer resolves through (registered above,
+            // before this) — phase 109g put MsSql/PostgresStateDialect on it too, so a StateEngine of
+            // MsSql or Postgres with that library not installed fails right here, at startup, naming
+            // the fix, rather than starting an API that can never open its own state store.
             return StateDatabase.FromOptions(
                 options.StateEngine, options.StateDbPath, options.StateConnectionString,
-                sp.GetRequiredService<SecretStore>());
+                sp.GetRequiredService<SecretStore>(), sp.GetRequiredService<LibraryRegistry>());
         });
         builder.Services.AddSingleton(sp => new TaskRunStore(sp.GetRequiredService<StateDatabase>()));
         builder.Services.AddSingleton(sp => new RunMetricsStore(sp.GetRequiredService<StateDatabase>()));
