@@ -35,6 +35,15 @@ So the order lives here, and is the one to work through:
 | 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 5 | **038** — Postgres COPY staging, and the columnar decision | |
 
+Updated 2026-09-14 (later than the note below): **137 is done and removed** — it was never added to the
+table above; it was written as a `todo/` doc mid-session (see the 2026-09-14 note below) and picked up
+directly, independently of the 133/134/034/035/038 queue. `DbDataSync.Cli.csproj` gained a `Publish`-time
+`CopyPrebuiltSpa` copy target, and `ci.yml`/`release.yml` now build the SPA before packing — every
+released nupkg to date had shipped with an empty `wwwroot` because `dotnet pack`/`publish` of the CLI
+project never triggered the API project's own SPA build target. `ci.yml`'s `package` job also gained two
+real assertions (packed nupkg content, running containers' `/` response) so this class of bug fails CI
+next time rather than shipping unnoticed again.
+
 Updated 2026-09-14: **133 and 134 go to the top**, and the reason they are only being queued now is
 worth recording. `planning/done/bulk-load-pipeline-and-the-initial-load-rule.md` was resolved on
 2026-09-04 but named its phases A, B and C rather than numbering them — deliberately, to avoid claiming

@@ -1,6 +1,6 @@
 # Phase 137 — the packed NuGet tool actually includes the web console
 
-**Status**: Not started.
+**Status**: Complete.
 **Plan reference**: `architecture/planning/done/packaged-nupkg-missing-web-ui-assets.md`.
 
 ## Why
@@ -102,4 +102,36 @@ real installs, real containers, not fakes):
 
 ## Retrospective
 
-Not yet implemented.
+Built exactly as designed, with real verification at every step — no design changes needed.
+
+- `CopyPrebuiltSpa` added to `src/DbDataSync.Cli/DbDataSync.Cli.csproj`, verbatim from design item 1.
+- `ci.yml`'s `package` job and `release.yml` both gained the `actions/setup-node@v4` + `npm ci`/`npm run
+  build` step ahead of their existing `dotnet pack`. `package` already had `setup-node` for its own
+  Node steps, so this needed no new action, only the build commands themselves.
+- Two real CI assertions added to `ci.yml`'s `package` job: unzip the packed `.nupkg` and fail loud if
+  `tools/<tfm>/any/wwwroot/` is missing or empty (right after the pack step), and — for both the default
+  and runtime-only images, right after each one's existing health-check loop — `curl`/`grep` the running
+  container's `/` for the `MapFallback` fallback string, failing if it's present. `release.yml` only
+  got the SPA-build step, not the two assertions — deliberately scoped to `ci.yml` per the design (a
+  release is already smoke-tested by its own install/version check, and CI is where a broken pack would
+  be caught before a release run ever happens).
+- **Manual verification, real builds, both directions** (checkpoints 2 and 5): `npm ci && npm run build`
+  in `src/DbDataSync.Web`, then `dotnet pack src/DbDataSync.Cli/DbDataSync.Cli.csproj -c Release`,
+  unzipped — `tools/net10.0/any/wwwroot/` had `index.html` plus every JS/CSS asset, 10 files total. Then,
+  with a clean `bin`/`obj` and `dist/` moved aside (no SPA build at all, the "broken" case), the same
+  pack produced **zero** `wwwroot` files — proving `CopyPrebuiltSpa`'s `Exists(...)` guard genuinely
+  gates the copy rather than always finding something. The new CI nupkg-content assertion's own shell
+  logic was run by hand against both nupkgs: it failed loud (the exact intended message) against the
+  broken one and passed against the real one — the "prove the test can fail" discipline checkpoint 5
+  asks for, done for the nupkg-content check specifically.
+- The container `/`-response assertion's underlying behavior was **not** re-verified with a real `docker
+  build` here (the SDK-based multi-stage build is a multi-minute, multi-GB operation on a shared
+  sandbox already running several unrelated containers) — verified by inspection instead: `.dockerignore`
+  excludes `**/dist/`, so the `build` stage's `COPY src/ ./src/` never sees a pre-built SPA and
+  `CopyPrebuiltSpa`'s `Exists(...)` guard is always false inside the container build; the Dockerfile
+  already passes `-p:SkipWebBuild=true` and does its own `COPY --from=web .../dist/ /app/wwwroot/` after
+  publish, a path phases 120/121 already proved works and which this phase does not touch. The new
+  `curl`/`grep` assertion itself is a thin, low-risk addition on top of that already-working path; its
+  first real exercise will be the next actual CI run. Flagged here rather than silently skipped.
+- No real bugs found during implementation — the root cause and fix were already fully nailed down by
+  the planning doc and this phase's own `Why` section before any code was written.

@@ -231,8 +231,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # Phase 137: dotnet pack of DbDataSync.Cli.csproj never triggers DbDataSync.Api.csproj's own
+      # BuildSpa target (that only fires when Api.csproj is published directly) — build the SPA here,
+      # the same way the Dockerfile's own `web` stage does, and Cli.csproj's new CopyPrebuiltSpa target
+      # picks up the already-built dist/ at pack time.
+      - name: Build the SPA
+        working-directory: src/DbDataSync.Web
+        run: |
+          npm ci
+          npm run build
       - name: Pack the global tool
         run: dotnet pack src/DbDataSync.Cli/DbDataSync.Cli.csproj -c Release -o artifacts
+      # Phase 137: the actual reason the missing-wwwroot bug shipped unnoticed — every check before this
+      # only proved the tool runs and answers --help, none of which would ever notice an empty wwwroot.
+      # A .nupkg is a zip; unpack it and fail loud if tools/<tfm>/any/wwwroot/ is missing or empty rather
+      # than silently passing on a `dist/` that built nothing.
+      - name: Assert the packed nupkg actually contains the web console
+        run: |
+          nupkg=$(ls artifacts/*.nupkg | head -n1)
+          rm -rf /tmp/nupkg-contents
+          mkdir -p /tmp/nupkg-contents
+          unzip -q "$nupkg" -d /tmp/nupkg-contents
+          wwwroot=$(find /tmp/nupkg-contents/tools -type d -name wwwroot | head -n1)
+          if [ -z "$wwwroot" ] || [ -z "$(find "$wwwroot" -type f -print -quit)" ]; then
+            echo "packed nupkg has no non-empty tools/<tfm>/any/wwwroot/ — the web console did not get packed"
+            exit 1
+          fi
       - name: Install it into a clean tool root and run it
         run: |
           dotnet tool install --tool-path /tmp/dbdatasync-tool --add-source artifacts DbDataSync
@@ -252,6 +276,16 @@ jobs:
           echo "the container never became healthy"
           docker logs dbdatasync-ci
           exit 1
+      # Phase 137: the Dockerfile's own path was never actually proof this worked either — it sidesteps
+      # BuildSpa entirely (its `web` stage COPYs dist/ straight into wwwroot/), so this asserts the
+      # running container serves real SPA content, not MapFallback's "No web assets are published"
+      # fallback text.
+      - name: Assert the running container serves the web console, not the fallback
+        run: |
+          if curl -sf http://127.0.0.1:18080/ | grep -q "No web assets are published"; then
+            echo "the default image's / answered with the no-web-assets fallback, not the SPA"
+            exit 1
+          fi
       # Phase 121: the slim alternative to the default (SDK-based) image above. Built with the same
       # single `docker build` this repo's own Dockerfile already defines — --target just picks a
       # different one of its stages, so there is no second Dockerfile to keep in sync.
@@ -275,6 +309,12 @@ jobs:
           echo "the runtime-only container never became healthy"
           docker logs dbdatasync-ci-runtime
           exit 1
+      - name: Assert the runtime-only container serves the web console, not the fallback
+        run: |
+          if curl -sf http://127.0.0.1:18082/ | grep -q "No web assets are published"; then
+            echo "the runtime-only image's / answered with the no-web-assets fallback, not the SPA"
+            exit 1
+          fi
       - name: Upload the tool package
         # ~150MB every time: it's a framework-dependent, RID-agnostic package (see the csproj comment)
         # that bundles DuckDB/LibGit2Sharp/SQLite/SqlClient's native binaries for every platform in one

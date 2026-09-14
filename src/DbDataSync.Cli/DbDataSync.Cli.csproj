@@ -86,4 +86,26 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <!--
+    Phase 137: every released nupkg to date has shipped with an empty wwwroot. `dotnet pack`/`dotnet
+    publish` of THIS project never runs DbDataSync.Api.csproj's own BuildSpa target — that target only
+    fires when Api.csproj is published directly, which nothing in this repo's real release path does
+    (confirmed against the SDK's own Microsoft.NET.PackTool.targets, and by real dotnet pack/publish
+    runs). This mirrors the Dockerfile's own already-proven pattern instead: build the SPA once,
+    upstream (CI's own npm ci/npm run build step, ahead of `dotnet pack`), then copy the already-built
+    dist/ into place here — a copy step, not a build step, so an ordinary inner-loop `dotnet
+    build`/`dotnet test` with no dist/ present (and no npm available) is unaffected.
+  -->
+  <PropertyGroup>
+    <WebProjectDir>$(MSBuildProjectDirectory)/../DbDataSync.Web</WebProjectDir>
+  </PropertyGroup>
+
+  <Target Name="CopyPrebuiltSpa" BeforeTargets="Publish" Condition="Exists('$(WebProjectDir)/dist')">
+    <ItemGroup>
+      <_SpaDist Include="$(WebProjectDir)/dist/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SpaDist)"
+          DestinationFiles="@(_SpaDist->'$(PublishDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
 </Project>
