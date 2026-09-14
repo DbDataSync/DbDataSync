@@ -584,9 +584,18 @@ public sealed class RunExecutor(
         // has one — Kind *and* Options together, since reading one stage's Kind from the mapping
         // and its options from the replication is how an option set for a Kind nobody selected
         // ends up being passed to the one they did (phase 68).
-        var effectiveReader = PipelineResolution.Reader(task, mapping);
-        var effectiveCache = PipelineResolution.Cache(task, mapping);
-        var effectiveWriter = PipelineResolution.Writer(task, mapping);
+        //
+        // A BulkLoad run resolves against BulkLoadConfig (phase 133), not ChangeProcessingConfig —
+        // its whole point is a reader/cache/writer independent of the mapping's incremental pipeline
+        // (BatchReload by default, not whatever reads "changes since a watermark"). Primary,
+        // Verification and ReconcileDeletes are unaffected: Verification/ReconcileDeletes always
+        // carry an explicit item.Kinds below anyway, and Primary was never in scope for this change.
+        var effectiveReader = item.RunKind == RunKind.BulkLoad
+            ? PipelineResolution.BulkLoadReader(task, mapping) : PipelineResolution.Reader(task, mapping);
+        var effectiveCache = item.RunKind == RunKind.BulkLoad
+            ? PipelineResolution.BulkLoadCache(task, mapping) : PipelineResolution.Cache(task, mapping);
+        var effectiveWriter = item.RunKind == RunKind.BulkLoad
+            ? PipelineResolution.BulkLoadWriter(task, mapping) : PipelineResolution.Writer(task, mapping);
 
         // Then the unit of work's own, which is the most specific. It's how a BulkLoad of an
         // incrementally-synced replication reloads a segment at all: the configured reader reports

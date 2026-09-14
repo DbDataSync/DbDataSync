@@ -533,6 +533,53 @@ public sealed class RunExecutorTests : IDisposable
     }
 
     /// <summary>
+    /// A regression test for a bug phase 133 shipped: a BulkLoad item with no explicit
+    /// <see cref="WorkItemKinds"/> override must resolve its reader/cache/writer against
+    /// <see cref="ReplicationTaskConfig.BulkLoad"/>, not <see cref="ReplicationTaskConfig.ChangeProcessing"/>
+    /// — the whole point of giving Bulk Load its own pipeline. Proven here by configuring
+    /// <c>BulkLoad.Reader</c> with a Kind the registered driver does not offer at all: if resolution ever
+    /// regresses back to <c>ChangeProcessing.Reader</c> (a Kind the driver *does* offer,
+    /// <c>MsSqlChangeTracking</c>), this fails to fail — it would instead proceed to (and fail at) opening
+    /// a connection, not at the reader-kind check itself.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteWorkerAsync_ABulkLoadWithNoOverride_ResolvesAgainstBulkLoadConfig_NotChangeProcessing()
+    {
+        _configRepository.SaveReplicationTask(new ReplicationTaskConfig
+        {
+            Name = "crm-sync",
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 1, IdleTimeoutSeconds = 2 },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig { Kind = "MsSqlChangeTracking" },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+            },
+            BulkLoad = new BulkLoadConfig { Reader = new ReaderConfig { Kind = "NoSuchReaderKind" } },
+        }, Author);
+        _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+        }, Author);
+        _configRepository.SaveConnection(new ConnectionInput
+        {
+            Name = "src", DriverType = DriverIds.MsSql, Host = "127.0.0.1", Port = 1, Database = "App",
+            AuthMode = AuthMode.IntegratedAuth,
+        }, Author);
+
+        var bulkLoadRunId = _workQueueStore.Enqueue(
+            "crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "full", segmentJson: "{\"mode\":\"full\"}");
+
+        await _executor.ExecuteWorkerAsync("crm-sync", WorkerLanes.Uniform(1), CancellationToken.None);
+
+        var run = _taskRunStore.GetRun(bulkLoadRunId)!;
+        Assert.Equal(RunStatus.Failed, run.Status);
+        Assert.Contains("does not support reader kind 'NoSuchReaderKind'", run.ErrorSummary);
+    }
+
+    /// <summary>
     /// A cron replication keeps the old fast exit. Its next occurrence can be hours away, and holding
     /// a process open for that is not restraint, it is a leak.
     /// </summary>
