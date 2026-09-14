@@ -30,9 +30,11 @@ So the order lives here, and is the one to work through:
 | | phase | why here |
 | --- | --- | --- |
 | 1 | **134** — an initial load becomes a bulk load | the behaviour change, and the first caller `IPositionCapturing` has ever had |
-| 2 | **034** — PostgreSQL logical replication | |
-| 3 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 2 | **138** — a mapping-level Delete Reconciliation override, in the SPA | independent of 134 — pure SPA, over a backend that has supported it since phase 125 |
+| 3 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
+| 4 | **034** — PostgreSQL logical replication | |
+| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 6 | **038** — Postgres COPY staging, and the columnar decision | |
 
 Updated 2026-09-14 (latest of all): **133 is done and removed** — the full `Backfill` → `BulkLoad`
 rename, plus the `BulkLoadConfig` pipeline it was for: a reader (defaulting to `BatchReload`), a cache
@@ -43,7 +45,27 @@ unconditionally, not just an override, since even the `BatchReload` default can 
 given driver. As decided 2026-09-14 (see below), no migration and no backwards compatibility: existing
 state databases and any config carrying the old `backfillDegreeOfParallelism` key must be recreated.
 134 is next — expect `BulkLoadBatchStore.GetRecentBulkLoads`, not `GetRecentBackfills` as its own doc
-still says; the method was renamed here for full-rename consistency.
+still said; the method was renamed here for full-rename consistency. That also means the audit note
+below, written to plan phase 139 before 133 actually landed, needs one correction — see its own note.
+
+Updated 2026-09-14 (later than the note above, same session): **138 and 139 join `todo/`**, found by an
+explicit audit — walking recent phase retrospectives for backend work that shipped with no matching SPA
+surface, requested by the user while 133/134 were mid-implementation in another session (133 has since
+landed, per the note above — 139's own doc was corrected afterward to the endpoint/method names 133
+actually shipped, `GET .../bulk-loads` and `GetRecentBulkLoads`, rather than the `.../bulkloads` guess it
+was first written with). Two real, still-open gaps found (checked against everything after each: nothing
+later closed either one). **138**: phase 125's own retrospective named it directly —
+`TableMappingConfig.ReconcileOverride` has been fully supported by config, validation, resolution and
+the scheduler since phase 125, and nothing has ever read or written it from the SPA. **139**: phase 107
+built `BulkLoadBatches` (then `BackfillBatches`) and its endpoint "to support" a future history screen
+and deliberately shipped none; phase 133's own doc reaffirms the gap is still there today. Sequenced
+after 134 specifically because it turns every initial load into a bulk load — the volume this screen
+needs to handle materially changes the moment 134 ships, which is also why 139's own design leans on
+real keyset pagination rather than the flat `limit` phase 107 shipped. A third candidate,
+`architecture/planning/todo/run-lag.md` (source/target watermark-age lag), was found and explicitly
+**not** turned into a phase doc — it is still genuinely blocked on phase 034 (Postgres logical
+replication) providing a second real example before its own "reader declares a lag capability" design
+can be written, exactly as that doc's own 2026-08-28 update already says.
 
 Updated 2026-09-14 (later than the note below): **137 is done and removed** — it was never added to the
 table above; it was written as a `todo/` doc mid-session (see the 2026-09-14 note below) and picked up
