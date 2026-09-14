@@ -165,14 +165,18 @@ triggers genuinely differ, not duplicated by accident.
 
 ## Open questions / risks
 
-1. **Version fidelity at runtime, not compile time.** `LibraryRegistry`'s resolver serves whatever is
-   actually installed at `<repo>/libraries/<id>/lib/`, which can differ from the exact version
-   `MsSqlDriver`/`PostgresDriver` were compiled against. .NET's default load context is permissive
-   about this by simple name — it will generally accept a different version rather than refuse it —
-   but a genuinely breaking change in the installed version surfaces as a runtime
-   `MissingMethodException`, not a build error. The same risk `nuget-loaded-drivers.md`'s own "Version
-   conflicts with the host" section already names for compiled plugins, now real for these two drivers
-   as well even though they aren't loaded as plugins in the separate-assembly sense.
+1. **Version fidelity at runtime, not compile time — resolved by a separate phase, not by this one.**
+   `LibraryRegistry`'s resolver serves whatever is actually installed at `<repo>/libraries/<id>/lib/`,
+   which can differ from the exact version `MsSqlDriver`/`PostgresDriver` were compiled against. .NET's
+   default load context is permissive about this by simple name — it will generally accept a different
+   version rather than refuse it — but a genuinely breaking change in the installed version surfaces as
+   a runtime `MissingMethodException`, not a build error. The same risk `nuget-loaded-drivers.md`'s own
+   "Version conflicts with the host" section already names for compiled plugins, now real for these two
+   drivers as well even though they aren't loaded as plugins in the separate-assembly sense.
+   `architecture/implementation/todo/phase-109j-library-compatibility-checking.md` answers this: a
+   no-execution static check (`MetadataLoadContext` against the driver's own extracted member surface)
+   at `library install`/`sync` and `config check` time, plus an isolated runtime smoke-test an operator
+   can trigger from the Libraries screen. Not gated on 109h landing first — either order is fine.
 2. **The connection-creation seeding hook (#3's second seam)** — `ApplyStateDatabase`'s own hook is
    fully specified above; the connection-path one names the candidate call sites but still needs
    confirming against the real current save flow at implementation time.
