@@ -92,19 +92,45 @@ the identical package and version the driver project pins — harmless duplicati
 keeps a real local copy for exactly the same reason the test host doesn't otherwise bootstrap
 `LibraryRegistry`'s resolver.
 
-### 3. Auto-seed `microsoft-data-sqlclient` and `npgsql` so a fresh deployment isn't broken
+### 3. Auto-seed `microsoft-data-sqlclient` and `npgsql` when they're actually chosen
 
 Both are already `KnownLibraries` catalog entries, and the container image already restores every
 `KnownLibraries` entry into a build-time cache (`internal build-catalog-cache`, phase 121) that
-`library install`/`sync` then copies from with no SDK and no network. What's missing for *this* phase:
-today that install still needs an explicit `dbdatasync config library install microsoft-data-sqlclient`/
-`npgsql` (or `sync`) command run at least once. MSSQL is DbDataSync's original v1 engine and Postgres
-has been a first-class one since phase 20 — neither can start requiring a manual library-install step
-on a fresh `setup`/`serve` just because this phase stopped embedding their assemblies. This phase must
-make that installation automatic on a fresh deployment, using the same no-SDK/no-network cache path the
-container image already relies on. **The exact hook — folded into `serve`'s existing first-run
-bootstrap, into `setup`, or a new explicit step — needs deciding against the real current code at
-implementation time**, not guessed here.
+`library install`/`sync` then copies from with no SDK and no network. What's missing: today that
+install still needs an explicit `dbdatasync config library install microsoft-data-sqlclient`/`npgsql`
+(or `sync`) command run at least once. MSSQL is DbDataSync's original v1 engine and Postgres has been
+a first-class one since phase 20 — neither can start requiring a manual library-install step just
+because this phase stopped embedding their assemblies.
+
+**Not guessed at — 109g's own retrospective already named the exact template and the exact two seams
+it deliberately left for whoever built this.** `Tui/SetupSteps.InstallMySqlDriverAsync`
+(`src/DbDataSync.Cli/Tui/SetupSteps.cs:128`) already proves the shape: an async install through the
+`installLibrary` delegate (`Func<string,string,IReadOnlyList<PackageRef>,string,string?,
+CancellationToken,Task<LibraryManifest>>`) already threaded from `SetupCommand.RunAsync` → production:
+`LibraryInstaller.InstallAsync` → `SetupScreen.RunAsync` → a tab's own `SaveAsync`. This phase applies
+that same shape to the two places 109g's retrospective named and explicitly declined to touch within
+its own scope:
+
+- **`Tui/SetupSteps.ApplyStateDatabase`** — when an operator picks `MsSql`/`Postgres` as the
+  `StateEngine`, install the matching library first, the same way `InstallMySqlDriverAsync` installs
+  `MySqlConnector` before writing `drivers/mysql/driver.yaml` (minus that driver-manifest tail — these
+  two are already built-in, nothing to seed beyond the library itself). 109g's own words on why this
+  wasn't done there: *"`StateDatabaseTab.Save(string root)` is synchronous today, and threading an
+  async install through it means the same signature change `DriversTab`/`SetupScreen` already absorbed
+  once... a real, separable UX decision."* That decision is this phase's to make.
+- **The connection-creation path** — when an operator configures a connection using the `MsSql`/
+  `Postgres` driver type, the same install-if-missing check applies. The exact current hook (the SPA's
+  connection-save flow, or `DriverConnectionFactory`/`ConnectionsController` on the API side) needs
+  confirming against the real code at implementation time — not assumed here the way the state-database
+  seam already was.
+
+### 4. Cross-reference: DuckDB gets the *unconditional* version of this in 109i
+
+Unlike these two — needed only if an operator chooses them — DuckDB is required by every deployment
+regardless of configuration (verification and segmenting always use it). 109i specs that as its own,
+different trigger (install once, unconditionally, on every `serve` start rather than on a choice) —
+see `architecture/implementation/todo/phase-109i-duckdb-decoupling.md`. Built once each because the
+triggers genuinely differ, not duplicated by accident.
 
 ## What this does not do
 
@@ -147,8 +173,9 @@ implementation time**, not guessed here.
    `MissingMethodException`, not a build error. The same risk `nuget-loaded-drivers.md`'s own "Version
    conflicts with the host" section already names for compiled plugins, now real for these two drivers
    as well even though they aren't loaded as plugins in the separate-assembly sense.
-2. **The exact seeding hook for #3** — needs confirming against `ServeCommand`/`setup`'s real current
-   first-run sequence at implementation time, not decided here.
+2. **The connection-creation seeding hook (#3's second seam)** — `ApplyStateDatabase`'s own hook is
+   fully specified above; the connection-path one names the candidate call sites but still needs
+   confirming against the real current save flow at implementation time.
 
 ## How to verify when built
 
