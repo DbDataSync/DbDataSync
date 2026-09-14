@@ -27,15 +27,23 @@ internal static class SetupSteps
     internal readonly record struct StepResult(bool Warning, string Message);
 
     /// <summary>
-    /// SQLite needs nothing (the default, no separate server); SQL Server/PostgreSQL get their
-    /// connection string written and a real connect attempted — reported back rather than trusted,
-    /// exactly like the console step did (<c>SetupCommand.WalkThroughAsync</c>'s old step 3).
+    /// SQLite needs nothing (the default, no separate server); SQL Server/PostgreSQL get their matching
+    /// library installed first if it isn't already (phase 109h — see below), then their connection
+    /// string written and a real connect attempted — reported back rather than trusted, exactly like
+    /// the console step did (<c>SetupCommand.WalkThroughAsync</c>'s old step 3).
     /// </summary>
     /// <param name="password">Null means "leave the stored secret alone" — the tabbed form pre-fills
     /// nothing into a password field for an already-configured install, so a blank field on Save must
     /// not overwrite a real password with an empty one. Only a non-null value (including "") is
     /// written.</param>
-    internal static StepResult ApplyStateDatabase(string root, string engine, string? connectionString, string? password)
+    /// <param name="installLibrary">The same seam <see cref="InstallMySqlDriverAsync"/> already threads
+    /// from <c>SetupCommand.RunAsync</c> — production always passes <c>LibraryInstaller.InstallAsync</c>.
+    /// Phase 109g deliberately left this a manual step ("`config library install` once"); phase 109h
+    /// applies the same async-install shape it always said was the template, now that this method is
+    /// async anyway.</param>
+    internal static async Task<StepResult> ApplyStateDatabaseAsync(
+        string root, string engine, string? connectionString, string? password,
+        Func<string, string, IReadOnlyList<PackageRef>, string, string?, CancellationToken, Task<LibraryManifest>> installLibrary)
     {
         if (engine == StateEngineIds.Sqlite)
             return new StepResult(false, "Using SQLite — nothing else to configure.");
@@ -45,15 +53,34 @@ internal static class SetupSteps
         if (password is not null)
             new SecretStore("DbDataSync", true).Store(SecretRefs.ForAppSetting("stateConnectionString"), password);
 
-        // Installing the library itself is a manual step this phase (109g) leaves as one, deliberately
-        // — see phase 109g's own retrospective for why (this step would have to become async and grow
-        // a progress affordance, an InstallMySqlDriverAsync-shaped decision bigger than this phase's
-        // scope). `dbdatasync config library install microsoft-data-sqlclient`/`npgsql` once is the
-        // documented fix; `dbdatasync config check` (and the connection attempt below) names it if it
-        // is missing.
+        var libraryRegistry = new LibraryRegistry(root).LoadAll();
+        var libraryId = engine == StateEngineIds.MsSql ? MsSqlStateDialect.LibraryId : PostgresStateDialect.LibraryId;
+        if (!libraryRegistry.Installed.ContainsKey(libraryId))
+        {
+            // MsSql/Postgres are always in KnownLibraries (they're built-in engines) — the pinned
+            // version is what the setup wizard has no operator-facing field to override, unlike
+            // InstallMySqlDriverAsync's version textbox: there is no "which SqlClient version" question
+            // in this tab, so the catalog's own pinned version is the one seeded.
+            var catalogEntry = KnownLibraries.TryGetById(libraryId)!;
+            try
+            {
+                await installLibrary(
+                    root, libraryId, [new PackageRef(catalogEntry.PackageId, catalogEntry.PinnedVersion)],
+                    catalogEntry.FactoryType, null, CancellationToken.None);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return new StepResult(true, $"Could not install '{libraryId}': {ex.Message}");
+            }
+
+            // Re-load rather than RegisterInstalled: this is a one-shot CLI process (setup, then either
+            // `serve` starts fresh or the operator exits), not a long-lived host with other state to
+            // preserve across the reload — see StateDatabase.FromOptions's own caller idiom.
+            libraryRegistry = new LibraryRegistry(root).LoadAll();
+        }
+
         try
         {
-            var libraryRegistry = new LibraryRegistry(root).LoadAll();
             StateDatabase.FromOptions(
                 engine, Path.Combine(root, "state.db"), connectionString, new SecretStore("DbDataSync", true),
                 libraryRegistry);

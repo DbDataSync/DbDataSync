@@ -105,7 +105,7 @@ internal static class SetupScreen
             savedUrl = url;
             SetupSteps.ApplyConsoleUrl(root, url);
 
-            var messages = new List<string> { stateDatabase.Save(root).Message };
+            var messages = new List<string> { (await stateDatabase.SaveAsync(root, installLibrary)).Message };
 
             var driverResult = await drivers.SaveAsync(root, installLibrary);
             if (driverResult is { } result)

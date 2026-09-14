@@ -12,6 +12,14 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Phase 109h: both driver projects' own PackageReferences now exclude runtime assets (they
+         compile against the reference assembly but no longer ship the DLL). This test project needs its
+         own, un-excluded, direct references to both — not only Npgsql — because it also references the
+         MsSql driver project and touches Microsoft.Data.SqlClient directly (MsSqlScratchDatabase.cs,
+         CrossEngineReplicationTests.cs), the one place the phase doc's "one package per test project"
+         framing undersold: a standalone `dotnet test` run here needs both real local copies. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Npgsql" Version="9.0.3" />
   </ItemGroup>
 
   <ItemGroup>

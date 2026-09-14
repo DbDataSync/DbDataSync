@@ -12,6 +12,12 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Phase 109h: InviteCommandTests.cs uses Microsoft.Data.SqlClient directly (its own scratch-database
+         scaffolding, ahead of the LibraryRegistry-backed install its own comment already documents) —
+         previously supplied transitively through DbDataSync.Drivers.MsSql's own PackageReference, which
+         now excludes runtime assets. A real gap beyond the phase doc's own "two driver test projects"
+         framing, found by running the full suite. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
   </ItemGroup>
 
   <ItemGroup>

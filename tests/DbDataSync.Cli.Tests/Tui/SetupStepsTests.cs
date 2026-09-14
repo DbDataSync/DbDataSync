@@ -2,6 +2,7 @@ using ClrKernel.Core.Secrets;
 using DbDataSync.Cli.Tui;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
+using DbDataSync.Libraries;
 using DbDataSync.State;
 
 namespace DbDataSync.Cli.Tests.Tui;
@@ -18,10 +19,16 @@ public sealed class SetupStepsTests : IDisposable
 
     public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
+    private static Task<LibraryManifest> FailingInstallLibrary(
+        string repoRoot, string id, IReadOnlyList<PackageRef> packages, string factoryType, string? source,
+        CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("This test's engine choice should never reach an install call.");
+
     [Fact]
-    public void ApplyStateDatabase_Sqlite_WritesNothingAndReportsPlainly()
+    public async Task ApplyStateDatabase_Sqlite_WritesNothingAndReportsPlainly()
     {
-        var result = SetupSteps.ApplyStateDatabase(_root, StateEngineIds.Sqlite, connectionString: null, password: null);
+        var result = await SetupSteps.ApplyStateDatabaseAsync(
+            _root, StateEngineIds.Sqlite, connectionString: null, password: null, FailingInstallLibrary);
 
         Assert.False(result.Warning);
         Assert.Equal("Using SQLite — nothing else to configure.", result.Message);
@@ -30,14 +37,25 @@ public sealed class SetupStepsTests : IDisposable
         Assert.False(config.ContainsKey("DbDataSync:StateEngine"));
     }
 
+    /// <summary>
+    /// Phase 109h: choosing MsSql now installs <c>microsoft-data-sqlclient</c> first if it isn't
+    /// already — a real install (<see cref="LibraryInstaller.InstallAsync"/>, the same delegate
+    /// production wires through <c>SetupCommand.RunAsync</c>), not a fake, matching this repo's own
+    /// "real, not mocked" precedent for anything that must actually make
+    /// <see cref="StateDatabase.FromOptions"/> reach a real <c>DbProviderFactory</c>
+    /// (<c>DbDataSync.State.Tests</c>' <c>LibraryInstallFixture</c>). Still uses a connection string
+    /// nothing listens on, for a fast failure — only the pre-connect step (the library install) is now
+    /// real network/disk I/O.
+    /// </summary>
     [Fact]
-    public void ApplyStateDatabase_MsSql_WritesConfigAndSecretAndReportsTheFailedConnection()
+    public async Task ApplyStateDatabase_MsSql_InstallsTheLibraryThenWritesConfigAndSecretAndReportsTheFailedConnection()
     {
         // Loopback with a port nothing listens on — a fast connection-refused rather than a real
         // server's DNS-timeout-length wait, same trick SetupCommandTests uses for this case.
         const string connectionString = "Server=127.0.0.1,1;Database=DbDataSyncState;Connect Timeout=1;";
 
-        var result = SetupSteps.ApplyStateDatabase(_root, StateEngineIds.MsSql, connectionString, "hunter2");
+        var result = await SetupSteps.ApplyStateDatabaseAsync(
+            _root, StateEngineIds.MsSql, connectionString, "hunter2", LibraryInstaller.InstallAsync);
 
         Assert.True(result.Warning);
         Assert.Contains("Could not connect yet", result.Message);
@@ -49,6 +67,29 @@ public sealed class SetupStepsTests : IDisposable
         var secrets = new SecretStore("DbDataSync", true);
         Assert.True(secrets.TryResolve(SecretRefs.ForAppSetting("stateConnectionString"), out var password));
         Assert.Equal("hunter2", password);
+        secrets.Delete(SecretRefs.ForAppSetting("stateConnectionString"));
+
+        Assert.True(new LibraryRegistry(_root).LoadAll().Installed.ContainsKey(MsSqlStateDialect.LibraryId));
+    }
+
+    /// <summary>The install-if-missing check is idempotent — a second call against a root that already
+    /// has the library does not attempt to reinstall it (asserted by handing it an installLibrary that
+    /// throws if ever invoked).</summary>
+    [Fact]
+    public async Task ApplyStateDatabase_MsSql_WhenLibraryAlreadyInstalled_DoesNotReinstall()
+    {
+        var entry = KnownLibraries.TryGetById(MsSqlStateDialect.LibraryId)!;
+        await LibraryInstaller.InstallAsync(
+            _root, entry.Id, [new PackageRef(entry.PackageId, entry.PinnedVersion)], entry.FactoryType);
+
+        const string connectionString = "Server=127.0.0.1,1;Database=DbDataSyncState;Connect Timeout=1;";
+        var result = await SetupSteps.ApplyStateDatabaseAsync(
+            _root, StateEngineIds.MsSql, connectionString, "hunter2", FailingInstallLibrary);
+
+        Assert.True(result.Warning);
+        Assert.Contains("Could not connect yet", result.Message);
+
+        var secrets = new SecretStore("DbDataSync", true);
         secrets.Delete(SecretRefs.ForAppSetting("stateConnectionString"));
     }
 

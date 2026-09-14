@@ -2,6 +2,7 @@ using DbDataSync.Cli.Tui;
 using DbDataSync.Cli.Tui.Tabs;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
+using DbDataSync.Libraries;
 using ClrKernel.Core.Secrets;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
@@ -58,8 +59,11 @@ public sealed class TabWiringTests : IDisposable
         Assert.Equal("example.com", host);
     }
 
+    /// <summary>Phase 109h: <see cref="StateDatabaseTab.SaveAsync"/> installs
+    /// <c>microsoft-data-sqlclient</c> for real first (see <c>SetupStepsTests</c>' identical choice of a
+    /// real install over a fake, for the same "must actually reach a real DbProviderFactory" reason).</summary>
     [Fact]
-    public void StateDatabaseTab_SelectingSqlServerAndTyping_SavesTheTypedConnectionAndPassword()
+    public async Task StateDatabaseTab_SelectingSqlServerAndTyping_SavesTheTypedConnectionAndPassword()
     {
         using var app = Application.Create(new VirtualTimeProvider());
         app.Init("ansi");
@@ -87,7 +91,7 @@ public sealed class TabWiringTests : IDisposable
             TypeText(injector, "hunter2");
         });
 
-        var result = tab.Save(_root);
+        var result = await tab.SaveAsync(_root, LibraryInstaller.InstallAsync);
         Assert.Contains("Could not connect yet", result.Message);
 
         var config = DbDataSyncConfigFile.Read(_root);

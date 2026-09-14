@@ -1,3 +1,4 @@
+using DbDataSync.Libraries;
 using DbDataSync.State;
 using Microsoft.Extensions.Configuration;
 using Terminal.Gui.ViewBase;
@@ -48,12 +49,17 @@ internal sealed class StateDatabaseTab : View
         _password.Visible = needsServer;
     }
 
-    public SetupSteps.StepResult Save(string root)
+    /// <summary>Phase 109h: async now, the same "installLibrary threaded down from SetupScreen" shape
+    /// <see cref="DriversTab.SaveAsync"/> already uses — <see cref="SetupSteps.ApplyStateDatabaseAsync"/>
+    /// installs the matching library first when MsSql/Postgres is picked and it isn't installed yet.</summary>
+    public Task<SetupSteps.StepResult> SaveAsync(
+        string root,
+        Func<string, string, IReadOnlyList<PackageRef>, string, string?, CancellationToken, Task<LibraryManifest>> installLibrary)
     {
         var engine = Engines[_engine.Value ?? 0];
         var connectionString = engine == StateEngineIds.Sqlite ? null : _connection.Text;
         var password = engine == StateEngineIds.Sqlite || _password.Text.Length == 0 ? null : _password.Text;
-        return SetupSteps.ApplyStateDatabase(root, engine, connectionString, password);
+        return SetupSteps.ApplyStateDatabaseAsync(root, engine, connectionString, password, installLibrary);
     }
 
     public void Populate(IConfiguration configuration)

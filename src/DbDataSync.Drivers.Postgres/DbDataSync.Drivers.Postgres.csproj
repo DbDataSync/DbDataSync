@@ -7,7 +7,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Npgsql" Version="9.0.3" />
+    <!-- ExcludeAssets="runtime" (phase 109h) — see DbDataSync.Drivers.MsSql.csproj's identical comment
+         for why: compiles unchanged, ships nothing, resolved at first touch through LibraryRegistry's
+         AssemblyLoadContext.Resolving handler from <repo>/libraries/npgsql/lib/. -->
+    <PackageReference Include="Npgsql" Version="9.0.3" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>

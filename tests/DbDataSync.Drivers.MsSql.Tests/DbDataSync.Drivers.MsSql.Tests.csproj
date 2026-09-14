@@ -12,6 +12,12 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Phase 109h: DbDataSync.Drivers.MsSql.csproj's own PackageReference now excludes runtime assets
+         (it compiles against the reference assembly but no longer ships the DLL — see that project's
+         comment), so this test project — which touches Microsoft.Data.SqlClient types directly and
+         needs a real standalone `dotnet test` run to work with no LibraryRegistry-installed library
+         present — needs its own, un-excluded, direct reference to the identical package + version. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
   </ItemGroup>
 
   <ItemGroup>

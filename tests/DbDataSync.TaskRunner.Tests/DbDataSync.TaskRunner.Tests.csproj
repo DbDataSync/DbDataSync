@@ -12,6 +12,13 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Phase 109h: this test project's own scaffolding (RunExecutorIntegrationTests.cs,
+         Scd2NaturalKeyIntegrationTests.cs) uses Microsoft.Data.SqlClient directly to set up a scratch
+         SQL Server database, previously supplied transitively through DbDataSync.Drivers.MsSql's own
+         (now ExcludeAssets="runtime") PackageReference — a real gap the phase doc's own "two driver
+         test projects" framing did not anticipate, found by actually running the full suite rather than
+         assumed. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
   </ItemGroup>
 
   <ItemGroup>
