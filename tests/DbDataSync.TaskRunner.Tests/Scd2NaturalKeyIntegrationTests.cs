@@ -91,12 +91,14 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
             Path.Combine(_repoRoot, "config"), new GitCommitService(_repoRoot), secretStore);
         _taskRunStore = new TaskRunStore(stateDatabase);
         _workQueueStore = new WorkQueueStore(stateDatabase);
+        var batchStore = new BulkLoadBatchStore(stateDatabase);
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
                 new ChangeWatermarkStore(stateDatabase), new VerificationResultStore(stateDatabase),
                 _logWriter = new LogWriter(stateDatabase),
-                new BulkLoadBatchStore(stateDatabase), new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledInitialLoadEnqueuer())),
+                batchStore, new Lazy<IInitialLoadEnqueuer>(() =>
+                    new RealInitialLoadEnqueuer(_configRepository, _workQueueStore, batchStore))),
             new LocalRunnerConfig(_configRepository, Author),
             Scripting.ForTests(_configRepository, _repoRoot),
             Path.Combine(_repoRoot, "state.db"));
@@ -357,8 +359,13 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
 
         var run = await EnqueueAndDrainAsync("orders");
 
-        Assert.Equal(RunStatus.Failed, run.Status);
-        Assert.Contains("NotAMappedColumn", run.ErrorSummary);
+        // Phase 134: this mapping's reader (Change Tracking) captures a position ahead of its first
+        // pass rather than reading directly, so the Primary run itself never reaches the writer at
+        // all — the check this test is about fails on the Bulk Load that pass requested instead.
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        var load = _taskRunStore.GetMappingRunHistory(TaskName, RunKind.BulkLoad, "orders", limit: 1).Single();
+        Assert.Equal(RunStatus.Failed, load.Status);
+        Assert.Contains("NotAMappedColumn", load.ErrorSummary);
     }
 
     /// <summary>

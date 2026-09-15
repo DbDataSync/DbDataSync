@@ -85,11 +85,13 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _workQueueStore = new WorkQueueStore(stateDatabase);
         _watermarkStore = new ChangeWatermarkStore(stateDatabase);
         _logWriter = new LogWriter(stateDatabase);
+        var batchStore = new BulkLoadBatchStore(stateDatabase);
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
                 _watermarkStore, new VerificationResultStore(stateDatabase), _logWriter,
-                new BulkLoadBatchStore(stateDatabase), new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledInitialLoadEnqueuer())),
+                batchStore, new Lazy<IInitialLoadEnqueuer>(() =>
+                    new RealInitialLoadEnqueuer(_configRepository, _workQueueStore, batchStore))),
             // The real thing, not a fake: what this fixture wants to be able to assert is that a
             // provisioning report becomes a committed change to the mapping on disk, which is
             // LocalRunnerConfig's whole job. In a deployment the runner reaches it over loopback.
@@ -226,11 +228,45 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
 
     /// <summary>Enqueues a Primary pass for the "main" mapping and drains it with a single-consumer
     /// worker, returning the final TaskRuns row for that pass.</summary>
-    private async Task<TaskRunRecord> EnqueueAndDrainAsync()
+    private Task<TaskRunRecord> EnqueueAndDrainAsync() => EnqueueAndDrainAsync("e2e-sync");
+
+    /// <summary>The same, for a replication other than the fixture's default "e2e-sync" — every test
+    /// that stands up its own mapping (a different reader, provisioning off, and so on) needs its own
+    /// replication name, since <see cref="SetUpConfigAsync"/> and <c>SetUp*Async</c> below each save a
+    /// distinct <c>ReplicationTaskConfig</c>.</summary>
+    private async Task<TaskRunRecord> EnqueueAndDrainAsync(string taskName)
     {
-        var runId = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
-        await _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
+        var runId = _workQueueStore.Enqueue(taskName, RunKind.Primary, "main");
+        await _executor.ExecuteWorkerAsync(taskName, WorkerLanes.Uniform(1), CancellationToken.None);
         return _taskRunStore.GetRun(runId)!;
+    }
+
+    /// <summary>
+    /// Phase 134: a mapping whose reader captures its own position (<c>IPositionCapturing</c> — Change
+    /// Tracking, CDC, TriggerAudit) never loads on its *own* first Primary pass any more — that pass
+    /// only captures a position and requests a Bulk Load, which runs concurrently on the worker's other
+    /// lane (see <see cref="RunExecutor"/>'s two-lane doc). <c>SchedulerService.FilterHeld</c> is what
+    /// keeps a *production* worker from being handed a further Primary pass for this mapping while that
+    /// load is in flight (<c>ReadHold.Loading</c> — phase 134's own retrospective, "Known follow-up",
+    /// is explicit that this is the only enforcement point, by design). A test that enqueues directly,
+    /// bypassing the scheduler, has no such guard — so any test that wants a *second*, genuinely
+    /// incremental pass on the same worker lifetime as the mapping's first must wait for the load this
+    /// helper is watching for, the same way a real scheduler's own next due-check naturally would.
+    /// </summary>
+    private async Task WaitForLoadToCompleteAsync(string taskName, string mappingName, string sourceTable)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var state = _watermarkStore.GetReadState(taskName, mappingName, WatermarkKey.Build(
+                new SourceTableRef { ConnectionName = "src-conn", Database = _databaseName, Schema = "dbo", Table = sourceTable },
+                MsSqlDialect.Instance));
+            if (state is null || state.Hold != ReadHold.Loading)
+                return;
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException($"'{mappingName}' on '{taskName}' was still Loading after 30s.");
     }
 
     /// <summary>
@@ -261,6 +297,13 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         while (DateTimeOffset.UtcNow < deadline && _taskRunStore.GetRun(first)?.Status != RunStatus.Succeeded)
             await Task.Delay(100);
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(first)!.Status);
+
+        // "first" only captured a position and requested a Bulk Load (phase 134 — this reader is
+        // Change Tracking, one of the position-capturing three); the real load is still running on the
+        // worker's other lane. A real scheduler would not hand this mapping a further Primary pass
+        // until that load promotes (ReadHold clears) — waiting for the same thing here is what makes
+        // "second" a genuine incremental pass rather than a race against the still-Loading mapping.
+        await WaitForLoadToCompleteAsync("e2e-sync", "main", _sourceTable);
 
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
         var second = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
@@ -303,14 +346,26 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     {
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
 
-        var firstRun = await EnqueueAndDrainAsync();
+        var loadRun = await EnqueueAndDrainAsync();
 
-        // A first pass has nowhere to have come from, which is a different answer from "it did not
-        // move" — so previous is null and new is not.
-        Assert.Null(firstRun.PreviousWatermark);
-        Assert.NotNull(firstRun.NewWatermark);
+        // Phase 134: this reader (Change Tracking) captures its own position ahead of a Bulk Load
+        // rather than reading directly, so the pass that requests it moves nothing of its own — no
+        // previous, no new.
+        Assert.Equal(RunStatus.Succeeded, loadRun.Status);
+        Assert.Null(loadRun.PreviousWatermark);
+        Assert.Null(loadRun.NewWatermark);
 
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
+        var firstRun = await EnqueueAndDrainAsync();
+
+        // The mapping's first genuinely incremental pass: "previous" is the position the Bulk Load
+        // captured (Alice's, before Bob existed) rather than null — a different answer from "it did
+        // not move", which the captured position already ruled out even though no run's own row
+        // carried it until now.
+        Assert.NotNull(firstRun.PreviousWatermark);
+        Assert.NotNull(firstRun.NewWatermark);
+
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (3, 'Carol');");
         var secondRun = await EnqueueAndDrainAsync();
 
         // The chain: the second pass starts exactly where the first one left off, and ends at what
@@ -611,6 +666,12 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         await SetUpConfigAsync();
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One');");
 
+        // Past this mapping's own initial load first — that pass never has Timing regardless of this
+        // option (phase 134: it only captures a position), so testing the option itself needs a
+        // genuinely incremental pass.
+        await EnqueueAndDrainAsync();
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Two');");
+
         var run = await EnqueueAndDrainAsync();
 
         Assert.Equal(RunStatus.Succeeded, run.Status);
@@ -621,8 +682,14 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     public async Task WithTheTraceOption_ARunRecordsEveryStage()
     {
         await SetUpConfigAsync(traceTiming: true);
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One');");
+
+        // Past this mapping's own initial load first (phase 134: a Change Tracking reader's first pass
+        // only captures a position and never reaches the reader/staging/writer stages this test is
+        // actually about).
+        Assert.Equal(RunStatus.Succeeded, (await EnqueueAndDrainAsync()).Status);
         await ExecuteAsync(_adminConnection,
-            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'One'), (2, 'Two'), (3, 'Three');");
+            $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Two'), (3, 'Three'), (4, 'Four');");
 
         var run = await EnqueueAndDrainAsync();
 
@@ -793,8 +860,22 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task AFailedPass_DoesNotAcknowledgeAndLeavesTheHistoryAlone()
     {
-        await SetUpTriggerAuditAsync("trg-fail", $"NotATable_{Guid.NewGuid():N}");
+        var target = $"TrgFail_{Guid.NewGuid():N}";
+        await ExecuteAsync(_adminConnection,
+            $"CREATE TABLE dbo.[{target}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+        await SetUpTriggerAuditAsync("trg-fail", target);
+
+        // Past this mapping's own initial load first (phase 134: TriggerAuditReader is one of the
+        // position-capturing three, so a fresh mapping's first Primary pass only captures a position
+        // and never touches the target — a real target is needed for that Bulk Load to succeed, which
+        // is why this warm-up creates one). The pass this test is actually about is the *next*
+        // genuinely incremental pass, whose write then fails.
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
+        Assert.Equal(RunStatus.Succeeded, (await EnqueueAndDrainAsync("trg-fail")).Status);
+        var watermarkBefore = WatermarkFor("trg-fail", "main", _sourceTable);
+
+        await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (2, 'Bob');");
+        await ExecuteAsync(_adminConnection, $"DROP TABLE dbo.[{target}];");
 
         var runId = _workQueueStore.Enqueue("trg-fail", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("trg-fail", WorkerLanes.Uniform(1), CancellationToken.None);
@@ -807,9 +888,10 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         Assert.Null(run.PreviousWatermark);
         Assert.Null(run.NewWatermark);
 
-        // Not pruned, and no watermark stored — the two go together, and that pairing is the invariant.
+        // Not pruned, and the watermark exactly where the warm-up pass left it — the two go together,
+        // and that pairing is the invariant.
         Assert.True(await ShadowRowCountAsync() > 0);
-        Assert.Null(WatermarkFor("trg-fail", "main", _sourceTable));
+        Assert.Equal(watermarkBefore, WatermarkFor("trg-fail", "main", _sourceTable));
     }
 
     #endregion
@@ -985,9 +1067,15 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         var runId = _workQueueStore.Enqueue("prov-off", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("prov-off", WorkerLanes.Uniform(1), CancellationToken.None);
 
+        // Phase 134: this mapping's own reader (Change Tracking) captures a position ahead of its
+        // first pass rather than reading directly, so the Primary run itself never reaches
+        // provisioning at all — the recovery this test is about happens on the Bulk Load that pass
+        // requested instead.
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
+        var load = _taskRunStore.GetMappingRunHistory("prov-off", RunKind.BulkLoad, "main", limit: 1).Single();
+        Assert.Equal(RunStatus.Succeeded, load.Status);
         Assert.Equal(new Dictionary<int, string> { [1] = "Alice" }, await GetRowsAsync(target));
-        Assert.True(LoggedInspection(runId));
+        Assert.True(LoggedInspection(load.RunId));
 
         // On disk, so the next pass never has to look again — and the catalog's answer, not the plan's.
         var reloaded = _configRepository.LoadTableMapping("prov-off", "main");
@@ -1047,7 +1135,12 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         var runId = _workQueueStore.Enqueue("prov-off", RunKind.Primary, "main");
         await _executor.ExecuteWorkerAsync("prov-off", WorkerLanes.Uniform(1), CancellationToken.None);
 
-        Assert.Equal(RunStatus.Failed, _taskRunStore.GetRun(runId)!.Status);
+        // Phase 134: the Primary run itself only captures a position (Change Tracking); the
+        // missing-table refusal this test is about happens on the Bulk Load that pass requested
+        // instead.
+        Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(runId)!.Status);
+        var load = _taskRunStore.GetMappingRunHistory("prov-off", RunKind.BulkLoad, "main", limit: 1).Single();
+        Assert.Equal(RunStatus.Failed, load.Status);
         Assert.Empty(await CachedColumnsAsync("dbo", target));
         Assert.Empty(_configRepository.LoadTableMapping("prov-off", "main").TargetColumns);
     }
