@@ -12,7 +12,12 @@ namespace DbDataSync.State;
 /// <c>IConnectionFactory</c>/<c>DriverConnectionFactory</c> already uses.
 /// <para>
 /// See phase 134's <c>IRunnerState.RequestInitialLoad</c> — <see cref="LocalRunnerState"/>'s
-/// implementation of it is this interface's only caller.
+/// implementation of it is this interface's only caller, and takes it as a <see cref="Lazy{T}"/> rather
+/// than resolving it directly: this interface's only real implementation (<c>BulkLoadService</c>)
+/// depends, transitively, on <c>StateHost</c> — the same <c>IHostedService</c> that depends on
+/// <see cref="LocalRunnerState"/> to exist at all — so resolving it eagerly in that constructor closes a
+/// DI cycle that hangs the host at startup. See <c>LocalRunnerState</c>'s own doc on the field for the
+/// full chain.
 /// </para>
 /// </summary>
 public interface IInitialLoadEnqueuer

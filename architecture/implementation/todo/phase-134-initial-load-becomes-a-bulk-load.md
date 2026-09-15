@@ -293,3 +293,48 @@ deliberately untouched, per the corrected spec (the hold clears on its own; no r
 - Watch CI on the PR. On red: read the failure output (the "known follow-up" section above names the
   most likely source), fix, update this Handoff, commit, push, repeat.
 - On green: merge, move this doc `todo/` → `done/`.
+
+## Handoff — 2026-09-14 (round 2, CI fix)
+
+**CI's first run on PR #1 found a real bug** — not one of the "known follow-up" items above, something
+this session's own local checks (`dotnet build`, unit tests) could not have caught: the API hung on
+startup, never logging a line, which timed out the Playwright `webServer` wait in the E2E job.
+
+**Root cause: a DI cycle this phase's own registration introduced.** `StateHost` (an `IHostedService`,
+built eagerly at host startup) depends on `LocalRunnerState`. Round 1's `LocalRunnerState` constructor
+depended directly on `IInitialLoadEnqueuer`, registered as `sp.GetRequiredService<BulkLoadService>()`.
+`BulkLoadService` depends on `ProcessSupervisor`, and `ProcessSupervisor` depends on `StateHost` directly
+(pre-existing, phase-134-unrelated code). So: `StateHost → LocalRunnerState → IInitialLoadEnqueuer
+(BulkLoadService) → ProcessSupervisor → StateHost` — closed. Before this phase, `BulkLoadService` (and
+therefore `ProcessSupervisor`) was only ever constructed lazily, on an operator's first
+`POST .../bulk-load` — long after startup. Round 1 made `LocalRunnerState` (needed eagerly) transitively
+require it too, closing the loop.
+
+**Fix: `Lazy<IInitialLoadEnqueuer>` instead of a direct dependency.**
+`LocalRunnerState`'s constructor now takes `Lazy<IInitialLoadEnqueuer>` and calls `.Value` only inside
+`RequestInitialLoad` — the one place that ever needs it, always well after host startup has finished (a
+mapping's first pass claiming `InitialLoad`, at the earliest). Constructing the `Lazy<T>` wrapper itself
+does not invoke the factory, so it does not recurse into `BulkLoadService`/`ProcessSupervisor`/`StateHost`
+at `LocalRunnerState` construction time — the cycle is broken at exactly the edge this phase added, with
+zero change to `ProcessSupervisor`'s or `BulkLoadService`'s own dependency shape. `DbDataSyncHost` now
+registers `services.AddSingleton(sp => new Lazy<IInitialLoadEnqueuer>(sp.GetRequiredService<IInitialLoadEnqueuer>))`
+alongside the existing `IInitialLoadEnqueuer` registration. Every test fixture that constructs
+`LocalRunnerState` directly (6 files) was updated to pass `new Lazy<IInitialLoadEnqueuer>(() => <stub>)`
+instead of the stub directly.
+
+**Verified properly this time, per explicit instruction** — not just build/unit tests:
+`dotnet build src/DbDataSync.Api` (clean), then actually ran
+`dotnet exec src/DbDataSync.Api/bin/Debug/net10.0/DbDataSync.Api.dll --urls http://127.0.0.1:<port>` with
+a scratch `DbDataSync:RepoRoot` and confirmed, within ~6 seconds: `Runner state endpoint listening...`,
+`Now listening on: ...`, `Application started.` — plus a `curl` against the root path returning `401`
+(the fallback auth policy — proof the server is answering requests, not hung). This is the exact failure
+mode CI caught and this session did not the first time; re-run before trusting this fix again if the DI
+graph changes further.
+
+Also re-ran (no Docker): `DbDataSync.State.Tests` — all passing, including the phase's own new
+`LocalRunnerStateInitialLoadTests` (updated for the `Lazy<>` signature change) and
+`ChangeWatermarkStoreTests` additions. `DbDataSync.Api`, `DbDataSync.TaskRunner`, and every test project
+this round touched (`DbDataSync.TaskRunner.Tests`, `DbDataSync.Api.Tests`) rebuild clean.
+
+Branch was already rebased onto a fresh `main` (phase 133a + an unrelated CI fix) by the orchestrating
+session before this round started; pushed from that same commit, nothing further to reconcile.

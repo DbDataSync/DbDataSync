@@ -26,7 +26,7 @@ public sealed class PrimaryPassOutcomeTests : IDisposable
         _state = new LocalRunnerState(
             new TaskRunStore(_database), new WorkQueueStore(_database), new RunLockStore(_database),
             _watermarks, new VerificationResultStore(_database), new LogWriter(_database),
-            new BulkLoadBatchStore(_database), new NeverCalledInitialLoadEnqueuer());
+            new BulkLoadBatchStore(_database), new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledInitialLoadEnqueuer()));
     }
 
     public void Dispose()

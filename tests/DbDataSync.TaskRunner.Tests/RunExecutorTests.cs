@@ -52,7 +52,7 @@ public sealed class RunExecutorTests : IDisposable
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, _runLockStore,
                 new ChangeWatermarkStore(_stateDatabase), new VerificationResultStore(_stateDatabase), _logWriter,
-                new BulkLoadBatchStore(_stateDatabase), new NeverCalledInitialLoadEnqueuer()),
+                new BulkLoadBatchStore(_stateDatabase), new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledInitialLoadEnqueuer())),
             new LocalRunnerConfig(_configRepository, Author),
             Scripting.ForTests(_configRepository, _repoRoot),
             Path.Combine(_repoRoot, "state.db"));

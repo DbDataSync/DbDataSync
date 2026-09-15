@@ -231,6 +231,14 @@ public static class DbDataSyncHost
         // without a project-reference cycle — see IInitialLoadEnqueuer's own doc. Same pattern as
         // IConnectionFactory/DriverConnectionFactory above: registered by interface as well, not instead.
         builder.Services.AddSingleton<IInitialLoadEnqueuer>(sp => sp.GetRequiredService<BulkLoadService>());
+        // Deferred, not resolved directly by LocalRunnerState's constructor — StateHost (an
+        // IHostedService built eagerly at startup) depends on LocalRunnerState, and eagerly resolving
+        // IInitialLoadEnqueuer here would force BulkLoadService -> ProcessSupervisor -> StateHost to
+        // build too, closing a DI cycle that hangs the host before it logs a single line (this shipped
+        // once without the Lazy wrapper and did exactly that in CI). The Lazy<T> itself is cheap to
+        // construct — it just closes over `sp` — and only resolves the real service, well after
+        // startup, the first time LocalRunnerState.RequestInitialLoad actually runs.
+        builder.Services.AddSingleton(sp => new Lazy<IInitialLoadEnqueuer>(sp.GetRequiredService<IInitialLoadEnqueuer>));
         builder.Services.AddSingleton<ReconcileService>();
         builder.Services.AddSingleton<SegmentingPreviewService>();
         builder.Services.AddSingleton<ResyncService>();

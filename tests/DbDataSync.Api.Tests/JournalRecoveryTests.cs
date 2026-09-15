@@ -35,7 +35,7 @@ public sealed class JournalRecoveryTests : IDisposable
         _state = new LocalRunnerState(
             _taskRuns, _workQueue, new RunLockStore(_database), new ChangeWatermarkStore(_database),
             new VerificationResultStore(_database), _logs, new BulkLoadBatchStore(_database),
-            new NeverCalledInitialLoadEnqueuer());
+            new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledInitialLoadEnqueuer()));
 
         _recovery = new JournalRecovery(_state, _taskRuns, _logs, new ApiOptions
         {

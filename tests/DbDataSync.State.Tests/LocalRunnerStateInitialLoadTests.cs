@@ -33,7 +33,8 @@ public sealed class LocalRunnerStateInitialLoadTests : IDisposable
 
         _state = new LocalRunnerState(
             taskRuns, _workQueue, new RunLockStore(database), _watermarks,
-            new VerificationResultStore(database), _logs, _bulkLoadBatches, new NeverCalledEnqueuer());
+            new VerificationResultStore(database), _logs, _bulkLoadBatches,
+            new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledEnqueuer()));
     }
 
     public void Dispose()

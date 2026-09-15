@@ -21,11 +21,27 @@ public sealed class LocalRunnerState(
     /// finishes, to decide whether it just completed the batch a mapping's pending initial load is
     /// waiting on.</summary>
     BulkLoadBatchStore bulkLoadBatches,
-    /// <summary>Phase 134: <see cref="RequestInitialLoad"/>'s own segment-expansion/enqueue core — the
-    /// same one the operator-facing bulk-load endpoint uses (via <c>BulkLoadService</c>, reached
-    /// through this interface — see its own doc for why), so there is one place that turns "start a
-    /// bulk load" into work-queue rows rather than two.</summary>
-    IInitialLoadEnqueuer initialLoadEnqueuer) : IRunnerState
+    /// <summary>
+    /// Phase 134: <see cref="RequestInitialLoad"/>'s own segment-expansion/enqueue core — the same one
+    /// the operator-facing bulk-load endpoint uses (via <c>BulkLoadService</c>, reached through
+    /// <see cref="IInitialLoadEnqueuer"/> — see its own doc for why), so there is one place that turns
+    /// "start a bulk load" into work-queue rows rather than two.
+    /// <para>
+    /// **Lazy, not resolved eagerly — this is load-bearing, not a style choice.** <c>StateHost</c> (an
+    /// <c>IHostedService</c>, constructed at host startup) depends on this class; resolving
+    /// <c>IInitialLoadEnqueuer</c> (→ <c>BulkLoadService</c> → <c>ProcessSupervisor</c>) in this
+    /// constructor would force <c>ProcessSupervisor</c> to build too, and its own constructor takes
+    /// <c>StateHost</c> right back — a DI cycle that deadlocks the host on a thread-pool-starvation spin
+    /// before it ever logs a line (confirmed the hard way: this shipped once without the <c>Lazy</c> and
+    /// hung the API in CI). Before phase 134, <c>BulkLoadService</c> was only ever constructed lazily —
+    /// the first operator <c>POST .../bulk-load</c>, long after startup — which is exactly the property
+    /// <see cref="Lazy{T}"/> restores: the wrapper itself resolves at construction time (cheap, no
+    /// recursion), and <see cref="Lazy{T}.Value"/> only resolves the real <c>IInitialLoadEnqueuer</c> —
+    /// and, transitively, <c>StateHost</c> as an already-built singleton, not a re-entrant construction —
+    /// the first time <see cref="RequestInitialLoad"/> actually runs.
+    /// </para>
+    /// </summary>
+    Lazy<IInitialLoadEnqueuer> initialLoadEnqueuer) : IRunnerState
 {
     public void UpsertTask(string taskName, bool enabled) => taskRuns.UpsertTask(taskName, enabled);
 
@@ -64,7 +80,7 @@ public sealed class LocalRunnerState(
         // DefaultSegmenting will rarely use, and this process — the API, under ASP.NET Core's
         // synchronization-context-free server — has nothing for a blocking wait here to deadlock
         // against.
-        initialLoadEnqueuer.EnqueueForInitialLoadAsync(taskName, mappingName, batchId, CancellationToken.None)
+        initialLoadEnqueuer.Value.EnqueueForInitialLoadAsync(taskName, mappingName, batchId, CancellationToken.None)
             .GetAwaiter().GetResult();
     }
 
