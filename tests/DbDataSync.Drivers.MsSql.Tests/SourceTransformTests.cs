@@ -124,32 +124,26 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
         AssertTransformed(Assert.Single(await CollectAsync(read.Rows)));
     }
 
-    [Fact]
-    public async Task ChangeTrackingReader_AppliesTheTransformOnItsFullLoadPath()
-    {
-        await SeedAsync();
-        var reader = new MsSqlChangeTrackingReader();
-
-        var read = await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
-
-        AssertTransformed(Assert.Single(await CollectAsync(read.Rows)));
-    }
+    // ChangeTrackingReader_AppliesTheTransformOnItsFullLoadPath removed (phase 134): this reader no
+    // longer has a full-load path — RunExecutor routes InitialLoad to the Bulk Load pipeline instead,
+    // ahead of ever calling ReadChangesAsync. BatchReloadReader_AppliesTheTransform above covers the
+    // transform on the reader that actually performs an initial/full load now.
 
     [Fact]
     public async Task ChangeTrackingReader_AppliesTheTransformOnItsIncrementalPath()
     {
         // The one the token exists for. The incremental statement joins the table as `base`, so an
         // unqualified column reference would be ambiguous against CHANGETABLE's own copy of the key.
+        // The baseline position is captured directly (phase 134: this reader no longer full-loads), not
+        // read — nothing here needs its rows, only the version to diff the seeded insert against.
         var reader = new MsSqlChangeTrackingReader();
-        var baseline = await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
-        await CollectAsync(baseline.Rows);
+        var captured = await reader.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None);
 
         await SeedAsync();
 
         var read = await reader.ReadChangesAsync(
-            _connection, Source(), baseline.NewWatermark, ReadIntent.Changes, Transformed, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), captured.Position, ReadIntent.Changes, Transformed, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
 
         AssertTransformed(Assert.Single(await CollectAsync(read.Rows)));
     }

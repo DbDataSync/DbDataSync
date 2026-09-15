@@ -78,9 +78,14 @@ public sealed class MsSqlPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsS
     private async Task<(long RowsWritten, string Watermark)> RunOnceAsync(
         string? previousWatermark, IReadOnlyDictionary<string, string>? writerOptions = null)
     {
+        // Phase 134: MsSqlChangeTrackingReader no longer full-loads on InitialLoad — RunExecutor routes
+        // that to the Bulk Load pipeline instead. A null previousWatermark here means "this test's first
+        // pass, whatever has been seeded so far" — ChangesFromEarliest reads from the guaranteed-valid
+        // floor (GetMinValidVersionAsync), which is everything Change Tracking still holds, the same set
+        // of rows the deleted full-load branch used to return.
         var read = await _reader.ReadChangesAsync(
             _sourceConnection, Source(), previousWatermark,
-            previousWatermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
+            previousWatermark is null ? ReadIntent.ChangesFromEarliest : ReadIntent.Changes,
             Mappings, MappingName, [], new Dictionary<string, string>(),
             CancellationToken.None);
         var staged = await _staging.StageAsync(

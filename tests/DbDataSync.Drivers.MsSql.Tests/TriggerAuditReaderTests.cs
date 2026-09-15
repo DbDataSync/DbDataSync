@@ -402,8 +402,8 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
     {
         var reader = new TriggerAuditReader(MsSqlDialect.Instance, new ThrowingTableCatalog());
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
-        var start = (await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None)).NewWatermark;
+        var start = (await reader.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None)).Position;
 
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
         var result = await reader.ReadChangesAsync(
@@ -420,8 +420,8 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
     {
         var reader = new TriggerAuditReader(MsSqlDialect.Instance, new ThrowingTableCatalog());
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice');");
-        var start = (await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, [], MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None)).NewWatermark;
+        var start = (await reader.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None)).Position;
 
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
         var result = await reader.ReadChangesAsync(

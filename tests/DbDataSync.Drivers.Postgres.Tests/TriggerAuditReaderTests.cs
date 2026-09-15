@@ -236,10 +236,25 @@ public sealed class TriggerAuditReaderTests(PostgresTestDatabase db) : IClassFix
             new("Id", "int", false, true, false),
             new("Name", "varchar(50)", false, false, false),
         ];
-        Task<ReadResult> Read(string? watermark) => _reader.ReadChangesAsync(
-            _connection, source, watermark, watermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
-            [], MappingName, compositeColumns, new Dictionary<string, string>(),
-            CancellationToken.None);
+        // A null watermark used to mean "read this reader's own first-pass full load" — see the
+        // file-level ReadAsync's own doc comment. This test needs its composite-key column shape rather
+        // than that helper's fixed Columns(), so it repeats the same capture-instead-of-full-load fix
+        // inline rather than generalizing ReadAsync for one caller.
+        async Task<ReadResult> Read(string? watermark)
+        {
+            if (watermark is null)
+            {
+                var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+                var captured = await capturing.CapturePositionAsync(
+                    _connection, source, new Dictionary<string, string>(), CancellationToken.None);
+                return new ReadResult(EmptyRows(), captured.Position, new ReadDiagnostics());
+            }
+
+            return await _reader.ReadChangesAsync(
+                _connection, source, watermark, ReadIntent.Changes,
+                [], MappingName, compositeColumns, new Dictionary<string, string>(),
+                CancellationToken.None);
+        }
 
         await ExecuteAsync(
             $"INSERT INTO public.\"{composite}\" VALUES ('north', 1, 'a'), ('south', 1, 'b');");

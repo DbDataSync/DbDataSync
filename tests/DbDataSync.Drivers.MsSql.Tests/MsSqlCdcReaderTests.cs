@@ -215,6 +215,12 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
     {
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob');");
 
+        // Alice/Bob must be in the change table before CapturePositionAsync runs — otherwise the
+        // capture job (simulated here by a manual scan; a real one is always this far ahead by the
+        // time anything asks) hasn't caught up to them yet, the returned position is stale, and both
+        // rows wrongly replay below alongside Carol.
+        await WaitForCaptureAsync("0");
+
         var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
         var captured = await capturing.CapturePositionAsync(
             _connection, Source(), new Dictionary<string, string>(), CancellationToken.None);
