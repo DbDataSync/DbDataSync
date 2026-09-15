@@ -189,10 +189,14 @@ resolved:
 **Follow-up:** the first bullet above (the losing `RequestInitialLoad` call stranding `ReadHold` at
 `Loading`) was confirmed deterministically after this doc was first written — 15 of 15 local runs of a
 real wait for the hold to clear timed out — and designed into its own phase:
-`architecture/implementation/todo/phase-143-initial-load-race-loses-cleanly.md`. That phase does not
-expect to fix this test's row-count flake (a different, still-unexplained symptom — see phase 143's own
-"Out of scope"), so this section stays open even once 143 lands; re-check both together anyway, in case
-they turn out to share a cause after all.
+`architecture/implementation/todo/phase-143-initial-load-race-loses-cleanly.md`. That phase also found a
+fixture bug in this exact test: its own doc comment describes racing an *already-bootstrapped* mapping's
+ordinary sync against an on-demand reload (genuinely no collision), but the fixture never gives map-1 a
+prior pass, so it accidentally races a *brand-new* mapping's first pass instead — which phase 134 quietly
+turned into the same collision this section describes. The row-count flake may not be independent of
+that at all; phase 143 fixes the fixture (warm up map-1/map-2 first) as part of its own work, which is
+now the leading hypothesis for this flake too, not a confirmed separate bug — see phase 143's own "A
+test fixture bug this phase's own reproduction exposed."
 
 ### `DbDataSync.Drivers.MsSql.Tests` (fixed)
 

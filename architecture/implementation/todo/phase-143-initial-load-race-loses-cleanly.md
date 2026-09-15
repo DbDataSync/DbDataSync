@@ -81,6 +81,46 @@ impossible rather than merely rarer. The mapping's next scheduled Primary pass (
 winning reload has finished by then it succeeds, if not it fails the same way and retries again next
 tick. No operator recovery endpoint needed.
 
+## A test fixture bug this phase's own reproduction exposed
+
+`BulkLoadIntegrationTests.PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`'s own doc comment states
+its subject plainly: "a replication's ordinary scheduled sync and an on-demand reload are separate units
+of work with separate locks, so triggering both at once is normal operation, not contention." That is a
+real, still-true claim about phase 8's original Primary/BulkLoad separation — an *already-bootstrapped*
+mapping's routine incremental pass and an operator's on-demand full reload genuinely don't collide, since
+they're not competing for the same `WorkQueue` row at all.
+
+But the test never gives map-1 (or map-2) a prior pass before firing both triggers — it races them
+against a brand-new mapping's very first pass. Before phase 134 that was harmless: a fresh mapping's
+first Primary pass read the whole table directly through its own reader, with nothing in common with
+whatever the explicit reload was doing. Phase 134 changed that retroactively, without this test being
+revisited: a fresh mapping's first Primary pass *now* also auto-requests a Bulk Load for the identical
+segment the explicit trigger asks for — so, unchanged, this test quietly started exercising exactly the
+race this phase is about, not the benign coexistence scenario its own doc comment describes. It kept
+"passing" (mostly) only because of the bug this phase fixes: a losing collision was silently swallowed,
+so both sides got to report success regardless of whether real work happened underneath.
+
+**This test needs two changes, not one:**
+
+1. **Fix the fixture to test what it actually claims to test.** Give map-1 and map-2 a real prior pass
+   (the same `EnqueueAndDrainAsync`-style warm-up phase 141 used throughout for this exact "a first pass
+   means something different now" pattern) before the test's real subject — a genuinely-incremental
+   Primary pass racing an on-demand reload against an already-bootstrapped mapping, which is a true
+   non-collision and should keep asserting both succeed.
+2. **Add a new, separate test for the race this phase actually fixes** — a brand-new mapping (what this
+   test accidentally became), an explicit reload racing the mapping's own auto-triggered initial load for
+   the identical segment, asserting the losing side (the auto-trigger, i.e. the Primary pass) shows up as
+   `RunStatus.Failed` with a clear `errorSummary`, and that a *subsequent* pass for that mapping succeeds
+   cleanly once nothing is racing it (the self-healing claim).
+
+**This also reframes the still-unexplained row-count flake** (`Tgt_1` occasionally reading back 0 rows
+moments after its Bulk Load run self-reports 9 read/9 written) — previously treated as a second,
+independent mystery in phase 141's own retrospective. It may not be independent at all: it was observed
+in exactly this same accidentally-colliding scenario, so it's at least as plausible that it's a *further*
+symptom of the same unintended collision (a stray write, a Kinds mismatch between whichever side happens
+to win) as it is a wholly separate bug. Fix the fixture (item 1 above) first and re-check whether the
+row-count flake still reproduces at all before assuming it needs its own separate investigation.
+
 ## Out of scope
 
 - **The multi-segment case.** An auto-triggered initial load enqueues one segment per
@@ -96,15 +136,10 @@ tick. No operator recovery endpoint needed.
   fixes — it additionally needs an operator to manually reload exactly the same custom segment scheme a
   mapping's own `DefaultSegmenting` already uses, in the same narrow window. Tracked as a known
   follow-on, not blocking this phase.
-- **The separate, still-unexplained row-count flake** in the same test
-  (`BulkLoadIntegrationTests.PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`'s `Tgt_1` occasionally
-  reading back 0 rows moments after its Bulk Load run self-reports 9 read/9 written) — phase 141's own
-  retrospective is explicit this is a different, independently-caused symptom (the *winning* run's own
-  write is what's reported and apparently missing; that has nothing to do with the losing run's doomed
-  batch this phase fixes). This phase should make the test's `ReadHold`-related timeout risk (if a wait
-  for hold-clearing were ever added to it) go away, but is not expected to change the row-count flake's
-  own occurrence rate — re-check both once this phase lands, since it's possible they turn out to share
-  a cause after all.
+- **Confirming whether the row-count flake shares a cause with the fixture bug above** — see that
+  section for why it's now the leading hypothesis rather than a confirmed independent bug. This phase
+  fixes the fixture and the production race; it doesn't include a dedicated investigation beyond
+  re-checking whether the flake still reproduces once both are fixed.
 - A recovery endpoint for a mapping stuck in `ReadHold.Loading` for some *other* reason (a crashed
   worker mid-batch, say) — this phase makes the specific strand it describes impossible, it doesn't add
   general-purpose recovery tooling for the hold.
@@ -116,13 +151,12 @@ tick. No operator recovery endpoint needed.
 - `LocalRunnerStateInitialLoadTests` (phase 134's own file) — a new case: two `RequestInitialLoad`-shaped
   calls for the same mapping+segment, second one throws, `ReadHold` stays `None` afterward (not
   `Loading`).
-- The real proof: extend `BulkLoadIntegrationTests.PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`
-  (or a new, adjacent test) to assert the losing Primary pass — map-1's, in that test's specific
-  scenario — actually shows up as `RunStatus.Failed` with a clear `errorSummary`, and that a *subsequent*
-  scheduled pass for that mapping succeeds cleanly (the self-healing claim, not just "it doesn't hang").
-- Re-run `PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed` itself several times locally (it was
-  reliably reproducible via 15 back-to-back runs during diagnosis) to confirm the specific timeout this
-  phase targets is gone.
+- The real proof, per "A test fixture bug" above: `PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`
+  itself, fixed to warm up map-1/map-2 first, run several times locally to confirm both sides genuinely
+  and reliably succeed (no more timeout, no more row-count flake — or, if the flake persists even
+  post-warm-up, that it's confirmed independent after all). Plus the new, separate test for the
+  actual race (a fresh mapping, no warm-up, explicit reload racing the auto-trigger) — the losing Primary
+  pass shows up `Failed`, a subsequent pass for that mapping succeeds cleanly.
 
 ## Open questions to resolve during implementation
 
