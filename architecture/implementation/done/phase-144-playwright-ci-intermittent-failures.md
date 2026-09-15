@@ -383,4 +383,20 @@ last 12:**
 - **`35034756695`** (a docs-only push): `playwright` 104/104 again, the identical benign teardown-timing
   SqlClient pattern as the previous run, `dotnet`/`web`/`dotnet-windows`/`dotnet-integration` all green.
 
-Merged on this evidence, per the user's explicit go-ahead.
+**One more run, after merging `main` into this branch to resolve a `README.md` build-order conflict
+with phase 145's concurrent doc changes**: `playwright` green again (5th consecutive) — 104/104, zero
+retries. `dotnet-windows` and `dotnet-integration` were both red on this run, traced before merging
+rather than assumed unrelated:
+- `dotnet-windows`: `dotnet test`'s "No test matches the given testcase filter `Category!=Integration`"
+  for `DbDataSync.Drivers.Loader.Tests.dll` (an old, all-Integration-tagged project, unrelated to this
+  phase) — compared byte-for-byte against the immediately preceding green run's identical log line, the
+  same message appeared there too, but that run's job still exited 0. A pre-existing, nondeterministic
+  `dotnet test` exit-code quirk, not something this branch introduced or can fix by itself.
+- `dotnet-integration`: a real SQL Server deadlock (`Transaction ... was deadlocked on lock |
+  communication buffer resources ... chosen as the deadlock victim`) in
+  `MsSqlChangeTrackingConsistencyTests.ConcurrentDeletes_StillDeliverDeletesWithTheirKeys` — a
+  concurrency-stress test this phase never touched, in a file this phase never touched.
+
+Merged on this evidence, per the user's explicit go-ahead — the same "trace every red job to its actual
+content before merging" practice phase 139's own retrospective describes, not an assumption that red CI
+is always safe to ignore.
