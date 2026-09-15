@@ -404,3 +404,13 @@ unfiltered", not a crash), and notably **a real login attempt that reached the s
 to touch, further confirming the assembly itself loads correctly now. Two consecutive green
 `playwright` runs is encouraging but is not yet the "several consecutive runs" item 6 asks for before
 merging, given this job's pre-fix history of passing 3 of 12 runs by chance alone.
+
+**Update — third CI run (`35034756695`, a docs-only push), also fully green**: `playwright` 104/104,
+zero retries, and the identical benign teardown-timing SqlClient login-failure pattern as run 2 (a real
+login attempt, not a missing-assembly error) — not a recurrence of the bug, the same harmless artifact
+reappearing under the same conditions. `dotnet`, `web`, `dotnet-windows`, `dotnet-integration` all green
+too. **Three consecutive green `playwright` runs post-fix**, against a pre-fix baseline of 3 green out of
+the last 12 — item 6 is now reasonably satisfied for the race fix, and the SqlClient fix has twice shown
+the assembly loading correctly under exactly the conditions that used to trigger the bug (a live,
+in-process SqlClient stack trace, just for an unrelated reason). Ready to consider this phase mergeable,
+pending the user's own go-ahead.
