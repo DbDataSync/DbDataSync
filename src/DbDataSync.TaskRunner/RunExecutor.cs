@@ -422,6 +422,21 @@ public sealed class RunExecutor(
             state.CompleteRun(item.RunId, RunStatus.Failed, 0, 0, ex.Message, errorDetail: ex.ToString());
             state.MarkFailed(item.Id);
         }
+        catch (WorkQueueCollisionException ex)
+        {
+            // Phase 143: this pass's own auto-triggered initial load lost its race against other
+            // in-flight work for the same mapping+segment (an operator's own concurrent reload, most
+            // likely). Unlike PositionExpired/MetadataNotCached above, there is nothing for an operator
+            // to do — this mapping's own next scheduled pass retries on its own once the winner
+            // finishes — but it still gets its own FailureKind so the Runs tab can say that plainly
+            // rather than reading like an unexplained failure.
+            Log(item.RunId, LogSeverity.Error, ex.Message);
+            state.Flush();
+            state.CompleteRun(
+                item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.ConcurrentLoadInProgress,
+                errorDetail: ex.ToString());
+            state.MarkFailed(item.Id);
+        }
         // Deliberately not caught: the owner being gone is not this item failing. Recording it as
         // Failed would be this process asserting an outcome it is in no position to observe — and it
         // is the one exception that must reach ConsumeAsync, which stops rather than starting more.

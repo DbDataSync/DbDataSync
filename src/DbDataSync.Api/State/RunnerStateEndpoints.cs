@@ -58,8 +58,21 @@ public static class RunnerStateEndpoints
         // IRunnerState.RequestInitialLoad's own doc for why.
         group.MapPost("/request-initial-load", (RequestInitialLoadRequest r) =>
         {
-            state.RequestInitialLoad(r.TaskName, r.MappingName, r.SourceTable, r.CapturedPosition, r.CapturedPositionTimeUtc);
-            return Results.Ok();
+            try
+            {
+                state.RequestInitialLoad(r.TaskName, r.MappingName, r.SourceTable, r.CapturedPosition, r.CapturedPositionTimeUtc);
+                return Results.Ok();
+            }
+            catch (WorkQueueCollisionException ex)
+            {
+                // Phase 143: the owner answering "no" (a real, expected outcome — this call lost its
+                // race against other in-flight work), not the owner being unreachable — a 409, caught
+                // explicitly rather than left to become an unhandled 500. RemoteRunnerState.IsUnreachable
+                // treats 500+ as "the owner is gone, retry/journal"; an unhandled exception here would
+                // make a normal, self-healing loss look like the state owner crashing.
+                return Results.Conflict(
+                    new WorkQueueCollisionResponse(ex.TaskName, ex.RunKind, ex.MappingName, ex.SegmentLabel));
+            }
         });
 
         // ---- Outcomes ----

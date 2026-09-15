@@ -5,12 +5,11 @@
 CI uses, and **confirmed on a real `dotnet-integration` CI run**
 (github.com/DbDataSync/DbDataSync/actions/runs/34991040790, job 104455458431 — identical numbers:
 32/32, 68/69, 123/123) — 46 failures down to 1. That one, `BulkLoadIntegrationTests.
-PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`'s intermittent row-count race, stays open (see
-its own section below); investigating it also surfaced a real, separate production bug (a losing
-auto-triggered initial load stranding `ReadHold.Loading` forever), written up and designed in
-`architecture/planning/done/initial-load-pending-batch-stranded-by-a-concurrent-reload.md` →
-`architecture/implementation/todo/phase-143-initial-load-race-loses-cleanly.md` rather than fixed here,
-since it's a production correctness bug and not a test problem.
+PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`'s intermittent row-count race, turned out to
+share its cause with a real, separate production bug (a losing auto-triggered initial load stranding
+`ReadHold.Loading` forever) this investigation also surfaced — both fully resolved by
+`architecture/implementation/done/phase-143-initial-load-race-loses-cleanly.md`. `dotnet-integration`
+has no known failures left.
 **Plan reference**: none — split out of phase 140 on 2026-09-15. This is the `ubuntu-latest`
 `dotnet-integration` job (real SQL Server/Postgres/MySQL service containers), unrelated to anything
 Windows-specific — it doesn't belong in phase 140, which is scoped to `dotnet-windows`.
@@ -186,17 +185,17 @@ resolved:
   Profiler/Extended Events on the target database to see literally what the two racing pipelines executed
   and in what order, rather than inferring from HTTP-visible state alone.
 
-**Follow-up:** the first bullet above (the losing `RequestInitialLoad` call stranding `ReadHold` at
-`Loading`) was confirmed deterministically after this doc was first written — 15 of 15 local runs of a
-real wait for the hold to clear timed out — and designed into its own phase:
-`architecture/implementation/todo/phase-143-initial-load-race-loses-cleanly.md`. That phase also found a
+**Follow-up — resolved:** the first bullet above (the losing `RequestInitialLoad` call stranding
+`ReadHold` at `Loading`) was confirmed deterministically after this doc was first written — 15 of 15
+local runs of a real wait for the hold to clear timed out — and fixed in
+`architecture/implementation/done/phase-143-initial-load-race-loses-cleanly.md`. That phase also found a
 fixture bug in this exact test: its own doc comment describes racing an *already-bootstrapped* mapping's
-ordinary sync against an on-demand reload (genuinely no collision), but the fixture never gives map-1 a
-prior pass, so it accidentally races a *brand-new* mapping's first pass instead — which phase 134 quietly
-turned into the same collision this section describes. The row-count flake may not be independent of
-that at all; phase 143 fixes the fixture (warm up map-1/map-2 first) as part of its own work, which is
-now the leading hypothesis for this flake too, not a confirmed separate bug — see phase 143's own "A
-test fixture bug this phase's own reproduction exposed."
+ordinary sync against an on-demand reload (genuinely no collision), but the fixture never gave map-1 a
+prior pass, so it accidentally raced a *brand-new* mapping's first pass instead — which phase 134 quietly
+turned into the same collision this section describes. **The row-count flake was not independent after
+all**: once both the fixture and the production race were fixed, the same file ran clean 8 times back to
+back locally (64/64 individual test executions, 0 failures) — confirmed, not merely hypothesized. The
+full `dotnet-integration` job has no known failures left.
 
 ### `DbDataSync.Drivers.MsSql.Tests` (fixed)
 

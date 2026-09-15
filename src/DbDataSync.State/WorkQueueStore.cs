@@ -68,6 +68,11 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// no-op (no new row, existing RunId returned) if an equivalent item is already
     /// Pending/Claimed/Running for this (task, kind, mapping, segment) — relies on the same
     /// ON CONFLICT DO NOTHING idiom RunLockStore.TryAcquire already uses.
+    /// <para>
+    /// This silent-collapse behaviour is correct when two callers' requests really are the same thing —
+    /// two identical reload clicks should collapse into one real reload, not run it twice. See
+    /// <see cref="EnqueueOrThrow"/> for the callers where that isn't true.
+    /// </para>
     /// </summary>
     public Guid Enqueue(
         string taskName,
@@ -79,6 +84,45 @@ public sealed class WorkQueueStore(StateDatabase database)
         string? bulkLoadBatchId = null,
         // Phase 124: a serialized DeleteGuard override — see WorkItem.DeleteGuardJson.
         string? deleteGuardJson = null) =>
+        EnqueueCore(
+            taskName, runKind, mappingName, segmentLabel, segmentJson, kinds, bulkLoadBatchId,
+            deleteGuardJson, throwOnCollision: false);
+
+    /// <summary>
+    /// Like <see cref="Enqueue"/>, except a collision with other in-flight work for this exact (task,
+    /// kind, mapping, segment) throws <see cref="WorkQueueCollisionException"/> instead of silently
+    /// returning the existing item's RunId.
+    /// <para>
+    /// For a caller whose request is genuinely independent of whoever else might be enqueuing the same
+    /// segment — currently only <c>LocalRunnerState.RequestInitialLoad</c>'s auto-triggered initial
+    /// load, which must not be silently attached to an unrelated, differently-scoped, differently-timed
+    /// reload that happens to be racing it (phase 143). Every other caller keeps using
+    /// <see cref="Enqueue"/>.
+    /// </para>
+    /// </summary>
+    public Guid EnqueueOrThrow(
+        string taskName,
+        RunKind runKind,
+        string mappingName,
+        string segmentLabel = NoSegment,
+        string? segmentJson = null,
+        WorkItemKinds? kinds = null,
+        string? bulkLoadBatchId = null,
+        string? deleteGuardJson = null) =>
+        EnqueueCore(
+            taskName, runKind, mappingName, segmentLabel, segmentJson, kinds, bulkLoadBatchId,
+            deleteGuardJson, throwOnCollision: true);
+
+    private Guid EnqueueCore(
+        string taskName,
+        RunKind runKind,
+        string mappingName,
+        string segmentLabel,
+        string? segmentJson,
+        WorkItemKinds? kinds,
+        string? bulkLoadBatchId,
+        string? deleteGuardJson,
+        bool throwOnCollision) =>
         database.Retry(() =>
         {
             using var connection = database.OpenConnection();
@@ -115,8 +159,12 @@ public sealed class WorkQueueStore(StateDatabase database)
                 if (!inserted)
                 {
                     // Already queued/in-flight — return the existing item's RunId instead of minting
-                    // an orphaned TaskRuns row for a queue row that will never exist.
+                    // an orphaned TaskRuns row for a queue row that will never exist. Unless this
+                    // caller's request isn't the same thing as whatever's already in flight, in which
+                    // case attaching to it silently would be wrong — see EnqueueOrThrow's own doc.
                     transaction.Rollback();
+                    if (throwOnCollision)
+                        throw new WorkQueueCollisionException(taskName, runKind, mappingName, segmentLabel);
                     return GetExistingRunId(connection, taskName, runKind, mappingName, segmentLabel);
                 }
             }

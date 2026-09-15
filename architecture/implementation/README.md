@@ -29,12 +29,19 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **143** — a losing auto-triggered initial load fails cleanly instead of stranding `ReadHold` | found chasing 141's own last flaky test; a real production bug in phase 134's `RequestInitialLoad`, not a test problem |
-| 2 | **034** — PostgreSQL logical replication | |
-| 3 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **034** — PostgreSQL logical replication | |
+| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-15 (latest of all): **140 and 141 are both done and removed; 143 is new.** 140 (a
+Updated 2026-09-15 (latest of all): **143 is done and removed.** Fixed the real production bug found
+while chasing phase 141's last known failure — a losing auto-triggered initial load (a mapping's own
+first pass racing a concurrent operator reload for the identical segment) used to strand `ReadHold` at
+`Loading` forever; now the loser fails cleanly and self-heals on its mapping's next scheduled pass. Also
+resolved phase 141's own still-open row-count flake, which turned out to share this exact cause via a
+stale test fixture rather than being an independent bug — `dotnet-integration` has no known failures
+left. See `architecture/implementation/done/phase-143-initial-load-race-loses-cleanly.md`.
+
+Updated 2026-09-15 (previously latest): **140 and 141 are both done and removed.** 140 (a
 separate session, on a real Windows host) fixed every remaining Windows CI failure this doc's own
 "rescoped" note below describes — see `architecture/implementation/done/phase-140-windows-ci-
 verification-and-remaining-failure.md` for the full retrospective. 141 fixed `dotnet-integration`'s

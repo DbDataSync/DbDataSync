@@ -78,11 +78,43 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
 
     public void BeginRun(Guid runId, int? pid) => Required("begin-run", new BeginRunRequest(runId, pid));
 
+    /// <summary>
+    /// Not <see cref="Required"/> — a 409 here means the owner answered "no" to a real, expected
+    /// outcome (this call lost its <c>WorkQueue</c> race — see <see cref="WorkQueueCollisionException"/>),
+    /// not "the owner is gone". <see cref="IsUnreachable"/> only treats 500+ that way; a 409 already
+    /// falls through <see cref="Send{T}"/>'s own <c>EnsureSuccessStatusCode</c> as a plain
+    /// <see cref="HttpRequestException"/>, which would reach <c>RunExecutor</c> with the type and message
+    /// this deliberately reconstructs instead — so its own <c>catch (WorkQueueCollisionException)</c>
+    /// matches over the wire the same as it does in-process (phase 143).
+    /// </summary>
     public void RequestInitialLoad(
         string taskName, string mappingName, string sourceTable,
         string capturedPosition, DateTimeOffset? capturedPositionTimeUtc) =>
-        Required("request-initial-load", new RequestInitialLoadRequest(
-            taskName, mappingName, sourceTable, capturedPosition, capturedPositionTimeUtc));
+        WithGrace<object?>(() =>
+        {
+            SendRequestInitialLoad(new RequestInitialLoadRequest(
+                taskName, mappingName, sourceTable, capturedPosition, capturedPositionTimeUtc));
+            return null;
+        });
+
+    private void SendRequestInitialLoad(RequestInitialLoadRequest body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{StateProtocol.Route}/request-initial-load")
+        {
+            Content = JsonContent.Create(body, options: Json),
+        };
+
+        using var response = _http.Send(request);
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            using var stream = response.Content.ReadAsStream();
+            var collision = JsonSerializer.Deserialize<WorkQueueCollisionResponse>(stream, Json)!;
+            throw new WorkQueueCollisionException(
+                collision.TaskName, collision.RunKind, collision.MappingName, collision.SegmentLabel);
+        }
+
+        response.EnsureSuccessStatusCode();
+    }
 
     // ---- Outcomes: journal rather than lose ----
 

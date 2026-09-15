@@ -38,6 +38,33 @@ public sealed class WorkQueueStoreTests : IDisposable
     }
 
     [Fact]
+    public void EnqueueOrThrow_WhileAnEquivalentItemIsAlreadyPending_ThrowsInstead_NoNewRow()
+    {
+        var first = _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "full");
+
+        var ex = Assert.Throws<WorkQueueCollisionException>(
+            () => _queue.EnqueueOrThrow("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "full"));
+
+        Assert.Equal("crm-sync", ex.TaskName);
+        Assert.Equal(RunKind.BulkLoad, ex.RunKind);
+        Assert.Equal("orders", ex.MappingName);
+        Assert.Equal("full", ex.SegmentLabel);
+        // The losing call minted nothing of its own — only the winner's row exists.
+        Assert.Single(_taskRunStore.GetRunHistory("crm-sync", RunKind.BulkLoad));
+        Assert.Equal(first, _taskRunStore.GetRunHistory("crm-sync", RunKind.BulkLoad).Single().RunId);
+    }
+
+    [Fact]
+    public void EnqueueOrThrow_WithNothingAlreadyInFlight_EnqueuesNormally()
+    {
+        var runId = _queue.EnqueueOrThrow("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "full");
+
+        var run = _taskRunStore.GetRun(runId);
+        Assert.NotNull(run);
+        Assert.Equal(RunStatus.Queued, run!.Status);
+    }
+
+    [Fact]
     public void Enqueue_DifferentSegmentLabels_AreIndependent()
     {
         var range1 = _queue.Enqueue("crm-sync", RunKind.BulkLoad, "orders", segmentLabel: "1-1000");

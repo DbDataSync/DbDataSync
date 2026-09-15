@@ -39,9 +39,13 @@ internal sealed class RealInitialLoadEnqueuer(
 
         batchStore.CreateBatch(batchId, replicationName, mappingName, segments.Count, estimatedRows: null, estimateCaveat: null);
 
+        // Phase 143: EnqueueOrThrow, not Enqueue — this request is not the same thing as whatever else
+        // might already be enqueuing this mapping's segments (an explicit Bulk Load trigger racing this
+        // mapping's own auto-triggered load, say), so a collision must not be silently attached to it.
+        // Mirrors BulkLoadService.EnqueueForInitialLoadAsync's own use of the same throwing variant.
         foreach (var segment in segments)
         {
-            workQueueStore.Enqueue(
+            workQueueStore.EnqueueOrThrow(
                 replicationName, RunKind.BulkLoad, mappingName, segment.Describe(),
                 SegmentSerializer.Serialize(segment), WorkItemKinds.FromConfig, batchId);
         }

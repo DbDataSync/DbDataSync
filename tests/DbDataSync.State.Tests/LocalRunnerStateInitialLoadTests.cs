@@ -8,11 +8,16 @@ namespace DbDataSync.State.Tests;
 /// segment and whether the batch it belongs to has just reached <see cref="BulkLoadState.Completed"/>.
 /// If so, it promotes whichever mapping's pending initial load names that batch
 /// (<see cref="ChangeWatermarkStore.PromotePendingLoad"/>) — the "one act" phase 134's design calls for.
+/// <para>
+/// Also covers phase 143's own change to <see cref="LocalRunnerState.RequestInitialLoad"/> itself —
+/// see the tests at the bottom of this file.
+/// </para>
 /// </summary>
 public sealed class LocalRunnerStateInitialLoadTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("dbdatasync-state-tests-").FullName;
     private readonly WorkQueueStore _workQueue;
+    private readonly TaskRunStore _taskRuns;
     private readonly ChangeWatermarkStore _watermarks;
     private readonly BulkLoadBatchStore _bulkLoadBatches;
     private readonly LogWriter _logs;
@@ -25,16 +30,16 @@ public sealed class LocalRunnerStateInitialLoadTests : IDisposable
     public LocalRunnerStateInitialLoadTests()
     {
         var database = new StateDatabase(Path.Combine(_tempDir, "state.db"));
-        var taskRuns = new TaskRunStore(database);
+        _taskRuns = new TaskRunStore(database);
         _workQueue = new WorkQueueStore(database);
         _watermarks = new ChangeWatermarkStore(database);
         _bulkLoadBatches = new BulkLoadBatchStore(database);
         _logs = new LogWriter(database);
 
         _state = new LocalRunnerState(
-            taskRuns, _workQueue, new RunLockStore(database), _watermarks,
+            _taskRuns, _workQueue, new RunLockStore(database), _watermarks,
             new VerificationResultStore(database), _logs, _bulkLoadBatches,
-            new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledEnqueuer()));
+            new Lazy<IInitialLoadEnqueuer>(() => new SingleFullSegmentEnqueuer(_workQueue, _bulkLoadBatches)));
     }
 
     public void Dispose()
@@ -43,13 +48,21 @@ public sealed class LocalRunnerStateInitialLoadTests : IDisposable
         Directory.Delete(_tempDir, recursive: true);
     }
 
-    /// <summary>Never exercised here — none of these tests drive <c>RequestInitialLoad</c> — but
-    /// <see cref="LocalRunnerState"/>'s constructor needs one.</summary>
-    private sealed class NeverCalledEnqueuer : IInitialLoadEnqueuer
+    /// <summary>A real (not stubbed) <see cref="IInitialLoadEnqueuer"/> for
+    /// <see cref="RequestInitialLoad_WhenNothingElseIsInFlight_SetsThePendingLoad"/> and its neighbours
+    /// below — always a single <see cref="FullSegment"/>, since this file has no
+    /// <c>ConfigRepository</c>/mapping to resolve a real <c>DefaultSegmenting</c> from. Mirrors
+    /// <c>RealInitialLoadEnqueuer</c>'s own default for an unconfigured mapping.</summary>
+    private sealed class SingleFullSegmentEnqueuer(WorkQueueStore workQueue, BulkLoadBatchStore batches)
+        : IInitialLoadEnqueuer
     {
         public Task EnqueueForInitialLoadAsync(
-            string replicationName, string mappingName, string batchId, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Not expected to be called by these tests.");
+            string replicationName, string mappingName, string batchId, CancellationToken cancellationToken)
+        {
+            batches.CreateBatch(batchId, replicationName, mappingName, segmentCount: 1, estimatedRows: null, estimateCaveat: null);
+            workQueue.EnqueueOrThrow(replicationName, RunKind.BulkLoad, mappingName, "full", segmentJson: null, kinds: null, batchId);
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary><c>Completed</c> does all three, once: the pending position becomes live, the hold
@@ -127,5 +140,41 @@ public sealed class LocalRunnerStateInitialLoadTests : IDisposable
         var read = _watermarks.GetReadState(TaskName, MappingName, SourceTable)!;
         Assert.Equal(ReadHold.Loading, read.Hold);
         Assert.Null(read.Watermark);
+    }
+
+    /// <summary>The ordinary case: nothing else in flight, so the enqueue wins and the pending load is
+    /// recorded — <see cref="LocalRunnerState.RequestInitialLoad"/>'s own reordering (phase 143) doesn't
+    /// change this outcome, only what happens when it loses (below).</summary>
+    [Fact]
+    public void RequestInitialLoad_WhenNothingElseIsInFlight_SetsThePendingLoad()
+    {
+        _state.RequestInitialLoad(TaskName, MappingName, SourceTable, "999", null);
+
+        var read = _watermarks.GetReadState(TaskName, MappingName, SourceTable)!;
+        Assert.Equal(ReadHold.Loading, read.Hold);
+        Assert.Single(_taskRuns.GetRunHistory(TaskName, RunKind.BulkLoad));
+    }
+
+    /// <summary>
+    /// Phase 143's own fix, direct: a second request for the identical mapping+segment — modelling an
+    /// operator's own concurrent reload racing this mapping's auto-trigger, from whichever side loses —
+    /// throws rather than silently colliding, and leaves the winner's own already-durable pending-load
+    /// state exactly as the winner left it. Before this phase, the losing call's own
+    /// <c>SetPendingLoad</c> ran unconditionally and overwrote <c>PendingBulkLoadBatchId</c> with a batch
+    /// nothing would ever complete — the strand this phase exists to make impossible.
+    /// </summary>
+    [Fact]
+    public void RequestInitialLoad_WhenAnotherLoadForTheSameMappingIsAlreadyInFlight_ThrowsAndLeavesTheWinnerAlone()
+    {
+        _state.RequestInitialLoad(TaskName, MappingName, SourceTable, "999", null);
+
+        Assert.Throws<WorkQueueCollisionException>(
+            () => _state.RequestInitialLoad(TaskName, MappingName, SourceTable, "1234", null));
+
+        var read = _watermarks.GetReadState(TaskName, MappingName, SourceTable)!;
+        // Still Loading — the winner's own hold, untouched by the loser.
+        Assert.Equal(ReadHold.Loading, read.Hold);
+        // Still exactly one BulkLoad run for this mapping — the loser minted no durable work of its own.
+        Assert.Single(_taskRuns.GetRunHistory(TaskName, RunKind.BulkLoad));
     }
 }

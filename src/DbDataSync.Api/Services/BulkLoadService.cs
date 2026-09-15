@@ -71,7 +71,8 @@ public sealed class BulkLoadService(
         // Monitoring screen can add the segments back up.
         var batchId = Guid.NewGuid().ToString("N");
         var runIds = await CreateBatchAndEnqueueAsync(
-            task, mapping, replicationName, mappingName, batchId, segments, kinds, cancellationToken);
+            task, mapping, replicationName, mappingName, batchId, segments, kinds,
+            throwOnCollision: false, cancellationToken);
 
         var ensureResult = supervisor.EnsureWorkerRunning(replicationName);
         return ensureResult.Outcome == TriggerOutcome.FailedToStart ? ensureResult : TriggerResult.Started(runIds);
@@ -111,9 +112,13 @@ public sealed class BulkLoadService(
 
         var segments = await ExpandAsync(task, mapping, requested, readerKindOverride: null, cancellationToken);
 
+        // Phase 143: unlike the operator-facing path above, this request is not the same thing as
+        // whatever else might already be enqueuing this mapping's segments — a losing collision here
+        // must not be silently attached to it (see WorkQueueCollisionException's own doc). The caller,
+        // LocalRunnerState.RequestInitialLoad, lets this propagate rather than catching it.
         await CreateBatchAndEnqueueAsync(
             task, mapping, replicationName, mappingName, batchId, segments, WorkItemKinds.FromConfig,
-            cancellationToken);
+            throwOnCollision: true, cancellationToken);
 
         supervisor.EnsureWorkerRunning(replicationName);
     }
@@ -124,23 +129,26 @@ public sealed class BulkLoadService(
     /// <c>COUNT(RunId)</c>, which undercounts when an equivalent segment was already in flight), and one
     /// <c>WorkQueue</c> row per segment.
     /// </summary>
+    /// <param name="throwOnCollision">True for the auto-triggered-initial-load path, where a collision
+    /// with other in-flight work for the same mapping+segment is a different caller's request, not this
+    /// one's own — see <see cref="WorkQueueStore.EnqueueOrThrow"/>. False for the operator-facing path,
+    /// where two requests for the same segment really are the same thing and should collapse.</param>
     private async Task<IReadOnlyList<Guid>> CreateBatchAndEnqueueAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, string replicationName, string mappingName,
         string batchId, IReadOnlyList<BatchReloadSegment> segments, WorkItemKinds kinds,
-        CancellationToken cancellationToken)
+        bool throwOnCollision, CancellationToken cancellationToken)
     {
         var (estimatedRows, estimateCaveat) = await EstimateRowsAsync(task, mapping, cancellationToken);
         batchStore.CreateBatch(batchId, replicationName, mappingName, segments.Count, estimatedRows, estimateCaveat);
 
         return segments
-            .Select(segment => workQueueStore.Enqueue(
-                replicationName,
-                RunKind.BulkLoad,
-                mappingName,
-                segment.Describe(),
-                SegmentSerializer.Serialize(segment),
-                kinds,
-                batchId))
+            .Select(segment => throwOnCollision
+                ? workQueueStore.EnqueueOrThrow(
+                    replicationName, RunKind.BulkLoad, mappingName, segment.Describe(),
+                    SegmentSerializer.Serialize(segment), kinds, batchId)
+                : workQueueStore.Enqueue(
+                    replicationName, RunKind.BulkLoad, mappingName, segment.Describe(),
+                    SegmentSerializer.Serialize(segment), kinds, batchId))
             .ToList();
     }
 

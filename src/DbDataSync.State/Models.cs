@@ -235,6 +235,13 @@ public static class RunFailureKinds
     /// the table's shape this pass needed to run at all — phase 91.
     /// </summary>
     public const string MetadataNotCached = "MetadataNotCached";
+
+    /// <summary>A mapping's own auto-triggered initial load lost its race against other in-flight work
+    /// for the same mapping+segment (an operator's own concurrent reload, most likely) — see
+    /// <c>WorkQueueCollisionException</c>. Unlike the two kinds above, the fix is not an operator action:
+    /// the mapping's own next scheduled pass retries this on its own once the winner finishes — phase
+    /// 143.</summary>
+    public const string ConcurrentLoadInProgress = "ConcurrentLoadInProgress";
 }
 
 /// <param name="ResultPath">Where the parquet is. The index says where; the file says what.</param>

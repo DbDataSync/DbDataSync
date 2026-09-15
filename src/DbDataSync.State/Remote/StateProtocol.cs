@@ -40,6 +40,12 @@ public sealed record BeginRunRequest(Guid RunId, int? Pid);
 public sealed record RequestInitialLoadRequest(
     string TaskName, string MappingName, string SourceTable,
     string CapturedPosition, DateTimeOffset? CapturedPositionTimeUtc);
+/// <summary>Phase 143 — the 409 body <c>/request-initial-load</c> returns when
+/// <see cref="WorkQueueCollisionException"/> is thrown server-side, carrying enough to reconstruct the
+/// same exception (and its same message) on the runner's own side rather than losing its type crossing
+/// the wire. See <c>RemoteRunnerState.RequestInitialLoad</c>.</summary>
+public sealed record WorkQueueCollisionResponse(
+    string TaskName, RunKind RunKind, string MappingName, string SegmentLabel);
 public sealed record WorkItemRequest(long WorkItemId);
 public sealed record CompleteRunRequest(
     Guid RunId, RunStatus Status, long RowsRead, long RowsWritten, string? ErrorSummary,

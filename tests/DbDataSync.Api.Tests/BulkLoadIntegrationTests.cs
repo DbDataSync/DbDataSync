@@ -93,10 +93,32 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
     /// Both pipelines converge on "the target matches the source" — the source doesn't change during
     /// the test — so the interleaving between them doesn't make the final state ambiguous.
     /// </para>
+    /// <para>
+    /// **Warms up both mappings first, deliberately.** Phase 134 made a mapping's very first Primary
+    /// pass auto-request a Bulk Load too (for a position-capturing reader, which Change Tracking is) —
+    /// racing that against this test's own explicit reload is a completely different scenario (the
+    /// subject of phase 143, not this test), and without a warm-up this test was quietly exercising it
+    /// by accident: a brand-new mapping's first pass and an on-demand reload of the identical segment,
+    /// not the already-bootstrapped-mapping-vs-reload coexistence this test's name and doc comment
+    /// actually describe. See <see cref="ARaceBetweenAConcurrentReloadAndAMappingsOwnFirstPass_TheLoserFailsCleanly_AndSelfHeals"/>
+    /// for that scenario, deliberately, instead.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed()
     {
+        var warmupRunIds = await ReadRunIdsAsync(await _client.PostAsync(
+            $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json")));
+        Assert.Equal(2, warmupRunIds.Count);
+        AssertAllSucceeded(await Task.WhenAll(warmupRunIds.Select(PollUntilTerminalAsync)));
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "map-1");
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "map-2");
+        Assert.Equal(RowsPerTable, await CountAsync("Tgt_1"));
+        Assert.Equal(RowsPerTable, await CountAsync("Tgt_2"));
+
+        // The test's real subject: both mappings already have a live watermark, so this Primary
+        // trigger is a genuinely incremental pass for each — no auto-triggered Bulk Load, no collision
+        // with the explicit reload below, exactly the coexistence this test is named for.
         var primaryTask = _client.PostAsync(
             $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json"));
         var bulkLoadTask = PostBulkLoadAsync("map-1", new FullSegment());
@@ -118,6 +140,67 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
 
         Assert.Equal(RowsPerTable, await CountAsync("Tgt_1"));
         Assert.Equal(RowsPerTable, await CountAsync("Tgt_2"));
+    }
+
+    /// <summary>
+    /// Phase 143's own scenario, deliberately — what
+    /// <see cref="PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed"/> exercised by accident before
+    /// its own warm-up was added: a brand-new mapping's first-ever Primary pass (Change Tracking, a
+    /// position-capturing reader) auto-requests a Bulk Load for the same instant an operator's own
+    /// explicit reload requests the identical segment. Two independent requests, not one that happens
+    /// to arrive twice — the loser (confirmed by direct `WorkQueue` inspection during diagnosis: the
+    /// explicit trigger consistently wins, since it enqueues immediately on the HTTP request rather
+    /// than waiting on a worker to claim and start processing the Primary pass first) fails cleanly
+    /// with <see cref="DbDataSync.State.RunFailureKinds.ConcurrentLoadInProgress"/>, not merged into the
+    /// winner's own outcome and not stranding the mapping's `ReadHold`. Its next scheduled pass, with
+    /// nothing racing it this time, converges the mapping on its own.
+    /// </summary>
+    [Fact]
+    public async Task ARaceBetweenAConcurrentReloadAndAMappingsOwnFirstPass_TheLoserFailsCleanly_AndSelfHeals()
+    {
+        var primaryTask = _client.PostAsync(
+            $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json"));
+        var bulkLoadTask = PostBulkLoadAsync("map-1", new FullSegment());
+
+        var primaryRunIds = await ReadRunIdsAsync(await primaryTask);
+        var bulkLoadRunIds = await ReadRunIdsAsync(await bulkLoadTask);
+        Assert.Equal(2, primaryRunIds.Count);
+        Assert.Single(bulkLoadRunIds);
+
+        var primaryRuns = await Task.WhenAll(primaryRunIds.Select(PollUntilTerminalAsync));
+        var bulkLoadRun = await PollUntilTerminalAsync(bulkLoadRunIds[0]);
+
+        // The explicit reload wins and genuinely moves the data — unaffected by the race.
+        Assert.Equal("Succeeded", bulkLoadRun.GetProperty("status").GetString());
+        Assert.Equal(RowsPerTable, await CountAsync("Tgt_1"));
+
+        // map-1's own Primary pass lost: it's the one that auto-requested the identical segment,
+        // reliably after the explicit trigger's own enqueue already landed.
+        var map1Primary = Assert.Single(primaryRuns, r => r.GetProperty("mappingName").GetString() == "map-1");
+        Assert.Equal("Failed", map1Primary.GetProperty("status").GetString());
+        Assert.Equal("ConcurrentLoadInProgress", map1Primary.GetProperty("failureKind").GetString());
+        Assert.Contains("already in progress", map1Primary.GetProperty("errorSummary").GetString());
+
+        // map-2 was never part of the race — its own auto-trigger had nothing to collide with. Wait
+        // for its own (unrelated) Bulk Load to finish before triggering again below: the manual trigger
+        // endpoint enqueues a Primary pass per mapping regardless of ReadHold (only
+        // SchedulerService.FilterHeld checks that, for the scheduler's own automatic due-check), so
+        // re-triggering while map-2 is still genuinely Loading would race *it* too — a real, separate,
+        // pre-existing gap this test isn't about (see the planning doc this investigation also wrote
+        // up: a manual re-trigger against a still-Loading mapping resolves to Changes intent, once its
+        // ChangeWatermarks row exists at all, against a watermark that isn't live yet).
+        var map2Primary = Assert.Single(primaryRuns, r => r.GetProperty("mappingName").GetString() == "map-2");
+        Assert.Equal("Succeeded", map2Primary.GetProperty("status").GetString());
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "map-2");
+
+        // Self-healing: map-1 still has no live watermark (its own attempt never promoted one), so its
+        // next scheduled pass tries the whole capture-and-request sequence again — and this time wins
+        // cleanly, with nothing left racing it.
+        var retryRunIds = await ReadRunIdsAsync(await _client.PostAsync(
+            $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json")));
+        AssertAllSucceeded(await Task.WhenAll(retryRunIds.Select(PollUntilTerminalAsync)));
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "map-1");
+        Assert.Equal(RowsPerTable, await CountAsync("Tgt_1"));
     }
 
     /// <summary>

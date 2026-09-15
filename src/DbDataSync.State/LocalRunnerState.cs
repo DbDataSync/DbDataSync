@@ -62,10 +62,21 @@ public sealed class LocalRunnerState(
     public void BeginRun(Guid runId, int? pid) => taskRuns.BeginRun(runId, pid);
 
     /// <summary>
-    /// Phase 134. Fail closed, in this order: the pending position and the <c>Loading</c> hold are
-    /// durable before any work exists to do it, never the other way around — a crash between the two
-    /// steps must leave "held, nothing queued yet", not "queued, with nothing stopping a concurrent
-    /// Primary pass against the same mapping".
+    /// Phase 134, reordered by phase 143. Enqueue first, and only make the pending position/<c>Loading</c>
+    /// hold durable once that enqueue is known to have actually created this mapping's own real work —
+    /// never the other way around. The two-caller race this exists for (an operator's own reload racing
+    /// this exact auto-trigger for the identical segment) resolves at the <c>WorkQueue</c> uniqueness
+    /// constraint (see <see cref="WorkQueueStore.EnqueueOrThrow"/>): the loser throws, propagates
+    /// uncaught (a "Prerequisite" call, per <see cref="IRunnerState.RequestInitialLoad"/>'s own doc), and
+    /// this mapping's <c>ReadHold</c> never leaves whatever it already was — no stranded pending-load
+    /// state pointing at a batch nothing will ever complete. Writing the pending state *before* knowing
+    /// the outcome was phase 134's original design and is exactly the bug phase 143 fixes: a crash (or a
+    /// lost race) between the two steps left "held, with nothing that will ever un-hold it" — permanent,
+    /// not self-correcting. This order's own crash window is milder: a crash between a successful enqueue
+    /// and this call recording it durably leaves the real work to complete anyway
+    /// (<see cref="ChangeWatermarkStore.PromotePendingLoad"/> simply finds no row waiting on that batch,
+    /// the same harmless no-match an operator's own ordinary reload already produces), at the cost of one
+    /// redundant reload attempt on this mapping's next pass rather than a permanent strand.
     /// </summary>
     public void RequestInitialLoad(
         string taskName, string mappingName, string sourceTable,
@@ -73,15 +84,16 @@ public sealed class LocalRunnerState(
     {
         var batchId = Guid.NewGuid().ToString("N");
 
-        watermarks.SetPendingLoad(taskName, mappingName, sourceTable, capturedPosition, capturedPositionTimeUtc, batchId);
-
         // IRunnerState is synchronous end to end (RemoteRunnerState's own HTTP calls block too); the
         // segment expansion this reuses is async only for the Auto/Custom segments an initial load's
         // DefaultSegmenting will rarely use, and this process — the API, under ASP.NET Core's
         // synchronization-context-free server — has nothing for a blocking wait here to deadlock
-        // against.
+        // against. Throws WorkQueueCollisionException on a lost race — deliberately not caught here,
+        // the same as every other prerequisite this method's own caller relies on.
         initialLoadEnqueuer.Value.EnqueueForInitialLoadAsync(taskName, mappingName, batchId, CancellationToken.None)
             .GetAwaiter().GetResult();
+
+        watermarks.SetPendingLoad(taskName, mappingName, sourceTable, capturedPosition, capturedPositionTimeUtc, batchId);
     }
 
     public void MarkRunning(long workItemId) => workQueue.MarkRunning(workItemId);
