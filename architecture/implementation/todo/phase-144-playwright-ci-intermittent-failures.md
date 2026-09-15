@@ -389,3 +389,18 @@ spec, passed. Bisecting product commits would start in the wrong place.
 4. On green (repeated, with no SqlClient recurrence) and item 4's decision already recorded above, move
    this doc to `implementation/done/` in the merge commit, rewritten as a retrospective per the usual
    convention.
+
+**Update — second CI run (`35033667955`, after the SqlClient fix), all jobs green**: `playwright`
+104/104 passed, zero retries — second green `playwright` run in a row on this branch (the first, before
+the SqlClient fix even landed, only proved the race fix). `dotnet-windows` also went green this time
+(the `RunWatermarkTimeTests` flake noted after the first run did not recur — consistent with it being an
+unrelated, pre-existing flake, not something this branch caused). One real `Microsoft.Data.SqlClient`
+event did appear in this run's `[WebServer]` log — a `SqlException: Login failed for user 'sa'` from
+`ChangePollingGate.AdmitAsync`, immediately after "Nonqualified transactions are being rolled back" at
+the very end of the run (global teardown dropping the test database while a background poll happened to
+fire at the same moment) — handled gracefully (a `warn`-level log, "dispatching its 2 due mapping(s)
+unfiltered", not a crash), and notably **a real login attempt that reached the server**, not a
+`FileNotFoundException` — i.e. exactly the kind of ordinary network/timing noise the fix was never meant
+to touch, further confirming the assembly itself loads correctly now. Two consecutive green
+`playwright` runs is encouraging but is not yet the "several consecutive runs" item 6 asks for before
+merging, given this job's pre-fix history of passing 3 of 12 runs by chance alone.
