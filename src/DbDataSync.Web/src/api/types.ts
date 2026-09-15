@@ -1161,6 +1161,27 @@ export interface BulkLoadBatchProgress {
 }
 
 /**
+ * The query parameters `bulk-loads/history` takes — see phase 139. Only `mappingName`, unlike
+ * `RunHistoryFilters` beside it: this history has no `kind` (every row here is already a bulk load)
+ * and no `status` filter in this first version (see the phase doc's own "What this does not build").
+ */
+export interface BulkLoadHistoryFilters {
+  mappingName?: string
+  /** Opaque — round-tripped verbatim from a previous page's `nextCursor`, never built by hand. */
+  cursor?: string
+}
+
+/**
+ * The bulk-load-history endpoint's shape since phase 139 — a page of batches, and where the next one
+ * starts. Mirrors `RunHistoryPage`'s own shape and the same "opaque, round-trip only" contract for
+ * `nextCursor`.
+ */
+export interface BulkLoadHistoryPage {
+  batches: BulkLoadBatchProgress[]
+  nextCursor: string | null
+}
+
+/**
  * The query parameters `runs` and `runs/watermark-times` both take, since phase 104 — kept as one
  * type so the two client calls building a query string from it cannot quietly drift apart, which
  * would blank the watermark column for a filtered or paged run that has one.

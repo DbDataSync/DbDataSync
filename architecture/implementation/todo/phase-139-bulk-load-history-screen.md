@@ -152,3 +152,131 @@ way `RunsPanel`'s does).
   base** rather than being two structurally-identical, independently-written classes — a real
   reuse-vs-duplication call, better made once the second implementation exists side by side with the
   first rather than guessed at from the plan.
+
+## Handoff — 2026-09-15
+
+**Status: implemented, fast-checked locally, not yet reviewed by CI.** Branch
+`phase-139-bulk-load-history-screen`, cut from an up-to-date `main` (133/134/138 already landed). Built
+the whole phase per the doc above, plus the orchestrator's own file/line grounding — nothing here was
+re-decided against what the doc had already settled.
+
+### What's done
+
+**Backend**, mirroring phase 104's Run History exactly:
+- `src/DbDataSync.State/BulkLoadBatchStore.cs` — `BulkLoadHistoryCursor(DateTimeOffset CreatedAtUtc,
+  string BatchId)` and `BulkLoadHistoryPage(IReadOnlyList<BulkLoadBatchProgress> Batches,
+  BulkLoadHistoryCursor? NextCursor)`, plus `BulkLoadBatchStore.GetHistory(taskName, mappingName?,
+  cursor?, limit = 20)` beside (not replacing) `GetRecentBulkLoads`. Same `SELECT`/`GROUP BY` as
+  `GetRecentBulkLoads`/`GetBatch`, with the keyset predicate
+  (`b.CreatedAtUtc < $cursorTime OR (b.CreatedAtUtc = $cursorTime AND b.BatchId < $cursorBatchId)`) and
+  the optional `b.MappingName = $mappingName` filter both added to the `WHERE` ahead of the
+  `GROUP BY` — confirmed empirically (all three engines' worth of shape already proven by
+  `GetRecentBulkLoads` itself), not just reasoned about.
+- `src/DbDataSync.Api/Services/BulkLoadHistoryCursorCodec.cs` — new, independent of
+  `RunHistoryCursorCodec` rather than sharing a generic base (see "Open question," below, resolved).
+- `src/DbDataSync.Api/Models/BulkLoadHistoryResponse.cs` — `(IReadOnlyList<BulkLoadBatchProgress>
+  Batches, string? NextCursor)`, mirroring `RunHistoryResponse`.
+- `src/DbDataSync.Api/Controllers/RunsController.cs` — new `GET
+  /api/replications/{name}/bulk-loads/history?mappingName=&cursor=&limit=`, beside `BulkLoads`
+  unchanged. `limit` clamped `Math.Clamp(limit, 1, 20)`, same range as `BulkLoads`' own clamp, default
+  20 (Run History's own scale, not the Monitoring card's 5).
+
+**Backend tests**:
+- `tests/DbDataSync.Api.Tests/BulkLoadHistoryCursorCodecTests.cs` — round-trip (with and without a
+  `mappingName`), null/empty/garbage token resets to page one, a cursor replayed under a different
+  `taskName` or `mappingName` resets to page one. 6 tests, pure unit (no `TestApiFactory`), all passing.
+- `tests/DbDataSync.State.Tests/BulkLoadBatchStoreTests.cs` — 4 new `GetHistory` tests: pages
+  newest-first across a keyset boundary with no duplicate/skipped batch (3 batches, limit 2); the
+  `mappingName` filter scopes to one mapping; a batch with every segment still `Queued` (no `TaskRuns`
+  row at all yet) still appears, `StartedAtUtc` null; scoped to the replication. Runs on real SQLite,
+  no Docker — all 11 tests in the file (7 pre-existing + 4 new) pass.
+- `tests/DbDataSync.Api.Tests/RunsControllerTests.cs` — 3 new tests against the real endpoint through
+  `TestApiFactory` (SQLite-backed, no Docker/SQL-Server dependency despite living in
+  `DbDataSync.Api.Tests`): `limit` clamps to 20 even when 999 is asked for and 25 batches exist; a
+  garbage cursor resets to page one rather than erroring; a cursor minted under one `mappingName`
+  filter, replayed with a different one, resets to page one. All 10 tests in the file (7 pre-existing +
+  3 new) pass locally.
+
+**Frontend**, mirroring `PauseHistoryPanel`'s static posture crossed with `RunsPanel`'s cursor-stack
+pagination:
+- `src/DbDataSync.Web/src/pages/replication-detail/BulkLoadHistoryPanel.tsx` — new. Table columns
+  exactly as specified (Started/Mapping/Segments/Rows copied/State), reusing
+  `BulkLoadProgressCard`'s exact inline string shapes for segments (`X / Y` + `· N failed`) and rows
+  copied (`rowsCopied.toLocaleString()` + `≈ estimatedRows` when present) rather than extracting a
+  shared helper — that card's own `Figure` comment already notes "the codebase keeps its own per file"
+  for this kind of small local formatting, so a new file following the same convention read as more
+  consistent than a first shared helper extracted from just two call sites. `cursorStack: (string |
+  null)[]` state and Older/Newer buttons matching `RunsPanel`'s interaction shape exactly
+  (`data-testid="bulk-load-history-page-older"`/`"-newer"`), and changing the mapping filter resets the
+  stack to `[null]` the same way `RunsPanel.changeMapping` does. `useBulkLoadHistory` carries no
+  `refetchInterval` at all — a plain `useQuery`.
+  - Each row also carries `data-batch-id` (beyond the generic `data-testid="bulk-load-history-row"`)
+    and per-batch cell test ids (`bulk-load-history-segments-${batchId}`, etc.) — not named in the
+    orchestrator's own spec, added because a Playwright spec asserting on one specific seeded batch
+    among several needs something more addressable than a bare repeated testid, the same reason
+    `RunsPanel` keys its own per-run testids by `runId`.
+- `src/DbDataSync.Web/src/api/types.ts` — `BulkLoadHistoryFilters`/`BulkLoadHistoryPage`, beside
+  `BulkLoadBatchProgress`.
+- `src/DbDataSync.Web/src/api/client.ts` — `bulkLoadHistoryQuery` (mirrors `runHistoryQuery`) and
+  `api.replications.bulkLoadHistory`, beside `bulkLoads`.
+- `src/DbDataSync.Web/src/api/hooks.ts` — `useBulkLoadHistory`, no `refetchInterval` parameter at all
+  (unlike `useRunHistory`/`useRecentBulkLoads`, which both take one).
+- `src/DbDataSync.Web/src/pages/replication-detail/MonitoringPanel.tsx` — fourth `MONITORING_TABS`
+  entry, `MonitoringBulkLoadHistoryTab()` mirroring `MonitoringPauseHistoryTab()`.
+- `src/DbDataSync.Web/src/App.tsx` — `<Route path="bulk-load-history" ...>` beside `pause-history`.
+
+**Playwright**: `tests/DbDataSync.Web.Tests/tests/bulk-load-history.spec.ts` — new, standalone (not
+in `golden-path.spec.ts`), following `run-history-filtering-and-paging.spec.ts`'s own pattern: a fake
+server (`serverPage`) that actually implements `mappingName`-filtered, keyset-paged, newest-first
+semantics against a 22-batch fixture (19 `orders` + 3 `customers`, `customers` newest) deep enough to
+cross the endpoint's own 20-row default page. Three tests: (1) the sub-tab renders and a seeded batch
+shows the right Segments/Rows copied/State text, plus a distinct `Running` batch reads as running; (2)
+the mapping filter narrows the whole history, not just the page already on screen (proven by making the
+oldest `orders` batch — page two of the *unfiltered* list — appear on page one once filtered); (3)
+Older/Newer moves between the two real pages and back. Screenshots at
+`screenshots/bulk-load-history/*.png`, `screenshots/README.md` updated with the new row.
+
+### Verification actually run this session
+
+- `dotnet build` on `DbDataSync.State`, `DbDataSync.Api`, and (transitively) their test projects — all
+  clean.
+- `dotnet test tests/DbDataSync.State.Tests` — full suite, **249 passed, 0 failed** (includes the 4 new
+  `GetHistory` tests).
+- `dotnet test tests/DbDataSync.Core.Tests` — full suite, **252 passed, 0 failed** (unrelated to this
+  phase, run per the process instructions' own "fast local checks" list).
+- `dotnet test tests/DbDataSync.Api.Tests --filter FullyQualifiedName~BulkLoadHistoryCursorCodecTests`
+  and `--filter FullyQualifiedName~RunsControllerTests` — **6/6** and **10/10** passed. Deliberately
+  filtered rather than running the whole `DbDataSync.Api.Tests` project: other files in that assembly
+  are genuinely Docker-backed (real SQL Server/Postgres containers), and the process instructions say
+  not to run that suite more than once, if at all, in a session — these two filters exercise every new
+  line without touching that surface. Both filtered classes use only `TestApiFactory`'s SQLite-backed
+  in-process host, no real external database.
+- `npm run build` and `npm run lint` in `src/DbDataSync.Web` — clean (lint's pre-existing warnings are
+  all in files this phase did not touch).
+- **The Playwright spec was actually run**, not just written — `npx playwright test
+  tests/bulk-load-history.spec.ts --project=chromium` against the real API + built SPA + the sandbox's
+  already-running `dbdatasync-mssql-source`/`-target` containers (global setup needs them regardless of
+  which spec runs). **3/3 passed.** This is a deviation from the task's own framing of manual browser
+  verification as a "nice to have" — running the spec itself (not a manual click-through) was both more
+  thorough and no more expensive once the containers were confirmed already up, so it was run rather
+  than skipped.
+
+### Open question, resolved: independent codec, not a shared base
+
+Wrote `BulkLoadHistoryCursorCodec` as its own class rather than factoring out a generic base with
+`RunHistoryCursorCodec`. What is actually identical between them — an opaque base64-JSON envelope, and
+"decode failure of any kind means page one" — is a handful of lines each. What differs is real: the
+tiebreak field's type (`Guid RunId` vs. `string BatchId`) and the filter count (three vs. one), which
+means a shared base would need either a generic tiebreak type parameter or a filter list represented
+some other way — more indirection than the ~15 duplicated lines it would save. Two small, obviously
+parallel classes read as more honest about what they are than one generic one would.
+
+### What's left
+
+Nothing known. Every item in the phase doc's own "How it will be verified" section has a passing test
+or a real (not simulated) run behind it, and every decision the doc left open above is resolved with a
+reason recorded. The usual CI-only gaps remain unconfirmed by this session precisely because they need
+the Docker-backed suite: `DbDataSync.Api.Tests`' full run (the rest of that assembly, untouched by this
+phase) and the full Playwright suite (only the new spec was run in isolation, not `golden-path.spec.ts`
+et al. — no reason to expect a regression there, since nothing shared was changed, but unconfirmed is
+unconfirmed).

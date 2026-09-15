@@ -141,6 +141,85 @@ public sealed class RunsControllerTests(TestApiFactory factory) : IClassFixture<
         Assert.Null(page2.NextCursor);
     }
 
+    // ---- Phase 139: the bulk-load-history endpoint --------------------------------------------
+
+    /// <summary>Deserialization target for the bulk-load-history endpoint's page shape — mirrors
+    /// <c>DbDataSync.Api.Models.BulkLoadHistoryResponse</c> field for field.</summary>
+    private sealed record BulkLoadHistoryResponseDto(List<BulkLoadBatchProgress> Batches, string? NextCursor);
+
+    /// <summary>
+    /// `limit` is clamped the same way `BulkLoads`' own already is (1–20) — more batches than the
+    /// clamp allows, asking for far more than that, still gets back no more than the cap.
+    /// </summary>
+    [Fact]
+    public async Task BulkLoadHistory_ClampsLimit()
+    {
+        var taskName = $"bulk-hist-{Guid.NewGuid():N}";
+        var store = factory.Services.GetRequiredService<BulkLoadBatchStore>();
+        for (var i = 0; i < 25; i++)
+            store.CreateBatch($"b{i:D2}", taskName, "orders", 1, null, null);
+
+        var page = await GetBulkLoadHistoryAsync(taskName, limit: 999);
+
+        Assert.Equal(20, page.Batches.Count);
+        Assert.NotNull(page.NextCursor);
+    }
+
+    /// <summary>An invalid/garbage cursor resets to page one rather than erroring — the codec's own
+    /// "never a 400" posture, exercised through the real endpoint this time.</summary>
+    [Fact]
+    public async Task BulkLoadHistory_AnInvalidCursor_ResetsToPageOne_RatherThanErroring()
+    {
+        var taskName = $"bulk-hist-{Guid.NewGuid():N}";
+        var store = factory.Services.GetRequiredService<BulkLoadBatchStore>();
+        store.CreateBatch("only", taskName, "orders", 1, null, null);
+
+        var page = await GetBulkLoadHistoryAsync(taskName, cursor: "not-a-real-cursor!!");
+
+        var batch = Assert.Single(page.Batches);
+        Assert.Equal("only", batch.BatchId);
+    }
+
+    /// <summary>A cursor minted under one `mappingName` filter, replayed with a different one, is
+    /// treated as no cursor at all — page one under the filter actually asked for now.</summary>
+    [Fact]
+    public async Task BulkLoadHistory_ACursorFromADifferentMappingFilter_ResetsToPageOne()
+    {
+        var taskName = $"bulk-hist-{Guid.NewGuid():N}";
+        var store = factory.Services.GetRequiredService<BulkLoadBatchStore>();
+        store.CreateBatch("o1", taskName, "orders", 1, null, null);
+        await Task.Delay(5);
+        store.CreateBatch("o2", taskName, "orders", 1, null, null);
+        store.CreateBatch("c1", taskName, "customers", 1, null, null);
+
+        var ordersPage1 = await GetBulkLoadHistoryAsync(taskName, mappingName: "orders", limit: 1);
+        Assert.NotNull(ordersPage1.NextCursor);
+
+        // Same cursor, different mapping filter — must not be replayed as if it still applied.
+        var customersPage = await GetBulkLoadHistoryAsync(
+            taskName, mappingName: "customers", cursor: ordersPage1.NextCursor);
+
+        var batch = Assert.Single(customersPage.Batches);
+        Assert.Equal("c1", batch.BatchId);
+    }
+
+    private async Task<BulkLoadHistoryResponseDto> GetBulkLoadHistoryAsync(
+        string taskName, string? mappingName = null, string? cursor = null, int? limit = null)
+    {
+        var query = new List<string>();
+        if (mappingName is not null) query.Add($"mappingName={Uri.EscapeDataString(mappingName)}");
+        if (cursor is not null) query.Add($"cursor={Uri.EscapeDataString(cursor)}");
+        if (limit is not null) query.Add($"limit={limit}");
+        var queryString = query.Count == 0 ? "" : "?" + string.Join("&", query);
+
+        var response = await _client.GetAsync($"/api/replications/{taskName}/bulk-loads/history{queryString}");
+        response.EnsureSuccessStatusCode();
+
+        var body = await response.Content.ReadFromJsonAsync<BulkLoadHistoryResponseDto>(JsonOptions);
+        Assert.NotNull(body);
+        return body!;
+    }
+
     private async Task<RunHistoryResponseDto> GetHistoryAsync(
         string taskName, string? kind = null, string? mappingName = null, string? status = null,
         string? cursor = null, int? limit = null)

@@ -3,6 +3,7 @@ import { useCallback } from 'react'
 import { api } from './client'
 import type {
   BulkCreateRequest,
+  BulkLoadHistoryFilters,
   DriverType,
   ScriptDefinition, ScriptTestRequest, MetricsWindow, BulkLoadRequest, ReconcileDeletesRequest, ConnectionInput, ReplicationTaskConfig,
   RunHistoryFilters,
@@ -53,6 +54,8 @@ const keys = {
     ['replications', replicationName, 'metrics', window] as const,
   replicationLag: (replicationName: string) => ['replications', replicationName, 'lag'] as const,
   bulkLoads: (replicationName: string) => ['replications', replicationName, 'bulk-loads'] as const,
+  bulkLoadHistory: (replicationName: string) =>
+    ['replications', replicationName, 'bulk-loads', 'history'] as const,
   mappingReadState: (replicationName: string, mappingName: string) =>
     ['replications', replicationName, 'table-mappings', mappingName, 'read-state'] as const,
   verificationResults: (replicationName: string, mappingName: string) =>
@@ -856,6 +859,22 @@ export function useRecentBulkLoads(replicationName: string | undefined) {
     enabled: !!replicationName,
     refetchInterval: (query) =>
       query.state.data?.some((b) => b.state === 'Running') ? 2_000 : MONITORING_REFRESH_MS,
+  })
+}
+
+/**
+ * A page of bulk-load history — filtered by mapping and keyset-paged server-side, since phase 139.
+ *
+ * **No `refetchInterval` at all** — unlike `useRunHistory`/`useRecentBulkLoads` beside it. This is a
+ * low-volume audit list of past batches, the same "static, human-reloaded" posture `PauseHistoryPanel`
+ * already takes; the live view of an in-flight bulk load stays `BulkLoadProgressCard`, unaffected by
+ * this hook or this screen.
+ */
+export function useBulkLoadHistory(replicationName: string | undefined, filters: BulkLoadHistoryFilters) {
+  return useQuery({
+    queryKey: [...keys.bulkLoadHistory(replicationName ?? ''), filters],
+    queryFn: () => api.replications.bulkLoadHistory(replicationName!, filters),
+    enabled: !!replicationName,
   })
 }
 

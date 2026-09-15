@@ -86,6 +86,33 @@ public sealed class RunsController(
         Ok(bulkLoadBatchStore.GetRecentBulkLoads(name, Math.Clamp(limit, 1, 20)));
 
     /// <summary>
+    /// The wider bulk-load history <c>GetRecentBulkLoads</c>' own doc comment named as a future
+    /// screen — see phase 139. Real keyset pagination, mirroring phase 104's run history, plus an
+    /// optional <paramref name="mappingName"/> filter; <see cref="BulkLoads"/> above stays exactly as
+    /// it is — the Monitoring card's own "newest one, no cursor, no filter" contract does not change
+    /// shape just because this second consumer exists.
+    /// <para>
+    /// <paramref name="cursor"/> is opaque and round-tripped verbatim from a previous call's
+    /// <c>nextCursor</c> — see <see cref="BulkLoadHistoryCursorCodec"/> for why a cursor issued under a
+    /// different <paramref name="mappingName"/> is treated the same as no cursor at all rather than
+    /// rejected outright.
+    /// </para>
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("replications/{name}/bulk-loads/history")]
+    public ActionResult<BulkLoadHistoryResponse> BulkLoadHistory(
+        string name, [FromQuery] string? mappingName = null, [FromQuery] string? cursor = null, [FromQuery] int limit = 20)
+    {
+        var decodedCursor = BulkLoadHistoryCursorCodec.Decode(cursor, name, mappingName);
+        var page = bulkLoadBatchStore.GetHistory(name, mappingName, decodedCursor, Math.Clamp(limit, 1, 20));
+        var nextCursor = page.NextCursor is { } next
+            ? BulkLoadHistoryCursorCodec.Encode(next, name, mappingName)
+            : null;
+
+        return Ok(new BulkLoadHistoryResponse(page.Batches, nextCursor));
+    }
+
+    /// <summary>
     /// What a segmenting strategy proposes for this mapping, right now — the Bulk Load form's
     /// checklist. Every candidate, selected or not: the operator is being shown a proposal to
     /// disagree with, not told what will happen.

@@ -17,7 +17,8 @@ import {
   CustomTransformsTab, OverviewNotesTab, PipelineTab, SegmentingStrategiesTab, TargetProvisioningTab,
 } from './pages/replication-detail/OverviewPanel'
 import {
-  MonitoringCurrentStatusTab, MonitoringPauseHistoryTab, MonitoringRunHistoryTab,
+  MonitoringBulkLoadHistoryTab, MonitoringCurrentStatusTab, MonitoringPauseHistoryTab,
+  MonitoringRunHistoryTab,
 } from './pages/replication-detail/MonitoringPanel'
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
 import {
@@ -137,6 +138,10 @@ export default function App() {
               PauseEvents has recorded this since phase 64; this sub-tab is the first thing that reads
               it. */}
           <Route path="pause-history" element={<MonitoringPauseHistoryTab />} />
+          {/* Every past bulk load, across every mapping — see phase 139. GetRecentBulkLoads/the
+              existing `.../bulk-loads` endpoint stayed unbuilt-on since phase 107; this is the screen
+              its own doc comment named as a future consumer. */}
+          <Route path="bulk-load-history" element={<MonitoringBulkLoadHistoryTab />} />
         </Route>
         <Route path="history" element={<HistoryTab />} />
       </Route>

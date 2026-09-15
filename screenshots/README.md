@@ -29,3 +29,4 @@ Each spec writes only into its own folder via the shared `screenshotDir(...)` he
 | `admin-drivers-libraries/` | Admin → Drivers and Admin → Libraries (phase 118) | `admin-drivers-libraries.spec.ts` |
 | `library-search/` | NuGet search results on the Libraries screen, and a curated quick-add chip (phase 119) | `library-search.spec.ts` |
 | `admin-library-install/` | the non-catalog package trust dialog and the restart-required banner after an install (phase 120) | `admin-library-install.spec.ts` |
+| `bulk-load-history/` | Monitoring's Bulk Load History sub-tab — the history table, the mapping filter, and older/newer paging (phase 139) | `bulk-load-history.spec.ts` |
