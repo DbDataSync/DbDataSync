@@ -77,6 +77,54 @@ public sealed class BulkLoadBatchStore(StateDatabase database)
         });
 
     /// <summary>
+    /// One batch's rolled-up state, by id alone — a batch id is already globally unique, so there is no
+    /// need for the caller to know which replication it belongs to. Used by
+    /// <c>LocalRunnerState.CompleteRun</c> (phase 134) to decide whether a just-completed segment run
+    /// finished the batch a mapping's pending initial load is waiting on.
+    /// </summary>
+    public BulkLoadBatchProgress? GetBatch(string batchId) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, """
+                SELECT b.BatchId, b.MappingName, b.CreatedAtUtc, b.SegmentCount,
+                       b.EstimatedRows, b.EstimateCaveat,
+                       SUM(CASE WHEN r.Status = 'Succeeded' THEN 1 ELSE 0 END) AS SegmentsSucceeded,
+                       SUM(CASE WHEN r.Status = 'Failed'    THEN 1 ELSE 0 END) AS SegmentsFailed,
+                       SUM(CASE WHEN r.Status = 'Running'   THEN 1 ELSE 0 END) AS SegmentsRunning,
+                       SUM(r.RowsRead)     AS RowsRead,
+                       SUM(r.RowsWritten)  AS RowsCopied,
+                       MIN(r.StartedAtUtc) AS StartedAtUtc,
+                       MAX(r.EndedAtUtc)   AS LastActivityUtc
+                FROM BulkLoadBatches b
+                LEFT JOIN TaskRuns r ON r.BulkLoadBatchId = b.BatchId
+                WHERE b.BatchId = $batchId
+                GROUP BY b.BatchId, b.MappingName, b.CreatedAtUtc, b.SegmentCount,
+                         b.EstimatedRows, b.EstimateCaveat;
+                """);
+            cmd.Bind(database, "batchId", batchId);
+
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read())
+                return null;
+
+            return new BulkLoadBatchProgress(
+                BatchId: reader.GetString(0),
+                MappingName: reader.GetString(1),
+                CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(2)),
+                SegmentCount: reader.Int32(3),
+                SegmentsSucceeded: reader.IsDBNull(6) ? 0 : reader.Int32(6),
+                SegmentsFailed: reader.IsDBNull(7) ? 0 : reader.Int32(7),
+                SegmentsRunning: reader.IsDBNull(8) ? 0 : reader.Int32(8),
+                RowsRead: reader.IsDBNull(9) ? 0 : reader.Int64(9),
+                RowsCopied: reader.IsDBNull(10) ? 0 : reader.Int64(10),
+                EstimatedRows: reader.NullableInt64(4),
+                EstimateCaveat: reader.IsDBNull(5) ? null : reader.GetString(5),
+                StartedAtUtc: reader.IsDBNull(11) ? null : DateTimeOffset.Parse(reader.GetString(11)),
+                LastActivityUtc: reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12)));
+        });
+
+    /// <summary>
     /// The most recent bulk loads for one replication, newest first — one row per batch with its
     /// segments rolled up. The Monitoring card reads only the first; the wider list is what a future
     /// Batch Load History screen is for, which is why this takes a limit rather than returning one.

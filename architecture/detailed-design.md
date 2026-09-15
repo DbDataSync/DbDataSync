@@ -293,22 +293,22 @@ per-task files:
 
 ### 4.1 How a pass decides what to read
 
-*Rewritten by phase 101 — see that phase's doc for the full design. Superseded text: "no stored
-watermark means read the whole source table" — that is now `ReadIntent.InitialLoad`'s own definition,
-one of four things a pass can be asked to do, rather than something inferred from a missing watermark.*
+*Rewritten by phase 134 — see that phase's doc for the full design. Phase 101's own rewrite is
+superseded in turn: "every reader's own `InitialLoad` branch reads the source table" stops being the
+contract for any reader that can honestly report its position ahead of a read. For those readers an
+initial load now runs the Bulk Load pipeline instead, and the reader is never called for that pass at
+all — no change reader full-loads any more.*
 
-Two separate questions, answered in two different places. Nothing in the system inspects the source or
-the target to guess at either.
+Two separate questions, answered in two different places, same as before. Nothing in the system inspects
+the source or the target to guess at either.
 
 **Which reader runs is configuration.** `PipelineResolution.ReaderKind` resolves most-specific-first —
-the work item's transient Kind (a Backfill's), then `TableMappingConfig.ReaderOverride`, then
+the work item's transient Kind (a `BulkLoad`'s), then `TableMappingConfig.ReaderOverride`, then
 `ChangeProcessingConfig.Reader`. A mapping is *configured* for Change Tracking or CDC or Watermark; it
 never decides for itself, and there is no auto-detection anywhere.
 
-**What that reader is asked to do is a stored intent, not an inference.** `RunExecutor` resolves it once
-per pass — the mapping's own stored `ReadIntent` (phase 100's `ChangeWatermarkStore.GetReadState`) if
-one exists, else `ReadIntentResolution.Default(task, mapping)` — and passes it down alongside whatever
-watermark is stored:
+**What that reader is asked to do is a stored intent, not an inference** — resolved once per pass exactly
+as phase 100/101 built it:
 
 ```csharp
 var readState = item.RunKind == RunKind.Primary
@@ -321,79 +321,102 @@ var intent = item.RunKind == RunKind.Primary
 ```
 
 The key is still `(task, mapping, connection/database/schema.table)` — see §3.7's `ChangeWatermarks` row
-for why each part is in it and how it is spelled. And **a Backfill is handed `InitialLoad` and no
+for why each part is in it and how it is spelled. And **a `BulkLoad` is handed `InitialLoad` and no
 watermark unconditionally**, so it can never disturb the cursor an incremental sync depends on, whatever
 reader Kind it happens to use internally — it is not a live `ReadIntent` so much as the closest
 description of what a reload pass does.
 
-Every reader then branches on the intent it was handed — see
-`architecture/implementation/done/phase-101-readers-honour-the-read-intent.md` §2/§3 for `ChangeReaders`'
-`ChangesFromEarliest`/`ChangesFromLatest` behaviour in full. `InitialLoad`'s own behaviour, per reader, is
-unchanged from what a null watermark used to trigger:
+**An initial load runs the Bulk Load pipeline; no change reader ever full-loads.** Once `intent` resolves
+to `InitialLoad` for a `Primary` pass, `RunExecutor` checks one more thing before deciding what happens
+next: does this mapping's reader implement `IPositionCapturing` — can it report its current position
+without reading a row?
 
-| Reader | `InitialLoad` |
-| --- | --- |
-| `MsSqlChangeTrackingReader` | reads the source table itself |
-| `MsSqlCdcReader` | reads the source table, after waiting for the capture floor to be published |
-| `TriggerAuditReader` | reads the source table |
-| `WatermarkReader` | the same `SELECT`, with no predicate |
-| `BatchReloadReader`, `MsSqlBatchReloadReader` | every row — **always**, whatever intent it is handed |
-| `ScriptedQueryReader`, `DuckDbQueryReader` | whatever the script or query returns |
+- **If it does** (`MsSqlChangeTrackingReader`, `MsSqlCdcReader`, `TriggerAuditReader`, `WatermarkReader`),
+  the reader's `ReadChangesAsync` is never called for this pass at all. Instead: `CapturePositionAsync`
+  runs first, before anything else touches the table (before even the target connection opens); the
+  captured position is handed to the state owner (`IRunnerState.RequestInitialLoad`), which stashes it
+  as `ChangeWatermarks.PendingWatermark` — never the live `Watermark`, see below — sets
+  `ReadHold.Loading`, and starts a Bulk Load for this mapping, segmented exactly as an ordinary scheduled
+  reload of it would be (`TableMappingConfig.DefaultSegmenting`, empty meaning Full). The pass itself
+  reads and writes nothing and returns immediately.
+- **If it does not** (`BatchReloadReader`, `MsSqlBatchReloadReader`, `DuckDbQueryReader`,
+  `ScriptedQueryReader` — an unusual but not-forbidden choice of *Change Processing* reader), today's
+  exact behaviour is unchanged: the reader is dispatched directly with `intent = InitialLoad`. These
+  readers never had a full-load branch to remove — a reload reader reads everything regardless of
+  intent, and a scripted or DuckDB query reads whatever its script returns — so nothing here changes for
+  them.
 
-The first four share one reason, and it is the reason the rule exists at all: **a change feed only knows
-about changes since it was switched on.** `CHANGETABLE`, CDC's change table and a trigger's shadow table
-all start empty against a source table that may already hold millions of rows, so a mapping that began
-incrementally would be permanently, silently half-replicated. An `InitialLoad` pass reads the table;
-`Changes`, `ChangesFromEarliest` and `ChangesFromLatest` all read the feed instead.
+**Why the ordering matters — the correctness crux.** An initial load is only correct if the position is
+captured *before* the table is read: `capture → run the Bulk Load → persist the position → flip the
+intent to Changes`. Get it backwards and every change made during a multi-hour load is lost silently —
+the load succeeds, the row counts look right, and those rows are never seen again.
+`IPositionCapturing.CapturePositionAsync` is what makes the correct order possible without a race: a
+single, cheap call (a current-version query, a `MAX(...)` aggregate) that answers "where is the feed
+right now" without touching the table itself, so it can finish well before the Bulk Load's own, possibly
+much longer, read even begins.
 
-**Declaring which intents a reader can honour is a separate, per-reader question** (`IReadIntentDeclaring`)
-— but not for `InitialLoad`. `architecture/planning/done/bulk-load-pipeline-and-the-initial-load-rule.md`
-retargeted phase 101's §1 mid-implementation: once a Bulk Load pipeline performs an initial load rather
-than the reader itself (future, unscheduled work — that doc's Phase B), every mapping can request
-`InitialLoad` regardless of its reader, so no reader declares it any more. What each reader *does*
-declare is `Changes`/`ChangesFromEarliest`/`ChangesFromLatest`, which remain genuinely per-reader — the
-Watermark reader, for instance, has no honest `ChangesFromEarliest`, because for it the feed *is* the
-table and offering one would be a button that lies. `RunExecutor` refuses an undeclared intent loudly
-before opening a connection, but never refuses `InitialLoad` itself, which is what the retarget's
-"universally available" actually means at the call site.
+**The hold, and why it is necessary.** `RunLocks` are `(TaskName, RunKind, MappingName)`-scoped, so a
+`Primary` pass and a `BulkLoad` run for the same mapping do not contend by design — nothing in the
+locking model stops a `Primary` pass running against a mapping whose initial load is still in flight.
+`ReadHold.Loading` is what actually stops it: `SchedulerService.FilterHeld` excludes any mapping whose
+hold is not `None` from what it enqueues, the same way it already does for `PositionExpired` and
+`Paused`.
 
-**A second, narrower capability accompanies the first: can a reader report its current position without
-reading any row?** (`IPositionCapturing`.) This is what the retarget above turned `InitialLoad`'s old
-per-reader column *into* — the capability a Bulk Load handover will depend on, so that the source's
-position is captured before the table is read rather than after, and a change made mid-load is not lost.
-Declared and implemented now; nothing calls it yet, because the pipeline that will is not built yet.
+**The one-act promotion.** A completing run's outcome (`LocalRunnerState.CompleteRun`) checks whether it
+was a `BulkLoad` segment and, if the batch it belongs to has just reached `BulkLoadState.Completed`,
+promotes the mapping whose `ChangeWatermarks.PendingBulkLoadBatchId` names that batch — one statement:
+`Watermark = PendingWatermark`, `WatermarkTimeUtc = PendingWatermarkTimeUtc`, `ReadHold = None`,
+`ReadIntent = Changes`, and the three pending columns cleared (`ChangeWatermarkStore.PromotePendingLoad`).
+`CompletedWithFailures` does none of this — the mapping stays `Loading` for an operator to retry, through
+the same read-state recovery endpoint `PositionExpired` recovery already uses; there is no separate
+"resume a failed load" mechanism. `PendingBulkLoadBatchId` is what tells an auto-triggered initial load
+apart from an ordinary operator-triggered reload that happens to share the same `RunKind` and table but
+is not gating anything.
 
-Two behaviours follow from a reader's own `InitialLoad` branch and are worth knowing, unchanged from
-before this phase:
+Two behaviours from before this phase are unchanged:
 
-- **An `InitialLoad` pass is unbounded even when a row cap is configured.** It has no resumable position
-  to record — the cap only starts applying once there is a change window to take a slice of.
+- **A reload reader used as a mapping's Bulk Load reader is unaffected.** `RunKind.BulkLoad` always asks
+  its reader for `InitialLoad` regardless of position-capturing, since a reload never consults an
+  incremental cursor either way — this is not a live `ReadIntent` so much as the closest description of
+  what a reload pass does.
 - **Re-pointing a mapping at a different source table starts it over.** The table is part of the
   watermark key, so the old cursor is simply not found and the mapping resolves to its configured default
-  intent — `InitialLoad` unless set otherwise. That is correct — the new table's history was never read
-  — but nothing announces it.
+  intent — `InitialLoad` unless set otherwise, which now means "start a Bulk Load" rather than "the
+  reader full-loads" for the four readers above.
+
+**Declaring which intents a reader can honour is a separate, per-reader question** (`IReadIntentDeclaring`)
+— but not for `InitialLoad`, which no reader declares: it is universally available regardless of reader,
+and `RunExecutor` never refuses it (it refuses an undeclared `Changes`/`ChangesFromEarliest`/
+`ChangesFromLatest` loudly, before opening a connection, but `InitialLoad` itself is exempt from that
+check). What each reader *does* declare is `Changes`/`ChangesFromEarliest`/`ChangesFromLatest`, which
+remain genuinely per-reader — the Watermark reader, for instance, has no honest `ChangesFromEarliest`,
+because for it the feed *is* the table and offering one would be a button that lies.
 
 **What writes and clears the cursor.** Only a `Primary` pass advances `ChangeWatermarks`, only after the
 target write has committed, and the source is acknowledged (`IPositionAcknowledging`) only after *that*
-— acknowledging early would tell the source it may discard history a failed run still needs. Every
-intent transitions to `Changes` in the same write (`PrimaryPassOutcome`). Resync (`ResyncService`) is the
-deliberate way back to an initial load: it sets `ReadIntent.InitialLoad` and clears the mapping's
-`ReadHold` together, which the *next* `Primary` pass turns into an actual reload — rather than clearing
-the watermark and forcing a `BatchReload` run, which is what it did before phase 101. The same intent is
-also where a `PositionExpiredException` recovery lands once an operator chooses it, alongside
-`ChangesFromEarliest`.
+— acknowledging early would tell the source it may discard history a failed run still needs. An ordinary
+incremental pass transitions its intent to `Changes` in the same write (`PrimaryPassOutcome`); an initial
+load transitions the same way, but through the promotion above rather than through a pass that read
+anything. Resync (`ResyncService`) is the deliberate way back to an initial load: it sets
+`ReadIntent.InitialLoad` and clears the mapping's `ReadHold` together, which the *next* `Primary` pass
+turns into an actual Bulk Load. The same intent is also where a `PositionExpiredException` recovery lands
+once an operator chooses it, alongside `ChangesFromEarliest`.
 
 **An expired position holds the mapping rather than retrying forever.** `PositionExpiredException` sets
 `ReadHold.PositionExpired` in the same catch that fails the run; a held mapping is filtered out of the
 scheduler's own enqueue (`SchedulerService.FilterHeld`) so it is not dispatched again — and therefore
-notified about again — every tick until an operator resolves it. A `Backfill` is unaffected: it does not
-use the cursor a hold protects, so it remains a legitimate way to recover a held mapping.
+notified about again — every tick until an operator resolves it. A `BulkLoad` run is unaffected by a
+`Primary` pass's own hold: it does not use the cursor a hold protects, so it remains — now more than
+ever, since it is also what an initial load itself runs through — a legitimate way to recover a held
+mapping.
 
 **Keeping this true.** The declaration rule is implemented independently in each reader, so
 `ChangeReaderFirstPassContractTests` enumerates every `IChangeReader` in the solution and fails until a
 new one is declared as either implementing `IReadIntentDeclaring` with a non-empty, `InitialLoad`-free
 set, or exempt from declaring anything at all, naming the test that proves its declared set. A sixth
-reader cannot quietly get this wrong; it has to be classified first.
+reader cannot quietly get this wrong; it has to be classified first. `PositionCapturingContractTests`
+does the same for `IPositionCapturing`: a reader with a real position-capture story must implement it, a
+reader with nothing honest to report must not.
 
 ## 5. Extensibility Model
 

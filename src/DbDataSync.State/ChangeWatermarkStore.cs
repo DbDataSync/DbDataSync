@@ -233,6 +233,83 @@ public sealed class ChangeWatermarkStore(StateDatabase database)
         });
 
     /// <summary>
+    /// Phase 134: stashes a captured position as <c>Pending</c> — never onto <c>Watermark</c> itself —
+    /// and sets <see cref="ReadHold.Loading"/>, in one statement, the same "two facts, one write"
+    /// pattern <see cref="SetReadIntentAndHold"/> already uses. Upserts rather than requiring an
+    /// existing row, since a mapping can reach its very first pass with no <c>ChangeWatermarks</c> row
+    /// at all.
+    /// <para>
+    /// <paramref name="bulkLoadBatchId"/> is what a completing <c>BulkLoadBatches</c> row uses to find
+    /// its way back to this exact row — see <see cref="PromotePendingLoad"/>.
+    /// </para>
+    /// </summary>
+    public void SetPendingLoad(
+        string taskName, string mappingName, string sourceTable,
+        string pendingWatermark, DateTimeOffset? pendingWatermarkTimeUtc, string bulkLoadBatchId) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, database.Dialect.Upsert(
+                "ChangeWatermarks",
+                "TaskName, MappingName, SourceTable, ReadHold, PendingWatermark, PendingWatermarkTimeUtc, " +
+                    "PendingBulkLoadBatchId, UpdatedAtUtc",
+                "$task, $mapping, $table, $hold, $pendingWatermark, $pendingWatermarkTime, $batchId, $now",
+                "TaskName, MappingName, SourceTable",
+                "ReadHold = EXCLUDED.ReadHold, PendingWatermark = EXCLUDED.PendingWatermark, " +
+                    "PendingWatermarkTimeUtc = EXCLUDED.PendingWatermarkTimeUtc, " +
+                    "PendingBulkLoadBatchId = EXCLUDED.PendingBulkLoadBatchId, " +
+                    "UpdatedAtUtc = EXCLUDED.UpdatedAtUtc"));
+            cmd.Bind(database, "task", taskName);
+            cmd.Bind(database, "mapping", mappingName);
+            cmd.Bind(database, "table", sourceTable);
+            cmd.Bind(database, "hold", ReadHold.Loading.ToString());
+            cmd.Bind(database, "pendingWatermark", pendingWatermark);
+            cmd.Bind(database, "pendingWatermarkTime", (object?)pendingWatermarkTimeUtc?.ToString("O") ?? DBNull.Value);
+            cmd.Bind(database, "batchId", bulkLoadBatchId);
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.ExecuteNonQuery();
+        });
+
+    /// <summary>
+    /// The "one act" phase 134's design calls for, once a Bulk Load batch a mapping was waiting on
+    /// reaches <c>BulkLoadState.Completed</c> (never on <c>CompletedWithFailures</c> — see the caller):
+    /// the pending position becomes the live one, the hold clears, and the intent flips to
+    /// <see cref="ReadIntent.Changes"/> — the same one statement <see cref="SetReadIntentAndHold"/>'s own
+    /// doc reasons a recovery must be, so there is no window where one of the three has happened and the
+    /// others have not.
+    /// <para>
+    /// Matched on <paramref name="bulkLoadBatchId"/> alone, not a full key — a batch id is already
+    /// globally unique (<c>Guid.NewGuid().ToString("N")</c>), and this is what lets the caller promote
+    /// without first resolving which mapping it belongs to.
+    /// </para>
+    /// </summary>
+    /// <returns>False when no row was waiting on this batch — an ordinary operator-triggered reload
+    /// shares <c>RunKind.BulkLoad</c> and the same table without gating anything, and completing one of
+    /// those must promote nothing.</returns>
+    public bool PromotePendingLoad(string bulkLoadBatchId) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, """
+                UPDATE ChangeWatermarks
+                SET Watermark = PendingWatermark,
+                    WatermarkTimeUtc = PendingWatermarkTimeUtc,
+                    ReadIntent = $intent,
+                    ReadHold = $hold,
+                    PendingWatermark = NULL,
+                    PendingWatermarkTimeUtc = NULL,
+                    PendingBulkLoadBatchId = NULL,
+                    UpdatedAtUtc = $now
+                WHERE PendingBulkLoadBatchId = $batchId;
+                """);
+            cmd.Bind(database, "intent", ReadIntent.Changes.ToString());
+            cmd.Bind(database, "hold", ReadHold.None.ToString());
+            cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Bind(database, "batchId", bulkLoadBatchId);
+            return cmd.ExecuteNonQuery() == 1;
+        });
+
+    /// <summary>
     /// Forgets where a table got to, so the next pass reads it from the beginning.
     /// <para>
     /// The recovery for a position the source no longer retains — see

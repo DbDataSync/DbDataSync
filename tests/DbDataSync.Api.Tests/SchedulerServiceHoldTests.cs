@@ -185,6 +185,26 @@ public sealed class SchedulerServiceHoldTests(TestApiFactory factory) : IClassFi
     }
 
     /// <summary>
+    /// Phase 134: <see cref="ReadHold.Loading"/> is a new value, not new logic — <see cref="SchedulerService.FilterHeld"/>
+    /// already excludes any hold that isn't <see cref="ReadHold.None"/> generically, so a mapping mid
+    /// initial-load is filtered out for free, the same as <see cref="ReadHold.PositionExpired"/> above.
+    /// </summary>
+    [Fact]
+    public async Task ALoadingMapping_IsNotDispatchedOnTheNextTick()
+    {
+        var (task, mapping) = await SetUpHeldMappingAsync();
+        var watermarks = factory.Services.GetRequiredService<ChangeWatermarkStore>();
+        var key = WatermarkKeyFor(task, mapping);
+        watermarks.SetReadHold(task.Name, mapping.Name, key, ReadHold.Loading);
+
+        await TickAsync(BuildScheduler());
+
+        var runs = factory.Services.GetRequiredService<TaskRunStore>()
+            .GetRunHistory(task.Name, RunKind.Primary);
+        Assert.Empty(runs);
+    }
+
+    /// <summary>
     /// The open question resolved: a hold stops a scheduled <c>Primary</c> pass, never a <c>BulkLoad</c>
     /// — a bulk load does not use the cursor a hold protects, and is a legitimate way to recover a held
     /// mapping. <see cref="SchedulerService.FilterHeld"/> only ever runs over mappings due for a

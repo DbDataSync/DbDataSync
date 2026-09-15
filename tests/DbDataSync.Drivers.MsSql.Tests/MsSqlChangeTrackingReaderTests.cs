@@ -55,19 +55,37 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
         return list;
     }
 
+    /// <summary>
+    /// The correctness crux phase 134 depends on. This reader no longer full-loads on
+    /// <see cref="ReadIntent.InitialLoad"/> — <c>RunExecutor</c> routes that to the Bulk Load pipeline
+    /// instead, capturing this reader's position (<see cref="IPositionCapturing.CapturePositionAsync"/>)
+    /// before the load ever reads a row. What has to hold for that handover to be correct: a change
+    /// committed *after* the position was captured but before the Bulk Load (or anything else) reads
+    /// from the table must still arrive on the very next <see cref="ReadIntent.Changes"/> pass. Get the
+    /// ordering backwards — capture after the read instead of before it — and this is exactly the
+    /// assertion that fails, silently, in production: the row that would go missing.
+    /// </summary>
     [Fact]
-    public async Task FullLoad_WhenNoPreviousWatermark_ReturnsAllRowsAsInserts()
+    public async Task PositionCapturedBeforeARowExists_StillSeesItOnTheNextChangesPass()
     {
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob');");
 
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var captured = await capturing.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None);
+        Assert.False(string.IsNullOrEmpty(captured.Position));
+
+        // Committed after the capture, before anything reads from the position it returned.
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (3, 'Carol');");
+
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), captured.Position, ReadIntent.Changes, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
-        Assert.Equal(2, rows.Count);
-        Assert.All(rows, r => Assert.Equal(ChangeOperation.Insert, r.Operation));
-        Assert.Contains(rows, r => (int)r["Id"]! == 1 && (string)r["Name"]! == "Alice");
-        Assert.False(string.IsNullOrEmpty(result.NewWatermark));
+        var inserted = Assert.Single(rows);
+        Assert.Equal(ChangeOperation.Insert, inserted.Operation);
+        Assert.Equal(3, (int)inserted["Id"]!);
+        Assert.Equal("Carol", (string)inserted["Name"]!);
     }
 
     /// <summary>
@@ -139,10 +157,12 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
     {
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol');");
 
-        var baseline = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
-        await CollectAsync(baseline.Rows);
-        var watermark = baseline.NewWatermark;
+        // A captured position, not a read — this reader no longer full-loads (see
+        // PositionCapturedBeforeARowExists_StillSeesItOnTheNextChangesPass), and the current version
+        // after the three rows above is exactly the baseline this test wants to read incrementally from.
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var watermark = (await capturing.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None)).Position;
 
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (4, 'Dave');");
         await ExecuteAsync($"UPDATE dbo.[{_tableName}] SET Name = 'Robert' WHERE Id = 2;");
@@ -172,16 +192,16 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
     [Fact]
     public async Task Incremental_WithNoChanges_ReturnsEmptyButAdvancesWatermark()
     {
-        var baseline = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
-        await CollectAsync(baseline.Rows);
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var baselinePosition = (await capturing.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None)).Position;
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), baseline.NewWatermark, ReadIntent.Changes, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), baselinePosition, ReadIntent.Changes, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
         Assert.Empty(rows);
-        Assert.Equal(baseline.NewWatermark, result.NewWatermark);
+        Assert.Equal(baselinePosition, result.NewWatermark);
     }
 
     /// <summary>
@@ -211,10 +231,10 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
     /// leaves the table's current version stored and CHANGETABLE as the only thing consulted after.</summary>
     private async Task<string> BaselineAsync()
     {
-        var baseline = await _reader.ReadChangesAsync(
-            _connection, Source(), previousWatermark: null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
-        await CollectAsync(baseline.Rows);
-        return baseline.WatermarkAfterRead;
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var captured = await capturing.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None);
+        return captured.Position;
     }
 
     [Fact]

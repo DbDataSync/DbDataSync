@@ -42,11 +42,11 @@ public sealed class ChangeReaderFirstPassContractTests
     private static readonly Dictionary<Type, string> Declaring = new()
     {
         [typeof(MsSqlChangeTrackingReader)] =
-            "DbDataSync.Drivers.MsSql.Tests.MsSqlChangeTrackingReaderTests.FullLoad_WhenNoPreviousWatermark_ReturnsAllRowsAsInserts",
+            "DbDataSync.Drivers.MsSql.Tests.MsSqlChangeTrackingReaderTests.PositionCapturedBeforeARowExists_StillSeesItOnTheNextChangesPass",
         [typeof(MsSqlCdcReader)] =
-            "DbDataSync.Drivers.MsSql.Tests.MsSqlCdcReaderTests.WithNoStoredPosition_EveryRowIsReadAsAnInsert",
+            "DbDataSync.Drivers.MsSql.Tests.MsSqlCdcReaderTests.AnInitialLoad_CapturesThePosition_AndDoesNotFullLoad",
         [typeof(TriggerAuditReader)] =
-            "DbDataSync.Drivers.MsSql.Tests.TriggerAuditReaderTests.WithNoStoredPosition_EveryRowIsReadAsAnInsert",
+            "DbDataSync.Drivers.MsSql.Tests.TriggerAuditReaderTests.AnInitialLoad_CapturesThePosition_AndDoesNotFullLoad",
         [typeof(WatermarkReader)] =
             "DbDataSync.Drivers.MsSql.Tests.MsSqlWatermarkReaderTests.FullLoad_ReturnsAllRows",
     };

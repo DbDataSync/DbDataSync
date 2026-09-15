@@ -88,7 +88,8 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _executor = new RunExecutor(
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
-                _watermarkStore, new VerificationResultStore(stateDatabase), _logWriter),
+                _watermarkStore, new VerificationResultStore(stateDatabase), _logWriter,
+                new BulkLoadBatchStore(stateDatabase), new NeverCalledInitialLoadEnqueuer()),
             // The real thing, not a fake: what this fixture wants to be able to assert is that a
             // provisioning report becomes a committed change to the mapping on disk, which is
             // LocalRunnerConfig's whole job. In a deployment the runner reaches it over loopback.

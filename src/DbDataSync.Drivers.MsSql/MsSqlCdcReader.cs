@@ -121,35 +121,10 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
 
         var diagnostics = new ReadDiagnostics();
 
-        if (intent == ReadIntent.InitialLoad)
-        {
-            // The floor has to be known before a first pass can store a position, and it is not known
-            // the instant a table is enabled — the capture job records it when it processes the
-            // enable. A first pass that stored the database's max LSN instead would store a position
-            // *below* the instance's own floor, and every pass after it would read that as expired
-            // history when nothing had expired. So this waits for the floor rather than guessing at
-            // it, and says so if it never arrives.
-            var floor = await WaitForCaptureFloorAsync(sourceConnection, instance, cancellationToken)
-                ?? throw new InvalidOperationException(
-                    $"Change Data Capture has not started capturing '{source.Schema}.{source.Table}' yet " +
-                    $"(capture instance '{instance.CaptureInstance}' has no start position). This pass " +
-                    "will succeed once the capture job has processed the enable — check that SQL Server " +
-                    "Agent is running if it does not.");
-
-            // CDC's change table only holds what has happened since capture was enabled, so a table
-            // that already had rows would otherwise start half-replicated with nothing to say so.
-            var rows = ReadFullLoadAsync(
-                sourceConnection, source, SourceProjection.Render(MsSqlDialect.Instance, columnMappings),
-                cancellationToken);
-
-            // The later of the two: the floor can be ahead of what the job has scanned, and the max
-            // can be ahead of the floor once the job has caught up.
-            var start = MsSqlCdcCatalog.Compare(floor, maxLsn) > 0 ? floor : maxLsn;
-            return new ReadResult(
-                rows, MsSqlCdcCatalog.ToWatermark(start), diagnostics,
-                NewWatermarkTimeUtc: await MapTimeAsync(sourceConnection, start, cancellationToken));
-        }
-
+        // Phase 134: an InitialLoad pass never reaches this reader any more — RunExecutor routes it to
+        // the Bulk Load pipeline instead, ahead of ever calling ReadChangesAsync, because this reader
+        // implements IPositionCapturing. Every intent left to handle here has a stored position behind
+        // it.
         if (intent == ReadIntent.ChangesFromLatest)
         {
             // Adopts the table as already-synced: the current max LSN becomes the new watermark and the
@@ -431,19 +406,6 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
     {
         await Task.CompletedTask;
         yield break;
-    }
-
-    private static async IAsyncEnumerable<ChangeRow> ReadFullLoadAsync(
-        DbConnection connection, SourceTableRef source, string projection,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        using var cmd = connection.CreateTimedCommand();
-        cmd.CommandText = MsSqlCdcStatement.BuildFullLoad(source.Schema, source.Table, projection, source.Filter);
-
-        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        var schema = ResultSetSchema.From(reader);
-        while (await reader.ReadAsync(cancellationToken))
-            yield return new ChangeRow(ChangeOperation.Insert, schema, ResultSetSchema.ReadValues(reader, schema.Count));
     }
 
     private static async IAsyncEnumerable<ChangeRow> ReadIncrementalAsync(

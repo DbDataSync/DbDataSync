@@ -104,6 +104,14 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
 
         // InitialLoad reads the table itself, with no predicate — the same statement a first pass has
         // always issued, now driven by the intent rather than by previousWatermark being null.
+        //
+        // Phase 134 routes a Primary pass's InitialLoad to the Bulk Load pipeline instead of calling
+        // this reader at all — but only for a reader that implements IPositionCapturing, which this one
+        // does. Unlike the other three, this branch is deliberately left in place rather than deleted:
+        // this reader is also a legitimate choice for a mapping's *Bulk Load* reader (RunKind.BulkLoad
+        // always asks any reader for InitialLoad, regardless of position-capturing, since a reload has
+        // no incremental cursor to consult either way), and for that caller a null previousWatermark
+        // with no predicate is exactly a reload's own definition — see RunExecutor.RunMappingAsync.
         var incremental = intent == ReadIntent.Changes;
         var maxRows = BoundedRead.Read(options);
 

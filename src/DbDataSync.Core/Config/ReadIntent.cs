@@ -60,6 +60,19 @@ public enum ReadHold
     /// <summary>An operator stopped this one table specifically, at the finer of the two pause grains —
     /// beside phase 64's per-replication <c>Tasks.Paused</c>, not instead of it.</summary>
     Paused,
+
+    /// <summary>
+    /// An initial load is running for this mapping and no valid position exists yet — see phase 134.
+    /// Set the moment a <c>Primary</c> pass resolves to <see cref="ReadIntent.InitialLoad"/> against a
+    /// reader that captures its own position (<c>IPositionCapturing</c>): the captured position is
+    /// stashed on <c>ChangeWatermarks.PendingWatermark</c>, not the live one, and this hold is what
+    /// stops a <c>Primary</c> pass running against the mapping while nothing durable backs it — the same
+    /// coordination problem <see cref="PositionExpired"/> and <see cref="Paused"/> each solve for their
+    /// own cause. Cleared, and the pending position promoted, only once the Bulk Load batch it started
+    /// reaches <c>BulkLoadState.Completed</c> — never on <c>CompletedWithFailures</c>, which leaves the
+    /// mapping held for an operator to retry.
+    /// </summary>
+    Loading,
 }
 
 /// <summary>

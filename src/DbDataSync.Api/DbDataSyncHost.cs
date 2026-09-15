@@ -226,6 +226,11 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<SegmentingStrategyRunner>();
         builder.Services.AddSingleton<CustomSegmentExpansion>();
         builder.Services.AddSingleton<BulkLoadService>();
+        // LocalRunnerState (DbDataSync.State) needs BulkLoadService's segment-expansion/enqueue core for
+        // a runner-triggered initial load (phase 134) but cannot reference DbDataSync.Api directly
+        // without a project-reference cycle — see IInitialLoadEnqueuer's own doc. Same pattern as
+        // IConnectionFactory/DriverConnectionFactory above: registered by interface as well, not instead.
+        builder.Services.AddSingleton<IInitialLoadEnqueuer>(sp => sp.GetRequiredService<BulkLoadService>());
         builder.Services.AddSingleton<ReconcileService>();
         builder.Services.AddSingleton<SegmentingPreviewService>();
         builder.Services.AddSingleton<ResyncService>();

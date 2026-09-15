@@ -271,4 +271,74 @@ public sealed class ChangeWatermarkStoreTests : IDisposable
         Assert.Equal(ReadIntent.ChangesFromEarliest, state.Intent);
         Assert.Equal(ReadHold.None, state.Hold);
     }
+
+    // ---- Phase 134: SetPendingLoad / PromotePendingLoad ----
+
+    /// <summary>The captured position lands as Pending, never as the live Watermark — a crashed or
+    /// still-running load must not read as a completed position.</summary>
+    [Fact]
+    public void SetPendingLoad_StashesThePositionAsPending_NeverAsTheLiveWatermark()
+    {
+        const string table = "orders-db/App/dbo.Orders";
+
+        _store.SetPendingLoad("crm-sync", "orders", table, "12345", DateTimeOffset.UtcNow, "batch-1");
+
+        var state = _store.GetReadState("crm-sync", "orders", table)!;
+        Assert.Equal(ReadHold.Loading, state.Hold);
+        Assert.Null(state.Watermark);
+    }
+
+    /// <summary>The one act: the pending position becomes the live one, the hold clears, the intent
+    /// flips to Changes, and the pending columns are wiped — all in one write.</summary>
+    [Fact]
+    public void PromotePendingLoad_MovesThePendingPositionToLive_ClearsTheHold_FlipsTheIntent()
+    {
+        const string table = "orders-db/App/dbo.Orders";
+        var capturedTime = DateTimeOffset.UtcNow;
+        _store.SetPendingLoad("crm-sync", "orders", table, "999", capturedTime, "batch-1");
+
+        var promoted = _store.PromotePendingLoad("batch-1");
+
+        Assert.True(promoted);
+        var state = _store.GetReadState("crm-sync", "orders", table)!;
+        Assert.Equal(ReadIntent.Changes, state.Intent);
+        Assert.Equal(ReadHold.None, state.Hold);
+        Assert.Equal("999", state.Watermark);
+        Assert.Equal(capturedTime, state.WatermarkTimeUtc);
+    }
+
+    /// <summary>A crashed or still-running load — pending fields written, batch never completed — must
+    /// leave the live watermark untouched and the mapping still held. Nothing calls PromotePendingLoad
+    /// in that case, so this is really just confirming SetPendingLoad alone changes nothing else.</summary>
+    [Fact]
+    public void ACrashedLoad_LeavesTheLiveWatermarkUntouched_AndTheMappingStillHeld()
+    {
+        const string table = "orders-db/App/dbo.Orders";
+        _store.SetWatermark("crm-sync", "orders", table, "111");
+        _store.SetReadIntent("crm-sync", "orders", table, ReadIntent.Changes);
+
+        _store.SetPendingLoad("crm-sync", "orders", table, "999", null, "batch-1");
+
+        var state = _store.GetReadState("crm-sync", "orders", table)!;
+        Assert.Equal(ReadHold.Loading, state.Hold);
+        // The live watermark is untouched by the pending write — only PromotePendingLoad ever moves it.
+        Assert.Equal("111", state.Watermark);
+    }
+
+    /// <summary>An ordinary operator-triggered reload shares RunKind.BulkLoad and the same table without
+    /// gating anything — completing one of those must promote nothing. PendingBulkLoadBatchId is what
+    /// tells the two apart.</summary>
+    [Fact]
+    public void PromotePendingLoad_WhenNoRowIsWaitingOnThisBatch_PromotesNothing()
+    {
+        const string table = "orders-db/App/dbo.Orders";
+        _store.SetPendingLoad("crm-sync", "orders", table, "999", null, "batch-1");
+
+        var promoted = _store.PromotePendingLoad("some-unrelated-batch");
+
+        Assert.False(promoted);
+        var state = _store.GetReadState("crm-sync", "orders", table)!;
+        Assert.Equal(ReadHold.Loading, state.Hold);
+        Assert.Null(state.Watermark);
+    }
 }
