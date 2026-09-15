@@ -103,16 +103,10 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
         var target = await GetMaxSequenceAsync(sourceConnection, source, cancellationToken);
         var diagnostics = new ReadDiagnostics();
 
-        if (intent == ReadIntent.InitialLoad)
-        {
-            // The shadow table only holds what has happened since the trigger was created, so a table
-            // that already had rows would otherwise start half-replicated with nothing to say so —
-            // the same first-pass rule every change-feed reader here follows.
-            var rows = ReadFullLoadAsync(
-                sourceConnection, source, SourceProjection.Render(dialect, columnMappings), cancellationToken);
-            return new ReadResult(rows, target.ToString(), diagnostics);
-        }
-
+        // Phase 134: an InitialLoad pass never reaches this reader any more — RunExecutor routes it to
+        // the Bulk Load pipeline instead, ahead of ever calling ReadChangesAsync, because this reader
+        // implements IPositionCapturing. Every intent left to handle here has a stored position behind
+        // it.
         if (intent == ReadIntent.ChangesFromLatest)
         {
             // Adopts the table as already-synced: the shadow table's current maximum becomes the new
@@ -311,22 +305,6 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
     {
         await Task.CompletedTask;
         yield break;
-    }
-
-    private async IAsyncEnumerable<ChangeRow> ReadFullLoadAsync(
-        DbConnection connection, SourceTableRef source, string projection,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        var filter = string.IsNullOrWhiteSpace(source.Filter) ? "" : $" WHERE {source.Filter}";
-
-        using var cmd = connection.CreateTimedCommand();
-        cmd.CommandText =
-            $"SELECT {projection} FROM {dialect.QualifyTable(source.Schema, source.Table)}{filter};";
-
-        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        var schema = ResultSetSchema.From(reader);
-        while (await reader.ReadAsync(cancellationToken))
-            yield return new ChangeRow(ChangeOperation.Insert, schema, ResultSetSchema.ReadValues(reader, schema.Count));
     }
 
     private async IAsyncEnumerable<ChangeRow> ReadIncrementalAsync(

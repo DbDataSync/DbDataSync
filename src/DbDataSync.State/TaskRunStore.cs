@@ -521,6 +521,30 @@ public sealed class TaskRunStore(StateDatabase database)
             database, connection, transaction, kind, message, run.TaskName, run.MappingName, runId);
     }
 
+    /// <summary>
+    /// A completing run's <see cref="RunKind"/>, <c>BulkLoadBatchId</c> and mapping — read directly
+    /// rather than through <see cref="RunColumns"/>/<see cref="GetRun"/>, which don't carry
+    /// <c>BulkLoadBatchId</c> at all (it exists to drive the Monitoring rollup, not the Runs tab). Used
+    /// by <c>LocalRunnerState.CompleteRun</c> (phase 134) to decide, after every run completes, whether
+    /// this was a <c>BulkLoad</c> segment and — if so — whether the batch it belongs to might now be the
+    /// one a mapping's pending initial load is waiting on.
+    /// </summary>
+    public (RunKind RunKind, string? BulkLoadBatchId, string? MappingName)? GetRunKindAndBatch(Guid runId) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection,
+                "SELECT RunKind, BulkLoadBatchId, MappingName FROM TaskRuns WHERE RunId = $runId;");
+            cmd.Bind(database, "runId", runId.ToString());
+            using var reader = cmd.ExecuteReader();
+            return reader.Read()
+                ? ((RunKind RunKind, string? BulkLoadBatchId, string? MappingName)?)(
+                    Enum.Parse<RunKind>(reader.GetString(0)),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2))
+                : null;
+        });
+
     public TaskRunRecord? GetRun(Guid runId) =>
         database.Retry(() =>
         {

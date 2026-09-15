@@ -798,5 +798,30 @@ internal static class Migrations
         ALTER TABLE PauseEvents {{addcolumn}} MappingName {{key}} NULL;
         CREATE INDEX IX_PauseEvents_TaskName_MappingName ON PauseEvents(TaskName, MappingName);
         """,
+
+        """
+        -- Phase 134: an initial load becomes a bulk load. The position a Primary pass captures ahead of
+        -- one (IPositionCapturing) cannot land on Watermark/WatermarkTimeUtc directly — those columns
+        -- reading as set is what every other caller already treats as "this mapping has a live,
+        -- completed position", and a crashed or still-running load must not read that way. So the
+        -- captured position gets its own column pair, promoted onto the live one only once the batch it
+        -- started is confirmed BulkLoadState.Completed — see ChangeWatermarkStore.PromotePendingLoad and
+        -- ReadHold.Loading, the hold that keeps a Primary pass from running against the mapping in the
+        -- meantime.
+        --
+        -- PendingBulkLoadBatchId is what lets a completing BulkLoadBatches row find its way back to
+        -- exactly the ChangeWatermarks row (if any) it is gating — an auto-triggered initial load is not
+        -- the only thing that can queue a RunKind.BulkLoad batch against this mapping (an operator's own
+        -- on-demand reload shares the same kind and table), and only the batch this column names is one
+        -- this mapping is actually waiting on.
+        --
+        -- All three nullable, no backfill: nothing already stored has a load pending against it, the
+        -- same reasoning every migration since phase 72 has used here. {{key}} rather than {{text}} for
+        -- PendingBulkLoadBatchId because it is indexed, same as TaskRuns.BulkLoadBatchId.
+        ALTER TABLE ChangeWatermarks {{addcolumn}} PendingWatermark {{text}} NULL;
+        ALTER TABLE ChangeWatermarks {{addcolumn}} PendingWatermarkTimeUtc {{text}} NULL;
+        ALTER TABLE ChangeWatermarks {{addcolumn}} PendingBulkLoadBatchId {{key}} NULL;
+        CREATE INDEX IX_ChangeWatermarks_PendingBulkLoadBatchId ON ChangeWatermarks(PendingBulkLoadBatchId);
+        """,
     ];
 }

@@ -42,6 +42,29 @@ public interface IRunnerState
 
     void BeginRun(Guid runId, int? pid);
 
+    /// <summary>
+    /// A <c>Primary</c> pass resolved its intent to <see cref="ReadIntent.InitialLoad"/> against a
+    /// reader that can capture its own position without reading a row
+    /// (<c>IPositionCapturing</c>) — see phase 134. The runner has already captured
+    /// <paramref name="capturedPosition"/> itself, before touching the table, and hands it here so the
+    /// state owner can take it from there: persist it as <c>Pending</c>, set
+    /// <see cref="ReadHold.Loading"/>, and start the Bulk Load pipeline for this mapping — segmented
+    /// exactly as an ordinary scheduled reload of it would be.
+    /// <para>
+    /// **Prerequisite, not Outcome — deliberately.** Every other member of this second group records
+    /// work already done, which is safe to journal and replay at least once. This one *creates* new
+    /// work (a fresh <c>BulkLoadBatchId</c> and its work-queue rows); replaying it blindly after a
+    /// restart could double-enqueue a batch the owner already received. The safe retry is simply the
+    /// next scheduled tick resolving to <see cref="ReadIntent.InitialLoad"/> again and asking again — a
+    /// runner that cannot reach the owner for this either succeeds on a later attempt or learns the
+    /// owner is gone (<c>StateOwnerUnavailableException</c>) and stops cleanly, the same as every
+    /// other prerequisite here.
+    /// </para>
+    /// </summary>
+    void RequestInitialLoad(
+        string taskName, string mappingName, string sourceTable,
+        string capturedPosition, DateTimeOffset? capturedPositionTimeUtc);
+
     // ---- Outcomes: what happened ----
     //
     // These record work that has already been done, so a runner that cannot deliver them has something

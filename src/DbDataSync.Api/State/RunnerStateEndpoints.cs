@@ -53,6 +53,15 @@ public static class RunnerStateEndpoints
             return Results.Ok();
         });
 
+        // Phase 134: a Primary pass captured its own position ahead of an initial load and is handing
+        // it to the state owner to take from here. Prerequisite, not Outcome — see
+        // IRunnerState.RequestInitialLoad's own doc for why.
+        group.MapPost("/request-initial-load", (RequestInitialLoadRequest r) =>
+        {
+            state.RequestInitialLoad(r.TaskName, r.MappingName, r.SourceTable, r.CapturedPosition, r.CapturedPositionTimeUtc);
+            return Results.Ok();
+        });
+
         // ---- Outcomes ----
 
         group.MapPost("/mark-running", (WorkItemRequest r) => { state.MarkRunning(r.WorkItemId); return Results.Ok(); });

@@ -95,7 +95,8 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
             _configRepository, driverRegistry, secretStore,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
                 new ChangeWatermarkStore(stateDatabase), new VerificationResultStore(stateDatabase),
-                _logWriter = new LogWriter(stateDatabase)),
+                _logWriter = new LogWriter(stateDatabase),
+                new BulkLoadBatchStore(stateDatabase), new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledInitialLoadEnqueuer())),
             new LocalRunnerConfig(_configRepository, Author),
             Scripting.ForTests(_configRepository, _repoRoot),
             Path.Combine(_repoRoot, "state.db"));

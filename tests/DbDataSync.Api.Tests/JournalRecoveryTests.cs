@@ -34,7 +34,8 @@ public sealed class JournalRecoveryTests : IDisposable
         _logs = new LogWriter(_database);
         _state = new LocalRunnerState(
             _taskRuns, _workQueue, new RunLockStore(_database), new ChangeWatermarkStore(_database),
-            new VerificationResultStore(_database), _logs);
+            new VerificationResultStore(_database), _logs, new BulkLoadBatchStore(_database),
+            new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledInitialLoadEnqueuer()));
 
         _recovery = new JournalRecovery(_state, _taskRuns, _logs, new ApiOptions
         {
@@ -299,6 +300,15 @@ public sealed class JournalRecoveryTests : IDisposable
 
         Assert.Null(new ChangeWatermarkStore(_database).GetReadState(TaskName, MappingName, "dbo.Orders"));
         Assert.Contains(_logger.Entries, e => e.Message.Contains("names no mapping"));
+    }
+
+    /// <summary>Journal recovery never starts a Bulk Load; this <see cref="LocalRunnerState"/>'s
+    /// constructor just needs one.</summary>
+    private sealed class NeverCalledInitialLoadEnqueuer : IInitialLoadEnqueuer
+    {
+        public Task EnqueueForInitialLoadAsync(
+            string replicationName, string mappingName, string batchId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Not expected to be called by journal recovery.");
     }
 
     private sealed class CapturingLogger : ILogger<JournalRecovery>

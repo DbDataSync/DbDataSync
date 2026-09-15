@@ -59,7 +59,7 @@ export type ReadIntent = 'InitialLoad' | 'Changes' | 'ChangesFromEarliest' | 'Ch
 
 /** Why a mapping's next scheduled `Primary` pass is not going to run — a reason, never a fifth
  * `ReadIntent`. See phase 100/101. */
-export type ReadHold = 'None' | 'PositionExpired' | 'Paused'
+export type ReadHold = 'None' | 'PositionExpired' | 'Paused' | 'Loading'
 
 /** One mapping's read intent and hold, resolved — never the raw absence of a stored row. See phase 100. */
 export interface MappingReadState {

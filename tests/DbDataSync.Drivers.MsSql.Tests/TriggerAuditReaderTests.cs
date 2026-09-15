@@ -64,11 +64,36 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         new("Name", "nvarchar(50)", false, false, false),
     ];
 
-    private Task<ReadResult> ReadAsync(string? watermark, IReadOnlyDictionary<string, string>? options = null) =>
-        _reader.ReadChangesAsync(
-            _connection, Source(), watermark, watermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
+    /// <summary>
+    /// A null <paramref name="watermark"/> used to mean "read this reader's own first-pass full load".
+    /// This reader no longer full-loads on <see cref="ReadIntent.InitialLoad"/> — <c>RunExecutor</c>
+    /// routes that to the Bulk Load pipeline instead, capturing the position ahead of it (see
+    /// <see cref="AnInitialLoad_CapturesThePosition_AndDoesNotFullLoad"/>) — so a null watermark here
+    /// captures that same position instead and wraps it in an equivalent (empty) <see cref="ReadResult"/>.
+    /// Every other call site only ever wanted this call's *position*, never its rows, so they are
+    /// unaffected.
+    /// </summary>
+    private async Task<ReadResult> ReadAsync(string? watermark, IReadOnlyDictionary<string, string>? options = null)
+    {
+        if (watermark is null)
+        {
+            var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+            var captured = await capturing.CapturePositionAsync(
+                _connection, Source(), options ?? new Dictionary<string, string>(), CancellationToken.None);
+            return new ReadResult(EmptyRows(), captured.Position, new ReadDiagnostics());
+        }
+
+        return await _reader.ReadChangesAsync(
+            _connection, Source(), watermark, ReadIntent.Changes,
             [], MappingName, Columns(), options ?? new Dictionary<string, string>(),
             CancellationToken.None);
+    }
+
+    private static async IAsyncEnumerable<ChangeRow> EmptyRows()
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
 
     private static async Task<List<ChangeRow>> CollectAsync(IAsyncEnumerable<ChangeRow> rows)
     {
@@ -85,17 +110,32 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         return Convert.ToInt64(await cmd.ExecuteScalarAsync());
     }
 
-    /// <summary>The shadow table holds only what happened since the trigger was created, so a table
-    /// that already had rows would otherwise start half-replicated with nothing to say so.</summary>
+    /// <summary>
+    /// The correctness crux phase 134 depends on. This reader no longer full-loads on
+    /// <see cref="ReadIntent.InitialLoad"/> — <c>RunExecutor</c> routes that to the Bulk Load pipeline
+    /// instead, capturing this reader's position (<see cref="IPositionCapturing.CapturePositionAsync"/>)
+    /// before the load ever reads a row. A change committed *after* the position was captured but
+    /// before anything reads from it must still arrive on the very next <see cref="ReadIntent.Changes"/>
+    /// pass — get the ordering backwards and this is exactly the row that goes missing, silently.
+    /// </summary>
     [Fact]
-    public async Task WithNoStoredPosition_EveryRowIsReadAsAnInsert()
+    public async Task AnInitialLoad_CapturesThePosition_AndDoesNotFullLoad()
     {
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (1, 'Alice'), (2, 'Bob');");
 
-        var rows = await CollectAsync((await ReadAsync(null)).Rows);
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var captured = await capturing.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None);
+        Assert.False(string.IsNullOrEmpty(captured.Position));
 
-        Assert.Equal(2, rows.Count);
-        Assert.All(rows, r => Assert.Equal(ChangeOperation.Insert, r.Operation));
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (3, 'Carol');");
+
+        var rows = await CollectAsync((await ReadAsync(captured.Position)).Rows);
+
+        var inserted = Assert.Single(rows);
+        Assert.Equal(ChangeOperation.Insert, inserted.Operation);
+        Assert.Equal(3, (int)inserted["Id"]!);
+        Assert.Equal("Carol", (string)inserted["Name"]!);
     }
 
     [Fact]

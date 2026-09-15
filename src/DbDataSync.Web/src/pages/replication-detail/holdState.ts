@@ -12,14 +12,26 @@ import type { ReadHold } from '../../api/types'
  * "paused" ahead of "running" for one replication: the more fundamental fact is the one worth saying,
  * and a mapping resumed from its own hold while the replication is still paused must not read as
  * running just because its own hold cleared.
+ *
+ * `'loading'` is phase 134's addition — `ReadHold.Loading`, set while an initial load's Bulk Load is in
+ * flight (a position has been captured but is not yet the live watermark). It clears on its own once the
+ * batch completes, so unlike `position-expired` it needs no recovery affordance in the dialog — see
+ * `MappingReadStateDialog`'s own doc for why that file is otherwise untouched by this phase.
  */
-export type HoldState = 'replication-disabled' | 'replication-paused' | 'position-expired' | 'paused' | 'none'
+export type HoldState =
+  | 'replication-disabled'
+  | 'replication-paused'
+  | 'position-expired'
+  | 'paused'
+  | 'loading'
+  | 'none'
 
 export function holdStateOf(taskEnabled: boolean, taskPaused: boolean, mappingHold: ReadHold): HoldState {
   if (!taskEnabled) return 'replication-disabled'
   if (taskPaused) return 'replication-paused'
   if (mappingHold === 'PositionExpired') return 'position-expired'
   if (mappingHold === 'Paused') return 'paused'
+  if (mappingHold === 'Loading') return 'loading'
   return 'none'
 }
 
@@ -28,5 +40,6 @@ export const HOLD_INFO: Record<HoldState, { label: string; dot: string }> = {
   'replication-paused': { label: 'Not running — replication paused', dot: 'dot-warn' },
   'position-expired': { label: 'Held — position expired, needs recovery', dot: 'dot-bad' },
   paused: { label: 'Held — paused', dot: 'dot-warn' },
+  loading: { label: 'Loading — initial load in progress', dot: 'dot-warn' },
   none: { label: '', dot: '' },
 }

@@ -35,6 +35,11 @@ public sealed record TryClaimNextRequest(string TaskName, string WorkerId, RunLa
 public sealed record TryAcquireLockRequest(string TaskName, RunKind RunKind, string MappingName, Guid RunId);
 public sealed record ReleaseLockRequest(string TaskName, RunKind RunKind, string MappingName);
 public sealed record BeginRunRequest(Guid RunId, int? Pid);
+/// <summary>Phase 134's <c>IRunnerState.RequestInitialLoad</c> — see that method's own doc for why this
+/// is a Prerequisite request rather than an Outcome one.</summary>
+public sealed record RequestInitialLoadRequest(
+    string TaskName, string MappingName, string SourceTable,
+    string CapturedPosition, DateTimeOffset? CapturedPositionTimeUtc);
 public sealed record WorkItemRequest(long WorkItemId);
 public sealed record CompleteRunRequest(
     Guid RunId, RunStatus Status, long RowsRead, long RowsWritten, string? ErrorSummary,

@@ -94,16 +94,10 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
     {
         sourceConnection.ChangeDatabase(source.Database);
 
-        if (intent == ReadIntent.InitialLoad)
-        {
-            var version = await GetCurrentVersionAsync(sourceConnection, cancellationToken);
-            var fullLoadRows = ReadFullLoadAsync(
-                sourceConnection, source, SourceProjection.Render(MsSqlDialect.Instance, columnMappings), cancellationToken);
-            return new ReadResult(
-                fullLoadRows, version.ToString(), new ReadDiagnostics(), Bounded: null,
-                await MapTimeAsync(sourceConnection, version, cancellationToken));
-        }
-
+        // Phase 134: an InitialLoad pass never reaches this reader any more — RunExecutor routes it to
+        // the Bulk Load pipeline instead, ahead of ever calling ReadChangesAsync, because this reader
+        // implements IPositionCapturing. Every intent left to handle here has a stored position behind
+        // it.
         var targetVersion = await GetCurrentVersionAsync(sourceConnection, cancellationToken);
 
         if (intent == ReadIntent.ChangesFromLatest)
@@ -361,20 +355,6 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
             throw new InvalidOperationException(
                 $"Change Tracking is not enabled for table '{source.Schema}.{source.Table}' in database '{source.Database}'.");
         return Convert.ToInt64(result);
-    }
-
-    private static async IAsyncEnumerable<ChangeRow> ReadFullLoadAsync(
-        DbConnection connection, SourceTableRef source, string projection,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        using var cmd = connection.CreateTimedCommand();
-        cmd.CommandText = MsSqlChangeTrackingStatement.BuildFullLoad(
-            source.Schema, source.Table, projection, source.Filter);
-
-        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        var schema = ResultSetSchema.From(reader);
-        while (await reader.ReadAsync(cancellationToken))
-            yield return new ChangeRow(ChangeOperation.Insert, schema, ResultSetSchema.ReadValues(reader, schema.Count));
     }
 
     private static async IAsyncEnumerable<ChangeRow> ReadIncrementalAsync(

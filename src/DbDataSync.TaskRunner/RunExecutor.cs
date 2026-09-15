@@ -661,6 +661,44 @@ public sealed class RunExecutor(
         {
             sourceConnection = await OpenAsync(sourceConnectionConfig, sourceDriverForResolution, cancellationToken);
             var sourceDriver = sourceDriverForResolution;
+
+            // Phase 134: an initial load runs the Bulk Load pipeline, not this reader — but only when
+            // the reader can honestly report its own position ahead of reading a row
+            // (IPositionCapturing). A reader with no such story (BatchReloadReader,
+            // MsSqlBatchReloadReader, DuckDbQueryReader, ScriptedQueryReader — see
+            // PositionCapturingContractTests' Exempt list) keeps today's behaviour exactly: it falls
+            // through to the ordinary dispatch below, called with intent InitialLoad as always.
+            //
+            // Captured here, before anything else touches the table — before even the target
+            // connection opens, since nothing about the target matters if this pass is not going to
+            // write. A change committed after this point but before the Bulk Load actually reads the
+            // table must still replay on this mapping's first ordinary Changes pass afterward, which is
+            // exactly what handing the state owner *this* position — rather than one read any later —
+            // guarantees. See architecture/planning/done/bulk-load-pipeline-and-the-initial-load-rule.md.
+            if (item.RunKind == RunKind.Primary && intent == ReadIntent.InitialLoad
+                && reader is IPositionCapturing capturing)
+            {
+                var captured = await capturing.CapturePositionAsync(
+                    sourceConnection, source, effectiveReader.Options, cancellationToken);
+
+                Log(item.RunId, LogSeverity.Info,
+                    $"'{mapping.Name}': position captured ('{captured.Position}') ahead of an initial " +
+                    "load — starting a Bulk Load for this mapping instead of reading this reader " +
+                    "directly. This pass reads and writes nothing; the captured position becomes this " +
+                    "mapping's watermark once the load completes.");
+
+                // A Prerequisite call (see IRunnerState.RequestInitialLoad's own doc) — its failure
+                // (StateOwnerUnavailableException) is deliberately not caught here, the same as every
+                // other prerequisite this method calls.
+                state.RequestInitialLoad(
+                    task.Name, mapping.Name, watermarkKey, captured.Position, captured.PositionTimeUtc);
+
+                // No rows read or written by this mechanism, and no watermark change of its own — the
+                // pending position this just requested is promoted to the live one only once the batch
+                // it started reaches BulkLoadState.Completed (see LocalRunnerState.CompleteRun).
+                return (0, 0, null, null);
+            }
+
             (targetConnection, var targetDriver) = await OpenConnectionAsync(target.ConnectionName, cancellationToken);
 
             var stagingProvider = targetDriver.StagingProviders.FirstOrDefault(p => p.Kind == cacheKind)

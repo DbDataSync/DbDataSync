@@ -78,6 +78,12 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
 
     public void BeginRun(Guid runId, int? pid) => Required("begin-run", new BeginRunRequest(runId, pid));
 
+    public void RequestInitialLoad(
+        string taskName, string mappingName, string sourceTable,
+        string capturedPosition, DateTimeOffset? capturedPositionTimeUtc) =>
+        Required("request-initial-load", new RequestInitialLoadRequest(
+            taskName, mappingName, sourceTable, capturedPosition, capturedPositionTimeUtc));
+
     // ---- Outcomes: journal rather than lose ----
 
     public void MarkRunning(long id) => Outcome("mark-running", new WorkItemRequest(id), JournalOperation.MarkRunning);
