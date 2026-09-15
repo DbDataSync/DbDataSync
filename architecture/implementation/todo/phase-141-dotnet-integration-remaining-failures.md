@@ -1,8 +1,8 @@
 # Phase 141 — `dotnet-integration`'s remaining ~46-test failure wave
 
-**Status**: `TaskRunner.Tests` (32/32) and `Api.Tests` (68/69) fixed and verified locally against the
-same Docker containers CI uses. One `Api.Tests` failure remains open (a real, intermittent race — see
-below). `DbDataSync.Drivers.MsSql.Tests`' 1 failure (122/123) confirmed but not fixed — see below.
+**Status**: `TaskRunner.Tests` (32/32), `Api.Tests` (68/69), and `DbDataSync.Drivers.MsSql.Tests`
+(123/123) fixed and verified locally against the same Docker containers CI uses. One `Api.Tests` failure
+remains open — a real, intermittent race, not root-caused (see below).
 **Plan reference**: none — split out of phase 140 on 2026-09-15. This is the `ubuntu-latest`
 `dotnet-integration` job (real SQL Server/Postgres/MySQL service containers), unrelated to anything
 Windows-specific — it doesn't belong in phase 140, which is scoped to `dotnet-windows`.
@@ -178,19 +178,18 @@ resolved:
   Profiler/Extended Events on the target database to see literally what the two racing pipelines executed
   and in what order, rather than inferring from HTTP-visible state alone.
 
-### `DbDataSync.Drivers.MsSql.Tests` (confirmed, not fixed)
+### `DbDataSync.Drivers.MsSql.Tests` (fixed)
 
 `Scd2CdcGuaranteedDeliveryIntegrationTests.APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation`
-fails with `ArgumentNullException` in `MsSqlCdcCatalog.FromWatermark` — this is **not a new discovery**:
-it's exactly the gap phase 134's own retrospective already named under "Known follow-up" (`grep -rn
-"ReadIntent.InitialLoad" tests/` there names this file's own `RunPassAsync(null, ReadIntent.InitialLoad)`
-call explicitly, "compile-clean but may fail at test run time — CI will surface exactly which"). Confirmed
-here: CI did. The established fix pattern (same doc, already applied to `MsSqlCdcReaderTests.cs` and two
-others) is to replace a direct `ReadChangesAsync(..., null, ReadIntent.InitialLoad, ...)` call with
-`IPositionCapturing.CapturePositionAsync` — but unlike those three files' call sites, **this one doesn't
-only want the position**: the initial pass's own rows (`a`/`p`/`x` for Ids 1/2/3) are later read back
-through `ReadVersionsAsync` and asserted on directly (`id1 = ["a", "b", "c"]`), so simply swapping to a
-position-only capture would silently drop the first version of every key. The correct fix needs the
-initial three rows staged and written directly (mirroring what a real Bulk Load's `BatchReloadReader`
-would produce, not what `MsSqlCdcReader` would) alongside the position capture, which means constructing
-`ChangeRow` values by hand rather than a one-line swap — not attempted here.
+failed with `ArgumentNullException` in `MsSqlCdcCatalog.FromWatermark` — exactly the gap phase 134's own
+retrospective already named under "Known follow-up" (its own `grep -rn "ReadIntent.InitialLoad" tests/`
+named this file's `RunPassAsync(null, ReadIntent.InitialLoad)` call explicitly, "compile-clean but may
+fail at test run time — CI will surface exactly which"). Unlike the three files phase 134 already fixed
+with a one-line swap to `IPositionCapturing.CapturePositionAsync`, this test's initial pass rows
+(`a`/`p`/`x` for Ids 1/2/3) are read back later and asserted on directly (`id1 = ["a", "b", "c"]`), so a
+bare position capture would have silently dropped the first version of every key. Fixed with a new
+`InitialLoadAsync()` helper that stages and writes the three rows directly — hand-built `ChangeRow`
+values from a plain `SELECT Id, Name`, mirroring exactly what a real Bulk Load's `BatchReloadReader`
+would produce (a plain table scan, no ordering columns) — then captures the CDC position via
+`CapturePositionAsync` to resume the incremental pass from. `DbDataSync.Drivers.MsSql.Tests`
+`Category=Integration` is 123/123 locally.

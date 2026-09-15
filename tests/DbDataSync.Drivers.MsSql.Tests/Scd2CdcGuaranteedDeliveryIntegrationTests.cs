@@ -165,6 +165,58 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         }
     }
 
+    /// <summary>
+    /// Phase 134: an initial load no longer goes through this reader — <c>RunExecutor</c> routes it to
+    /// the Bulk Load pipeline (a plain table scan, <c>BatchReloadReader</c>) instead, capturing this
+    /// reader's own position ahead of it via <see cref="IPositionCapturing"/> rather than reading
+    /// through it (see <c>MsSqlCdcReaderTests</c>' own established idiom for this exact seam —
+    /// <c>ReadIntent.InitialLoad</c> with a null watermark now throws here, per phase 134's own "Known
+    /// follow-up"). Mirrored here rather than a bare position capture, because unlike that idiom's own
+    /// call sites this test's initial rows are not thrown away: the incremental pass's own asserted
+    /// versions (<c>id1 = ["a","b","c"]</c>) start from them, so they are staged and written directly —
+    /// as a real Bulk Load's <c>BatchReloadReader</c> would produce them, a plain table scan with no
+    /// ordering columns (hence <see cref="StagedChangeSet.HasChangeOrdering"/> is still false here).
+    /// </summary>
+    private async Task<string> InitialLoadAsync()
+    {
+        var schema = new ChangeSchema(["Id", "Name"]);
+        var rows = new List<ChangeRow>();
+        await using (var cmd = _sourceConnection.CreateCommand())
+        {
+            cmd.CommandText = $"SELECT Id, Name FROM dbo.[{_sourceTable}] ORDER BY Id;";
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                rows.Add(new ChangeRow(ChangeOperation.Insert, schema, [reader.GetInt32(0), reader.GetString(1)]));
+        }
+
+        var staged = await _staging.StageAsync(
+            _targetConnection, Target(), ToAsyncEnumerable(rows), Mappings, MappingName, TargetColumns(),
+            new Dictionary<string, string>(), CancellationToken.None);
+        Assert.False(staged.HasChangeOrdering);
+        try
+        {
+            await _writer.ApplyAsync(
+                _targetConnection, Target(), staged, Mappings, MappingName, TargetColumns(),
+                WriterOptions(), CancellationToken.None);
+        }
+        finally
+        {
+            await _staging.CleanupAsync(_targetConnection, staged, CancellationToken.None);
+        }
+
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var captured = await capturing.CapturePositionAsync(
+            _sourceConnection, Source(), new Dictionary<string, string>(), CancellationToken.None);
+        return captured.Position;
+    }
+
+    private static async IAsyncEnumerable<ChangeRow> ToAsyncEnumerable(List<ChangeRow> rows)
+    {
+        await Task.CompletedTask;
+        foreach (var row in rows)
+            yield return row;
+    }
+
     private sealed record Version(string VersionKey, string Name, DateTime ValidFrom, DateTime? ValidTo, bool IsCurrent);
 
     private async Task<List<Version>> ReadVersionsAsync(int id)
@@ -206,10 +258,7 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         // keeps the incremental pass below from re-seeing them as phantom duplicate rows for every key,
         // Id 2 included, which would otherwise no longer be the singleton this pass needs it to be.
         await CdcCaptureJob.ScanAsync(_sourceConnection);
-        var (watermark, initialStaged, _) = await RunPassAsync(null, ReadIntent.InitialLoad);
-        // The full load reads the table itself, not the change table — there is no source order to
-        // state for a plain table scan, so this pass's staged set does not carry the two columns.
-        Assert.False(initialStaged.HasChangeOrdering);
+        var watermark = await InitialLoadAsync();
 
         // Two updates to Id 1 between reads — the exact scenario the plan doc confirmed crashes today.
         // Scanning between them (rather than once at the end) is what gives them two distinct
