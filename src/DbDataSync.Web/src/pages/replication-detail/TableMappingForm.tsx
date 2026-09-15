@@ -9,8 +9,8 @@ import {
 import { tableExists } from '../../api/tableExists'
 import { canonicalJson } from '../../api/canonicalJson'
 import type {
-  BatchReloadSegment, ColumnMapping, ColumnMetadata, ProvisioningConfig, ReadIntent, ReplicationTaskConfig,
-  ResolvedRef, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
+  BatchReloadSegment, ColumnMapping, ColumnMetadata, ProvisioningConfig, ReadIntent, ReconcileConfig,
+  ReplicationTaskConfig, ResolvedRef, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
 } from '../../api/types'
 import { MappingSide } from './MappingSide'
 import { EndpointSidePair } from '../../components/EndpointSidePair'
@@ -25,6 +25,7 @@ import { ProvisioningCard } from './ProvisioningCard'
 import { DefaultSegmentingCard } from './DefaultSegmentingCard'
 import { SourceFilterCard } from './SourceFilterCard'
 import { MappingPipelineCard, type PipelineOverrides } from './MappingPipelineCard'
+import { ReconcileConfigCard } from './ReconcileConfigCard'
 import { isQuerySource, queryOf, withQuery } from './querySource'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
@@ -109,6 +110,12 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   // Null inherits the replication's DefaultReadIntent — see phase 100/102.
   const [defaultReadIntent, setDefaultReadIntent] = useState<ReadIntent | null>(
     existing?.defaultReadIntent ?? null,
+  )
+  // Null inherits the replication's Reconcile entirely (phase 125) — a mapping that has never been
+  // asked reconciles however the replication does, which is not the same as one that overrides it
+  // with a disabled/empty config (the same reason `pipeline`'s overrides above are null, not empty).
+  const [reconcileOverride, setReconcileOverride] = useState<ReconcileConfig | null>(
+    structuredClone(existing?.reconcileOverride ?? null),
   )
 
   /**
@@ -220,6 +227,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     bulkLoadReaderOverride: pipeline.bulkLoadReaderOverride,
     bulkLoadCacheOverride: pipeline.bulkLoadCacheOverride,
     bulkLoadWriterOverride: pipeline.bulkLoadWriterOverride,
+    reconcileOverride,
   })
   const savedShape = existing && canonicalJson({
     name: existing.name,
@@ -238,6 +246,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     bulkLoadReaderOverride: existing.bulkLoadReaderOverride ?? null,
     bulkLoadCacheOverride: existing.bulkLoadCacheOverride ?? null,
     bulkLoadWriterOverride: existing.bulkLoadWriterOverride ?? null,
+    reconcileOverride: existing.reconcileOverride ?? null,
   })
   const dirty = !existing || draftShape !== savedShape
 
@@ -275,7 +284,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
         // being dropped by a save from here.
         ...existing,
         name, sources: [source], targets: [target], columnMappings, scripts, provisioning,
-        defaultSegmenting, notes, traceTiming, defaultReadIntent, ...pipeline,
+        defaultSegmenting, notes, traceTiming, defaultReadIntent, ...pipeline, reconcileOverride,
         sourceColumns: captureFor(sourceColumns, existing?.sourceColumns, sourceTableChanged),
         // `catalogTargetColumns`, not `targetColumns` — the latter falls back to the *source's*
         // columns for a target that does not exist yet, which is right for an editor about to
@@ -382,6 +391,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
             provisioning, setProvisioning,
             pipeline, setPipeline,
             defaultReadIntent, setDefaultReadIntent,
+            reconcileOverride, setReconcileOverride,
             notes, setNotes,
             traceTiming, setTraceTiming,
             target,
@@ -419,6 +429,8 @@ export interface MappingEditorContext {
   setPipeline: (next: PipelineOverrides) => void
   defaultReadIntent: ReadIntent | null
   setDefaultReadIntent: (next: ReadIntent | null) => void
+  reconcileOverride: ReconcileConfig | null
+  setReconcileOverride: (next: ReconcileConfig | null) => void
   notes: string | null
   setNotes: (next: string | null) => void
   traceTiming: boolean
@@ -533,21 +545,88 @@ export function MappingProvisioningTab() {
 export function MappingPipelineTab() {
   const {
     replicationName, existing, task, resolvedSource, resolvedTarget, pipeline, setPipeline,
-    defaultReadIntent, setDefaultReadIntent,
+    defaultReadIntent, setDefaultReadIntent, reconcileOverride, setReconcileOverride,
   } = useOutletContext<MappingEditorContext>()
 
   return (
-    <MappingPipelineCard
-      replicationName={replicationName}
-      mappingName={existing?.name}
-      task={task}
-      source={resolvedSource}
-      target={resolvedTarget}
-      overrides={pipeline}
-      onChange={setPipeline}
-      defaultReadIntent={defaultReadIntent}
-      onChangeDefaultReadIntent={setDefaultReadIntent}
-    />
+    <>
+      <MappingPipelineCard
+        replicationName={replicationName}
+        mappingName={existing?.name}
+        task={task}
+        source={resolvedSource}
+        target={resolvedTarget}
+        overrides={pipeline}
+        onChange={setPipeline}
+        defaultReadIntent={defaultReadIntent}
+        onChangeDefaultReadIntent={setDefaultReadIntent}
+      />
+      {task && (
+        <MappingReconcileCard
+          inherited={task.reconcile}
+          // The mapping's own effective Change Processing writer — pipeline.writerOverride if this
+          // mapping overrides it, the replication's otherwise — never the Bulk Load writer, which is
+          // irrelevant to what a delete-diff sweep resolves to (phase 129). Recomputed here rather
+          // than exported from MappingPipelineCard: one property lookup, not worth exposing its
+          // internals for.
+          writerKind={pipeline.writerOverride?.kind ?? task.changeProcessing.writer.kind}
+          reconcileOverride={reconcileOverride}
+          onChange={setReconcileOverride}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * The mapping-level counterpart to `OverviewPanel`'s replication-level `ReconcileConfigCard` — phase
+ * 138. Wraps the same card in a whole-object inherit/override toggle, the pattern
+ * `MappingPipelineCard.toggleOverride` established for a per-stage override: INHERITED badge, "Override
+ * here" toggle, seeded from the currently-effective config when turned on, back to `null` (not an
+ * empty/disabled object) when turned off.
+ */
+function MappingReconcileCard({ inherited, writerKind, reconcileOverride, onChange }: {
+  inherited: ReconcileConfig
+  writerKind: string
+  reconcileOverride: ReconcileConfig | null
+  onChange: (next: ReconcileConfig | null) => void
+}) {
+  const overriding = reconcileOverride !== null
+  const effective = reconcileOverride ?? inherited
+
+  const toggleOverride = () => onChange(overriding ? null : structuredClone(effective))
+
+  // Not a card of its own — ReconcileConfigCard already is one, reused as-is below. This is just the
+  // toggle strip that decides whether this mapping edits its own or shows the replication's, the same
+  // relationship MappingPipelineCard's per-stage toggle has to the ParameterForm it governs, just one
+  // level up (a whole card, not a stage within one).
+  return (
+    <>
+      <div className="row" style={{ gap: 8, padding: '0 2px' }}>
+        <span className="card-title sm">Delete reconciliation override</span>
+        {!overriding && <span className="badge">INHERITED</span>}
+        <span className="spacer row" style={{ gap: 7 }}>
+          <button
+            type="button"
+            className={`toggle ${overriding ? 'on' : ''}`}
+            onClick={toggleOverride}
+            aria-pressed={overriding}
+            data-testid="mapping-reconcile-override"
+          />
+          <span style={{ font: '500 11.5px var(--ui)', color: 'var(--ink-4)' }}>Override here</span>
+        </span>
+      </div>
+
+      {overriding ? (
+        <ReconcileConfigCard reconcile={effective} writerKind={writerKind} onChange={onChange} />
+      ) : (
+        <span className="hint" data-testid="mapping-reconcile-inherited">
+          This mapping sweeps however the replication does
+          {inherited.enabled ? '' : ' — which, right now, is not at all'}. Overriding replaces the whole
+          setting: cadence, after-change trigger and guard together, never half of each.
+        </span>
+      )}
+    </>
   )
 }
 

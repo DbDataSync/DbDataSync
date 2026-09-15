@@ -1,6 +1,6 @@
 # Phase 138 — a mapping-level Delete Reconciliation override, in the SPA
 
-**Status**: Planned, not started.
+**Status**: Complete.
 **Plan reference**: none — found during a 2026-09-14 audit of recently-shipped backend work with no
 matching SPA surface (see `architecture/implementation/README.md`'s 2026-09-14 update). Closes a gap
 phase 125's own retrospective named directly: *"No mapping-level `ReconcileOverride` editor in the
@@ -110,3 +110,36 @@ helper) rather than duplicating a subtly different calculation.
 - **Whether `MappingPipelineCard` should export its `kindOf`-style writer-resolution helper**, or
   whether `TableMappingForm` recomputes the equivalent locally. Small either way; worth a look at how
   much `MappingPipelineCard`'s internals can be reused without exporting more than intended.
+
+## Implementation notes
+
+Resolved as: **recompute locally, do not export anything from `MappingPipelineCard`.** The mapping's
+effective Change Processing writer Kind is one property lookup —
+`pipeline.writerOverride?.kind ?? task.changeProcessing.writer.kind` — not worth exposing
+`MappingPipelineCard`'s internals for. Verified against a real mapping whose writer is `MsSqlMerge`:
+the reused card correctly shows the `KeyReconcile`/`KeyReconcileDelete` pair (not
+`KeyReconcileScd2Close`), confirming the resolution is right, not just plausible.
+
+**Structural note beyond the plan**: the toggle header is *not* wrapped in its own `<div className="card">`
+— `ReconcileConfigCard` already is one, reused as-is per the plan, and nesting a second bordered card
+around it produced a visibly redundant double-card (two titles, two toggle rows) the first time it was
+tried. The toggle strip is a plain row sitting directly above the reused card instead — confirmed
+correct in a screenshot before settling on it.
+
+**Verified for real, not just `npm run build`/`lint`** (both also clean): ran the actual dev harness
+(`tools/dev-harness up --no-containers --rows 50`) against the already-running local SQL Server
+containers, drove a real Chromium browser (Playwright, no `claude-in-chrome` extension available this
+session) to the `dev-sync` replication's `table1` mapping's Pipeline tab, and confirmed every behavior
+the plan's "How it will be verified" section calls for:
+- Default state: INHERITED badge, "This mapping sweeps however the replication does — which, right
+  now, is not at all" hint (the replication's own `reconcile.enabled` is `false`).
+- Toggling on reveals the reused `ReconcileConfigCard`; enabling reconciliation within it reveals
+  Cadence/After a change/Guard, matching the replication-level card exactly.
+- Set cadence to `Every… 777s`, saved, reloaded the page from scratch (full `page.goto`, not an SPA
+  transition) — the override round-tripped exactly, `777` intact.
+- Toggled the override back off, saved, reloaded — reverted to the inherited hint, `reconcile-config-card`
+  gone entirely, confirming `null` (not an empty/disabled object) is what "off" actually writes, per the
+  plan's own emphasis on that distinction.
+
+No Playwright coverage added to the suite itself, per the plan's own reasoning (`golden-path.spec.ts`'s
+sequencing risk outweighs the marginal confidence, same call phase 125 made for `ReconcileConfigCard`).
