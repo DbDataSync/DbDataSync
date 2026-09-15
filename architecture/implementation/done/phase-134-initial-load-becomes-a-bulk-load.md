@@ -365,3 +365,58 @@ were not blocking the merge:
   `InitialLoad` with a null watermark, and their full-load branch is gone) — a real, if narrow and
   previously-untested, regression. Not fixed here; worth a decision (defensive error message on that
   Kind/RunKind combination, or leave it) in a follow-up.
+
+## Follow-up — 2026-09-15: the retriggered run's real findings, and five fixes
+
+The retrigger from the note above **was not a flake — it reproduced twice**, with growing scope (a third
+run pulled in `DbDataSync.Drivers.Postgres.Tests` and `DbDataSync.Drivers.MsSql.Tests` failures the first
+hadn't shown). Reading the actual failures rather than assuming either "it's fine" or "it's all
+connectivity" turned up **two distinct, real classes of problem**, not one:
+
+**1. Five genuine test regressions, all now fixed and individually verified against real MSSQL/Postgres
+containers** (not just `dotnet build`) — exactly the "Docker-backed driver test files... never audited"
+gap named above, now closed for the specific files this run's failures actually named:
+- `tests/DbDataSync.Drivers.Postgres.Tests/TriggerAuditReaderTests.cs`'s
+  `ACompositeKey_CollapsesAndIdentifiesADeleteByEveryPart` and
+  `tests/DbDataSync.Drivers.MsSql.Tests/TriggerAuditReaderTests.cs`'s two `Incremental_With*` tests: a
+  direct `ReadChangesAsync(..., null, ReadIntent.InitialLoad, ...)` call to seed a baseline, now
+  `ArgumentNullException` in `long.Parse` since that branch is gone. Fixed with `CapturePositionAsync`,
+  matching the pattern the phase's own `ReadAsync` helpers already used elsewhere in the same files.
+- `SourceTransformTests.cs`: `ChangeTrackingReader_AppliesTheTransformOnItsFullLoadPath` **removed** —
+  its subject no longer exists; `BatchReloadReader_AppliesTheTransform` already covers the transform on
+  an actual initial load's reader. `...OnItsIncrementalPath`'s baseline seed fixed the same way as above.
+- `MsSqlPipelineTests.cs`: its shared `RunOnceAsync` helper's null-watermark case switched to
+  `ReadIntent.ChangesFromEarliest` — reads from the guaranteed-valid floor (everything Change Tracking
+  currently holds) with **no call-site restructuring needed** across its four callers, since
+  `ChangesFromEarliest` can never throw `PositionExpiredException` by construction.
+- `MsSqlCdcReaderTests.AnInitialLoad_CapturesThePosition_AndDoesNotFullLoad` — **the design's own
+  "correctness crux" test, and its bug was real, not environmental**: it captured a position right after
+  inserting two rows with no capture-job scan in between (the test fixture stops the real Agent job and
+  scans manually), so the captured position was stale and all three rows — not just the one inserted
+  *after* capture — replayed on the subsequent read. A production Agent job is always this far ahead by
+  the time anything asks; the fixture wasn't, and needed one more `WaitForCaptureAsync` call before
+  capturing to match. This is the exact scenario the crux is supposed to prove correct — worth reading
+  closely if picking this thread up, not just trusting the "19/19 pass now" result.
+
+**2. The much larger remainder (~50 of the ~56 failures) — `BulkCreateRunIntegrationTests`,
+`ReconcileDeletesIntegrationTests`, `Scd2NaturalKeyIntegrationTests`, generic (non-InitialLoad-related)
+`RunExecutorIntegrationTests` cases, `PreviewIntegrationTests` — never touch an affected reader's
+InitialLoad path at all**, and all shared one signature: "Expected: Succeeded, Actual: Failed" / "N rows
+expected, 0 actual", alongside repeated SQL Server `Login failed for user 'sa' ... Infrastructure error
+occurred` spanning entire runs. Not chased further in this round — but **while this was in flight, a
+separate concurrent session investigating phase 136's new `dotnet-windows` job independently found and
+fixed a real, unguarded concurrent-install race in `DriverConnectionFactory.EnsureLibraryInstalledAsync`**
+(see phase 140), which plausibly explains a good share of this: many test classes each installing a
+driver library concurrently, racing on shared state, presenting as generic connection/login failures under
+load. That fix is already on `main` as of this note. **Whoever next gets a clean `dotnet-integration` run
+should not assume it's clean because of anything done in this phase** — check whether phase 140's fix (or
+something else) is what actually closed the gap, since it was never isolated and confirmed here.
+
+Local verification for all five fixes: `dotnet build DbDataSync.slnx` clean, and each affected test file
+run directly against the real local `dbdatasync-mssql-source`/`dbdatasync-postgres` Docker containers
+(not the shared CI ones) — `SourceTransformTests`/`TriggerAuditReaderTests`(MsSql): 8/8 pass;
+`TriggerAuditReaderTests`(Postgres): 1/1 pass; `MsSqlPipelineTests`: 4/4 pass; `MsSqlCdcReaderTests`
+(whole file, not just the fixed test): 19/19 pass. Pushed directly to `main` (small, well-verified,
+test-only changes — not routed through a new branch/PR, consistent with the CI-gated convention's own
+"a phase small enough to implement, verify locally, and commit within one session does not need any of
+this" carve-out).
