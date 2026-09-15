@@ -145,19 +145,10 @@ real, separate, pre-existing gap unrelated to the race this phase fixes.
 
 ## Out of scope
 
-- **The multi-segment case.** An auto-triggered initial load enqueues one segment per
-  `mapping.DefaultSegmenting` entry (empty meaning a single `FullSegment`) inside one batch
-  (`BulkLoadBatchStore.CreateBatch`, `SegmentCount = segments.Count`). For a mapping with more than one
-  configured segment, some segments could win their own `WorkQueue` race while others lose — this
-  phase's "throw on any collision" still leaves whichever segments *did* win as real, enqueued work
-  belonging to a batch this attempt is about to declare a loss on, so that batch's own `SegmentCount`
-  will never be satisfied by its own completions — a smaller, more contained version of today's bug (an
-  orphaned batch that never reaches `BulkLoadState.Completed`), not a new one, and needs the
-  batch-create-plus-enqueue sequence to become one atomic operation to close fully (currently two
-  separate store calls, each its own transaction). Narrower than the single-segment case this phase
-  fixes — it additionally needs an operator to manually reload exactly the same custom segment scheme a
-  mapping's own `DefaultSegmenting` already uses, in the same narrow window. Tracked as a known
-  follow-on, not blocking this phase.
+- **The multi-segment case** — a mapping with more than one configured `DefaultSegmenting` entry can
+  still leave an orphaned batch (though not a stranded `ReadHold`) if segments partially collide. Written
+  up in
+  `architecture/planning/todo/follow-up-phase-143-multi-segment-initial-load-collision-is-only-partly-fixed.md`.
 - A recovery endpoint for a mapping stuck in `ReadHold.Loading` for some *other* reason (a crashed
   worker mid-batch, say) — this phase makes the specific strand it describes impossible, it doesn't add
   general-purpose recovery tooling for the hold.
