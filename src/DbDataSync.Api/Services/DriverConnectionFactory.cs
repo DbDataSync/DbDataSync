@@ -94,28 +94,61 @@ public sealed class DriverConnectionFactory(
     /// every existing MsSql/Postgres integration test in this solution, so this is exercised, not just
     /// asserted, the moment those tests run against a fresh repo root with no `libraries/` directory.
     /// </summary>
+    /// <summary>
+    /// Found and fixed alongside <c>ConcurrentRunsIntegrationTests</c>' own CI flake: the
+    /// check-then-install sequence below had no synchronization at all, so N concurrent first-touch
+    /// callers for the *same* not-yet-installed library (the ordinary shape of "several connections on
+    /// the same never-before-used driver type, opened at once" — exactly what that test does by
+    /// creating <c>ConcurrentReplicationCount</c> replications' metadata concurrently) all saw
+    /// <c>Installed.ContainsKey(libraryId) == false</c> at the same time and all called
+    /// <see cref="LibraryInstaller.InstallOrDeferAsync"/> for the identical target directory
+    /// simultaneously — a real production race, not just a test artifact, since nothing about this path
+    /// is test-only. A single process-wide <see cref="SemaphoreSlim"/> serializes the whole
+    /// check-install-register sequence; the re-check immediately after acquiring it is the other half of
+    /// the double-checked-locking shape this needs, so a caller that waited out someone else's install
+    /// doesn't redundantly repeat it. Deliberately one lock for every library, not one per id — this
+    /// only ever contends during the narrow, one-time install window for a given library (the
+    /// `Installed.ContainsKey` fast path above returns before ever touching the semaphore once a library
+    /// is installed), so the simplicity is worth more than the (practically nonexistent) cost of
+    /// serializing two different libraries' first installs against each other too.
+    /// </summary>
+    private static readonly SemaphoreSlim InstallLock = new(1, 1);
+
     private async Task EnsureLibraryInstalledAsync(string driverType, CancellationToken cancellationToken)
     {
         if (!BuiltInDriverLibraryIds.TryGetValue(driverType, out var libraryId)
             || libraryRegistry.Installed.ContainsKey(libraryId))
             return;
 
-        var catalogEntry = KnownLibraries.TryGetById(libraryId)!;
-        var result = await LibraryInstaller.InstallOrDeferAsync(
-            apiOptions.RepoRoot, libraryId, [new PackageRef(catalogEntry.PackageId, catalogEntry.PinnedVersion)],
-            catalogEntry.FactoryType, cancellationToken: cancellationToken);
-
-        // Arms this process's resolver immediately — the same "no restart needed" idiom
-        // POST /api/libraries already uses — so the CreateConnection/OpenAsync call right after this
-        // returns can actually resolve the assembly it needs.
-        libraryRegistry.RegisterInstalled(libraryId);
-
-        if (result.Outcome == LibraryInstaller.LibraryInstallOutcome.PendingRestore)
+        await InstallLock.WaitAsync(cancellationToken);
+        try
         {
-            throw new InvalidOperationException(
-                $"'{libraryId}' has no SDK here to restore it, and no in-image catalog cache hit for it either — " +
-                "its manifest was written but it is still pending restore. Run `dbdatasync config library sync` " +
-                "on a host with the SDK, then retry.");
+            // Re-checked inside the lock: a concurrent caller may have finished installing this exact
+            // library while this one was waiting its turn.
+            if (libraryRegistry.Installed.ContainsKey(libraryId))
+                return;
+
+            var catalogEntry = KnownLibraries.TryGetById(libraryId)!;
+            var result = await LibraryInstaller.InstallOrDeferAsync(
+                apiOptions.RepoRoot, libraryId, [new PackageRef(catalogEntry.PackageId, catalogEntry.PinnedVersion)],
+                catalogEntry.FactoryType, cancellationToken: cancellationToken);
+
+            // Arms this process's resolver immediately — the same "no restart needed" idiom
+            // POST /api/libraries already uses — so the CreateConnection/OpenAsync call right after this
+            // returns can actually resolve the assembly it needs.
+            libraryRegistry.RegisterInstalled(libraryId);
+
+            if (result.Outcome == LibraryInstaller.LibraryInstallOutcome.PendingRestore)
+            {
+                throw new InvalidOperationException(
+                    $"'{libraryId}' has no SDK here to restore it, and no in-image catalog cache hit for it either — " +
+                    "its manifest was written but it is still pending restore. Run `dbdatasync config library sync` " +
+                    "on a host with the SDK, then retry.");
+            }
+        }
+        finally
+        {
+            InstallLock.Release();
         }
     }
 }
