@@ -1,8 +1,8 @@
 # Phase 140 — Windows CI: a real compatibility audit, not just a verification pass
 
-**Status**: Implemented and green on a real Windows host; awaiting a `dotnet-windows` CI run to confirm.
-See "Handoff — 2026-09-15" at the end of this doc — it supersedes several of the hypotheses below, which
-are kept as written so the correction is legible.
+**Status**: Complete — `dotnet-windows` green on run 35001058463 (commit `a2517ad`).
+See "Handoff — 2026-09-15" and "CI result — 2026-09-15" at the end of this doc; between them they
+supersede several of the hypotheses below, which are kept as written so the correction is legible.
 **Plan reference**: none — logged directly from this session's own investigation of phase 136's new
 `dotnet-windows` job (`.github/workflows/ci.yml`), the first real Windows CI run this repo has ever had.
 **Materially rescoped 2026-09-15**, same day it was opened: what looked like "verify five fixes, chase
@@ -373,3 +373,52 @@ execute, and each carries its reasoning at the site.
    those phases exist to prove, and CI is elevated. A developer on a non-elevated Windows box will see
    these 4 red; that is a known condition, not a regression.
 3. Once green: move this doc to `done/` per the README's workflow.
+
+## CI result — 2026-09-15 — `dotnet-windows` green, phase closed
+
+Commit `a2517ad`, run [35001058463](https://github.com/DbDataSync/DbDataSync/actions/runs/35001058463).
+
+**`dotnet-windows`: success.** Restore, Build and Test all green. `dotnet test` exits non-zero if a
+single test fails, so a passing Test step is a direct statement that **every** non-Integration test in
+the solution passes on a real `windows-latest` runner — the first time that has ever been true.
+
+The trend across the four most recent runs on `main` isolates this to the work in `a2517ad` rather than
+to anything else that landed alongside it:
+
+| run | `dotnet-windows` | `dotnet` | `web` | `playwright` | `dotnet-integration` |
+|---|---|---|---|---|---|
+| `fd9ca25` | fail | pass | pass | fail | fail |
+| `885c569` | fail | pass | pass | fail | fail |
+| `cc278dd` | fail | pass | pass | fail | fail |
+| **`a2517ad`** | **pass** | pass | pass | fail | fail |
+
+### The last open claim, now settled
+
+Item 2 of "What is left" — the four tests that fail on a non-elevated developer box and were *predicted*
+to pass on the elevated runner — is answered by the green Test step: had any of
+`WindowsServiceEventLogTests`' three or
+`ServiceCommandTests.GrantDataDirectoryAccess_LocalSystem_TakesOwnershipInsteadOfReturningEarly` failed,
+the step would be red. So phase 135's real `icacls` ownership-transfer checkpoint and phase 136's three
+real Event Log checkpoints **ran and passed on Windows**, which is what this doc's "Confirmed fixed for
+real" section could previously only establish by subtracting skip and failure counts. Those phases'
+retrospectives are now confirmed by observation rather than by arithmetic.
+
+What is still *not* directly read is the literal Event Log / `icacls` text in the job log — that needs an
+authenticated `gh` (the unauthenticated logs endpoint answers 403), and this session had none. The green
+Test step is a stronger signal than the arithmetic it replaces, but it is a pass/fail signal, not the
+output itself. Naming the remaining gap rather than calling it closed.
+
+### Two jobs still red, neither caused here and neither in scope
+
+- **`dotnet-integration`** — out of scope by this doc's own "Out of scope" section, tracked as phase 141.
+  Red on every run in the table, including the three before this work.
+- **`playwright`** — red on every run in the table too, so not a regression from this commit. Worth
+  flagging because this doc's own "Confirmed fixed for real" section says "the `dotnet` and `playwright`
+  jobs are both green as of the latest run": that was true when written and has not been true for at
+  least the last four runs on `main`. It is not covered by phase 140 or phase 141, and it is the job the
+  `playwright-suite-in-ci.md` planning doc exists to keep honest — it needs its own follow-up.
+
+### Status
+
+Phase 140's stated goal — a real Windows compatibility audit closing out what real CI runs actually
+showed — is met, and `dotnet-windows` is green. Moved to `done/`.
