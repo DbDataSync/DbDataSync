@@ -1,6 +1,6 @@
 # Phase 134 — an initial load becomes a bulk load
 
-**Status**: Planned, not started
+**Status**: Complete
 **Plan reference**: `architecture/planning/done/bulk-load-pipeline-and-the-initial-load-rule.md`
 (resolved 2026-09-04), "Phase B". Depends on phase 133 for the pipeline it routes to.
 
@@ -338,3 +338,30 @@ this round touched (`DbDataSync.TaskRunner.Tests`, `DbDataSync.Api.Tests`) rebui
 
 Branch was already rebased onto a fresh `main` (phase 133a + an unrelated CI fix) by the orchestrating
 session before this round started; pushed from that same commit, nothing further to reconcile.
+
+## Merged — 2026-09-14
+
+PR #1 squash-merged into `main` on explicit user instruction, ahead of a retriggered
+`dotnet-integration` CI run's result. That job's most recent completed run showed 27/32 and 18/69
+failures in `DbDataSync.TaskRunner.Tests`/`DbDataSync.Api.Tests`, every one with the same
+"Expected: Succeeded, Actual: Failed" / "Expected: N rows, Actual: 0" shape and repeated SQL Server
+`Login failed for user 'sa' ... Infrastructure error occurred` in the container logs spanning the whole
+run — consistent with a broad connectivity problem in that specific run rather than 27 independent
+logic regressions, and `dotnet-integration` has an otherwise clean track record on `main` (checked
+directly via `gh run list`/`gh api .../jobs` against several pre-session commits). A retrigger (empty
+commit) was in flight to confirm one way or the other when the merge instruction arrived. **Whoever
+picks this thread up next should check that retriggered run's outcome** before assuming either "it was
+just a flake" or "it's fine" — it was never actually confirmed clean.
+
+The two items already named above under "Known follow-up / not done here" are still open post-merge and
+were not blocking the merge:
+- The Docker-backed driver test files beyond the three directly fixed (`SourceTransformTests.cs`,
+  `MsSqlPipelineTests.cs`, `Scd2CdcGuaranteedDeliveryIntegrationTests.cs`, and any other direct
+  `ReadIntent.InitialLoad` caller a fresh `grep -rn "ReadIntent.InitialLoad" tests/` turns up) were never
+  audited for the same "seeds a baseline via a direct `ReadChangesAsync(..., InitialLoad, ...)` call"
+  pattern the three fixed files had. They compile; whether they pass is still unconfirmed.
+- `MsSqlChangeTrackingReader`/`MsSqlCdcReader`/`TriggerAuditReader` configured as a mapping's *Bulk Load*
+  reader override now throw instead of full-loading (since `RunKind.BulkLoad` always asks for
+  `InitialLoad` with a null watermark, and their full-load branch is gone) — a real, if narrow and
+  previously-untested, regression. Not fixed here; worth a decision (defensive error message on that
+  Kind/RunKind combination, or leave it) in a follow-up.

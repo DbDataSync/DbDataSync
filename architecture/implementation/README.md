@@ -29,14 +29,39 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **134** — an initial load becomes a bulk load | the behaviour change, and the first caller `IPositionCapturing` has ever had |
-| 2 | **138** — a mapping-level Delete Reconciliation override, in the SPA | independent of 134 — pure SPA, over a backend that has supported it since phase 125 |
-| 3 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
-| 4 | **034** — PostgreSQL logical replication | |
-| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **138** — a mapping-level Delete Reconciliation override, in the SPA | independent of 134 — pure SPA, over a backend that has supported it since phase 125 |
+| 2 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
+| 3 | **034** — PostgreSQL logical replication | |
+| 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 5 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-14 (latest of all): **136 is done and removed** — built in a background fork while 134
+Updated 2026-09-15 (latest of all): **134 is done and removed** — every change reader stops full-loading;
+`RunExecutor` captures the change feed's position (`IPositionCapturing`) before touching the table, hands
+it to a new `IRunnerState.RequestInitialLoad` (Prerequisite, not journalled — it creates new work), which
+persists it as `Pending`, sets `ReadHold.Loading`, and starts a Bulk Load batch segmented like an ordinary
+reload. `LocalRunnerState.CompleteRun` promotes the pending watermark, clears the hold, and flips the
+intent to `Changes` in one statement once the batch reaches `BulkLoadState.Completed` — matched purely on
+the batch's own globally unique id, so an ordinary operator-triggered reload never touches it. This was the
+first-ever PR in this repo (`#1`), using the new CI-gated handoff convention below, and it earned its
+keep immediately: CI (specifically, Playwright actually starting the app) caught a real circular DI
+dependency (`StateHost → LocalRunnerState → IInitialLoadEnqueuer → BulkLoadService → ProcessSupervisor →
+StateHost`) that hung the API at startup with zero log output — invisible to `dotnet build`/unit tests —
+fixed by resolving `IInitialLoadEnqueuer` through a `Lazy<>` instead of eagerly. Also found and fixed in
+passing: an unrelated, days-old CI bug (phase 109i onward) where the `playwright` job never built
+`DbDataSync.Cli`, which `globalSetup` needs to seed a real DuckDB install.
+
+**Merged ahead of full CI confirmation, on explicit user instruction** — `dotnet-integration`'s last
+completed run before the merge showed widespread failures with a uniform "Succeeded → Failed" / "N rows →
+0" shape alongside repeated SQL Server `sa` login failures, consistent with a connectivity problem in that
+run rather than real regressions, and the job has an otherwise clean history on `main` — but a retrigger
+was in flight, unconfirmed, when the merge happened. Two narrower gaps also remain, named in the phase
+doc's own "Known follow-up" section: a handful of Docker-backed driver test files beyond the three
+directly fixed were never audited for the same full-load-assumption pattern, and configuring
+`MsSqlChangeTrackingReader`/`MsSqlCdcReader`/`TriggerAuditReader` as a mapping's *Bulk Load* reader
+override now throws instead of full-loading (a narrow, previously-untested regression). Whoever picks
+this up next should check the retriggered CI run and decide on both gaps.
+
+Updated 2026-09-14 (later than the note below): **136 is done and removed** — built in a background fork while 134
 was in progress elsewhere, independently of the table above (never added to it — same situation as 135
 and 137). `WindowsServiceEventLog` (new, `[SupportedOSPlatform("windows")]`) writes directly to the
 Windows Event Log, bypassing `ILogger` entirely since the failure class this phase exists for (an
