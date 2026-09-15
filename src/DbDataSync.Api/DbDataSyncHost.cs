@@ -292,7 +292,19 @@ public static class DbDataSyncHost
             .AddScheme<AuthenticationSchemeOptions, SessionAuthenticationHandler>(
                 SessionAuthenticationHandler.SchemeName, _ => { });
 
-        if (OperatingSystem.IsWindows())
+        // Also gated on Auth:Disabled — found necessary by a real failure, not a hypothetical: with
+        // auth disabled, AddNegotiate() was still being registered on every Windows host (this check
+        // is purely OperatingSystem.IsWindows()-gated, independent of Disabled), and merely having
+        // Negotiate registered as an available scheme is enough for ASP.NET Core's real, Windows-native
+        // SSPI implementation to require IConnectionItemsFeature on every request through the
+        // authentication middleware — a real Kestrel connection feature TestServer (what
+        // WebApplicationFactory-based tests run against) does not implement, throwing NotSupportedException
+        // even for a route nothing ever challenges for Negotiate. Read directly off builder.Configuration,
+        // not DI, for the same reason certificateRepoRoot above does: this runs before builder.Build().
+        // An operator who explicitly disabled auth gets nothing to lose here either way — Negotiate
+        // existing but never being the effective scheme was already true whenever SessionAuthenticationHandler's
+        // own Disabled short-circuit accepted every request first.
+        if (OperatingSystem.IsWindows() && !AuthOptions.FromConfiguration(builder.Configuration).Disabled)
             authentication.AddNegotiate();
 
         builder.Services.AddAuthorizationBuilder()
