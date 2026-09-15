@@ -140,7 +140,7 @@ rather than staying unresolved — so a manual re-trigger while still `Loading` 
 against a watermark that isn't live yet, and a reader whose `Changes` branch assumes a non-null value
 (`MsSqlChangeTrackingReader` does; confirmed by direct reproduction) throws `ArgumentNullException`
 instead of a recognizable, named failure. Written up, not fixed, in
-`architecture/planning/todo/manual-trigger-against-a-loading-mapping-crashes-instead-of-refusing.md` — a
+`architecture/planning/todo/follow-up-phase-143-manual-trigger-against-a-loading-mapping-crashes-instead-of-refusing.md` — a
 real, separate, pre-existing gap unrelated to the race this phase fixes.
 
 ## Out of scope

@@ -125,7 +125,7 @@ existing convention for a list endpoint in this controller, not a new one invent
   mechanisms; nothing else holds anything.
 - **Notifications for a table-mapping pause.** `SetMappingHold` raises nothing — confirmed by reading
   the method, not merely asserted. Whether it should is an open product question, written up in
-  `architecture/planning/todo/mapping-level-pause-does-not-notify.md`.
+  `architecture/planning/todo/follow-up-phase-131-mapping-level-pause-does-not-notify.md`.
 - **Retention/pruning for `PauseEvents`.** Still untouched by `RunPruningService`; still no cap. Pause
   events remain rare, operator-initiated rows, unlike the per-pass volume `TaskRuns` pruning exists for.
 - **Live polling for `PauseHistoryPanel`.** A plain `useQuery` with no `refetchInterval`, invalidated

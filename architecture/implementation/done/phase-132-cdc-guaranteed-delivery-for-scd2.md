@@ -241,7 +241,7 @@ Exactly as scoped — none of these were built:
 
 Same boundary as planned: the window-function alternative for duplicate keys remains a real, deferred
 optimization, now written up in
-`architecture/planning/todo/scd2-duplicate-key-window-function-optimization.md` — the row-by-row design
+`architecture/planning/todo/follow-up-phase-132-scd2-duplicate-key-window-function-optimization.md` — the row-by-row design
 shipped here is correct and only pays its extra cost when a key actually has more than one staged row.
 No operator-facing toggle exists or was ever intended.
 Ordering/timestamp support stays exclusive to `MsSqlCdcReader`. A source transaction spanning a read

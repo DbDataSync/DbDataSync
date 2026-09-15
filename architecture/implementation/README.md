@@ -463,11 +463,18 @@ piece of work — a bug fix, an investigation, a code review), real follow-up wo
 something that should genuinely get done, not merely a boundary that was considered and deliberately
 left alone — it does not stay as a paragraph in that doc. It becomes:
 
-- **`architecture/planning/todo/`**, if it's a diagnosed-or-not problem with no agreed plan yet
-  (a bug with a known cause but no chosen fix, a "here's what I found" with real open questions) — see
-  that folder's own README for the shape.
+- **`architecture/planning/todo/follow-up-phase-NNN-short-title.md`**, if it's a diagnosed-or-not problem
+  with no agreed plan yet (a bug with a known cause but no chosen fix, a "here's what I found" with real
+  open questions) — see that folder's own README for the shape. The `follow-up-phase-NNN-` prefix names
+  the phase whose own work surfaced this, zero-padded to three digits the same way phase doc filenames
+  are — `follow-up-phase-134-...`, not `follow-up-phase134-...` — so it sorts and reads the same way. A
+  follow-up that came out of more than one phase's own work (the same gap named in two different docs,
+  say) takes every phase number it traces to: `follow-up-phase-136-140-...`. Every other planning doc
+  keeps its plain descriptive name — the prefix is specifically for the "found while finishing phase
+  N" case this section exists to stop losing.
 - **`architecture/implementation/todo/phase-NNN-*.md`**, a new numbered phase, if the scope is already
-  clear enough to build from directly.
+  clear enough to build from directly — this one gets the next phase number in sequence, same as any
+  other new phase, not the originating phase's own number.
 
 Either way, the `done/` doc keeps only a short pointer to where the work now lives — a sentence, not
 the elaboration — the same "a one-line 'see phase-012-...' is enough" rule

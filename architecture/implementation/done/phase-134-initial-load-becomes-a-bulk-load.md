@@ -251,10 +251,10 @@ deliberately untouched, per the corrected spec (the hold clears on its own; no r
   three affected readers.
 - **A reader from the affected three configured as a mapping's Bulk Load reader override now throws
   instead of full-loading** — still open, written up in
-  `architecture/planning/todo/bulk-load-reader-override-throws-for-position-capturing-readers.md`.
+  `architecture/planning/todo/follow-up-phase-134-bulk-load-reader-override-throws-for-position-capturing-readers.md`.
 - **`BulkLoadService.EnqueueForInitialLoadAsync`'s failure mode is not hardened** — still open beyond the
   one cause phase 143 fixed, written up in
-  `architecture/planning/todo/request-initial-load-endpoint-failure-mode-not-hardened.md`.
+  `architecture/planning/todo/follow-up-phase-134-request-initial-load-endpoint-failure-mode-not-hardened.md`.
 
 ### Local verification
 

@@ -407,7 +407,7 @@ What is still *not* directly read is the literal Event Log / `icacls` text in th
 authenticated `gh` (the unauthenticated logs endpoint answers 403), and this session had none. The green
 Test step is a stronger signal than the arithmetic it replaces, but it is a pass/fail signal, not the
 output itself — written up, alongside phase 136's own related gaps, in
-`architecture/planning/todo/windows-service-event-log-output-never-read-by-a-human.md`.
+`architecture/planning/todo/follow-up-phase-136-140-windows-service-event-log-output-never-read-by-a-human.md`.
 
 ### Two jobs still red, neither caused here and neither in scope
 

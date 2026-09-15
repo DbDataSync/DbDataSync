@@ -189,7 +189,7 @@ real `dotnet-windows` CI run and confirmed Checkpoint 5's real EventLog round tr
 green `Test` step, not `[SKIP]`, on a real `windows-latest` runner) — but that's pass/fail from CI, not
 the literal output read by a human, and Checkpoint 6's own manual scenario was never a test CI could run
 at all. Both of those, plus the non-elevated-install question below, are written up together in
-`architecture/planning/todo/windows-service-event-log-output-never-read-by-a-human.md`.
+`architecture/planning/todo/follow-up-phase-136-140-windows-service-event-log-output-never-read-by-a-human.md`.
 
 No real bugs were found in the *design* during implementation — the one thing this session caught (the
 `ApplicationStarted` closure's CA1416 warning) was a build-tooling/analyzer detail, not a logic error,
