@@ -29,27 +29,36 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **140** — Windows CI: verify this session's fixes, and the one still-unexplained failure | the new `dotnet-windows` job's first real run surfaced 7 failures; 5 fixed and pushed blind (no Windows box to verify against), 1 left deliberately unfixed — this phase closes both loops |
-| 2 | **138** — a mapping-level Delete Reconciliation override, in the SPA | independent of 134 — pure SPA, over a backend that has supported it since phase 125 |
-| 3 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
-| 4 | **034** — PostgreSQL logical replication | |
-| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **140** — Windows CI: a real compatibility audit, not just a verification pass | rescoped 2026-09-15 — the first `dotnet-windows` run's *actual* numbers (270/447 `Api.Tests` failed, not the sample originally checked) show this is much bigger than "verify 5 fixes, chase 1 failure" |
+| 2 | **141** — `dotnet-integration`'s remaining ~46-test failure wave | split out of 140 — a `ubuntu-latest` job issue, unrelated to Windows; the concurrent-install race fix (140) didn't close it, contrary to phase 134's own hope |
+| 3 | **138** — a mapping-level Delete Reconciliation override, in the SPA | independent of 134 — pure SPA, over a backend that has supported it since phase 125 |
+| 4 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
+| 5 | **034** — PostgreSQL logical replication | |
+| 6 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 7 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-15 (latest of all): **140 joins `todo/`**, logged directly from this session's own
-investigation of `dotnet-windows` (phase 136's new Windows CI job) — its first real run surfaced 7
-previously-invisible failures across three CI jobs. 5 were root-caused and fixed this session (two —
-the `dotnet` job's obj/bin enumeration-order bug and `dotnet-integration`'s real, unguarded
-`DriverConnectionFactory.EnsureLibraryInstalledAsync` concurrent-install race — reproduced and confirmed
-fixed locally; the other three — `ConfigRepository`'s Windows file-sharing violation, a missing
-`.gitattributes` causing a CRLF/LF test mismatch, and `AddNegotiate()` being registered regardless of
-`Auth:Disabled` — are logically sound but genuinely unverified, no Windows box available this session).
-One more (`ConnectionsControllerTests.Upsert_NeverReturnsOrCommitsPlaintextPassword`'s
-`NullReferenceException`, likely a second `Repository` handle not seeing a just-committed tree on
-Windows promptly) was investigated, confirmed environment-specific (15/15 clean on Linux), and
-deliberately left unfixed rather than guessed at — it guards a real security property. Given top
-priority: it directly follows up on work this same session just pushed, and the sooner a real Windows
-CI run confirms (or refutes) the five blind fixes, the less other work has to build on an assumption.
+Updated 2026-09-15 (latest of all): **140 rescoped, and 141 split out of it**, both the same day 140 was
+first opened — checking the real next `dotnet-windows` run's *actual* numbers (not another sample) while
+answering a question about phase 134's own follow-ups showed the original scope ("verify 5 fixes, chase
+1 failure") badly undersold the problem. The real picture: the first-ever `dotnet-windows` run showed
+**270 of 447 `Api.Tests` failing** — this session's five fixes had only been checked against a *sample*
+of that run's failures, not all of it. Reconciling exact counts across runs: the libgit2 cleanup fix
+really did recover `Core.Tests`/`State.Tests`/most of `Cli.Tests`, and — confirmed by arithmetic, xUnit's
+console runner only names failures/skips — phases 135 and 136's own real-Windows checkpoints (the real
+`icacls` ownership test, the three real Event Log tests) all **passed for real**, the first actual
+confirmation either phase has had. But `Api.Tests` moved only 270 → 253 failed, essentially unchanged
+across every fix this session made, including the `Auth:Disabled`/Negotiate one — that fix was correct
+for the one route it targeted but left the much larger `AuthenticatedApiFactory`-based population
+(auth-*enabled*, so the same gate doesn't apply) still 500ing on the same
+`IConnectionItemsFeature`/Negotiate mechanism. `Cli.Tests` also turned up 17 never-before-sampled
+failures: real Linux-only-assumption gaps in `ToolCommandTests`/two more `SystemdServiceTests` cases,
+and a distinct, unexplored Windows certificate/crypto failure cluster (`NewSelfSignedFileTests`,
+`CertUsePemTests`, more). 140's own doc now carries all of this. Separately, `dotnet-integration`'s
+~46-test remainder — flagged in phase 134's own follow-up as possibly explained by 140's
+concurrent-install race fix — **checked directly: it isn't**, the same order of magnitude persists after
+that fix landed, though the failure *shape* shifted from assembly-load exceptions to data/timing
+mismatches. Split into its own phase (141) since it's a `ubuntu-latest` job issue with nothing to do with
+Windows.
 
 Updated 2026-09-15 (earlier than the note above, same day): **134 is done and removed** — every change reader stops full-loading;
 `RunExecutor` captures the change feed's position (`IPositionCapturing`) before touching the table, hands
