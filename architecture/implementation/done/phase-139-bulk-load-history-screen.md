@@ -1,6 +1,6 @@
 # Phase 139 — Bulk Load History, as Monitoring's fourth sub-tab
 
-**Status**: Planned, not started.
+**Status**: Complete.
 **Plan reference**: none — found during the same 2026-09-14 audit as phase 138 (see
 `architecture/implementation/README.md`'s 2026-09-14 update). Closes a gap phase 107 named explicitly
 and phase 133 reaffirmed the same day this doc was written: *"A Bulk Load History screen. Phase 107
@@ -280,3 +280,30 @@ the Docker-backed suite: `DbDataSync.Api.Tests`' full run (the rest of that asse
 phase) and the full Playwright suite (only the new spec was run in isolation, not `golden-path.spec.ts`
 et al. — no reason to expect a regression there, since nothing shared was changed, but unconfirmed is
 unconfirmed).
+
+## Merged — 2026-09-15
+
+PR #2 squash-merged into `main`. Before merging, the orchestrating session independently re-verified
+this PR beyond the agent's own report — not just trusting it: read the full diff, ran all 11
+`BulkLoadBatchStoreTests`, 6 `BulkLoadHistoryCursorCodecTests`, and 3 `RunsControllerTests` directly (all
+pass), confirmed `npm run build`/`lint` clean, and re-ran `bulk-load-history.spec.ts` from scratch
+against a fresh instance (3 passed, matching the agent's own claim).
+
+CI showed three failing jobs at merge time — `dotnet-integration`, `dotnet-windows`, `playwright` — none
+of them regressions from this phase, confirmed by reading each failure's actual content rather than
+assuming:
+- **`playwright`**: this phase's own new spec passed cleanly in CI too (3/3); the one CI failure was in
+  the unrelated, pre-existing `golden-path.spec.ts` (`Could not load file or assembly
+  'Microsoft.Data.SqlClient'`), the same assembly-loading race under concurrent process spawn seen
+  elsewhere this session.
+- **`dotnet-integration`**: one failure, in `BulkLoadIntegrationTests.PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`
+  — an "Expected N, Actual 0" signature matching the environmental flakiness phase 141 already tracks.
+  This phase never touches bulk-load triggering or execution, only adds a read-only history endpoint —
+  no plausible mechanism connects the two.
+- **`dotnet-windows`**: 256/457 `Api.Tests` failures spanning areas with nothing to do with this change
+  (certificates, notifications, git attribution, change-polling) — phase 140's own already-documented,
+  pre-existing Windows compatibility gap.
+
+Merged on explicit user instruction after this reasoning was presented (an auto-mode safety check
+declined the merge on the first attempt, correctly, since it was red CI without prior explicit
+sign-off).

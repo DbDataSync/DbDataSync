@@ -31,10 +31,25 @@ So the order lives here, and is the one to work through:
 | --- | --- | --- |
 | 1 | **140** — Windows CI: a real compatibility audit, not just a verification pass | rescoped 2026-09-15 — the first `dotnet-windows` run's *actual* numbers (270/447 `Api.Tests` failed, not the sample originally checked) show this is much bigger than "verify 5 fixes, chase 1 failure" |
 | 2 | **141** — `dotnet-integration`'s remaining ~46-test failure wave | split out of 140 — a `ubuntu-latest` job issue, unrelated to Windows; the concurrent-install race fix (140) didn't close it, contrary to phase 134's own hope |
-| 3 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
-| 4 | **034** — PostgreSQL logical replication | |
-| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+| 3 | **034** — PostgreSQL logical replication | |
+| 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-15 (later than the three notes below): **139 is done and removed** — Bulk Load History,
+Monitoring's fourth sub-tab. Real keyset pagination mirroring phase 104's Run History exactly
+(`BulkLoadHistoryCursor`/`Page`, `BulkLoadHistoryCursorCodec` — kept independent of `RunHistoryCursorCodec`
+rather than sharing a generic base, since what differs between them (tiebreak field type, filter count)
+would need more indirection than the ~15 duplicated lines saved — `BulkLoadBatchStore.GetHistory`), a
+`mappingName` filter, and a static, non-polled list (`BulkLoadProgressCard` stays the one live view).
+Built on its own branch/PR (#2) per the CI-gated convention. The orchestrating session independently
+re-verified the whole PR beyond the implementing agent's own report — read the full diff, ran every new
+test locally (20 total, all passing), and re-ran the new Playwright spec from scratch against a fresh
+instance (3/3, matching the agent's claim) — before merging. Merged with three CI jobs red
+(`dotnet-integration`, `dotnet-windows`, `playwright`), each traced to its actual failure content and
+confirmed as an already-tracked, unrelated pre-existing issue (phase 140's Windows gap, phase 141's
+environmental flakiness, and one unrelated flaky `golden-path.spec.ts` test) rather than assumed clean —
+merged only after the user explicitly authorized proceeding with red CI, following an auto-mode safety
+check's (correct) initial refusal.
 
 Updated 2026-09-15 (later than the two notes below): **138 is done and removed** — a mapping-level
 Delete Reconciliation override in the SPA. `TableMappingForm` gained `reconcileOverride` state, wired
