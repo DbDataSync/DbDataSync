@@ -29,11 +29,26 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **140** — Windows CI: a real compatibility audit, not just a verification pass | rescoped 2026-09-15 — the first `dotnet-windows` run's *actual* numbers (270/447 `Api.Tests` failed, not the sample originally checked) show this is much bigger than "verify 5 fixes, chase 1 failure" |
-| 2 | **141** — `dotnet-integration`'s remaining ~46-test failure wave | split out of 140 — a `ubuntu-latest` job issue, unrelated to Windows; the concurrent-install race fix (140) didn't close it, contrary to phase 134's own hope |
-| 3 | **034** — PostgreSQL logical replication | |
-| 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **143** — a losing auto-triggered initial load fails cleanly instead of stranding `ReadHold` | found chasing 141's own last flaky test; a real production bug in phase 134's `RequestInitialLoad`, not a test problem |
+| 2 | **034** — PostgreSQL logical replication | |
+| 3 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 4 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-15 (latest of all): **140 and 141 are both done and removed; 143 is new.** 140 (a
+separate session, on a real Windows host) fixed every remaining Windows CI failure this doc's own
+"rescoped" note below describes — see `architecture/implementation/done/phase-140-windows-ci-
+verification-and-remaining-failure.md` for the full retrospective. 141 fixed `dotnet-integration`'s
+~46-test wave down to one known, intermittent flake (`BulkLoadIntegrationTests.
+PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`'s row-count race, left open and documented in its
+own doc) — the real root cause was never container contention (this doc's own original hypothesis,
+disproven by reproducing the exact failure counts locally against healthy, uncontended containers): a
+stub `IInitialLoadEnqueuer` in test fixtures, and a batch of pre-phase-134 tests asserting behaviour
+that permanently moved once a position-capturing reader's first pass stopped reading directly.
+Investigating that one remaining flake surfaced a real, separate production bug — a losing
+auto-triggered initial load strands a mapping's `ReadHold` at `Loading` forever, reproduced
+deterministically (15/15 local timeouts) — written up in
+`architecture/planning/done/initial-load-pending-batch-stranded-by-a-concurrent-reload.md` and carried
+forward as **143**, now at the top of this table.
 
 Updated 2026-09-15 (later than the three notes below): **139 is done and removed** — Bulk Load History,
 Monitoring's fourth sub-tab. Real keyset pagination mirroring phase 104's Run History exactly

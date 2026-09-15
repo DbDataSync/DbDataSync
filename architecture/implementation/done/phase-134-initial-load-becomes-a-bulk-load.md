@@ -420,3 +420,28 @@ run directly against the real local `dbdatasync-mssql-source`/`dbdatasync-postgr
 test-only changes — not routed through a new branch/PR, consistent with the CI-gated convention's own
 "a phase small enough to implement, verify locally, and commit within one session does not need any of
 this" carve-out).
+
+## Follow-up — 2026-09-15: the "much larger remainder" answer, and two things phase 141 found here
+
+Phase 141 (`architecture/implementation/done/phase-141-dotnet-integration-remaining-failures.md`) finally
+answers this doc's own repeated "not confirmed" warnings above: **it was not phase 140's concurrent-install
+race fix.** The real cause of the ~50-failure remainder was this phase's own `IInitialLoadEnqueuer` seam
+never being wired to a real implementation in the `TaskRunner.Tests`/`Api.Tests` fixtures, plus a batch of
+tests (written before this phase, several by this phase's own earlier fixes above) asserting behaviour
+that permanently moved once a position-capturing reader's first pass stopped reading directly. All fixed;
+`dotnet-integration` is 46 failures down to 1 known, unrelated flake.
+
+Two more things phase 141 found in this phase's own design while chasing that work, worth recording here
+since a reader of *this* doc is exactly who'd want to know:
+
+- **`WatermarkReader` is not exempt from the Primary-pass `InitialLoad` diversion** the way point 8 above
+  describes — that point is about `RunKind.BulkLoad` reader-override behaviour specifically (code
+  deletion), not this. `WatermarkReader` does implement `IPositionCapturing`, so a mapping using it as
+  its ordinary `ChangeProcessing.Reader` is diverted to the Bulk Load pipeline on its first pass exactly
+  like Change Tracking/CDC/TriggerAudit are. Not a bug — just a gap in this doc's own "which readers does
+  this affect" accounting.
+- **A losing auto-triggered `RequestInitialLoad` call strands a mapping's `ReadHold` at `Loading`
+  forever** — a real production bug in this phase's own design (`SetPendingLoad` runs before the enqueue
+  attempt's outcome is known), reproduced deterministically. Diagnosed in
+  `architecture/planning/done/initial-load-pending-batch-stranded-by-a-concurrent-reload.md`, designed
+  into `architecture/implementation/todo/phase-143-initial-load-race-loses-cleanly.md`.

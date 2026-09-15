@@ -1,8 +1,16 @@
 # Phase 141 — `dotnet-integration`'s remaining ~46-test failure wave
 
-**Status**: `TaskRunner.Tests` (32/32), `Api.Tests` (68/69), and `DbDataSync.Drivers.MsSql.Tests`
-(123/123) fixed and verified locally against the same Docker containers CI uses. One `Api.Tests` failure
-remains open — a real, intermittent race, not root-caused (see below).
+**Status**: Complete. `TaskRunner.Tests` (32/32), `Api.Tests` (68/69), and
+`DbDataSync.Drivers.MsSql.Tests` (123/123) fixed, verified locally against the same Docker containers
+CI uses, and **confirmed on a real `dotnet-integration` CI run**
+(github.com/DbDataSync/DbDataSync/actions/runs/34991040790, job 104455458431 — identical numbers:
+32/32, 68/69, 123/123) — 46 failures down to 1. That one, `BulkLoadIntegrationTests.
+PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`'s intermittent row-count race, stays open (see
+its own section below); investigating it also surfaced a real, separate production bug (a losing
+auto-triggered initial load stranding `ReadHold.Loading` forever), written up and designed in
+`architecture/planning/done/initial-load-pending-batch-stranded-by-a-concurrent-reload.md` →
+`architecture/implementation/todo/phase-143-initial-load-race-loses-cleanly.md` rather than fixed here,
+since it's a production correctness bug and not a test problem.
 **Plan reference**: none — split out of phase 140 on 2026-09-15. This is the `ubuntu-latest`
 `dotnet-integration` job (real SQL Server/Postgres/MySQL service containers), unrelated to anything
 Windows-specific — it doesn't belong in phase 140, which is scoped to `dotnet-windows`.
@@ -177,6 +185,14 @@ resolved:
   standard: a production-code change here would be a guess. Worth a dedicated follow-up with SQL Server
   Profiler/Extended Events on the target database to see literally what the two racing pipelines executed
   and in what order, rather than inferring from HTTP-visible state alone.
+
+**Follow-up:** the first bullet above (the losing `RequestInitialLoad` call stranding `ReadHold` at
+`Loading`) was confirmed deterministically after this doc was first written — 15 of 15 local runs of a
+real wait for the hold to clear timed out — and designed into its own phase:
+`architecture/implementation/todo/phase-143-initial-load-race-loses-cleanly.md`. That phase does not
+expect to fix this test's row-count flake (a different, still-unexplained symptom — see phase 143's own
+"Out of scope"), so this section stays open even once 143 lands; re-check both together anyway, in case
+they turn out to share a cause after all.
 
 ### `DbDataSync.Drivers.MsSql.Tests` (fixed)
 
