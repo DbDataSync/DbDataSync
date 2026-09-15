@@ -29,13 +29,29 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **138** — a mapping-level Delete Reconciliation override, in the SPA | independent of 134 — pure SPA, over a backend that has supported it since phase 125 |
-| 2 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
-| 3 | **034** — PostgreSQL logical replication | |
-| 4 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 5 | **038** — Postgres COPY staging, and the columnar decision | |
+| 1 | **140** — Windows CI: verify this session's fixes, and the one still-unexplained failure | the new `dotnet-windows` job's first real run surfaced 7 failures; 5 fixed and pushed blind (no Windows box to verify against), 1 left deliberately unfixed — this phase closes both loops |
+| 2 | **138** — a mapping-level Delete Reconciliation override, in the SPA | independent of 134 — pure SPA, over a backend that has supported it since phase 125 |
+| 3 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
+| 4 | **034** — PostgreSQL logical replication | |
+| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 6 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-15 (latest of all): **134 is done and removed** — every change reader stops full-loading;
+Updated 2026-09-15 (latest of all): **140 joins `todo/`**, logged directly from this session's own
+investigation of `dotnet-windows` (phase 136's new Windows CI job) — its first real run surfaced 7
+previously-invisible failures across three CI jobs. 5 were root-caused and fixed this session (two —
+the `dotnet` job's obj/bin enumeration-order bug and `dotnet-integration`'s real, unguarded
+`DriverConnectionFactory.EnsureLibraryInstalledAsync` concurrent-install race — reproduced and confirmed
+fixed locally; the other three — `ConfigRepository`'s Windows file-sharing violation, a missing
+`.gitattributes` causing a CRLF/LF test mismatch, and `AddNegotiate()` being registered regardless of
+`Auth:Disabled` — are logically sound but genuinely unverified, no Windows box available this session).
+One more (`ConnectionsControllerTests.Upsert_NeverReturnsOrCommitsPlaintextPassword`'s
+`NullReferenceException`, likely a second `Repository` handle not seeing a just-committed tree on
+Windows promptly) was investigated, confirmed environment-specific (15/15 clean on Linux), and
+deliberately left unfixed rather than guessed at — it guards a real security property. Given top
+priority: it directly follows up on work this same session just pushed, and the sooner a real Windows
+CI run confirms (or refutes) the five blind fixes, the less other work has to build on an assumption.
+
+Updated 2026-09-15 (earlier than the note above, same day): **134 is done and removed** — every change reader stops full-loading;
 `RunExecutor` captures the change feed's position (`IPositionCapturing`) before touching the table, hands
 it to a new `IRunnerState.RequestInitialLoad` (Prerequisite, not journalled — it creates new work), which
 persists it as `Pending`, sets `ReadHold.Loading`, and starts a Bulk Load batch segmented like an ordinary
