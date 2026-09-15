@@ -156,4 +156,69 @@ public sealed class BulkLoadBatchStoreTests : IDisposable
         Assert.Equal(0, batch.SegmentsSucceeded);
         Assert.Equal(BulkLoadState.Running, batch.State);
     }
+
+    // ---- Phase 139: GetHistory's keyset pagination -------------------------------------------------
+
+    /// <summary>
+    /// Newest first, and a second page picks up exactly where the first left off — no batch duplicated
+    /// or skipped across the boundary. Three batches, a page size of two.
+    /// </summary>
+    [Fact]
+    public void GetHistory_PagesNewestFirst_AcrossAKeysetBoundary()
+    {
+        _store.CreateBatch("old", Task, "orders", 1, null, null);
+        Thread.Sleep(5);
+        _store.CreateBatch("mid", Task, "orders", 1, null, null);
+        Thread.Sleep(5);
+        _store.CreateBatch("new", Task, "orders", 1, null, null);
+
+        var page1 = _store.GetHistory(Task, limit: 2);
+        Assert.Equal(["new", "mid"], page1.Batches.Select(b => b.BatchId));
+        Assert.NotNull(page1.NextCursor);
+
+        var page2 = _store.GetHistory(Task, cursor: page1.NextCursor, limit: 2);
+        Assert.Equal(["old"], page2.Batches.Select(b => b.BatchId));
+        Assert.Null(page2.NextCursor);
+    }
+
+    /// <summary>The `mappingName` filter scopes to one mapping's own batches, same replication.</summary>
+    [Fact]
+    public void GetHistory_MappingNameFilter_ScopesToOneMapping()
+    {
+        _store.CreateBatch("b1", Task, "orders", 1, null, null);
+        _store.CreateBatch("b2", Task, "customers", 1, null, null);
+
+        var page = _store.GetHistory(Task, mappingName: "customers", limit: 20);
+
+        Assert.Equal(["b2"], page.Batches.Select(b => b.BatchId));
+    }
+
+    /// <summary>
+    /// A batch whose segments are all still Queued has no `TaskRuns` row yet — `StartedAtUtc` is null —
+    /// but it still appears, ordered by `CreatedAtUtc` rather than dropped for lacking a start time.
+    /// </summary>
+    [Fact]
+    public void GetHistory_ABatchWithNoStartedSegmentsYet_StillAppears_OrderedByCreatedAt()
+    {
+        _store.CreateBatch("b1", Task, "orders", segmentCount: 2, estimatedRows: null, estimateCaveat: null);
+
+        var page = _store.GetHistory(Task, limit: 20);
+
+        var batch = Assert.Single(page.Batches);
+        Assert.Equal("b1", batch.BatchId);
+        Assert.Null(batch.StartedAtUtc);
+        Assert.Equal(BulkLoadState.Running, batch.State);
+    }
+
+    /// <summary>Scoped to the replication, same as `GetRecentBulkLoads`.</summary>
+    [Fact]
+    public void GetHistory_IsScopedToTheReplication()
+    {
+        _store.CreateBatch("mine", Task, "orders", 1, null, null);
+        _store.CreateBatch("theirs", "other-replication", "orders", 1, null, null);
+
+        var page = _store.GetHistory(Task, limit: 20);
+
+        Assert.Equal(["mine"], page.Batches.Select(b => b.BatchId));
+    }
 }

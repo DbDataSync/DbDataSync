@@ -48,6 +48,28 @@ public sealed record BulkLoadBatchProgress(
 }
 
 /// <summary>
+/// A position in <see cref="BulkLoadBatchStore.GetHistory"/>'s keyset — mirrors <c>RunHistoryCursor</c>
+/// (phase 104), see phase 139.
+/// <para>
+/// <c>(CreatedAtUtc, BatchId)</c>, not an offset, for the same reason <c>RunHistoryCursor</c> isn't
+/// one: the history is append-heavy, so an offset would shift under a page as new batches land.
+/// <c>BatchId</c> is a <c>Guid.NewGuid().ToString("N")</c> stamped once at enqueue — not a meaningful
+/// order, only a deterministic (ordinary string comparison) tiebreak for two batches created in the
+/// same instant, the same role <c>RunId</c> plays for <c>RunHistoryCursor</c> despite being just as
+/// arbitrary an order there.
+/// </para>
+/// </summary>
+public readonly record struct BulkLoadHistoryCursor(DateTimeOffset CreatedAtUtc, string BatchId);
+
+/// <summary>
+/// One page of <see cref="BulkLoadBatchStore.GetHistory"/>, and where the next one starts — mirrors
+/// <c>RunHistoryPage</c>. Unlike that type this does not implement <c>IReadOnlyList</c> itself: every
+/// caller of <c>GetHistory</c> is the new history endpoint, so there is no pre-paging call site to keep
+/// compiling unaware a next page exists.
+/// </summary>
+public sealed record BulkLoadHistoryPage(IReadOnlyList<BulkLoadBatchProgress> Batches, BulkLoadHistoryCursor? NextCursor);
+
+/// <summary>
 /// The batch view over a bulk load's segment runs. <c>BulkLoadBatches</c> holds what a segment doesn't
 /// carry — the planned segment count and one whole-table row estimate — and the per-segment progress
 /// is aggregated from <c>TaskRuns</c>, which already records every segment's status and final row
@@ -177,5 +199,95 @@ public sealed class BulkLoadBatchStore(StateDatabase database)
                     LastActivityUtc: reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12))));
             }
             return (IReadOnlyList<BulkLoadBatchProgress>)results;
+        });
+
+    /// <summary>
+    /// Bulk-load history for one replication — filtered and keyset-paged, see phase 139. A new method
+    /// beside <see cref="GetRecentBulkLoads"/> rather than a generalization of it: that one keeps the
+    /// Monitoring card's own contract (newest one, no filter, no cursor) exactly as it is.
+    /// <para>
+    /// The same <c>SELECT</c>/<c>GROUP BY</c> shape as <see cref="GetRecentBulkLoads"/> and
+    /// <see cref="GetBatch"/>, with an optional <c>MappingName</c> equality filter and the keyset
+    /// predicate added ahead of the <c>GROUP BY</c> — a keyset condition on <c>BulkLoadBatches</c>' own
+    /// columns has to filter which of its rows enter the aggregation, not which aggregated groups come
+    /// out of it, so it belongs in this <c>WHERE</c> rather than a <c>HAVING</c>.
+    /// </para>
+    /// <para>
+    /// The keyset predicate is written the expanded way, matching <c>TaskRunStore.GetRunHistory</c> —
+    /// <c>CreatedAtUtc &lt; $cursorTime OR (CreatedAtUtc = $cursorTime AND BatchId &lt; $cursorBatchId)</c>
+    /// — rather than the row-value-constructor form, which SQL Server does not support and this store
+    /// runs on all three engines (phase 63).
+    /// </para>
+    /// <para>
+    /// One row over <paramref name="limit"/> is fetched, not a second <c>COUNT</c> query, so "is there
+    /// a next page" is answered by what already came back — the extra row is trimmed before it reaches
+    /// a caller, and its own key becomes <see cref="BulkLoadHistoryPage.NextCursor"/>.
+    /// </para>
+    /// </summary>
+    public BulkLoadHistoryPage GetHistory(
+        string taskName, string? mappingName = null, BulkLoadHistoryCursor? cursor = null, int limit = 20) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, $"""
+                SELECT b.BatchId, b.MappingName, b.CreatedAtUtc, b.SegmentCount,
+                       b.EstimatedRows, b.EstimateCaveat,
+                       SUM(CASE WHEN r.Status = 'Succeeded' THEN 1 ELSE 0 END) AS SegmentsSucceeded,
+                       SUM(CASE WHEN r.Status = 'Failed'    THEN 1 ELSE 0 END) AS SegmentsFailed,
+                       SUM(CASE WHEN r.Status = 'Running'   THEN 1 ELSE 0 END) AS SegmentsRunning,
+                       SUM(r.RowsRead)     AS RowsRead,
+                       SUM(r.RowsWritten)  AS RowsCopied,
+                       MIN(r.StartedAtUtc) AS StartedAtUtc,
+                       MAX(r.EndedAtUtc)   AS LastActivityUtc
+                FROM BulkLoadBatches b
+                LEFT JOIN TaskRuns r ON r.BulkLoadBatchId = b.BatchId
+                WHERE b.TaskName = $taskName
+                {(mappingName is null ? "" : "AND b.MappingName = $mappingName")}
+                {(cursor is null ? "" : "AND (b.CreatedAtUtc < $cursorTime OR (b.CreatedAtUtc = $cursorTime AND b.BatchId < $cursorBatchId))")}
+                GROUP BY b.BatchId, b.MappingName, b.CreatedAtUtc, b.SegmentCount,
+                         b.EstimatedRows, b.EstimateCaveat
+                ORDER BY b.CreatedAtUtc DESC, b.BatchId DESC
+                {database.Limit("fetchLimit")};
+                """);
+            cmd.Bind(database, "taskName", taskName);
+            if (mappingName is not null)
+                cmd.Bind(database, "mappingName", mappingName);
+            if (cursor is not null)
+            {
+                cmd.Bind(database, "cursorTime", cursor.Value.CreatedAtUtc.ToString("O"));
+                cmd.Bind(database, "cursorBatchId", cursor.Value.BatchId);
+            }
+            // One more than asked for — see the doc comment above.
+            cmd.Bind(database, "fetchLimit", limit + 1);
+
+            using var reader = cmd.ExecuteReader();
+            var results = new List<BulkLoadBatchProgress>();
+            while (reader.Read())
+            {
+                results.Add(new BulkLoadBatchProgress(
+                    BatchId: reader.GetString(0),
+                    MappingName: reader.GetString(1),
+                    CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(2)),
+                    SegmentCount: reader.Int32(3),
+                    SegmentsSucceeded: reader.IsDBNull(6) ? 0 : reader.Int32(6),
+                    SegmentsFailed: reader.IsDBNull(7) ? 0 : reader.Int32(7),
+                    SegmentsRunning: reader.IsDBNull(8) ? 0 : reader.Int32(8),
+                    RowsRead: reader.IsDBNull(9) ? 0 : reader.Int64(9),
+                    RowsCopied: reader.IsDBNull(10) ? 0 : reader.Int64(10),
+                    EstimatedRows: reader.NullableInt64(4),
+                    EstimateCaveat: reader.IsDBNull(5) ? null : reader.GetString(5),
+                    StartedAtUtc: reader.IsDBNull(11) ? null : DateTimeOffset.Parse(reader.GetString(11)),
+                    LastActivityUtc: reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12))));
+            }
+
+            BulkLoadHistoryCursor? next = null;
+            if (results.Count > limit)
+            {
+                results.RemoveAt(results.Count - 1);
+                var last = results[^1];
+                next = new BulkLoadHistoryCursor(last.CreatedAtUtc, last.BatchId);
+            }
+
+            return new BulkLoadHistoryPage(results, next);
         });
 }

@@ -13,6 +13,7 @@ import {
 import type {
   MappingLag, ReadHold, ReplicationTaskConfig, TableMappingConfig, TableSpec,
 } from '../../api/types'
+import { BulkLoadHistoryPanel } from './BulkLoadHistoryPanel'
 import { BulkLoadProgressCard } from './BulkLoadProgressCard'
 import { holdStateOf, HOLD_INFO } from './holdState'
 import { formatLag, lagStateOf } from './lag'
@@ -26,15 +27,18 @@ const MONITORING_TABS: SubTab[] = [
   { path: null, label: 'Current Status', testId: 'monitoring-tab-current' },
   { path: 'history', label: 'Run History', testId: 'monitoring-tab-history' },
   { path: 'pause-history', label: 'Pause History', testId: 'monitoring-tab-pause-history' },
+  { path: 'bulk-load-history', label: 'Bulk Load History', testId: 'monitoring-tab-bulk-load-history' },
 ]
 
 /**
- * The Monitoring section's own layout route — see phase 103, and phase 131 for the third sub-tab.
+ * The Monitoring section's own layout route — see phase 103, phase 131 for the third sub-tab, and
+ * phase 139 for the fourth.
  *
- * Three sub-tabs, the `SubTabs` convention Overview and the mapping editor already use: **Current
+ * Four sub-tabs, the `SubTabs` convention Overview and the mapping editor already use: **Current
  * Status** is the index, so `/replications/{name}/monitoring` opens the lag table rather than
  * requiring a segment; **Run History** is what Runs used to be on its own top-level tab; **Pause
- * History** (phase 131) is who paused or resumed this replication or one of its mappings, and when.
+ * History** (phase 131) is who paused or resumed this replication or one of its mappings, and when;
+ * **Bulk Load History** (phase 139) is every past bulk load, across every mapping.
  *
  * Takes the command down to whichever sub-tab is open, the same way the layout route above passes it
  * to this one — `RunsCommand` reaches the history panel two levels down the outlet now rather than one,
@@ -75,6 +79,11 @@ export function MonitoringRunHistoryTab() {
 export function MonitoringPauseHistoryTab() {
   const { replicationName } = useOutletContext<MonitoringOutletContext>()
   return <PauseHistoryPanel replicationName={replicationName} />
+}
+
+export function MonitoringBulkLoadHistoryTab() {
+  const { replicationName } = useOutletContext<MonitoringOutletContext>()
+  return <BulkLoadHistoryPanel replicationName={replicationName} />
 }
 
 /**

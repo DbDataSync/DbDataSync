@@ -3,6 +3,8 @@ import type {
   AdminConfigEntry,
   ApplyResult,
   BulkLoadBatchProgress,
+  BulkLoadHistoryFilters,
+  BulkLoadHistoryPage,
   BulkLoadRequest,
   ReconcileDeletesRequest,
   SegmentCandidate,
@@ -120,6 +122,15 @@ function runHistoryQuery(filters: RunHistoryFilters, limit: number): string {
   return params.toString()
 }
 
+/** The query string `bulk-loads/history` builds from — mirrors `runHistoryQuery` above, see phase 139. */
+function bulkLoadHistoryQuery(filters: BulkLoadHistoryFilters, limit: number): string {
+  const params = new URLSearchParams()
+  if (filters.mappingName) params.set('mappingName', filters.mappingName)
+  if (filters.cursor) params.set('cursor', filters.cursor)
+  params.set('limit', String(limit))
+  return params.toString()
+}
+
 export const api = {
   connections: {
     list: () => request<ConnectionConfig[]>('/api/connections'),
@@ -202,6 +213,13 @@ export const api = {
     bulkLoads: (name: string, limit?: number) =>
       request<BulkLoadBatchProgress[]>(
         `/api/replications/${encodeURIComponent(name)}/bulk-loads${limit ? `?limit=${limit}` : ''}`,
+      ),
+    /** A page of bulk-load history, filtered by mapping and keyset-paged — see phase 139. Beside
+     * `bulkLoads` above, not built on it: the Monitoring card's own contract (newest one, no cursor,
+     * no filter) doesn't change shape because this second consumer exists. */
+    bulkLoadHistory: (name: string, filters: BulkLoadHistoryFilters = {}, limit = 20) =>
+      request<BulkLoadHistoryPage>(
+        `/api/replications/${encodeURIComponent(name)}/bulk-loads/history?${bulkLoadHistoryQuery(filters, limit)}`,
       ),
   },
   tableMappings: {
