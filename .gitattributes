@@ -1,0 +1,21 @@
+# Normalize every text file to LF, on checkout and in the repository, regardless of the checking-out
+# machine's own core.autocrlf. Found necessary by a real, reproducible failure: GitHub Actions'
+# windows-latest runners default Git for Windows to core.autocrlf=true, so a multi-line C# raw string
+# literal (NotesYamlRoundTripTests' own Markdown constant, among others) is compiled with \r\n on that
+# runner and \n everywhere else — the literal itself differs by platform before a single line of test
+# code ever runs, which is a strictly worse problem than any individual test working around it. `auto`
+# lets git's own binary-detection heuristic exempt genuinely binary files; explicit entries below are
+# only for the handful of extensions where guessing wrong would actually matter.
+* text=auto eol=lf
+
+# Never touched by line-ending normalization — corrupts binary content if it is.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.dll binary
+*.exe binary
+*.zip binary
+*.nupkg binary
