@@ -198,10 +198,24 @@ public sealed class ChangeReaderFirstPassContractTests
         // Loaded by path: the driver test projects are siblings of this one and are not referenced by
         // it, which is deliberate — a reference would drag every driver's test fixtures into this
         // assembly to check three names.
+        //
+        // Real bin/ output only, never obj/ — a real, filesystem-enumeration-order-dependent failure
+        // found in CI (never reproduced locally, where bin/ always happened to enumerate first): MSBuild
+        // leaves a *second* copy of each driver test assembly in obj/{Configuration}/{TFM}/ (the
+        // compiler's own pre-copy output), whose immediate directory is also named after the TFM but
+        // which never receives a project's copied dependencies (Npgsql, Microsoft.Data.SqlClient, ...) —
+        // only bin/ does. The original filter (`f.Directory!.Name == here.Name`) matched both. Whichever
+        // copy `Assembly.LoadFrom` reaches *first* wins the assembly's identity for the whole process
+        // (a later `LoadFrom` of the same identity from a different path returns the already-loaded
+        // instance rather than reloading) — so on a filesystem that happens to enumerate obj/ before
+        // bin/, the obj/ copy loads, and the later `GetTypes()` call throws `ReflectionTypeLoadException`
+        // for a dependency that was never missing from the real build output at all. Requiring the
+        // grandparent-of-grandparent segment to be literally "bin" (the real `bin/{Configuration}/{TFM}/`
+        // layout) excludes obj/ outright, regardless of enumeration order.
         var here = new FileInfo(typeof(ChangeReaderFirstPassContractTests).Assembly.Location).Directory!;
         var testAssemblies = here.Parent!.Parent!.Parent!.Parent!
             .EnumerateFiles("DbDataSync.Drivers.*.Tests.dll", SearchOption.AllDirectories)
-            .Where(f => f.Directory!.Name == here.Name)
+            .Where(f => f.Directory!.Name == here.Name && f.Directory.Parent?.Parent?.Name == "bin")
             .Select(f => f.FullName)
             .Distinct()
             .Select(Assembly.LoadFrom)
