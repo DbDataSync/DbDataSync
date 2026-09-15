@@ -1,9 +1,8 @@
 # Phase 144 — The `playwright` job: one test, failing most runs, hiding a quarter of the suite
 
 **Status**: In progress, on branch `phase-144-playwright-ci-intermittent-failures`, not yet merged.
-Items 1, 2 and 5 below are done and pushed; item 3 is investigated much further but not fixed (root
-cause narrowed, not confirmed); item 4 is decided (leave as-is) rather than acted on; item 6 needs a
-real CI run this branch hasn't had yet. See "Handoff" at the end.
+Items 1, 2, 3 and 5 below are done; item 4 is decided (leave as-is) rather than acted on; item 6 needs
+more of this branch's own CI history than the one green run it has had so far. See "Handoff" at the end.
 **Plan reference**: none — logged directly from this session's own investigation, the same way phase 140
 was. Phase 140's "CI result — 2026-09-15" section names this job as needing a follow-up of its own and
 does not attempt one; this is that follow-up. Prior art for the job itself:
@@ -168,29 +167,60 @@ src/DbDataSync.TaskRunner/bin/Debug/net10.0/runtimes/win-x86/native/Microsoft.Da
 
 **The managed `Microsoft.Data.SqlClient.dll` itself is not there at all** — only the Windows-only native
 SNI shim leaked through. This is exactly what `DbDataSync.Drivers.MsSql.csproj`'s
-`PackageReference Include="Microsoft.Data.SqlClient" ... ExcludeAssets="runtime"` says it should do
-(phase 109h: consumers supply the runtime asset themselves) — except **nothing does supply it for MsSql
-specifically**. Unlike DuckDb/mysql-connector, MsSql has no `KnownLibraries` catalog entry and no
-runtime `LibraryInstaller` install step (`grep -n mssql src/DbDataSync.Libraries/KnownLibraries.cs` finds
-nothing); it's a plain `ProjectReference` from `DbDataSync.Api`/`DbDataSync.TaskRunner`, both of which
-also have no `Microsoft.Data.SqlClient` `PackageReference` of their own (the test projects that need one
-directly — `Api.Tests`, `TaskRunner.Tests`, etc. — all added their own explicit reference; `Api`/
-`TaskRunner` never did).
+`PackageReference Include="Microsoft.Data.SqlClient" ... ExcludeAssets="runtime"` says it should do —
+its own comment names the real mechanism directly: `LibraryRegistry`'s `AssemblyLoadContext.Resolving`
+handler is supposed to serve the real assembly from `<repo>/libraries/microsoft-data-sqlclient/lib/` at
+first touch, the same phase 109h mechanism `MsSqlStateDialect`/`PostgresStateDialect` already use, and
+`microsoft-data-sqlclient` **is** a real `KnownLibraries` catalog entry (it was a wrong initial read of
+`grep -n mssql` — the id is `"microsoft-data-sqlclient"`, not `"mssql"`).
 
-If the managed assembly were never resolvable at all, MsSql operations would fail **every single time**,
-in every process, immediately — not in roughly one run in several dozen. Since real runs demonstrably
-read and write through the real `Microsoft.Data.SqlClient` driver dozens of times per job without issue,
-something else must be resolving it successfully most of the time — almost certainly `dotnet exec`'s
-normal `<app>.deps.json`-driven probing falling through to the shared NuGet package cache
-(`~/.nuget/packages/microsoft.data.sqlclient/...`) rather than the app's own output folder, since a
-framework-dependent (non-published, non-self-contained) `dotnet build` output commonly resolves that way
-for assets a `PackageReference` doesn't explicitly copy local. **This was not verified further** — no
-Docker in this sandbox to spawn a real `DbDataSync.TaskRunner` process and watch it resolve the
-assembly, and no way to force the specific race/eviction condition that would make that fallback
-occasionally miss. It is a sharper, falsifiable lead — not a confirmed mechanism, and specifically not
-something to patch (e.g. by dropping `ExcludeAssets="runtime"` or adding a direct `PackageReference` to
-`Api`/`TaskRunner`) without first confirming it actually changes the failure rate, per this doc's own
-standing rule not to assume a fix works.
+**Root cause, confirmed, not just narrowed**: `DriverConnectionFactory.EnsureLibraryInstalledAsync` (the
+API's own `OpenAsync`) auto-installs `microsoft-data-sqlclient` into `libraries/` the first time the API
+opens a real MsSql/Postgres connection (schema browsing, provisioning, the Test button). But
+`DbDataSync.TaskRunner` — a genuinely separate process, spawned fresh per replication by
+`ProcessSupervisor`, and the thing that actually reads/writes real data — had **no equivalent call
+anywhere**. `src/DbDataSync.TaskRunner/Program.cs` only ever called `LibraryRegistry.LoadAll()` **once**,
+at its own process startup, arming a resolver only for whatever already happened to be on disk at that
+exact moment. If nothing had installed the library into that replication's shared repo root *before*
+this particular worker process started — no ordering between "the API touches this driver first" and
+"a worker process for this driver spawns" is ever guaranteed by `ProcessSupervisor`, which enqueues work
+and spawns the worker without waiting for any install — that worker's own `new SqlConnection(...)`
+throws exactly this `FileNotFoundException`, deterministically, for that process, regardless of whether
+the library is durably installed and working fine everywhere else.
+
+**Verified directly, not just reasoned about** — with no Docker, using a throwaway console harness
+against the real `DbDataSync.Libraries`/`DbDataSync.State`/`DbDataSync.Drivers.MsSql` projects (not the
+Api/TaskRunner processes themselves, but the exact same code paths):
+- **Negative control**, reproducing the bug: a fresh repo root, `LibraryRegistry.LoadAll()` (no install
+  attempted, matching the old `TaskRunner/Program.cs`), then `MsSqlDriver.CreateConnection(...)` — throws
+  `System.IO.FileNotFoundException: Could not load file or assembly 'Microsoft.Data.SqlClient,
+  Version=7.0.0.0, Culture=neutral, PublicKeyToken=23ec7fc2d6eaa4a5'. The system cannot find the file
+  specified.` — **character-for-character the same message** the real CI run logged.
+- **Positive control**, with the fix: the same fresh repo root, but calling the new
+  `BuiltInDriverLibraries.EnsureInstalledAsync` first — installs `microsoft-data-sqlclient` for real
+  (confirmed: `libraries/microsoft-data-sqlclient/lib/` exists afterward), and the same
+  `CreateConnection` + `OpenAsync` against an unreachable address now fails with a real
+  `Microsoft.Data.SqlClient.SqlException` ("server was not found or was not accessible") — a genuine
+  network failure, not a missing-assembly one.
+
+**The fix**: `src/DbDataSync.State/BuiltInDriverLibraries.cs` (new) holds the shared
+check-install-register sequence (moved out of `DriverConnectionFactory`, which now just delegates to it)
+— `DbDataSync.State` because it already depends on `DbDataSync.Libraries` and both `Api` and
+`TaskRunner` already depend on it, avoiding a circular reference to reuse
+`MsSqlStateDialect.LibraryId`/`PostgresStateDialect.LibraryId` rather than a second copy of the id
+string. `RunExecutor.OpenAsync` (`DbDataSync.TaskRunner`) now calls it too, immediately before
+`driver.CreateConnection(...)` — the one place every connection this process opens actually goes
+through. `Program.cs` passes its own already-constructed `libraryRegistry`/`options.RepoRoot` through.
+
+**Known, accepted residual gap**: the install lock is per-process (a `SemaphoreSlim`, matching
+`DriverConnectionFactory`'s own original one, added for a real `ConcurrentRunsIntegrationTests` race).
+Two different processes (the API and a worker, or two workers for two different replications) racing to
+install the *same* not-yet-installed library for the first time at the same moment are not serialized
+against each other — a genuine cross-process file lock would close this fully, but is more than this fix
+warrants: in practice the API always touches a driver (schema browsing) before a replication using it
+can even be configured to run, so the true first-install race this doc is about (worker-before-API) is
+what's fixed, and worker-vs-worker was never possible before this fix either way (only the API ever
+installed anything). Documented in `BuiltInDriverLibraries`'s own doc comment, not silently assumed away.
 
 ### The full CI picture
 
@@ -229,12 +259,14 @@ spec, passed. Bisecting product commits would start in the wrong place.
    the same test as the trigger — test 18's `orders` mapping is the only one that triggers and reads back
    inside a single test. `mapping-column-add.spec.ts` and `replication-wide-provisioning.spec.ts`, the
    doc's own guesses, don't call `querySql` or assert `Succeeded` at all.
-3. **PARTIAL — Root-cause the `Microsoft.Data.SqlClient` load failure.** Materially narrowed (see "A
-   concrete, falsifiable lead" above: the managed assembly is verifiably absent from `Api`'s/
-   `TaskRunner`'s own build output, a real, checked-in-this-sandbox fact, not a guess) but **not
-   confirmed** — the specific condition that makes the fallback resolution miss is still unknown, and no
-   fix has been applied. Left for whoever picks this up next, ideally with either Docker locally or a way
-   to attach to a live CI runner.
+3. **DONE — Root-cause the `Microsoft.Data.SqlClient` load failure, and fix it.** Confirmed, not just
+   narrowed — see "Root cause, confirmed, not just narrowed" above, verified both directions with a
+   throwaway console harness (no Docker needed): without the fix, `MsSqlDriver.CreateConnection`
+   reproduces the exact real CI error message character-for-character; with it, the same call succeeds
+   and only a real network failure remains. Fixed in `src/DbDataSync.State/BuiltInDriverLibraries.cs`
+   (new, shared) plus `DbDataSync.TaskRunner`'s `RunExecutor.OpenAsync`/`Program.cs` now calling it,
+   mirroring what `DbDataSync.Api`'s `DriverConnectionFactory` already did. Still needs this branch's own
+   CI to confirm the failure stops recurring for real, not just in this isolated harness — see item 6.
 4. **DECIDED, not done — the serial cascade stays as it is.** Test 18 is not as self-contained as it
    looks: it selects `SRC_CONNECTION_NAME`/`TGT_CONNECTION_NAME` (created in test 02) for its new
    mapping's connections, so pulling it out of the serial block means either giving it its own
@@ -262,9 +294,13 @@ spec, passed. Bisecting product commits would start in the wrong place.
 
 ## Open questions to resolve during implementation
 
-- Is the `Microsoft.Data.SqlClient` failure a consequence of the retry (state left behind by a failed
-  run) or an independent bug that retries merely expose? The progressive behaviour — tests that passed on
-  attempt 1 failing by retry #2 — suggests the former, but "suggests" is doing real work in that sentence.
+- ~~Is the `Microsoft.Data.SqlClient` failure a consequence of the retry, or independent of it?~~
+  **Resolved: independent of retries specifically, though retries make it more likely to be observed.**
+  The real trigger is "a TaskRunner worker for a given driver type spawns before that driver has ever
+  been installed via the API" — a retry restarting the whole serial block from test 01 means more worker
+  spawns happen over the job's lifetime (more chances to hit an unlucky ordering), but the bug doesn't
+  need a retry to exist; a first-attempt run unlucky enough to spawn a worker before the API's own first
+  connection-open for that driver would hit it too.
 - ~~Do other specs share test 18's "trigger a pass, then read real rows" shape?~~ **Resolved: no.**
   `mapping-column-add.spec.ts` and `replication-wide-provisioning.spec.ts` don't call `querySql` or
   assert `Succeeded` at all; `bulk-load-progress.spec.ts` neither. Every other `querySql` in the suite is
@@ -280,17 +316,25 @@ spec, passed. Bisecting product commits would start in the wrong place.
   reaches SQL Server by container name via `docker exec`); Docker is not installed on this machine. Node
   24 is present, so only the containers are missing. Everything above is from CI logs.
 - **A real `dotnet build src/DbDataSync.Api`/`dotnet build src/DbDataSync.TaskRunner` was possible,
-  though, with no Docker needed** — that's what surfaced "A concrete, falsifiable lead" above (the
-  managed `Microsoft.Data.SqlClient.dll`'s real absence from both projects' own build output). Worth
-  remembering for the next session on this doc: not every part of this investigation needs Docker, only
-  the parts that need a live SQL Server or a live web app.
+  though, with no Docker needed** — that's what first surfaced the managed `Microsoft.Data.SqlClient.dll`'s
+  real absence from both projects' own build output, the thread that led to the confirmed root cause.
+  Worth remembering for the next session on this doc: not every part of this investigation needs Docker,
+  only the parts that need a live SQL Server or a live web app.
+- **A throwaway console project (referencing the real `DbDataSync.Libraries`/`DbDataSync.State`/
+  `DbDataSync.Drivers.MsSql` projects directly, no `Microsoft.Data.SqlClient` `PackageReference` of its
+  own) is what actually confirmed the root cause and the fix**, with no Docker and no real SQL Server:
+  a fresh temp repo root plus `MsSqlDriver.CreateConnection(...)` against an address that doesn't resolve
+  is enough to prove *whether the assembly loads at all*, entirely separately from whether the network
+  call that follows succeeds. Worth reusing as a pattern for the next library-loading question this repo
+  runs into — it isolates "does the assembly resolve" from "does the connection actually work" far more
+  cheaply than a full integration test.
 - **The green-run comparison is what made the SqlClient correlation legible** — zero occurrences in
   either green run, 3–5 in every red one. Worth repeating as a technique: diffing a passing run against a
   failing one separated the incidental log noise from the signal far faster than reading either alone.
 
-## Handoff — 2026-09-15
+## Handoff — 2026-09-15 (updated, later than the PR's first push)
 
-**Done, on this branch, not yet merged:**
+**Done, on this branch (PR #3), not yet merged:**
 - `tests/DbDataSync.Web.Tests/mapping-load-waiter.ts` — new, `waitForLoadToComplete`, the TS sibling of
   phase 141's `MappingLoadWaiter.cs`.
 - `tests/DbDataSync.Web.Tests/tests/golden-path.spec.ts` — test 18 now awaits it between the `Succeeded`
@@ -299,25 +343,49 @@ spec, passed. Bisecting product commits would start in the wrong place.
   report.
 - `.github/workflows/ci.yml` — `playwright` job uploads that JSON report unconditionally as
   `playwright-report`.
-- This doc, rewritten with real evidence from a live CI run and a real local build, in place of the
-  original sampled/inferred version.
+- `src/DbDataSync.State/BuiltInDriverLibraries.cs` (new) — the shared check-install-register sequence for
+  a built-in driver's library, moved out of `DriverConnectionFactory`.
+- `src/DbDataSync.Api/Services/DriverConnectionFactory.cs` — `EnsureLibraryInstalledAsync` now delegates
+  to the shared helper instead of duplicating it.
+- `src/DbDataSync.TaskRunner/RunExecutor.cs`/`Program.cs` — `RunExecutor` takes a `LibraryRegistry` and
+  `repoRoot` now, and calls the shared helper in `OpenAsync` before every connection it opens.
+- `tests/DbDataSync.TaskRunner.Tests/{RunExecutorTests,RunExecutorIntegrationTests,Scd2NaturalKeyIntegrationTests}.cs`
+  — updated for `RunExecutor`'s new constructor parameters.
+- This doc, rewritten twice now: once with real evidence from a live CI run and a real local build (the
+  first push), and again once the SqlClient root cause moved from "a lead" to "confirmed and fixed."
 
-**Verified so far:** the file loads and its tests list cleanly under
-`npx playwright test --list tests/golden-path.spec.ts` (45 tests found, test 18 included) — no syntax or
-module-resolution error. **Not yet verified:** an actual run of test 18 against real containers (no
-Docker in this sandbox), and therefore no confirmation yet that the fix actually turns the race green
-rather than just compiling.
+**Verified so far, all without Docker:**
+- `npx playwright test --list tests/golden-path.spec.ts` — 45 tests found, test 18 included, no syntax or
+  module-resolution error.
+- `dotnet build`/`dotnet test --filter "Category!=Integration"` clean across `DbDataSync.Api`,
+  `DbDataSync.TaskRunner`, and their three touched test projects (`TaskRunner.Tests`: 46/46;
+  `Api.Tests`: 433/434, the one failure — `ChangeReaderFirstPassContractTests
+  .EveryDeclaredProofNamesATestThatExists` — confirmed pre-existing by reproducing it identically with
+  this branch's changes stashed away; `State.Tests`: 205/205).
+- **This PR's own first CI run (`35025393950`) is green on `playwright`**: 104/104 passed, zero retries,
+  zero `Microsoft.Data.SqlClient` occurrences — consistent with the race fix working and with the
+  SqlClient bug being rare enough that one clean run proves nothing about it either way (see item 6,
+  still open). `dotnet-windows` failed on that run (`RunWatermarkTimeTests
+  .EveryRunOnThePageIsDatedFromOneReadOfTheGroupsHistory`) — unrelated, this branch touches no `.NET`
+  watermark code; a pre-existing flake, not investigated further here.
+- The SqlClient root cause and fix are verified with a throwaway console harness (see "Investigation
+  notes" above) reproducing the exact real error message without the fix and a genuine network failure
+  (not a missing-assembly one) with it — but **not yet verified against a real spawned
+  `DbDataSync.TaskRunner` process or real CI**, which is the next thing this branch's own runs need to
+  show.
 
 **What's left, in order:**
-1. Push this branch, open a PR, let CI run it.
-2. If test 18 is green and the race doesn't reproduce, that's item 2 confirmed for real, not just by
-   inspection.
-3. Item 3 (the SqlClient failure) is still open — this branch does not attempt a fix, only a sharper
-   lead (see "A concrete, falsifiable lead" above). Watch specifically for whether it recurs on this
-   branch's own CI runs; if it does, that's a second, independent data point on when it happens (which
-   test, which retry number, how far into the job) worth adding to this doc before anyone attempts a fix.
-4. Per item 6, don't merge on one green run — this job's own history (3 of the last 12 runs passed with
-   nothing fixed) means one green run is not evidence. Watch several.
-5. On green (repeated) and a decision on item 3 (fixed, or explicitly deferred as its own follow-up
-   phase), move this doc to `implementation/done/` in the merge commit, rewritten as a retrospective per
-   the usual convention.
+1. Watch this PR's (#3) next several CI runs — specifically for the `Microsoft.Data.SqlClient` failure
+   recurring. If it doesn't recur across a meaningful number of runs, that's real confirmation the fix
+   works, not just the isolated harness's proof that the mechanism is right.
+2. If it *does* recur even once on this branch, that's important: it would mean either the fix has a gap
+   (check whether the failure this time is the exact same shape — same message, same "not yet installed"
+   condition — or something new) or the residual cross-process race named above actually matters in
+   practice, not just in theory.
+3. Per item 6, don't merge on one green run generally — this job's own history (3 of the last 12 runs
+   passed before this branch, with nothing fixed) means one green run alone is not evidence, though the
+   race fix (item 2) is on much firmer ground than the SqlClient fix (item 3) precisely because the race
+   was directly observed failing and now directly observed passing, in the same place, in one CI run.
+4. On green (repeated, with no SqlClient recurrence) and item 4's decision already recorded above, move
+   this doc to `implementation/done/` in the merge commit, rewritten as a retrospective per the usual
+   convention.

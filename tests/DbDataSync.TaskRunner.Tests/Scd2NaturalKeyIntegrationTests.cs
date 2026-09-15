@@ -5,6 +5,7 @@ using DbDataSync.Core.Sql;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Generic;
 using DbDataSync.Drivers.MsSql;
+using DbDataSync.Libraries;
 using DbDataSync.Scripting;
 using DbDataSync.State;
 using LibGit2Sharp;
@@ -93,7 +94,7 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
         _workQueueStore = new WorkQueueStore(stateDatabase);
         var batchStore = new BulkLoadBatchStore(stateDatabase);
         _executor = new RunExecutor(
-            _configRepository, driverRegistry, secretStore,
+            _configRepository, driverRegistry, secretStore, new LibraryRegistry(_repoRoot).LoadAll(), _repoRoot,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
                 new ChangeWatermarkStore(stateDatabase), new VerificationResultStore(stateDatabase),
                 _logWriter = new LogWriter(stateDatabase),
