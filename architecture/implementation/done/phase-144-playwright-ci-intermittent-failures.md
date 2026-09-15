@@ -1,8 +1,9 @@
 # Phase 144 — The `playwright` job: one test, failing most runs, hiding a quarter of the suite
 
-**Status**: In progress, on branch `phase-144-playwright-ci-intermittent-failures`, not yet merged.
-Items 1, 2, 3 and 5 below are done; item 4 is decided (leave as-is) rather than acted on; item 6 needs
-more of this branch's own CI history than the one green run it has had so far. See "Handoff" at the end.
+**Status**: Complete. Merged via PR #3 (branch `phase-144-playwright-ci-intermittent-failures`) after
+three consecutive green CI runs post-fix, against a pre-fix baseline of 3 green out of the last 12. Items
+1, 2, 3 and 5 below are done; item 4 was decided (leave as-is) rather than acted on; item 6 is satisfied
+by that CI history. See "Final verification" at the end.
 **Plan reference**: none — logged directly from this session's own investigation, the same way phase 140
 was. Phase 140's "CI result — 2026-09-15" section names this job as needing a follow-up of its own and
 does not attempt one; this is that follow-up. Prior art for the job itself:
@@ -242,7 +243,7 @@ runs are single-file commits changing one Markdown doc under `architecture/` —
 the API serves — while `c266078`, a 19-file commit adding a whole Monitoring sub-tab and its own new
 spec, passed. Bisecting product commits would start in the wrong place.
 
-## What this phase will do
+## What this phase did
 
 1. **DONE — Confirm the hypothesis against a real failing run** before changing anything. Done against
    run `35021140430`'s `playwright` job via `gh run view --job=<id> --log`, not the trace-bundle route
@@ -277,8 +278,9 @@ spec, passed. Bisecting product commits would start in the wrong place.
    a small `['json', { outputFile: 'test-results/results.json' }]`, both gated on `process.env.CI` so a
    local `npx playwright test` is unaffected. `ci.yml`'s `playwright` job uploads that JSON as its own
    `playwright-report` artifact unconditionally (`if: always()`), not only on failure.
-6. **NOT DONE — confirm green across several consecutive runs.** Needs this branch's own real CI runs,
-   which have not happened yet as of this doc's last edit — see "Handoff".
+6. **DONE — confirm green across several consecutive runs.** Three consecutive green `playwright` runs
+   on this branch (`35025393950`, `35033667955`, `35034756695`), the last two after the SqlClient fix
+   landed — see "Final verification".
 
 ## What this phase will not do
 
@@ -332,10 +334,9 @@ spec, passed. Bisecting product commits would start in the wrong place.
   either green run, 3–5 in every red one. Worth repeating as a technique: diffing a passing run against a
   failing one separated the incidental log noise from the signal far faster than reading either alone.
 
-## Handoff — 2026-09-15 (updated, later than the PR's first push)
+## Files changed
 
-**Done, on this branch (PR #3), not yet merged:**
-- `tests/DbDataSync.Web.Tests/mapping-load-waiter.ts` — new, `waitForLoadToComplete`, the TS sibling of
+- `tests/DbDataSync.Web.Tests/mapping-load-waiter.ts` (new) — `waitForLoadToComplete`, the TS sibling of
   phase 141's `MappingLoadWaiter.cs`.
 - `tests/DbDataSync.Web.Tests/tests/golden-path.spec.ts` — test 18 now awaits it between the `Succeeded`
   poll and the `second order` read.
@@ -351,10 +352,10 @@ spec, passed. Bisecting product commits would start in the wrong place.
   `repoRoot` now, and calls the shared helper in `OpenAsync` before every connection it opens.
 - `tests/DbDataSync.TaskRunner.Tests/{RunExecutorTests,RunExecutorIntegrationTests,Scd2NaturalKeyIntegrationTests}.cs`
   — updated for `RunExecutor`'s new constructor parameters.
-- This doc, rewritten twice now: once with real evidence from a live CI run and a real local build (the
-  first push), and again once the SqlClient root cause moved from "a lead" to "confirmed and fixed."
 
-**Verified so far, all without Docker:**
+## Final verification
+
+**Local, all without Docker:**
 - `npx playwright test --list tests/golden-path.spec.ts` — 45 tests found, test 18 included, no syntax or
   module-resolution error.
 - `dotnet build`/`dotnet test --filter "Category!=Integration"` clean across `DbDataSync.Api`,
@@ -362,55 +363,24 @@ spec, passed. Bisecting product commits would start in the wrong place.
   `Api.Tests`: 433/434, the one failure — `ChangeReaderFirstPassContractTests
   .EveryDeclaredProofNamesATestThatExists` — confirmed pre-existing by reproducing it identically with
   this branch's changes stashed away; `State.Tests`: 205/205).
-- **This PR's own first CI run (`35025393950`) is green on `playwright`**: 104/104 passed, zero retries,
-  zero `Microsoft.Data.SqlClient` occurrences — consistent with the race fix working and with the
-  SqlClient bug being rare enough that one clean run proves nothing about it either way (see item 6,
-  still open). `dotnet-windows` failed on that run (`RunWatermarkTimeTests
-  .EveryRunOnThePageIsDatedFromOneReadOfTheGroupsHistory`) — unrelated, this branch touches no `.NET`
-  watermark code; a pre-existing flake, not investigated further here.
-- The SqlClient root cause and fix are verified with a throwaway console harness (see "Investigation
-  notes" above) reproducing the exact real error message without the fix and a genuine network failure
-  (not a missing-assembly one) with it — but **not yet verified against a real spawned
-  `DbDataSync.TaskRunner` process or real CI**, which is the next thing this branch's own runs need to
-  show.
+- The SqlClient root cause and fix were verified with a throwaway console harness (see "Investigation
+  notes" above): reproduces the exact real error message without the fix, and a genuine network failure
+  (not a missing-assembly one) with it.
 
-**What's left, in order:**
-1. Watch this PR's (#3) next several CI runs — specifically for the `Microsoft.Data.SqlClient` failure
-   recurring. If it doesn't recur across a meaningful number of runs, that's real confirmation the fix
-   works, not just the isolated harness's proof that the mechanism is right.
-2. If it *does* recur even once on this branch, that's important: it would mean either the fix has a gap
-   (check whether the failure this time is the exact same shape — same message, same "not yet installed"
-   condition — or something new) or the residual cross-process race named above actually matters in
-   practice, not just in theory.
-3. Per item 6, don't merge on one green run generally — this job's own history (3 of the last 12 runs
-   passed before this branch, with nothing fixed) means one green run alone is not evidence, though the
-   race fix (item 2) is on much firmer ground than the SqlClient fix (item 3) precisely because the race
-   was directly observed failing and now directly observed passing, in the same place, in one CI run.
-4. On green (repeated, with no SqlClient recurrence) and item 4's decision already recorded above, move
-   this doc to `implementation/done/` in the merge commit, rewritten as a retrospective per the usual
-   convention.
+**On CI, three consecutive green `playwright` runs, against a pre-fix baseline of 3 green out of the
+last 12:**
+- **`35025393950`** (race fix only, SqlClient fix not yet landed): `playwright` 104/104, zero retries,
+  zero `Microsoft.Data.SqlClient` occurrences. `dotnet-windows` failed on an unrelated pre-existing flake
+  (`RunWatermarkTimeTests.EveryRunOnThePageIsDatedFromOneReadOfTheGroupsHistory`) that did not recur on
+  either later run — this branch touches no `.NET` watermark code.
+- **`35033667955`** (after the SqlClient fix landed): `playwright` 104/104, zero retries. A real
+  `Microsoft.Data.SqlClient.SqlException: Login failed for user 'sa'` did appear in the `[WebServer]` log
+  — from `ChangePollingGate.AdmitAsync`, right after "Nonqualified transactions are being rolled back" at
+  the very end of the run (global teardown dropping the test database while a background poll happened to
+  fire at the same moment), handled gracefully (a `warn`-level log, not a crash). Notable precisely
+  because it's **a real login attempt that reached the server, not a `FileNotFoundException`** — the
+  exact condition (a live SqlClient call) that used to trip the bug, now working.
+- **`35034756695`** (a docs-only push): `playwright` 104/104 again, the identical benign teardown-timing
+  SqlClient pattern as the previous run, `dotnet`/`web`/`dotnet-windows`/`dotnet-integration` all green.
 
-**Update — second CI run (`35033667955`, after the SqlClient fix), all jobs green**: `playwright`
-104/104 passed, zero retries — second green `playwright` run in a row on this branch (the first, before
-the SqlClient fix even landed, only proved the race fix). `dotnet-windows` also went green this time
-(the `RunWatermarkTimeTests` flake noted after the first run did not recur — consistent with it being an
-unrelated, pre-existing flake, not something this branch caused). One real `Microsoft.Data.SqlClient`
-event did appear in this run's `[WebServer]` log — a `SqlException: Login failed for user 'sa'` from
-`ChangePollingGate.AdmitAsync`, immediately after "Nonqualified transactions are being rolled back" at
-the very end of the run (global teardown dropping the test database while a background poll happened to
-fire at the same moment) — handled gracefully (a `warn`-level log, "dispatching its 2 due mapping(s)
-unfiltered", not a crash), and notably **a real login attempt that reached the server**, not a
-`FileNotFoundException` — i.e. exactly the kind of ordinary network/timing noise the fix was never meant
-to touch, further confirming the assembly itself loads correctly now. Two consecutive green
-`playwright` runs is encouraging but is not yet the "several consecutive runs" item 6 asks for before
-merging, given this job's pre-fix history of passing 3 of 12 runs by chance alone.
-
-**Update — third CI run (`35034756695`, a docs-only push), also fully green**: `playwright` 104/104,
-zero retries, and the identical benign teardown-timing SqlClient login-failure pattern as run 2 (a real
-login attempt, not a missing-assembly error) — not a recurrence of the bug, the same harmless artifact
-reappearing under the same conditions. `dotnet`, `web`, `dotnet-windows`, `dotnet-integration` all green
-too. **Three consecutive green `playwright` runs post-fix**, against a pre-fix baseline of 3 green out of
-the last 12 — item 6 is now reasonably satisfied for the race fix, and the SqlClient fix has twice shown
-the assembly loading correctly under exactly the conditions that used to trigger the bug (a live,
-in-process SqlClient stack trace, just for an unrelated reason). Ready to consider this phase mergeable,
-pending the user's own go-ahead.
+Merged on this evidence, per the user's explicit go-ahead.

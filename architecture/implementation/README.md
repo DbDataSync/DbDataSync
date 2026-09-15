@@ -33,7 +33,20 @@ So the order lives here, and is the one to work through:
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-15 (latest of all): **143 is done and removed.** Fixed the real production bug found
+Updated 2026-09-15 (latest of all): **144 is done and removed.** Fixed two independent bugs that had
+made the `playwright` job fail most runs on `main` for weeks: golden-path test 18 raced phase 134's Bulk
+Load divert (the same shape phase 141 already fixed in `Api.Tests`, now with a TypeScript sibling of
+`MappingLoadWaiter`), and `DbDataSync.TaskRunner` — a separate process spawned per replication — had no
+equivalent of the API's own auto-install for a built-in driver's library
+(`microsoft-data-sqlclient`/`npgsql`), so a worker that happened to touch a driver before the API did
+threw `Could not load file or assembly` outright. Both root-caused against real CI logs (not sampled),
+the second confirmed with a throwaway console harness reproducing the exact real error message with and
+without the fix. Also made the job self-reporting (`github` reporter, an uploaded JSON report) — the
+reason nine earlier red runs drew no investigation. Merged after three consecutive green `playwright`
+runs, against a pre-fix baseline of 3 green out of the last 12. See
+`architecture/implementation/done/phase-144-playwright-ci-intermittent-failures.md`.
+
+Updated 2026-09-15 (previously latest): **143 is done and removed.** Fixed the real production bug found
 while chasing phase 141's last known failure — a losing auto-triggered initial load (a mapping's own
 first pass racing a concurrent operator reload for the identical segment) used to strand `ReadHold` at
 `Loading` forever; now the loser fails cleanly and self-heals on its mapping's next scheduled pass. Also
