@@ -32,8 +32,16 @@ So the order lives here, and is the one to work through:
 | 1 | **034** — PostgreSQL logical replication | |
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
+| 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
-Updated 2026-09-15 (latest of all): **143 is done and removed.** Fixed the real production bug found
+Updated 2026-09-15 (later than the note below): **145 is new.** Phase 132's own deferred
+window-function alternative for duplicate-key handling, designed from scratch (neither phase 132 nor its
+own plan doc had worked out the SQL beyond naming the mechanism) and carried forward while walking
+through open follow-ups with the user — see
+`architecture/implementation/todo/phase-145-scd2-duplicate-keys-set-based.md`. Placed at the bottom, not
+jumping the queue: this is a pure optimization with no correctness or urgency argument behind it.
+
+Updated 2026-09-15 (previously latest): **143 is done and removed.** Fixed the real production bug found
 while chasing phase 141's last known failure — a losing auto-triggered initial load (a mapping's own
 first pass racing a concurrent operator reload for the identical segment) used to strand `ReadHold` at
 `Loading` forever; now the loser fails cleanly and self-heals on its mapping's next scheduled pass. Also

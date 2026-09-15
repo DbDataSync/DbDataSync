@@ -1,6 +1,6 @@
 # SCD2 duplicate-key handling: the window-function alternative, deferred pending a live server
 
-**Status: a known, deferred optimization — now buildable, not started.** Extracted from
+**Status: resolved 2026-09-15 — see Outcome at the end.** Extracted from
 `architecture/implementation/done/phase-132-cdc-guaranteed-delivery-for-scd2.md`'s own "What's
 explicitly still not built" section, where it sat as an inert bullet — moved here per
 `architecture/implementation/README.md`'s "Follow-up work gets its own doc, not a paragraph."
@@ -34,3 +34,13 @@ disproven, just deferred.
 Whether the set-based version is actually faster in practice, by how much, under what batch shapes — none
 of this was measured. This doc exists to make the deferred option findable, not to argue it's worth
 doing; that's the first thing whoever picks this up should establish.
+
+## Outcome
+
+Worked out into a real, buildable design — reading the current row-by-row implementation
+(`Scd2Writer.ApplyDuplicateKeysInOrderAsync`, `HistorizedStatement`) directly, since neither phase 132 nor
+its own plan doc had worked out the set-based version beyond naming the mechanism. Carried forward into
+`architecture/implementation/todo/phase-145-scd2-duplicate-keys-set-based.md`, which has the full SQL
+sketch (a `ROW_NUMBER()`/`LEAD()`/`COUNT() OVER` derived table replacing the per-key/per-row loop
+entirely) and its own verification plan, including the real before/after measurement this doc's own "Not
+evaluated" section says was still missing.
