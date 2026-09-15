@@ -289,10 +289,9 @@ runs them. There is simply no Windows door to it.
   it asserted the Windows-only refusal for `cert list` with a comment reading "this environment is Linux".
   Now uses an unknown subcommand, whose handling is identical everywhere.
 
-**Real product gap named, deliberately not closed**: Windows cannot reach phase 130's tier 2 from the CLI
-at all, while `DbDataSyncHost` will happily run `SelfSignedCertificateService` there when the config names
-the managed path. Whether `new-self-signed` on Windows should offer the file-based route alongside the
-store one is a product decision, not a phase 140 cleanup.
+**Real product gap found here, not closed here**: Windows cannot reach phase 130's tier 2 from the CLI at
+all, while `DbDataSyncHost` will happily run `SelfSignedCertificateService` there. Written up in
+`architecture/planning/todo/follow-up-phase-140-windows-cannot-reach-the-managed-self-signed-certificate-from-the-cli.md`.
 
 ### Item 3 (`State.Tests`) — not timing, not the scheduler: a half-stated file-sharing contract
 
@@ -416,8 +415,9 @@ output itself — written up, alongside phase 136's own related gaps, in
 - **`playwright`** — red on every run in the table too, so not a regression from this commit. Worth
   flagging because this doc's own "Confirmed fixed for real" section says "the `dotnet` and `playwright`
   jobs are both green as of the latest run": that was true when written and has not been true for at
-  least the last four runs on `main`. It is not covered by phase 140 or phase 141, and it is the job the
-  `playwright-suite-in-ci.md` planning doc exists to keep honest — it needs its own follow-up.
+  least the last four runs on `main`. Covered by neither phase 140 nor phase 141, so it is now
+  `implementation/todo/phase-144-playwright-ci-intermittent-failures.md`, which root-causes it to a
+  single test.
 
 ### Status
 
