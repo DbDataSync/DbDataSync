@@ -259,8 +259,19 @@ public sealed class DescriptorDriverTests : IClassFixture<DescriptorDriverApiFac
 
         Assert.NotNull(completedPayload);
         Assert.Equal("Succeeded", completedPayload!.Value.GetProperty("status").GetString());
-        Assert.Equal(2, completedPayload.Value.GetProperty("rowsRead").GetInt64());
-        Assert.Equal(2, completedPayload.Value.GetProperty("rowsWritten").GetInt64());
+
+        // Phase 134: WatermarkReader also captures a position ahead of a mapping's first pass rather
+        // than reading directly (it implements IPositionCapturing — its own doc explains why its
+        // ReadIntent.InitialLoad branch stayed, unlike the other three, but that's about a Bulk Load
+        // reader override, not this), so the triggered run above never carries real
+        // rowsRead/rowsWritten itself. The real load happens on the Bulk Load it requested.
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "main");
+        var history = await _client.GetFromJsonAsync<JsonElement>(
+            $"/api/replications/{_replicationName}/runs?kind=BulkLoad&mappingName=main&limit=1");
+        var load = Assert.Single(history.GetProperty("runs").EnumerateArray());
+        Assert.Equal("Succeeded", load.GetProperty("status").GetString());
+        Assert.Equal(2, load.GetProperty("rowsRead").GetInt64());
+        Assert.Equal(2, load.GetProperty("rowsWritten").GetInt64());
 
         var tgtBuilder = new SqlConnectionStringBuilder(MsSqlServerConnectionString) { InitialCatalog = _targetDatabase };
         await using var tgtConnection = new SqlConnection(tgtBuilder.ConnectionString);

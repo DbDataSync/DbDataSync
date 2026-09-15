@@ -197,12 +197,22 @@ public sealed class RunLifecycleIntegrationTests : IClassFixture<TestApiFactory>
 
         Assert.NotNull(completedPayload);
         Assert.Equal("Succeeded", completedPayload!.Value.GetProperty("status").GetString());
-        Assert.Equal(2, completedPayload.Value.GetProperty("rowsRead").GetInt64());
-        Assert.Equal(2, completedPayload.Value.GetProperty("rowsWritten").GetInt64());
         Assert.NotEmpty(logLines);
 
         var runDetail = await _client.GetFromJsonAsync<JsonElement>($"/api/runs/{runId}");
         Assert.Equal("Succeeded", runDetail.GetProperty("status").GetString());
         Assert.True(runDetail.GetProperty("pid").GetInt32() > 0);
+
+        // Phase 134: this mapping's reader (Change Tracking) captures a position ahead of its first
+        // pass rather than reading directly, so the triggered run above — whose completion SignalR
+        // just proved broadcasts for a real spawned process — never carries real rowsRead/rowsWritten
+        // itself. The real load happens on the Bulk Load it requested; wait for it, then check its row.
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "main");
+        var history = await _client.GetFromJsonAsync<JsonElement>(
+            $"/api/replications/{_replicationName}/runs?kind=BulkLoad&mappingName=main&limit=1");
+        var load = Assert.Single(history.GetProperty("runs").EnumerateArray());
+        Assert.Equal("Succeeded", load.GetProperty("status").GetString());
+        Assert.Equal(2, load.GetProperty("rowsRead").GetInt64());
+        Assert.Equal(2, load.GetProperty("rowsWritten").GetInt64());
     }
 }

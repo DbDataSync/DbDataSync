@@ -92,6 +92,7 @@ public sealed class ReconcileDeletesScd2IntegrationTests : IClassFixture<TestApi
         // versions" starting state, the same role phase 124's own fixture gives its seeding pass.
         var primary = await ReadRunIdsAsync(await _client.PostAsync($"/api/replications/{_replicationName}/runs", Empty()));
         AssertAllSucceeded(await Task.WhenAll(primary.Select(PollUntilTerminalAsync)));
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "map");
         Assert.Equal(3, await OpenVersionCountAsync());
     }
 

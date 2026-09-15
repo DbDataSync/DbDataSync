@@ -188,7 +188,21 @@ public sealed class BulkCreateRunIntegrationTests : IClassFixture<TestApiFactory
 
                 var status = detail.GetProperty("status").GetString();
                 if (status is "Succeeded" or "Failed")
-                    return detail;
+                {
+                    if (status != "Succeeded")
+                        return detail;
+
+                    // Phase 134: a bulk-created mapping's reader (Change Tracking) captures a position
+                    // ahead of its own first pass rather than reading directly, so this Primary run's
+                    // own row (rowsWritten included) reflects nothing about the real load — that
+                    // happens on the Bulk Load it requested, which every caller here actually wants:
+                    // wait for it, then return its row instead.
+                    await _client.WaitForLoadToCompleteAsync(_replicationName, mappingName);
+                    var history = await _client.GetFromJsonAsync<JsonElement>(
+                        $"/api/replications/{_replicationName}/runs?kind=BulkLoad&mappingName={Uri.EscapeDataString(mappingName)}&limit=1");
+                    var load = history.GetProperty("runs").EnumerateArray().FirstOrDefault();
+                    return load.ValueKind == JsonValueKind.Object ? load : detail;
+                }
             }
 
             await Task.Delay(500);

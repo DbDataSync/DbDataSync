@@ -67,6 +67,7 @@ public sealed class ReconcileDeletesIntegrationTests : IClassFixture<TestApiFact
         // sweep normally finds itself run against, rather than an empty table.
         var primary = await ReadRunIdsAsync(await _client.PostAsync($"/api/replications/{_replicationName}/runs", Empty()));
         AssertAllSucceeded(await Task.WhenAll(primary.Select(PollUntilTerminalAsync)));
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "map");
         Assert.Equal(3, await CountAsync());
     }
 

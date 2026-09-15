@@ -115,7 +115,20 @@ public sealed class ConcurrentRunsIntegrationTests : IClassFixture<TestApiFactor
             .ToList();
         Assert.True(failures.Count == 0, "Expected every concurrently-triggered run to succeed, but got:\n" + string.Join("\n", failures));
 
-        foreach (var run in finalRuns)
+        // Phase 134: each replication's reader (Change Tracking) captures a position ahead of its
+        // first pass rather than reading directly, so every Primary run's own rowsRead/rowsWritten
+        // above is 0 by design — the real load happens on the Bulk Load each pass requested. Wait for
+        // each to finish, then check its row instead.
+        var loadRuns = await Task.WhenAll(Enumerable.Range(0, ConcurrentReplicationCount).Select(async i =>
+        {
+            var replicationName = $"repl-{i}-{_databaseName}";
+            await _client.WaitForLoadToCompleteAsync(replicationName, "main");
+            var history = await _client.GetFromJsonAsync<JsonElement>(
+                $"/api/replications/{replicationName}/runs?kind=BulkLoad&mappingName=main&limit=1", JsonOptions);
+            return history.GetProperty("runs").EnumerateArray().Single();
+        }));
+
+        foreach (var run in loadRuns)
         {
             Assert.Equal(RowsPerTable, run.GetProperty("rowsRead").GetInt64());
             Assert.Equal(RowsPerTable, run.GetProperty("rowsWritten").GetInt64());

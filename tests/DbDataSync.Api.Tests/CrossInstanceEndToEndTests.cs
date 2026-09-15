@@ -166,8 +166,26 @@ public sealed class CrossInstanceEndToEndTests : IClassFixture<TestApiFactory>, 
                 response.EnsureSuccessStatusCode();
                 var run = await response.Content.ReadFromJsonAsync<JsonElement>();
                 var status = run.GetProperty("status").GetString();
-                if (status is "Succeeded" or "Failed" or "Cancelled")
+                if (status is "Failed" or "Cancelled")
                     return run;
+                if (status == "Succeeded")
+                {
+                    // Phase 134: this mapping's reader (Change Tracking) captures a position ahead of
+                    // its first pass rather than reading directly, so that pass's own row never
+                    // carries real rowsRead/rowsWritten — the real load happens on the Bulk Load it
+                    // requested. Wait for it, then return its row instead, when this trigger was the
+                    // one that started it (a later, genuinely incremental trigger starts no load, and
+                    // returns its own row unchanged).
+                    await _client.WaitForLoadToCompleteAsync(_replicationName, "main");
+                    var history = await _client.GetFromJsonAsync<JsonElement>(
+                        $"/api/replications/{_replicationName}/runs?kind=BulkLoad&mappingName=main&limit=1");
+                    var load = history.GetProperty("runs").EnumerateArray().FirstOrDefault();
+                    return load.ValueKind == JsonValueKind.Object
+                        && DateTimeOffset.Parse(load.GetProperty("enqueuedAtUtc").GetString()!)
+                            >= DateTimeOffset.Parse(run.GetProperty("enqueuedAtUtc").GetString()!)
+                        ? load
+                        : run;
+                }
             }
 
             await Task.Delay(250);

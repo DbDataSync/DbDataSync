@@ -261,25 +261,34 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Equal(0, before.Runs);
         Assert.Null(before.LastCompletedPassUtc);
 
+        // Phase 134: this mapping's first pass only captures a position (Change Tracking) and
+        // requests a Bulk Load — it moves nothing itself, so it is not "the run that just happened"
+        // this test is about. Get past it (via a real Bulk Load, counted separately below), then
+        // trigger the genuinely incremental pass these assertions are testing.
+        await TriggerAndWaitAsync();
+        using (var connection = OpenDatabase())
+            await ExecuteAsync(connection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (4, 'dave');");
         await TriggerAndWaitAsync();
 
         var after = await GetMetricsAsync();
-        Assert.Equal(1, after.Runs);
+        Assert.Equal(2, after.Runs);
         Assert.Equal(0, after.Failures);
-        Assert.Equal(3, after.RowsWritten);
+        Assert.Equal(1, after.RowsWritten);
         Assert.NotNull(after.ProcessingP50Ms);
         Assert.NotNull(after.LastCompletedPassUtc);
 
         // The window is a real filter, not decoration: a one-hour window still holds a run from a
         // moment ago, and the bucket count follows what was asked for.
         var hour = await GetMetricsAsync("1h");
-        Assert.Equal(1, hour.Runs);
+        Assert.Equal(2, hour.Runs);
         Assert.Equal(24, hour.Buckets.Count);
-        Assert.Equal(1, hour.Buckets.Sum(b => b.Runs));
+        Assert.Equal(2, hour.Buckets.Sum(b => b.Runs));
 
-        // A bulk load is a different question and is not folded into the incremental figures.
+        // A bulk load is a different question and is not folded into the incremental figures — the
+        // one real Bulk Load the first trigger above started is tracked here, not among the Primary
+        // figures just asserted.
         var bulkLoad = await GetMetricsAsync(kind: "BulkLoad");
-        Assert.Equal(0, bulkLoad.Runs);
+        Assert.Equal(1, bulkLoad.Runs);
     }
 
     [Fact]
@@ -663,7 +672,14 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
                 var run = await response.Content.ReadFromJsonAsync<JsonElement>();
                 var status = run.GetProperty("status").GetString();
                 if (status == "Succeeded")
+                {
+                    // Phase 134: this mapping's reader (Change Tracking) captures a position ahead of
+                    // its first pass rather than reading directly, so a Succeeded Primary run's own
+                    // status says nothing about whether the Bulk Load it requested has finished — every
+                    // caller here reads real target rows, or previews against real state, right after.
+                    await _client.WaitForLoadToCompleteAsync(_replicationName, "main");
                     return;
+                }
                 if (status is "Failed" or "Cancelled")
                     throw new InvalidOperationException($"Run {runId} {status}: {run.GetProperty("errorSummary")}");
             }
