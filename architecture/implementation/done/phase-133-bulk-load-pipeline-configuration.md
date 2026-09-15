@@ -135,14 +135,13 @@ off the value being renamed.
 - **A Bulk Load History screen.** Phase 107 built `BulkLoadBatches` and its endpoint to support one and
   deliberately shipped no UI; that is still true and still separate.
 
-## Open questions to resolve during implementation
+## Open questions — resolved
 
-- **Does `RunLane` stay two-valued?** Verification rides the backfill lane today because both are
-  on-demand, non-incremental whole-table work. That reasoning survives the rename, but the lane is now
-  named after one of the two kinds on it, which reads worse than `Backfill` did.
+Both resolved during implementation; see "Implementation notes" below for the reasoning behind each.
+
+- **Does `RunLane` stay two-valued?** Yes, renamed but not split further.
 - **Whether the work-item transient Kind override is still needed** once a real configured default
-  exists. A one-off "reload this segment with a different writer" may or may not be a thing anyone
-  does; if not, it is dead weight that this phase could remove rather than re-point.
+  exists. Yes, kept.
 
 ## Implementation notes
 

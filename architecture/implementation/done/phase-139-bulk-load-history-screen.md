@@ -141,17 +141,15 @@ way `RunsPanel`'s does).
   filter can follow the same pattern later if it turns out to be wanted, the same way phase 104 added
   `status` to Run History alongside `kind`/`mappingName` rather than all three needing to ship together.
 
-## Open questions to resolve during implementation
+## Open questions — resolved
 
-- **Exact keyset tiebreak when two batches share the same `CreatedAtUtc`.** `BatchId` as the secondary
-  sort key almost certainly resolves it (same shape `RunId` does for Run History), but worth confirming
-  against `BulkLoadBatchStore`'s actual `INSERT` — `CreatedAtUtc` is stamped in application code, not a
-  database-generated monotonic value, so two batches created within the same tick are possible in a way
-  Run History's UUID `RunId` tiebreak doesn't need to think about as carefully.
+- **Exact keyset tiebreak when two batches share the same `CreatedAtUtc`.** Confirmed: `BatchId` as the
+  secondary sort key, implemented as `b.CreatedAtUtc < $cursorTime OR (b.CreatedAtUtc = $cursorTime AND
+  b.BatchId < $cursorBatchId)` — see `src/DbDataSync.State/BulkLoadBatchStore.cs`.
 - **Whether `RunHistoryCursorCodec` and the new `BulkLoadHistoryCursorCodec` should share a generic
-  base** rather than being two structurally-identical, independently-written classes — a real
-  reuse-vs-duplication call, better made once the second implementation exists side by side with the
-  first rather than guessed at from the plan.
+  base.** Resolved against sharing one — kept independent, since what differs between them (the tiebreak
+  field's type, the filter count) would need more indirection than the ~15 duplicated lines saved. See
+  "Merged" below.
 
 ## Handoff — 2026-09-15
 

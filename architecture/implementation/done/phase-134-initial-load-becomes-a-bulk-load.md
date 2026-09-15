@@ -242,34 +242,19 @@ deliberately untouched, per the corrected spec (the hold clears on its own; no r
 
 ### Known follow-up / not done here
 
-- **Driver-level unit tests that call the three affected readers directly with `ReadIntent.InitialLoad` +
-  a null watermark exist well beyond the four "Declaring" proof tests.** I found and fixed the direct
-  owners (`MsSqlChangeTrackingReaderTests`, `MsSqlCdcReaderTests`, `TriggerAuditReaderTests` in both the
-  MsSql and Postgres test projects — including their shared `ReadAsync`/`BaselineAsync` helpers, which
-  many other tests in those same files reuse for a "seed a baseline position" idiom now served by
-  `CapturePositionAsync` instead). **I did *not* audit or fix**: `SourceTransformTests.cs`,
-  `MsSqlPipelineTests.cs`, `Scd2CdcGuaranteedDeliveryIntegrationTests.cs`,
-  `Scd2CdcGuaranteedDeliveryIntegrationTests.cs`'s own `RunPassAsync(null, ReadIntent.InitialLoad)` call,
-  or any other direct caller a broader grep might still find (`grep -rn "ReadIntent.InitialLoad" tests/`
-  is the query I used to enumerate the search space — rerun it if picking this back up). These are all
-  Docker-backed (`[Trait("Category","Integration")]`), so they are **compile-clean but may fail at test
-  run time** — CI will surface exactly which. The fix pattern is established (see the three files above):
-  replace a direct `ReadChangesAsync(..., null, ReadIntent.InitialLoad, ...)` call used only to seed a
-  starting position with a `CapturePositionAsync` call, and where the test's whole point was asserting
-  full-load *rows*, rewrite it as a capture-then-replay ordering test instead.
-- **A reader from the affected three (`MsSqlChangeTrackingReader`/`MsSqlCdcReader`/`TriggerAuditReader`)
-  configured as a mapping's *Bulk Load* reader override** would now throw instead of full-loading, if
-  `RunKind.BulkLoad` ever dispatches it with a null watermark (it always does, per its own contract). This
-  is a real, if unusual and previously-untested, configuration regression — not raised by the corrected
-  spec, not fixed here. `WatermarkReader` is exempt from this (see point 8 above) but the other three are
-  not. Worth a decision (defensive throw with a clear message on that reader/RunKind combination? leave
-  it?) in a follow-up round.
-- **`BulkLoadService.EnqueueForInitialLoadAsync`'s failure mode is not hardened.** If it throws for a
-  reason other than owner-unavailability (e.g. an `AutoSegment` in `DefaultSegmenting` failing to expand
-  against an unreachable source), that currently surfaces as an unhandled exception from the
-  `/request-initial-load` endpoint, which `RemoteRunnerState.IsUnreachable` would treat as a 5xx —
-  meaning the runner could misread a genuine config/segment error as "the owner is gone" and start
-  journalling. Not addressed; flagged for whoever picks this up next.
+- **Driver-level unit tests calling the three affected readers directly with `ReadIntent.InitialLoad` +
+  a null watermark, beyond the four "Declaring" proof tests — resolved.** The three files this note
+  originally flagged as unaudited (`SourceTransformTests.cs`, `MsSqlPipelineTests.cs`,
+  `Scd2CdcGuaranteedDeliveryIntegrationTests.cs`) were all fixed, the first two by this phase's own later
+  "Follow-up — 2026-09-15" below, the third by phase 141. Re-running this note's own suggested
+  `grep -rn "ReadIntent.InitialLoad" tests/` afterward found no remaining unaudited callers among the
+  three affected readers.
+- **A reader from the affected three configured as a mapping's Bulk Load reader override now throws
+  instead of full-loading** — still open, written up in
+  `architecture/planning/todo/bulk-load-reader-override-throws-for-position-capturing-readers.md`.
+- **`BulkLoadService.EnqueueForInitialLoadAsync`'s failure mode is not hardened** — still open beyond the
+  one cause phase 143 fixed, written up in
+  `architecture/planning/todo/request-initial-load-endpoint-failure-mode-not-hardened.md`.
 
 ### Local verification
 

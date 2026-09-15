@@ -448,7 +448,37 @@ the former is a lettered add-on, the latter is its own numbered phase.
    any new phase) rather than silently absorbing unplanned scope into what was originally described as
    one phase.
 
-## CI-gated multi-session handoff
+## Follow-up work gets its own doc, not a paragraph
+
+Adopted 2026-09-15, after real cost from not doing it: phase 134's own retrospective named two
+follow-up items in a "Known follow-up / not done here" section, and a "worth a decision... in a
+follow-up round" for a third. All three sat there, correct and unactioned, until phase 141 — reading
+that doc for an unrelated reason — rediscovered them by chance. Between those two points, nobody
+looking at `implementation/README.md`'s own build-order table (the thing this whole convention exists
+to make "the order to work through" legible from) could see that work existed at all, because it was
+never a `todo/` file — it was prose, inside a file that this folder's own structure says means *done*.
+
+**A `done/` doc is a retrospective, not a backlog.** If, while writing one (or while finishing any
+piece of work — a bug fix, an investigation, a code review), real follow-up work is identified —
+something that should genuinely get done, not merely a boundary that was considered and deliberately
+left alone — it does not stay as a paragraph in that doc. It becomes:
+
+- **`architecture/planning/todo/`**, if it's a diagnosed-or-not problem with no agreed plan yet
+  (a bug with a known cause but no chosen fix, a "here's what I found" with real open questions) — see
+  that folder's own README for the shape.
+- **`architecture/implementation/todo/phase-NNN-*.md`**, a new numbered phase, if the scope is already
+  clear enough to build from directly.
+
+Either way, the `done/` doc keeps only a short pointer to where the work now lives — a sentence, not
+the elaboration — the same "a one-line 'see phase-012-...' is enough" rule
+`architecture/planning/README.md` already states for its own `done/` folder, extended to this one. This
+is not optional polish: a `done/` doc with real, unextracted follow-up work in it is exactly the state
+that let phase 134's items go unseen for a full session's worth of unrelated work.
+
+**This applies retroactively, not just going forward.** Reading an older `done/` phase doc — for any
+reason, not only while working on a new phase in the same area — and finding a stated follow-up that
+is still valid is the moment to extract it, the same as if it had just been written. Leaving it for
+whoever reads that doc next is how it gets missed again.
 
 Adopted 2026-09-14, for a problem this project ran into directly: a phase big enough to span more than
 one working session (a large rename, a schema change) used to mean either one session blocking for
@@ -497,6 +527,9 @@ Match the existing `done/` docs' shape:
 - Decisions made, and real bugs found (for `done/` docs — these are often the most valuable part of a
   retrospective; don't skip them for the sake of brevity).
 - What's explicitly out of scope / not built, so a later phase doesn't have to rediscover the boundary.
+  **A deliberate boundary — considered and rejected, or deferred on purpose — is fine as prose here.**
+  Anything that is actually *outstanding work* (a known bug, a gap, a "worth a decision in a follow-up
+  round") is not: see "Follow-up work gets its own doc, not a paragraph" below.
 - Open questions, for `todo/` docs where something is genuinely undecided and expected to be resolved
   during implementation rather than before it.
 

@@ -184,20 +184,12 @@ assumed closed.
 
 ### What's honestly still unverified
 
-Everything that needs a real Windows box, which this session never had access to:
-
-- Checkpoint 5's real EventLog round trip — the test exists, is written to actually prove it (not a
-  smoke test), and reports `[SKIP]` here. It has never actually run.
-- Checkpoint 6's manual verification: reproducing phase 135's original Error 1053 scenario (or any
-  other forced startup exception) against a real installed Windows service, and confirming the message
-  now appears in Event Viewer under source `DbDataSync` without the Scheduled-Task workaround that
-  session needed. Not done. The code path matches the design and the manually-verified fix phase 135's
-  own investigation established, but "matches the design" and "confirmed working on a real service" are
-  different claims, and only the first one is made here.
-- Whether a non-elevated real Windows install's first `service install` run can actually call
-  `EventLog.CreateEventSource` successfully — GitHub Actions' `windows-latest` runners are elevated by
-  default (noted in `WindowsServiceEventLogTests`'s own doc comment), so CI should be fine, but an
-  operator's own non-elevated shell hitting this for the first time is unverified.
+Everything that needs a real Windows box, which this session never had access to. Phase 140 later got a
+real `dotnet-windows` CI run and confirmed Checkpoint 5's real EventLog round trip *ran and passed* (a
+green `Test` step, not `[SKIP]`, on a real `windows-latest` runner) — but that's pass/fail from CI, not
+the literal output read by a human, and Checkpoint 6's own manual scenario was never a test CI could run
+at all. Both of those, plus the non-elevated-install question below, are written up together in
+`architecture/planning/todo/windows-service-event-log-output-never-read-by-a-human.md`.
 
 No real bugs were found in the *design* during implementation — the one thing this session caught (the
 `ApplicationStarted` closure's CA1416 warning) was a build-tooling/analyzer detail, not a logic error,

@@ -240,9 +240,10 @@ Exactly as scoped — none of these were built:
 ## What's explicitly still not built
 
 Same boundary as planned: the window-function alternative for duplicate keys remains a real, deferred
-optimization once a live server is available to iterate the change-point detection against (it now is,
-for whoever picks this up — the row-by-row design shipped here is correct and only pays its extra cost
-when a key actually has more than one staged row). No operator-facing toggle exists or was ever intended.
+optimization, now written up in
+`architecture/planning/todo/scd2-duplicate-key-window-function-optimization.md` — the row-by-row design
+shipped here is correct and only pays its extra cost when a key actually has more than one staged row.
+No operator-facing toggle exists or was ever intended.
 Ordering/timestamp support stays exclusive to `MsSqlCdcReader`. A source transaction spanning a read
 boundary is still not guaranteed to land in one pass — unchanged from phase 84, and not attempted here.
 

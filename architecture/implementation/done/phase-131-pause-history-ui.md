@@ -124,8 +124,8 @@ existing convention for a list endpoint in this controller, not a new one invent
 - **A third pause grain.** Replication and table-mapping remain the only two `ReadHold`/`Tasks.Paused`
   mechanisms; nothing else holds anything.
 - **Notifications for a table-mapping pause.** `SetMappingHold` raises nothing — confirmed by reading
-  the method, not merely asserted; whether the mapping grain should ever notify is left as a separate,
-  unresolved product question.
+  the method, not merely asserted. Whether it should is an open product question, written up in
+  `architecture/planning/todo/mapping-level-pause-does-not-notify.md`.
 - **Retention/pruning for `PauseEvents`.** Still untouched by `RunPruningService`; still no cap. Pause
   events remain rare, operator-initiated rows, unlike the per-pass volume `TaskRuns` pruning exists for.
 - **Live polling for `PauseHistoryPanel`.** A plain `useQuery` with no `refetchInterval`, invalidated

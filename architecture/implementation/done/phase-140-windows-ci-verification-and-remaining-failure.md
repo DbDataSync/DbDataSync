@@ -406,7 +406,8 @@ retrospectives are now confirmed by observation rather than by arithmetic.
 What is still *not* directly read is the literal Event Log / `icacls` text in the job log — that needs an
 authenticated `gh` (the unauthenticated logs endpoint answers 403), and this session had none. The green
 Test step is a stronger signal than the arithmetic it replaces, but it is a pass/fail signal, not the
-output itself. Naming the remaining gap rather than calling it closed.
+output itself — written up, alongside phase 136's own related gaps, in
+`architecture/planning/todo/windows-service-event-log-output-never-read-by-a-human.md`.
 
 ### Two jobs still red, neither caused here and neither in scope
 

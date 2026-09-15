@@ -105,11 +105,12 @@ helper) rather than duplicating a subtly different calculation.
   UI surfaces a server-computed binding level either; the client-side `reconcileOverride !== null` check
   is sufficient and consistent with every other override toggle in this file.
 
-## Open questions to resolve during implementation
+## Open questions — resolved
 
 - **Whether `MappingPipelineCard` should export its `kindOf`-style writer-resolution helper**, or
-  whether `TableMappingForm` recomputes the equivalent locally. Small either way; worth a look at how
-  much `MappingPipelineCard`'s internals can be reused without exporting more than intended.
+  whether `TableMappingForm` recomputes the equivalent locally. Resolved in favor of recomputing it
+  locally (`pipeline.writerOverride?.kind ?? task.changeProcessing.writer.kind`) — small either way, and
+  this avoids exporting more of `MappingPipelineCard`'s internals than intended.
 
 ## Implementation notes
 
