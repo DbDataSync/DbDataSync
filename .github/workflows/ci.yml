@@ -205,9 +205,15 @@ jobs:
         # resolves it in src/DbDataSync.TaskRunner/bin/Debug), and `dotnet build src/DbDataSync.Api`
         # does not build it. Without it every triggered run sits Queued forever with nothing to claim
         # it — which is what silently broke golden-path test 06 on this job.
+        #
+        # DbDataSync.Cli too, since phase 109i: globalSetup shells out to its Debug build
+        # (`config library install duckdb`) to seed a real DuckDB install rather than a hand-rolled
+        # fixture — this job never built the CLI project at all, so the whole suite has been failing
+        # at globalSetup with "The application to execute does not exist" ever since that phase landed.
         run: |
           dotnet build src/DbDataSync.Api
           dotnet build src/DbDataSync.TaskRunner
+          dotnet build src/DbDataSync.Cli
       - name: Install the SPA's dependencies
         working-directory: src/DbDataSync.Web
         run: npm ci
