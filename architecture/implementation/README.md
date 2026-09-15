@@ -32,6 +32,7 @@ So the order lives here, and is the one to work through:
 | 1 | **034** — PostgreSQL logical replication | |
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
+| 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
 Updated 2026-09-15 (latest of all): **144 is done and removed.** Fixed two independent bugs that had
 made the `playwright` job fail most runs on `main` for weeks: golden-path test 18 raced phase 134's Bulk
@@ -45,6 +46,13 @@ without the fix. Also made the job self-reporting (`github` reporter, an uploade
 reason nine earlier red runs drew no investigation. Merged after three consecutive green `playwright`
 runs, against a pre-fix baseline of 3 green out of the last 12. See
 `architecture/implementation/done/phase-144-playwright-ci-intermittent-failures.md`.
+
+Updated 2026-09-15 (previously latest): **145 is new.** Phase 132's own deferred
+window-function alternative for duplicate-key handling, designed from scratch (neither phase 132 nor its
+own plan doc had worked out the SQL beyond naming the mechanism) and carried forward while walking
+through open follow-ups with the user — see
+`architecture/implementation/todo/phase-145-scd2-duplicate-keys-set-based.md`. Placed at the bottom, not
+jumping the queue: this is a pure optimization with no correctness or urgency argument behind it.
 
 Updated 2026-09-15 (previously latest): **143 is done and removed.** Fixed the real production bug found
 while chasing phase 141's last known failure — a losing auto-triggered initial load (a mapping's own

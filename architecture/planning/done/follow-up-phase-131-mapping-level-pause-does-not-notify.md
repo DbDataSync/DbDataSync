@@ -1,9 +1,11 @@
 # Should a table-mapping-level pause raise a notification, like a replication-level one does?
 
-**Status: an open product question, not investigated.** Extracted from
+**Status: resolved 2026-09-15 — no, not for now.** Extracted from
 `architecture/implementation/done/phase-131-pause-history-ui.md`'s own "What this does not build"
 section, where it sat as an inert bullet — moved here per `architecture/implementation/README.md`'s
-"Follow-up work gets its own doc, not a paragraph."
+"Follow-up work gets its own doc, not a paragraph." Decided without further investigation: a
+table-mapping pause stays silent, same as phase 131 shipped it. Revisit if it turns out to matter in
+practice — nothing about `PauseEventRecord` (it already carries `MappingName`) blocks adding this later.
 
 ## The question, as phase 131 left it
 
