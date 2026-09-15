@@ -6,6 +6,7 @@ using DbDataSync.Scripting;
 using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.MsSql;
+using DbDataSync.Libraries;
 using DbDataSync.State;
 using DbDataSync.TaskRunner;
 using LibGit2Sharp;
@@ -49,7 +50,7 @@ public sealed class RunExecutorTests : IDisposable
         driverRegistry.Register(new MsSqlDriver());
 
         _executor = new RunExecutor(
-            _configRepository, driverRegistry, secretStore,
+            _configRepository, driverRegistry, secretStore, new LibraryRegistry(_repoRoot).LoadAll(), _repoRoot,
             new LocalRunnerState(_taskRunStore, _workQueueStore, _runLockStore,
                 new ChangeWatermarkStore(_stateDatabase), new VerificationResultStore(_stateDatabase), _logWriter,
                 new BulkLoadBatchStore(_stateDatabase), new Lazy<IInitialLoadEnqueuer>(() => new NeverCalledInitialLoadEnqueuer())),

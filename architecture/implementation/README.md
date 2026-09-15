@@ -34,7 +34,20 @@ So the order lives here, and is the one to work through:
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 | 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
-Updated 2026-09-15 (later than the note below): **145 is new.** Phase 132's own deferred
+Updated 2026-09-15 (latest of all): **144 is done and removed.** Fixed two independent bugs that had
+made the `playwright` job fail most runs on `main` for weeks: golden-path test 18 raced phase 134's Bulk
+Load divert (the same shape phase 141 already fixed in `Api.Tests`, now with a TypeScript sibling of
+`MappingLoadWaiter`), and `DbDataSync.TaskRunner` — a separate process spawned per replication — had no
+equivalent of the API's own auto-install for a built-in driver's library
+(`microsoft-data-sqlclient`/`npgsql`), so a worker that happened to touch a driver before the API did
+threw `Could not load file or assembly` outright. Both root-caused against real CI logs (not sampled),
+the second confirmed with a throwaway console harness reproducing the exact real error message with and
+without the fix. Also made the job self-reporting (`github` reporter, an uploaded JSON report) — the
+reason nine earlier red runs drew no investigation. Merged after three consecutive green `playwright`
+runs, against a pre-fix baseline of 3 green out of the last 12. See
+`architecture/implementation/done/phase-144-playwright-ci-intermittent-failures.md`.
+
+Updated 2026-09-15 (previously latest): **145 is new.** Phase 132's own deferred
 window-function alternative for duplicate-key handling, designed from scratch (neither phase 132 nor its
 own plan doc had worked out the SQL beyond naming the mechanism) and carried forward while walking
 through open follow-ups with the user — see

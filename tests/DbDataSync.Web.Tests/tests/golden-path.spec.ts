@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DB_NAME, querySql, runSql, SA_PASSWORD, SOURCE_TABLE, SRC_CONNECTION_NAME, TARGET_TABLE, TGT_CONNECTION_NAME } from '../test-db'
 import { screenshotDir } from '../screenshots'
+import { waitForLoadToComplete } from '../mapping-load-waiter'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const screenshotsDir = screenshotDir('golden-path')
@@ -784,6 +785,11 @@ public sealed class DropGadgets : IRowTransform
         .filter((r) => r.mappingName === NEW_MAPPING)
         .map((r) => `${r.status}${r.errorSummary ? `: ${r.errorSummary}` : ''}`)
     }, { timeout: 90_000 }).toContain('Succeeded')
+
+    // Phase 144: a `Succeeded` Primary run here means the position was captured, not that the rows
+    // landed — this reader is position-capturing, so its first pass diverts into a concurrently
+    // running Bulk Load (phase 134). Reading the table immediately, as this test used to, raced it.
+    await waitForLoadToComplete(page, PROVISIONED_REPLICATION, NEW_MAPPING)
 
     expect(querySql(`SET NOCOUNT ON; SELECT Description FROM dbo.${NEW_TARGET} ORDER BY Id;`, DB_NAME))
       .toContain('second order')

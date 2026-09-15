@@ -51,7 +51,8 @@ DriverLoader.LoadCompiledDrivers(options.RepoRoot, driverRegistry);
 var (state, runnerConfig, disposeState) = RunnerStateFactory.Create(options);
 using var _stateScope = disposeState;
 var executor = new RunExecutor(
-    configRepository, driverRegistry, secretStore, state, runnerConfig, scriptHost, options.StateDbPath);
+    configRepository, driverRegistry, secretStore, libraryRegistry, options.RepoRoot, state, runnerConfig,
+    scriptHost, options.StateDbPath);
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>

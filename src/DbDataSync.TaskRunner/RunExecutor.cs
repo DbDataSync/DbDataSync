@@ -9,6 +9,7 @@ using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Generic;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.Postgres;
+using DbDataSync.Libraries;
 using DbDataSync.Scripting;
 using DbDataSync.Scripting.Abstractions;
 using DbDataSync.State;
@@ -38,6 +39,12 @@ public sealed class RunExecutor(
     ConfigRepository configRepository,
     DriverRegistry driverRegistry,
     SecretStore secretStore,
+    /// <summary>Phase 144: lets <see cref="OpenAsync"/> auto-seed a built-in driver's library the same
+    /// way <c>DbDataSync.Api</c>'s <c>DriverConnectionFactory</c> already does for its own connections —
+    /// see <see cref="BuiltInDriverLibraries"/>'s own doc comment for why this process needs its own
+    /// copy of that check rather than assuming the API already ran it.</summary>
+    LibraryRegistry libraryRegistry,
+    string repoRoot,
     IRunnerState state,
     /// <summary>How the one config write a run can make — its provisioning report, phase 94 — reaches
     /// the process that owns the repository. Never a <see cref="ConfigRepository"/> write of its own:
@@ -1557,6 +1564,11 @@ public sealed class RunExecutor(
     private async Task<DbConnection> OpenAsync(
         ConnectionConfig config, IDriver driver, CancellationToken cancellationToken)
     {
+        // Phase 144: this process is spawned fresh per replication and may be the very first thing to
+        // ever touch a given built-in driver — nothing guarantees the API already opened a connection
+        // for it first. See BuiltInDriverLibraries's own doc comment.
+        await BuiltInDriverLibraries.EnsureInstalledAsync(libraryRegistry, repoRoot, config.DriverType, cancellationToken);
+
         var credential = config.AuthMode == AuthMode.SqlAuth
             ? secretStore.Resolve(config.CredentialSecretRef!)
             : null;

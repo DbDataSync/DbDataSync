@@ -6,6 +6,7 @@ using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.Generic;
+using DbDataSync.Libraries;
 using DbDataSync.State;
 using DbDataSync.TaskRunner;
 using LibGit2Sharp;
@@ -87,7 +88,7 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
         _logWriter = new LogWriter(stateDatabase);
         var batchStore = new BulkLoadBatchStore(stateDatabase);
         _executor = new RunExecutor(
-            _configRepository, driverRegistry, secretStore,
+            _configRepository, driverRegistry, secretStore, new LibraryRegistry(_repoRoot).LoadAll(), _repoRoot,
             new LocalRunnerState(_taskRunStore, _workQueueStore, new RunLockStore(stateDatabase),
                 _watermarkStore, new VerificationResultStore(stateDatabase), _logWriter,
                 batchStore, new Lazy<IInitialLoadEnqueuer>(() =>
