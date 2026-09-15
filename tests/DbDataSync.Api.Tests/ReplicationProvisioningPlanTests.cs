@@ -60,18 +60,7 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
         }, Author);
     }
 
-    public void Dispose()
-    {
-        // LibGit2Sharp leaves some of its object files read-only, which Directory.Delete's recursive
-        // walk cannot remove on Windows — a pre-existing quirk of this fixture's own sandbox, reproduced
-        // identically by every other test in this file's family that does `Repository.Init` +
-        // `Directory.Delete` (MappingMetadataTests included), and unrelated to anything phase 105
-        // touches. Cleared explicitly here so a real assertion failure is never masked by a teardown
-        // exception.
-        foreach (var file in Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories))
-            File.SetAttributes(file, FileAttributes.Normal);
-        Directory.Delete(_root, recursive: true);
-    }
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     // ---- Test scaffolding -----------------------------------------------------------------------
 

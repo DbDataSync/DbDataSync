@@ -26,7 +26,7 @@ public sealed class ScriptUsageScannerTests : IDisposable
         _scanner = new ScriptUsageScanner(_config);
     }
 
-    public void Dispose() => Directory.Delete(_repoRoot, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
     private void SaveConnection(
         string name,

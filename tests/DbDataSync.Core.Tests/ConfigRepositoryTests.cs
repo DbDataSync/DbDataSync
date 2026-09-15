@@ -26,7 +26,7 @@ public sealed class ConfigRepositoryTests : IDisposable
         _repository = new ConfigRepository(_configRoot, new GitCommitService(_repoRoot), _secrets);
     }
 
-    public void Dispose() => Directory.Delete(_repoRoot, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
     [Fact]
     public void SaveConnection_WritesYamlFileMatchingLayout()

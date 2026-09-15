@@ -31,10 +31,7 @@ public sealed class ScriptedMetadataTests : IDisposable
         _metadata = new ScriptedMetadata(host, _configRepository);
     }
 
-    public void Dispose()
-    {
-        try { Directory.Delete(_repoRoot, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-    }
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
     private const string ConnectionName = "src";
 

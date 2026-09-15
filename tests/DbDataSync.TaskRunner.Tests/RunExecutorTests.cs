@@ -60,7 +60,7 @@ public sealed class RunExecutorTests : IDisposable
     public void Dispose()
     {
         _logWriter.Dispose();
-        Directory.Delete(_repoRoot, recursive: true);
+        GitTempDirectory.DeleteRecursively(_repoRoot);
     }
 
     private void SaveTask(

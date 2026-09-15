@@ -69,7 +69,7 @@ public class AuthenticatedApiFactory : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing && Directory.Exists(RepoRoot))
-            Directory.Delete(RepoRoot, recursive: true);
+        if (disposing)
+            GitTempDirectory.DeleteRecursively(RepoRoot);
     }
 }

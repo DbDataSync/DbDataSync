@@ -17,7 +17,7 @@ public sealed class LibraryValidateCommandTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("dbdatasync-validate-cli-").FullName;
     private readonly SecretStore _secrets = new("DbDataSync", true);
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     private ConfigRepository Repo() =>
         new(Path.Combine(_root, "config"), new GitCommitService(EnsureGitRepo()), _secrets);

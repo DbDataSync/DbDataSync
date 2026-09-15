@@ -34,7 +34,7 @@ public sealed class NotesYamlRoundTripTests : IDisposable
             SecretStore.ForProviders([new InMemorySecretProvider()]));
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     private void SaveReplication(string? notes) => _config.SaveReplicationTask(new ReplicationTaskConfig
     {

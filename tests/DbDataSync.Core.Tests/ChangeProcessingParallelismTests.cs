@@ -27,7 +27,7 @@ public sealed class ChangeProcessingParallelismTests : IDisposable
             SecretStore.ForProviders([new InMemorySecretProvider()]));
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     private static ReplicationTaskConfig Task(int? degreeOfParallelism = null, int? bulkLoadDegreeOfParallelism = null) => new()
     {

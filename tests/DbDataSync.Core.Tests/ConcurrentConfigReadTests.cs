@@ -25,7 +25,7 @@ public sealed class ConcurrentConfigReadTests : IDisposable
             SecretStore.ForProviders([new InMemorySecretProvider()]));
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     private ReplicationTaskConfig Task(int frequency) => new()
     {

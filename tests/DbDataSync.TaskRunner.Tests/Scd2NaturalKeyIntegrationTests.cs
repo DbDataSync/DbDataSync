@@ -117,7 +117,7 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
         await ExecuteAsync(bootstrap, $"ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
         await ExecuteAsync(bootstrap, $"DROP DATABASE [{_databaseName}];");
 
-        Directory.Delete(_repoRoot, recursive: true);
+        GitTempDirectory.DeleteRecursively(_repoRoot);
     }
 
     private static async Task ExecuteAsync(SqlConnection connection, string sql)

@@ -62,7 +62,7 @@ public sealed class MappingMetadataTests : IDisposable
         }, Author);
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     private static ColumnMetadata Col(
         string name, string type, bool nullable = false, bool pk = false, bool identity = false) =>

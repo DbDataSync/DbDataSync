@@ -73,8 +73,8 @@ public class TestApiFactory : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing && _ownsRepoRoot && Directory.Exists(RepoRoot))
-            Directory.Delete(RepoRoot, recursive: true);
+        if (disposing && _ownsRepoRoot)
+            GitTempDirectory.DeleteRecursively(RepoRoot);
     }
 
     /// <summary>

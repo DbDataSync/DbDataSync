@@ -26,7 +26,7 @@ public sealed class ScriptParameterYamlRoundTripTests : IDisposable
             SecretStore.ForProviders([new InMemorySecretProvider()]));
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     [Fact]
     public void AVarargParameter_SurvivesARoundTrip()

@@ -27,7 +27,7 @@ public sealed class ReadIntentYamlRoundTripTests : IDisposable
             SecretStore.ForProviders([new InMemorySecretProvider()]));
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     private ReplicationTaskConfig Task(ReadIntent? defaultReadIntent) => new()
     {

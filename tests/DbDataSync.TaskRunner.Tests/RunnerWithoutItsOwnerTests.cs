@@ -16,7 +16,7 @@ public sealed class RunnerWithoutItsOwnerTests : IDisposable
 {
     private readonly string _repoRoot = Directory.CreateTempSubdirectory("dbdatasync-runner-exit-").FullName;
 
-    public void Dispose() => Directory.Delete(_repoRoot, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
     /// <summary>A replication the runner can actually load, so that what these tests observe is the
     /// state wiring rather than a config error on the way to it.</summary>

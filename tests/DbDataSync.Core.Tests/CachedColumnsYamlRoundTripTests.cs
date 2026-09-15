@@ -41,7 +41,7 @@ public sealed class CachedColumnsYamlRoundTripTests : IDisposable
         }, Author);
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
     private TableMappingConfig Save(
         List<CachedColumn> source, List<CachedColumn> target, DateTime? capturedUtc)

@@ -63,10 +63,7 @@ public sealed class AdminCertificateServiceWindowsTests : IDisposable
             }
         }
 
-        foreach (var file in Directory.EnumerateFiles(_repoRoot, "*", SearchOption.AllDirectories))
-            File.SetAttributes(file, FileAttributes.Normal);
-
-        Directory.Delete(_repoRoot, recursive: true);
+        GitTempDirectory.DeleteRecursively(_repoRoot);
     }
 
     private AdminCertificateService Build() =>

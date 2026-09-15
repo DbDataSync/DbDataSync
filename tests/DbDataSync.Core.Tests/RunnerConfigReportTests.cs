@@ -47,7 +47,7 @@ public sealed class RunnerConfigReportTests : IDisposable
         SaveMapping();
     }
 
-    public void Dispose() => Directory.Delete(_repoRoot, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
     private void SaveMapping(string notes = "as created") =>
         _config.SaveTableMapping("r", new TableMappingConfig

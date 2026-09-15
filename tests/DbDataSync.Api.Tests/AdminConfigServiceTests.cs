@@ -24,16 +24,7 @@ public sealed class AdminConfigServiceTests : IDisposable
 {
     private readonly string _repoRoot = Directory.CreateTempSubdirectory("admin-config-service-tests-").FullName;
 
-    // libgit2 writes its object files read-only; plain Directory.Delete refuses to remove a read-only
-    // file on Windows. Same workaround as tests/DbDataSync.Cli.Tests/GitTempDirectory.cs (not shared
-    // across projects — small enough not to be worth a cross-project dependency for).
-    public void Dispose()
-    {
-        foreach (var file in Directory.EnumerateFiles(_repoRoot, "*", SearchOption.AllDirectories))
-            File.SetAttributes(file, FileAttributes.Normal);
-
-        Directory.Delete(_repoRoot, recursive: true);
-    }
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
     private const string UrlKey = "DbDataSync:Url";
     private const string StateConnectionStringKey = "DbDataSync:StateConnectionString";

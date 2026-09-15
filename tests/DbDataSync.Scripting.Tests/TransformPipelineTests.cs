@@ -30,11 +30,7 @@ public sealed class TransformPipelineTests : IDisposable
             _configRepository, new ScriptCompiler(new ScriptCacheDirectory(Path.Combine(_repoRoot, "cache"))));
     }
 
-    public void Dispose()
-    {
-        try { Directory.Delete(_repoRoot, recursive: true); } catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-    }
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
     private void Register(string name, string kind, string entryType, string code) =>
         _configRepository.SaveScript(

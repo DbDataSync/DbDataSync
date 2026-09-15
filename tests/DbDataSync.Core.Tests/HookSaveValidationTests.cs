@@ -25,7 +25,7 @@ public sealed class HookSaveValidationTests : IDisposable
         _repository = new ConfigRepository(configRoot, new GitCommitService(_repoRoot), SecretStore.ForProviders([new InMemorySecretProvider()]));
     }
 
-    public void Dispose() => Directory.Delete(_repoRoot, recursive: true);
+    public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
     private ConnectionInput Connection(Dictionary<string, List<HookConfig>?> hooks) => new()
     {
