@@ -1,7 +1,14 @@
 # Phase 142 — GitHub Actions: Node 20 runtime deprecation
 
-**Status**: Implemented, not committed — other in-flight work on `main` should land first (user's
-instruction, 2026-09-15), so this doesn't trigger an extra CI run on its own.
+**Status**: Complete. Verified against real CI runs on `main` (job list checked directly via `gh run
+view --json jobs`, e.g. run 35006082487) — no Node-20-runtime deprecation annotation on any job, and
+`dotnet`, `dotnet-windows`, `web`, and `playwright` all green (their checkout/setup-dotnet/setup-node/
+upload-artifact steps all use the bumped majors). `dotnet-integration` fails on that same run, but on
+the already-known, already-tracked `BulkLoadIntegrationTests` flake (see phase 141/143), unrelated to
+this phase. `package` never ran on any of these checks — it's gated on `refs/tags/release/v*` pushes
+only (`ci.yml:249`), so its own use of the bumped actions is unverified by any normal push; nothing in
+this repo currently cuts a release tag on a cadence that would confirm it without deliberately doing so
+just to test this.
 
 **Plan reference**: No planning doc — diagnosed and fixed directly in conversation, 2026-09-15. CI
 was warning that several actions still run on the Node.js 20 runtime, which GitHub is deprecating.
@@ -31,14 +38,18 @@ Fix applied to both workflow files:
 `NuGet/login@v1` (in `release.yml`) was checked and left alone — it isn't one of the standard
 `actions/*` majors this warning is about.
 
-## How to verify when built
+## How it was verified
 
-A real CI run (push or PR) with no Node-20-runtime deprecation annotations, and every job that touches
-these actions still green: `dotnet`/`dotnet-windows`/`dotnet-integration` (checkout, setup-dotnet),
-`web` (checkout, setup-node), `playwright` (checkout, setup-dotnet, setup-node, upload-artifact), and
-`package` (checkout, setup-dotnet, setup-node, upload-artifact — the Docker build and nupkg smoke
-tests are the parts most likely to be sensitive to an action major bump, though none of v6/v7 of these
-four actions carry a documented breaking change relevant to how this repo uses them).
+A real CI run on `main` (several, since this landed bundled with other pushes rather than its own
+commit-triggered run — see Decisions below) shows no Node-20-runtime deprecation annotations anywhere,
+and every job that actually ran and touches these actions is green: `dotnet`, `dotnet-windows`, `web`,
+`playwright`. `dotnet-integration` fails, but on the pre-existing, already-tracked
+`BulkLoadIntegrationTests` race (phase 141/143), confirmed unrelated by reading the actual failure
+content, not assumed. `package` (checkout, setup-dotnet, setup-node, upload-artifact — the Docker build
+and nupkg smoke tests, the parts most likely to be sensitive to an action major bump) never ran on any
+push checked: it only triggers on `refs/tags/release/v*`, so it stays genuinely unverified until a real
+release is cut. None of v6/v7 of these four actions carry a documented breaking change relevant to how
+this repo uses them, so this is a real but low-probability gap, not a known issue.
 
 ## Decisions made
 
@@ -53,9 +64,3 @@ four actions carry a documented breaking change relevant to how this repo uses t
   exists here and was checked.
 - Any workflow behavior change beyond the version bumps — no new steps, no logic changes.
 
-## Handoff
-
-Commit alongside (or immediately after) the other in-flight work already on `main`, in the same commit
-as this doc. Once a real CI run confirms the warnings are gone and every affected job is still green,
-rewrite this as a retrospective (fold "How to verify" into "verified how") and `git mv` it into
-`implementation/done/`.
