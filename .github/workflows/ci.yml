@@ -239,6 +239,17 @@ jobs:
           name: playwright-failure-artifacts
           path: tests/DbDataSync.Web.Tests/test-results/
           retention-days: 7
+      # Phase 144: always, not just on failure — a few KB either way, and it's what lets a green run
+      # actually prove the whole suite ran rather than being read only when something goes red.
+      # playwright.config.ts's reporter list only writes this file when GitHub Actions' own CI=true is
+      # set, so a local `npx playwright test` never produces it — this step only ever runs here anyway.
+      - name: Upload the JSON test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: tests/DbDataSync.Web.Tests/test-results/results.json
+          retention-days: 7
 
   # Only on the same release/v* tag push that triggers release.yml — restricted from every push (its
   # original scope) by request, to stop this job's ~150MB nupkg upload from repeatedly hitting the

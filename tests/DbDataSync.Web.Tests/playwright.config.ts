@@ -83,7 +83,14 @@ export default defineConfig({
   // fails all three attempts and goes red — a deterministic failure (a missing build output, a real
   // assertion break) is not rescued by a retry.
   retries: process.env.CI ? 2 : 0,
-  reporter: [['list']],
+  // Phase 144: on CI, ['list']'s console output is all a failing job's annotations ever carried —
+  // nothing named the failing test on the run page itself, which is why nine red runs before this
+  // drew no investigation. The 'github' reporter adds those annotations (only meaningful inside a
+  // GitHub Actions runner, so gated on CI rather than always on); the small JSON report is uploaded
+  // by ci.yml so a failure's test name and error are one click away, no `gh run view --log` required.
+  reporter: process.env.CI
+    ? [['list'], ['github'], ['json', { outputFile: 'test-results/results.json' }]]
+    : [['list']],
   use: {
     baseURL: 'http://127.0.0.1:5173',
     trace: 'retain-on-failure',
