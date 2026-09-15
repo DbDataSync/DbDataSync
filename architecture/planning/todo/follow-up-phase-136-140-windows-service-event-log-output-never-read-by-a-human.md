@@ -1,7 +1,7 @@
 # Phase 135/136's Windows Event Log and `icacls` work: pass/fail confirmed on CI, literal output never read
 
-**Status: a small, well-bounded verification gap — not started.** Extracted from
-`architecture/implementation/done/phase-136-windows-service-startup-diagnostics.md`'s own "What's
+**Status: partly closed 2026-09-15 — item 3 answered and fixed, items 1 and 2 still open.** Extracted
+from `architecture/implementation/done/phase-136-windows-service-startup-diagnostics.md`'s own "What's
 honestly still unverified" section and
 `architecture/implementation/done/phase-140-windows-ci-verification-and-remaining-failure.md`'s own "CI
 result" section, both of which named this and left it — moved here per
@@ -21,24 +21,80 @@ Naming the remaining gap rather than calling it closed."
 
 **What remains open, precisely:**
 
-1. **Nobody has read the literal Event Log / `icacls` text the tests produced.** The tests assert
-   specific content (an event exists under source `DbDataSync`, with certain fields), and they passed —
-   but the actual log lines have never been read by a human, only inferred from a green checkmark. Phase
-   140 tried and couldn't: reading the raw job log needs an authenticated `gh` (the unauthenticated logs
-   endpoint 403s), and no session so far has had one.
+1. **Nobody has read the literal Event Log / `icacls` text the tests produced.** *(Still open — and
+   harder to close than this doc originally assumed; see "Correction" below.)* The tests assert specific
+   content (an event exists under source `DbDataSync`, with certain fields), and they passed — but the
+   actual log lines have never been read by a human, only inferred from a green checkmark.
+
 2. **Phase 136's own Checkpoint 6 — a *manual* scenario, not a test** — reproducing phase 135's original
    Error 1053 startup failure against a real installed Windows service, and confirming the diagnostic
    message appears in Event Viewer without the Scheduled-Task workaround phase 135's own investigation
-   needed. This was never a test at all, so no CI run — green or not — closes it. Still not done.
-3. **Whether a *non-elevated* real Windows install's first `service install` can call
-   `EventLog.CreateEventSource` successfully.** `windows-latest` GitHub runners are elevated by default
-   (noted in `WindowsServiceEventLogTests`'s own doc comment), so CI passing says nothing about this
-   case. An operator's own non-elevated shell hitting this for the first time is still unverified.
+   needed. This was never a test at all, so no CI run — green or not — closes it. **Still not done**, and
+   it needs an elevated Windows shell willing to install and deliberately break a real service.
 
-## Why these are worth closing, not just noting again
+3. ~~**Whether a *non-elevated* real Windows install's first `service install` can call
+   `EventLog.CreateEventSource` successfully.**~~ **Answered, and it was worse than "no" — now fixed.**
+   See below.
 
-Items 2 and 3 are exactly the kind of gap a real operator could hit that CI structurally cannot catch —
-CI runs elevated and the reproduction in item 2 needs a hand-installed, hand-broken service. Item 1 is
-lower-stakes (a green test is a real signal) but cheap to close once someone has authenticated `gh`
-access, and would upgrade "the tests presumably assert something reasonable" to "confirmed, by reading
-it."
+## Item 3: answered on a real non-elevated Windows shell, and fixed
+
+Run for real (`dbdatasync service install --repo <temp>`, non-elevated, real Windows 11), the answer is
+not merely that the source cannot be registered. The command **crashed**:
+
+```
+  Ran icacls to take ownership of '<repo>' for 'SYSTEM'.
+  Ran icacls to grant 'SYSTEM' access to '<repo>'.
+Unhandled exception. System.Security.SecurityException: The source DbDataSync was not found on
+computer ., but some or all event logs could not be searched.  Inaccessible logs: Security, State.
+   at System.Diagnostics.EventLog.SourceExists(String source, ...)
+   at DbDataSync.Cli.WindowsServiceEventLog.EnsureSourceRegistered() in ...\WindowsServiceEventLog.cs:line 45
+   at DbDataSync.Cli.ServiceCommand.Install(String[] args) in ...\ServiceCommand.cs:line 137
+```
+
+Three things worth naming, because none of them were predicted:
+
+- It throws at **`EventLog.SourceExists`**, not at `CreateEventSource`. The guard that exists precisely
+  to make re-running `service install` safe is itself the call that cannot run unelevated — it has to
+  search every log, including `Security`, to answer.
+- `DbDataSync.Cli`'s `Program.cs` has **no top-level exception handler**, so the operator gets a raw
+  .NET unhandled-exception stack trace and **exit code 127**, with nothing anywhere saying "run this
+  elevated."
+- Worst of the three: `GrantDataDirectoryAccess` runs **before** this and had already rewritten part of
+  the data directory's ownership and ACLs. The command left the machine **half-modified** and then died.
+
+**Fixed** by an explicit elevation refusal at the top of `ServiceCommand.Install`, before anything
+touches the machine — mirroring what `ToolCommand`'s Unix path has always done (`Needs root. Run: sudo
+…`). It now prints what is needed and why, changes nothing, and exits 1. Covered by
+`ServiceCommandTests.Install_NotElevated_RefusesBeforeTouchingAnything`, which asserts both the message
+and that the directory's owner is unchanged; it drives the new test-only `elevatedOverride` parameter,
+since CI's `windows-latest` runners are elevated and the branch is otherwise unreachable there — the
+same idiom `SystemdService.Install`'s own `executableOverride` already uses.
+
+`WindowsElevation.IsAdministrator()` was extracted from `RealToolPathEnvironment`'s private copy, which
+had the only implementation, so there is still one answer to "am I elevated" rather than two.
+
+## Correction: authenticated `gh` does **not** close item 1
+
+This doc previously said item 1 was "cheap to close once someone has authenticated `gh` access." That is
+wrong, and was checked rather than assumed: with `gh` authenticated, the `dotnet-windows` job log for a
+real run contains **zero** occurrences of any Event Log content — no written entry text, no `icacls`
+output, nothing matching `DbDataSync started`. `dotnet test`'s console reporter names only failures and
+skips, never what a passing test read back, and `WindowsServiceEventLogTests` prints nothing of its own.
+
+So the CI log can never close item 1, no matter who reads it. The only routes are:
+
+- **Run the tests from an elevated shell on a real Windows box and read the output** — they would still
+  have to be made to print what they assert, or be stepped through in a debugger.
+- **Have the tests emit what they read back**, so a future CI log does carry it. Cheap, and it turns a
+  permanently-unverifiable claim into one any run answers — but it is a deliberate change to tests that
+  currently assert silently, so it is a decision, not an obvious win.
+
+Item 1 is the lowest-stakes of the three (a green test is a real signal), but it should stop being
+described as one authentication away from closed.
+
+## Why the rest is worth closing, not just noting again
+
+Item 2 is exactly the kind of gap a real operator could hit that CI structurally cannot catch — CI runs
+elevated, and the reproduction needs a hand-installed, hand-broken service. Item 3 turned out to be
+precisely that kind of gap too, and it was a live crash on the most ordinary mistake an operator can
+make: forgetting to open the terminal as administrator.

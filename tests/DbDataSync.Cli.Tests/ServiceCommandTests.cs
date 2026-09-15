@@ -53,6 +53,61 @@ public sealed class ServiceCommandTests : IDisposable
         Assert.Contains("SYSTEM", owner, StringComparison.OrdinalIgnoreCase);
     }
 
+
+    /// <summary>
+    /// The refusal that replaced a crash. Run non-elevated on a real Windows shell,
+    /// <c>service install</c> used to rewrite part of the data directory's ACLs and then die with an
+    /// unhandled <c>SecurityException</c> out of <c>EventLog.SourceExists</c> — stack trace, exit code
+    /// 127, no mention of elevation, half-modified directory. Phase 136's follow-up doc listed this
+    /// case as unverified; it reproduced exactly as feared.
+    /// <para>
+    /// Driven through the test-only <c>elevatedOverride</c> because CI's <c>windows-latest</c> runners
+    /// are elevated, so the branch is otherwise unreachable there — the same reason
+    /// <see cref="SystemdService.Install"/> takes an <c>executableOverride</c>. <c>_root</c> is passed
+    /// and then asserted untouched, which is the half of this that matters: refusing late would still
+    /// have left the directory changed.
+    /// </para>
+    /// </summary>
+    [WindowsOnlyFact]
+    [SupportedOSPlatform("windows")]
+    public void Install_NotElevated_RefusesBeforeTouchingAnything()
+    {
+        var ownerBefore = new System.Security.AccessControl.DirectorySecurity(
+                _root, System.Security.AccessControl.AccessControlSections.Owner)
+            .GetOwner(typeof(System.Security.Principal.NTAccount))!.Value;
+
+        var (exitCode, output) = RunCaptured(
+            () => ServiceCommand.Install(["install", "--repo", _root], elevatedOverride: false));
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Administrator", output);
+        Assert.Contains("Nothing has been changed.", output);
+
+        var ownerAfter = new System.Security.AccessControl.DirectorySecurity(
+                _root, System.Security.AccessControl.AccessControlSections.Owner)
+            .GetOwner(typeof(System.Security.Principal.NTAccount))!.Value;
+
+        Assert.Equal(ownerBefore, ownerAfter);
+    }
+
+    private static (int ExitCode, string Output) RunCaptured(Func<int> action)
+    {
+        var originalOut = Console.Out;
+        var originalErr = Console.Error;
+        using var output = new StringWriter();
+        Console.SetOut(output);
+        Console.SetError(output);
+        try
+        {
+            return (action(), output.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalErr);
+        }
+    }
+
     private static (int ExitCode, string Output) RunCaptured(string[] args)
     {
         var originalOut = Console.Out;

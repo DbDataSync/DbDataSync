@@ -64,12 +64,44 @@ public static class ServiceCommand
         return 1;
     }
 
-    private static int Install(string[] args)
+    /// <param name="elevatedOverride">Only for <c>ServiceCommandTests</c> — the same test-only escape
+    /// hatch <see cref="SystemdService.Install"/>'s own <c>executableOverride</c> is, and for the same
+    /// reason: CI's <c>windows-latest</c> runners are elevated, so the refusal branch below is
+    /// unreachable there without one.</param>
+    internal static int Install(string[] args, bool? elevatedOverride = null)
     {
         var executable = Environment.ProcessPath;
         if (executable is null)
         {
             Console.Error.WriteLine("Could not determine this tool's own executable path.");
+            return 1;
+        }
+
+        // Before anything that touches the machine, because every step below needs elevation and two
+        // of them fail badly without it. Phase 136's follow-up doc
+        // (planning/todo/follow-up-phase-136-140-...) listed "whether a non-elevated first
+        // `service install` can register the Event Log source" as unverified; run on a real
+        // non-elevated Windows shell it does not merely fail, it crashes: GrantDataDirectoryAccess
+        // first rewrites part of the data directory's ACLs, then EventLog.SourceExists throws
+        // SecurityException ("some or all event logs could not be searched") straight out of
+        // EnsureSourceRegistered, and the CLI has no top-level handler — so the operator gets an
+        // unhandled-exception stack trace, exit code 127, and a half-modified directory, with nothing
+        // anywhere saying "run this elevated". Refusing up front is what ToolCommand's Unix path
+        // already does ("Needs root. Run: sudo ...").
+        // The OperatingSystem.IsWindows() half is for the analyzer, not the logic: this method is only
+        // ever reached from Run's own Windows branch, but that branch tests RuntimeInformation.IsOSPlatform,
+        // which CA1416 does not read as a guard. The plain check is the one it recognises — the same
+        // convention phase 136 settled on, and the same ternary shape ToolCommand.IsElevated already uses.
+        var elevated = elevatedOverride ?? (!OperatingSystem.IsWindows() || WindowsElevation.IsAdministrator());
+
+        if (!elevated)
+        {
+            Console.Error.WriteLine(
+                "Needs Administrator. Registering a Windows service, taking ownership of the data " +
+                "directory and creating the Event Log source all require elevation.");
+            Console.Error.WriteLine(
+                "Re-run this command from an elevated prompt (right-click the terminal, Run as " +
+                "administrator). Nothing has been changed.");
             return 1;
         }
 

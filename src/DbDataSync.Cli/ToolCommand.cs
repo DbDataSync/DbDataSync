@@ -134,12 +134,7 @@ internal sealed class RealToolPathEnvironment : IToolPathEnvironment
     private static extern uint GetEuid();
 
     [SupportedOSPlatform("windows")]
-    private static bool IsWindowsAdministrator()
-    {
-        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-        return new System.Security.Principal.WindowsPrincipal(identity)
-            .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
-    }
+    private static bool IsWindowsAdministrator() => WindowsElevation.IsAdministrator();
 
     // Broadcasts WM_SETTINGCHANGE so already-running processes (Explorer, an open terminal that polls)
     // notice the Machine PATH changed — a brand new process picks it up regardless, this just saves
