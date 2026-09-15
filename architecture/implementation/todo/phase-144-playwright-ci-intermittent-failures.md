@@ -1,7 +1,9 @@
 # Phase 144 — The `playwright` job: one test, failing most runs, hiding a quarter of the suite
 
-**Status**: Planned, not started. Root cause narrowed to a single test and a leading hypothesis with a
-known fix elsewhere in the repo — see "What the logs actually say".
+**Status**: In progress, on branch `phase-144-playwright-ci-intermittent-failures`, not yet merged.
+Items 1, 2 and 5 below are done and pushed; item 3 is investigated much further but not fixed (root
+cause narrowed, not confirmed); item 4 is decided (leave as-is) rather than acted on; item 6 needs a
+real CI run this branch hasn't had yet. See "Handoff" at the end.
 **Plan reference**: none — logged directly from this session's own investigation, the same way phase 140
 was. Phase 140's "CI result — 2026-09-15" section names this job as needing a follow-up of its own and
 does not attempt one; this is that follow-up. Prior art for the job itself:
@@ -118,6 +120,78 @@ Whether fixing the race removes this too — because no retry ever happens — o
 independent bug that merely needs a retry to become visible, is genuinely open. **It should not be
 assumed away.**
 
+### Confirmed against a real failing run, not just read from the doc's own log samples
+
+Both this section's hypothesis and the one above were checked directly against run `35021140430`
+(`gh run view 35021140430 --json jobs`, then `gh run view --job=<id> --log`), the CI run this project's
+own phase 142 doc landed on — not the `show-trace` route item 1 originally proposed, which needs a
+downloaded trace bundle; the raw log turned out to carry the same evidence more directly.
+
+**The race is confirmed exactly as hypothesized.** Attempt 0 of test 18 fails in 7.7s, at line 789 —
+`.toContain('second order')` against an empty read — immediately after the `Succeeded` poll at line 780
+passed. No ambiguity: this is the shape phase 141 already fixed in `Api.Tests`, reproduced with a real
+timestamped log this session read itself, not inferred from a sample.
+
+**The `Microsoft.Data.SqlClient` failure is real, and its shape refines the doc's original guess.** In
+this run it did not occur 3–5 times — it occurred exactly **once**, and not on test 18 at all: on retry
+#2 (the *third* full pass through the serial block — `test.describe.serial`'s retry model reruns the
+whole block from test 01, not just the failed test, which is why 01–17 all show `(retry #1)`/`(retry #2)`
+suffixes in the log), test **06**'s own trigger of the `items` mapping failed with
+
+```
+Run started for mapping 'items' (Primary). Config error: Could not load file or assembly
+'Microsoft.Data.SqlClient, Version=7.0.0.0, Culture=neutral, PublicKeyToken=23ec7fc2d6eaa4a5'.
+The system cannot find the file specified.
+```
+
+which then cascaded: 06 failing mid-block meant every later test in that pass — including 18 — is
+recorded as `-` (did not run) for retry #2. So in this specific run, the *nominal* cause of the whole
+job going red was this SqlClient failure, not the race — the race had already failed the job on attempt 0
+and retry #1 before retry #2 ever got there. Both bugs are real and independent; either alone is enough
+to redden a run, which is consistent with the doc's original observation that red runs correlate with
+neither a specific commit nor a specific diff.
+
+### A concrete, falsifiable lead on the SqlClient failure — not yet a confirmed root cause
+
+Checked directly against this sandbox's own build output (a real `dotnet build` of `DbDataSync.Api` and
+`DbDataSync.TaskRunner`, not a guess):
+
+```
+$ find src/DbDataSync.Api/bin src/DbDataSync.TaskRunner/bin -iname "*sqlclient*"
+src/DbDataSync.TaskRunner/bin/Debug/net10.0/runtimes/win-x64/native/Microsoft.Data.SqlClient.SNI.dll
+src/DbDataSync.Api/bin/Debug/net10.0/runtimes/win-x86/native/Microsoft.Data.SqlClient.SNI.dll
+src/DbDataSync.Api/bin/Debug/net10.0/runtimes/win-x64/native/Microsoft.Data.SqlClient.SNI.dll
+src/DbDataSync.Api/bin/Debug/net10.0/runtimes/win-arm64/native/Microsoft.Data.SqlClient.SNI.dll
+src/DbDataSync.TaskRunner/bin/Debug/net10.0/runtimes/win-arm64/native/Microsoft.Data.SqlClient.SNI.dll
+src/DbDataSync.TaskRunner/bin/Debug/net10.0/runtimes/win-x86/native/Microsoft.Data.SqlClient.SNI.dll
+```
+
+**The managed `Microsoft.Data.SqlClient.dll` itself is not there at all** — only the Windows-only native
+SNI shim leaked through. This is exactly what `DbDataSync.Drivers.MsSql.csproj`'s
+`PackageReference Include="Microsoft.Data.SqlClient" ... ExcludeAssets="runtime"` says it should do
+(phase 109h: consumers supply the runtime asset themselves) — except **nothing does supply it for MsSql
+specifically**. Unlike DuckDb/mysql-connector, MsSql has no `KnownLibraries` catalog entry and no
+runtime `LibraryInstaller` install step (`grep -n mssql src/DbDataSync.Libraries/KnownLibraries.cs` finds
+nothing); it's a plain `ProjectReference` from `DbDataSync.Api`/`DbDataSync.TaskRunner`, both of which
+also have no `Microsoft.Data.SqlClient` `PackageReference` of their own (the test projects that need one
+directly — `Api.Tests`, `TaskRunner.Tests`, etc. — all added their own explicit reference; `Api`/
+`TaskRunner` never did).
+
+If the managed assembly were never resolvable at all, MsSql operations would fail **every single time**,
+in every process, immediately — not in roughly one run in several dozen. Since real runs demonstrably
+read and write through the real `Microsoft.Data.SqlClient` driver dozens of times per job without issue,
+something else must be resolving it successfully most of the time — almost certainly `dotnet exec`'s
+normal `<app>.deps.json`-driven probing falling through to the shared NuGet package cache
+(`~/.nuget/packages/microsoft.data.sqlclient/...`) rather than the app's own output folder, since a
+framework-dependent (non-published, non-self-contained) `dotnet build` output commonly resolves that way
+for assets a `PackageReference` doesn't explicitly copy local. **This was not verified further** — no
+Docker in this sandbox to spawn a real `DbDataSync.TaskRunner` process and watch it resolve the
+assembly, and no way to force the specific race/eviction condition that would make that fallback
+occasionally miss. It is a sharper, falsifiable lead — not a confirmed mechanism, and specifically not
+something to patch (e.g. by dropping `ExcludeAssets="runtime"` or adding a direct `PackageReference` to
+`Api`/`TaskRunner`) without first confirming it actually changes the failure rate, per this doc's own
+standing rule not to assume a fix works.
+
 ### The full CI picture
 
 30 most recent `main` runs, `playwright` job only, newest first. `cancelled` = superseded by a newer push.
@@ -140,30 +214,39 @@ spec, passed. Bisecting product commits would start in the wrong place.
 
 ## What this phase will do
 
-1. **Confirm the hypothesis against a real failing run** before changing anything — specifically, that
-   the `orders` mapping's run list contains a terminal `Succeeded` Primary run *plus* an in-flight Bulk
-   Load at the moment line 789 reads the table. The `playwright-failure-artifacts` trace bundle for a red
-   run has the API responses in it; `npx playwright show-trace` on the retained artifact is the cheapest
-   confirmation, and it needs no local database.
-2. **Apply phase 141's fix to the Playwright suite** — a `read-state`-polling wait equivalent to
-   `WaitForLoadToCompleteAsync`, used wherever a test triggers a pass and then reads real target rows.
-   Audit the other specs for the same pattern rather than fixing only test 18: phase 141 found this
-   shape in several `Api.Tests` classes' shared setup, and there is no reason the SPA suite would have
-   it in exactly one place.
-3. **Root-cause the `Microsoft.Data.SqlClient` load failure separately**, and explicitly re-check whether
-   it still occurs once retries stop happening. If it does not reproduce, say so rather than declaring it
-   fixed — it would merely be unobserved.
-4. **Reconsider the serial cascade.** One failing test hiding 25 others is a large amount of lost signal
-   for a suite whose entire justification is catching what local runs miss. Whether test 18 (which builds
-   its own replication, its own source table and its own target) genuinely needs to live inside the shared
-   serial block is worth asking; it is largely self-contained already.
-5. **Make the job self-reporting.** `reporter: [['list']]` only — no `github` reporter, so the failing
-   job's annotations carry nothing but the unrelated Node 20 warning, and no JSON/JUnit/HTML report is
-   produced. Everything in this doc took an authenticated `gh` and several multi-megabyte log downloads to
-   establish; adding `['github']` plus a small uploaded report would have put the failing test's name on
-   the run page from the start. Cheap, and the reason nine red runs drew no investigation.
-6. **Confirm green across several consecutive runs, not one.** Three of the last twelve runs passed
-   without anyone fixing anything, so a single green run proves nothing here.
+1. **DONE — Confirm the hypothesis against a real failing run** before changing anything. Done against
+   run `35021140430`'s `playwright` job via `gh run view --job=<id> --log`, not the trace-bundle route
+   originally proposed (the raw log carried the same evidence more directly, no download/`show-trace`
+   needed) — see "Confirmed against a real failing run" above. Both the race and the SqlClient failure
+   are real, independent, and each alone reddens a run.
+2. **DONE — Apply phase 141's fix to the Playwright suite** — `tests/DbDataSync.Web.Tests/mapping-load-waiter.ts`
+   (`waitForLoadToComplete`), the TypeScript sibling of `MappingLoadWaiter.WaitForLoadToCompleteAsync`,
+   polling the same `read-state` endpoint. Wired into test 18 right after the `Succeeded` poll and
+   before the `second order` read. **Audited the rest of the suite for the same shape and found none** —
+   grepped every spec for `toContain('Succeeded')` (only `golden-path.spec.ts` matches at all) and cross-
+   checked every `querySql(...)` call against which mapping it reads: every other one reads `items`/
+   `TARGET_TABLE`, whose first-ever pass happened many tests before any of those assertions run, not in
+   the same test as the trigger — test 18's `orders` mapping is the only one that triggers and reads back
+   inside a single test. `mapping-column-add.spec.ts` and `replication-wide-provisioning.spec.ts`, the
+   doc's own guesses, don't call `querySql` or assert `Succeeded` at all.
+3. **PARTIAL — Root-cause the `Microsoft.Data.SqlClient` load failure.** Materially narrowed (see "A
+   concrete, falsifiable lead" above: the managed assembly is verifiably absent from `Api`'s/
+   `TaskRunner`'s own build output, a real, checked-in-this-sandbox fact, not a guess) but **not
+   confirmed** — the specific condition that makes the fallback resolution miss is still unknown, and no
+   fix has been applied. Left for whoever picks this up next, ideally with either Docker locally or a way
+   to attach to a live CI runner.
+4. **DECIDED, not done — the serial cascade stays as it is.** Test 18 is not as self-contained as it
+   looks: it selects `SRC_CONNECTION_NAME`/`TGT_CONNECTION_NAME` (created in test 02) for its new
+   mapping's connections, so pulling it out of the serial block means either giving it its own
+   connections (real, if small, duplication) or a lighter-weight dependency-tracking scheme this suite
+   doesn't have today. Worth doing, but it's a separable restructuring, not part of fixing the two actual
+   bugs this phase was opened for — noted here rather than attempted so it isn't silently dropped.
+5. **DONE — Make the job self-reporting.** `playwright.config.ts`'s `reporter` now adds `['github']` and
+   a small `['json', { outputFile: 'test-results/results.json' }]`, both gated on `process.env.CI` so a
+   local `npx playwright test` is unaffected. `ci.yml`'s `playwright` job uploads that JSON as its own
+   `playwright-report` artifact unconditionally (`if: always()`), not only on failure.
+6. **NOT DONE — confirm green across several consecutive runs.** Needs this branch's own real CI runs,
+   which have not happened yet as of this doc's last edit — see "Handoff".
 
 ## What this phase will not do
 
@@ -182,9 +265,11 @@ spec, passed. Bisecting product commits would start in the wrong place.
 - Is the `Microsoft.Data.SqlClient` failure a consequence of the retry (state left behind by a failed
   run) or an independent bug that retries merely expose? The progressive behaviour — tests that passed on
   attempt 1 failing by retry #2 — suggests the former, but "suggests" is doing real work in that sentence.
-- Do other specs share test 18's "trigger a pass, then read real rows" shape? `mapping-column-add`,
-  `replication-wide-provisioning` and `bulk-load-progress` are the likely candidates and none of them has
-  failed yet, which may only mean their timing is luckier.
+- ~~Do other specs share test 18's "trigger a pass, then read real rows" shape?~~ **Resolved: no.**
+  `mapping-column-add.spec.ts` and `replication-wide-provisioning.spec.ts` don't call `querySql` or
+  assert `Succeeded` at all; `bulk-load-progress.spec.ts` neither. Every other `querySql` in the suite is
+  against `items`/`TARGET_TABLE`, read many tests after that mapping's own first pass, not in the same
+  test as the trigger.
 - Why were there red runs *before* phase 134 (`b7af603`, `f2e15ac`, `485fd7d`)? Attributed here to the
   since-fixed missing `DbDataSync.Cli` build, but not verified — if they were the same failure, the phase
   134 correlation is weaker than it looks and the hypothesis needs re-examining.
@@ -194,6 +279,45 @@ spec, passed. Bisecting product commits would start in the wrong place.
 - **No local reproduction was possible.** The suite needs the `docker compose` topology (`test-db.ts`
   reaches SQL Server by container name via `docker exec`); Docker is not installed on this machine. Node
   24 is present, so only the containers are missing. Everything above is from CI logs.
+- **A real `dotnet build src/DbDataSync.Api`/`dotnet build src/DbDataSync.TaskRunner` was possible,
+  though, with no Docker needed** — that's what surfaced "A concrete, falsifiable lead" above (the
+  managed `Microsoft.Data.SqlClient.dll`'s real absence from both projects' own build output). Worth
+  remembering for the next session on this doc: not every part of this investigation needs Docker, only
+  the parts that need a live SQL Server or a live web app.
 - **The green-run comparison is what made the SqlClient correlation legible** — zero occurrences in
   either green run, 3–5 in every red one. Worth repeating as a technique: diffing a passing run against a
   failing one separated the incidental log noise from the signal far faster than reading either alone.
+
+## Handoff — 2026-09-15
+
+**Done, on this branch, not yet merged:**
+- `tests/DbDataSync.Web.Tests/mapping-load-waiter.ts` — new, `waitForLoadToComplete`, the TS sibling of
+  phase 141's `MappingLoadWaiter.cs`.
+- `tests/DbDataSync.Web.Tests/tests/golden-path.spec.ts` — test 18 now awaits it between the `Succeeded`
+  poll and the `second order` read.
+- `tests/DbDataSync.Web.Tests/playwright.config.ts` — `reporter` adds `['github']` and a CI-only JSON
+  report.
+- `.github/workflows/ci.yml` — `playwright` job uploads that JSON report unconditionally as
+  `playwright-report`.
+- This doc, rewritten with real evidence from a live CI run and a real local build, in place of the
+  original sampled/inferred version.
+
+**Verified so far:** the file loads and its tests list cleanly under
+`npx playwright test --list tests/golden-path.spec.ts` (45 tests found, test 18 included) — no syntax or
+module-resolution error. **Not yet verified:** an actual run of test 18 against real containers (no
+Docker in this sandbox), and therefore no confirmation yet that the fix actually turns the race green
+rather than just compiling.
+
+**What's left, in order:**
+1. Push this branch, open a PR, let CI run it.
+2. If test 18 is green and the race doesn't reproduce, that's item 2 confirmed for real, not just by
+   inspection.
+3. Item 3 (the SqlClient failure) is still open — this branch does not attempt a fix, only a sharper
+   lead (see "A concrete, falsifiable lead" above). Watch specifically for whether it recurs on this
+   branch's own CI runs; if it does, that's a second, independent data point on when it happens (which
+   test, which retry number, how far into the job) worth adding to this doc before anyone attempts a fix.
+4. Per item 6, don't merge on one green run — this job's own history (3 of the last 12 runs passed with
+   nothing fixed) means one green run is not evidence. Watch several.
+5. On green (repeated) and a decision on item 3 (fixed, or explicitly deferred as its own follow-up
+   phase), move this doc to `implementation/done/` in the merge commit, rewritten as a retrospective per
+   the usual convention.
