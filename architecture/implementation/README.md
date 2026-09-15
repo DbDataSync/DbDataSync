@@ -31,11 +31,24 @@ So the order lives here, and is the one to work through:
 | --- | --- | --- |
 | 1 | **140** — Windows CI: a real compatibility audit, not just a verification pass | rescoped 2026-09-15 — the first `dotnet-windows` run's *actual* numbers (270/447 `Api.Tests` failed, not the sample originally checked) show this is much bigger than "verify 5 fixes, chase 1 failure" |
 | 2 | **141** — `dotnet-integration`'s remaining ~46-test failure wave | split out of 140 — a `ubuntu-latest` job issue, unrelated to Windows; the concurrent-install race fix (140) didn't close it, contrary to phase 134's own hope |
-| 3 | **138** — a mapping-level Delete Reconciliation override, in the SPA | independent of 134 — pure SPA, over a backend that has supported it since phase 125 |
-| 4 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
-| 5 | **034** — PostgreSQL logical replication | |
-| 6 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 7 | **038** — Postgres COPY staging, and the columnar decision | |
+| 3 | **139** — Bulk Load History, as Monitoring's fourth sub-tab | depends on 134 landing (133's rename is already in) — see the phase doc's own dependency note |
+| 4 | **034** — PostgreSQL logical replication | |
+| 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 6 | **038** — Postgres COPY staging, and the columnar decision | |
+
+Updated 2026-09-15 (later than the two notes below): **138 is done and removed** — a mapping-level
+Delete Reconciliation override in the SPA. `TableMappingForm` gained `reconcileOverride` state, wired
+into the dirty-check and save payload the same way `pipeline`'s overrides already are; a new
+`MappingReconcileCard` wraps the existing `ReconcileConfigCard` (reused unmodified) in a whole-object
+inherit/override toggle on the mapping's Pipeline tab, mirroring `MappingPipelineCard`'s own per-stage
+pattern. The writer Kind the reused card needs is recomputed locally
+(`pipeline.writerOverride?.kind ?? task.changeProcessing.writer.kind`) rather than exporting anything
+from `MappingPipelineCard` — the phase doc's one open question, resolved in its own favor ("small either
+way"). Verified against a real running instance — `tools/dev-harness`, a real Chromium browser via
+Playwright (no browser extension available this session) — not just a clean `npm run build`/`lint`: the
+toggle round-trips a saved override across a full page reload in both directions (on with a real cadence
+value, and back off to `null`, not an empty object), and the writer-Kind resolution was checked against
+a real `MsSqlMerge` mapping. Independent of 140/141 — pure SPA, over a backend phase 125 already shipped.
 
 Updated 2026-09-15 (latest of all): **140 rescoped, and 141 split out of it**, both the same day 140 was
 first opened — checking the real next `dotnet-windows` run's *actual* numbers (not another sample) while
