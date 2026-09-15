@@ -149,15 +149,32 @@ public sealed class CertUsePemTests : IDisposable
     }
 
     [Fact]
-    public void Status_NothingConfigured_ReportsNoCertificateAndPointsAtUsePemUsePfx()
+    public void Status_NothingConfigured_ReportsNoCertificateAndPointsAtTheNextStep()
     {
         ServeCommand.Prepare(_root);
 
         var (exitCode, output) = RunCaptured(["status", "--repo", _root]);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("use-pem", output);
-        Assert.Contains("use-pfx", output);
+        Assert.Contains("No certificate is bound.", output);
+
+        // Which next step is named is genuinely platform-specific, and phase 140 is where that first
+        // mattered: with nothing bound, `status` falls through to StatusForStoreCertificate on Windows,
+        // whose advice is the certificate *store* route (phase 82) — new-self-signed, enroll, then bind.
+        // Off Windows there is no store to enroll into and the advice is the file route (phase 113).
+        // Asserted per platform rather than gated, because the claim under test — that "nothing bound"
+        // tells the operator what to actually do next — is true on both, and only Windows had no test
+        // making it prove that at all before now.
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Contains("new-self-signed", output);
+            Assert.Contains("bind", output);
+        }
+        else
+        {
+            Assert.Contains("use-pem", output);
+            Assert.Contains("use-pfx", output);
+        }
     }
 
     private static (int ExitCode, string Output) RunCaptured(string[] args)

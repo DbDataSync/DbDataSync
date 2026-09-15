@@ -109,7 +109,18 @@ public sealed class StateJournal : IDisposable
     public static IReadOnlyList<JournalEntry> Read(string path, Action<string>? onSkipped = null)
     {
         var entries = new List<JournalEntry>();
-        foreach (var line in File.ReadLines(path))
+
+        // FileShare.ReadWrite, not File.ReadLines' default: Append above deliberately opens with
+        // FileShare.Read so a journal can be read while the runner that owns it is still writing, and
+        // on Windows that only works if the reader reciprocates — File.ReadLines asks for a share mode
+        // that denies writers, which the live write handle already contradicts, so the open fails
+        // outright with "the process cannot access the file because it is being used by another
+        // process". POSIX does not enforce sharing at all, which is why only half of that contract
+        // being stated read as working until phase 140 ran this suite on Windows for the first time.
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+
+        while (reader.ReadLine() is { } line)
         {
             if (string.IsNullOrWhiteSpace(line))
                 continue;

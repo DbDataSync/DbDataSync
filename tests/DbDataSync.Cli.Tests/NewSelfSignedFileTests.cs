@@ -9,6 +9,15 @@ namespace DbDataSync.Cli.Tests;
 /// <c>dbdatasync config cert new-self-signed</c>'s non-Windows branch (phase 130, tier 2) — driven
 /// through the real <see cref="CertCommand"/> against a real temp repo, the same way
 /// <see cref="CertUsePemTests"/> exercises <c>use-pem</c>/<c>use-pfx</c>.
+/// <para>
+/// <see cref="NonWindowsFactAttribute"/> throughout, since phase 140: on Windows <c>CertCommand.Run</c>
+/// dispatches <c>new-self-signed</c> to the *store*-based phase 82 implementation instead, so these
+/// asserted a managed PFX that the command they invoked never set out to write. Not a bug in the
+/// file-based path, which is genuinely cross-platform and which <c>SelfSignedCertificateServiceTests</c>
+/// exercises on whatever OS runs it — a dispatch with no Windows door to it. That Windows therefore
+/// cannot reach tier 2 from the CLI at all, while <c>DbDataSyncHost</c> will happily run its renewal
+/// service there, is a real product gap; phase 140 names it and deliberately does not close it.
+/// </para>
 /// </summary>
 public sealed class NewSelfSignedFileTests : IDisposable
 {
@@ -16,7 +25,7 @@ public sealed class NewSelfSignedFileTests : IDisposable
 
     public void Dispose() => GitTempDirectory.DeleteRecursively(_root);
 
-    [Fact]
+    [NonWindowsFact]
     public void NewSelfSigned_WritesTheManagedPfxAndPointsKestrelAtIt_AndCommits()
     {
         ServeCommand.Prepare(_root);
@@ -38,7 +47,7 @@ public sealed class NewSelfSignedFileTests : IDisposable
         Assert.Contains(repo.Commits, c => c.MessageShort.StartsWith("Generate a self-signed certificate", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void NewSelfSigned_SansCoverTheConsoleUrlHostAndLocalhost()
     {
         ServeCommand.Prepare(_root);
@@ -54,7 +63,7 @@ public sealed class NewSelfSignedFileTests : IDisposable
         Assert.Contains("localhost", dnsNames);
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void NewSelfSigned_NoConsoleUrlConfigured_DefaultsToLocalhost()
     {
         ServeCommand.Prepare(_root);
@@ -67,7 +76,7 @@ public sealed class NewSelfSignedFileTests : IDisposable
         Assert.Contains("localhost", CertificateSanReader.GetDnsNames(certificate));
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void NewSelfSigned_AfterAPriorUsePem_RemovesTheStaleKeyPath()
     {
         ServeCommand.Prepare(_root);
@@ -89,7 +98,7 @@ public sealed class NewSelfSignedFileTests : IDisposable
         Assert.False(config.ContainsKey("Kestrel:Certificates:Default:KeyPath"));
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void Status_AfterNewSelfSigned_ReportsTheFileCertificate()
     {
         ServeCommand.Prepare(_root);

@@ -1,14 +1,18 @@
 namespace DbDataSync.Cli.Tests;
 
 /// <summary>
-/// Phase 123's <c>dbdatasync tool install</c>/<c>tool uninstall</c>. This sandbox is Linux, so
+/// Phase 123's <c>dbdatasync tool install</c>/<c>tool uninstall</c>. Off Windows,
 /// <c>ToolCommand.Run</c>'s own <c>OperatingSystem.IsWindows()</c> branch genuinely runs the Unix path
-/// here — tested directly through <see cref="FakeToolPathEnvironment"/>, the same reasoning
+/// — tested directly through <see cref="FakeToolPathEnvironment"/>, the same reasoning
 /// <c>SystemdServiceTests</c> gives for testing its own Linux path for real rather than only through a
-/// fake. The Windows Machine-<c>PATH</c> logic has no OS branch of its own to fake, so it's tested as
-/// the pure <see cref="ToolCommand.AddToPath"/>/<see cref="ToolCommand.RemoveFromPath"/> functions
-/// instead — exactly what a Windows run of <c>ToolCommand</c> itself calls, unexercised here only
-/// because nothing on this host can pretend to *be* Windows.
+/// fake — so the five tests that drive <c>ToolCommand.Run</c> down it carry <see cref="NonWindowsFactAttribute"/>:
+/// phase 140 stood up a real <c>windows-latest</c> CI job, where that branch is simply not the one
+/// taken and those tests were asserting POSIX symlinks and <c>chmod</c> against a run that never
+/// attempted either. The Windows Machine-<c>PATH</c> logic has no OS branch of its own to fake, so it's
+/// tested as the pure <see cref="ToolCommand.AddToPath"/>/<see cref="ToolCommand.RemoveFromPath"/>
+/// functions instead — exactly what a Windows run of <c>ToolCommand</c> itself calls, and those do now
+/// run for real on Windows. Driving Windows <c>tool install</c> end to end still has no fake to drive it
+/// through; that is new coverage, not a phase 140 regression.
 /// </summary>
 public sealed class ToolCommandTests : IDisposable
 {
@@ -20,7 +24,7 @@ public sealed class ToolCommandTests : IDisposable
 
     private string Executable => Path.Combine(_toolDir, "dbdatasync");
 
-    [Fact]
+    [NonWindowsFact]
     public void Install_NotElevated_PrintsTheSudoCommand_AndWritesNothing()
     {
         var env = new FakeToolPathEnvironment { IsElevated = false };
@@ -34,7 +38,7 @@ public sealed class ToolCommandTests : IDisposable
         Assert.Empty(env.ChmodCalls);
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void Install_AsRoot_LinksUsrLocalBin_AndChmodsTheToolDir()
     {
         var env = new FakeToolPathEnvironment();
@@ -47,7 +51,7 @@ public sealed class ToolCommandTests : IDisposable
         Assert.Contains("Next: `dbdatasync config check`", output);
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void Install_Twice_IsANoOp_TheSecondTime()
     {
         var env = new FakeToolPathEnvironment();
@@ -72,7 +76,7 @@ public sealed class ToolCommandTests : IDisposable
         Assert.Contains($"dotnet tool uninstall --tool-path {_toolDir} DbDataSync", output);
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void Uninstall_NotElevated_PrintsTheSudoCommand_AndRemovesNothing()
     {
         var env = new FakeToolPathEnvironment();
@@ -97,7 +101,7 @@ public sealed class ToolCommandTests : IDisposable
         Assert.Contains("nothing to remove", output);
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void Install_ADirUnderTheUserProfile_WarnsButStillProceeds()
     {
         var home = Environment.GetEnvironmentVariable("HOME");

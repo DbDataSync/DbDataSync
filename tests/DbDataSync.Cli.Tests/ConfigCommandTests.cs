@@ -86,13 +86,17 @@ public sealed class ConfigCommandTests : IDisposable
     [Fact]
     public async Task Cert_ForwardsToCertCommand()
     {
-        // "list" (unlike "status"/"use-pem"/"use-pfx" since phase 113) stays Windows-only, gated the
-        // same way whether reached directly or through `config` — this environment is Linux, so the
-        // platform message is what proves the forward happened.
-        var (exitCode, output) = await Run(["cert", "list"]);
+        // An unknown subcommand, because what this test is about is the *forward* — that `config cert`
+        // reaches CertCommand at all — and only CertCommand knows the word "cert" in that message.
+        // It used to assert the Windows-only refusal for `cert list` instead, with a comment reading
+        // "this environment is Linux"; phase 140 stood up a windows-latest CI job where `cert list` is
+        // a real command that succeeds, and the test failed on a platform difference that has nothing
+        // to do with what it set out to prove. Unknown-subcommand handling is identical on every
+        // platform, so this proves the same thing everywhere.
+        var (exitCode, output) = await Run(["cert", "not-a-cert-command"]);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("Windows-only", output);
+        Assert.Contains("Unknown cert command", output);
     }
 
     private static async Task<(int ExitCode, string Output)> Run(string[] args)

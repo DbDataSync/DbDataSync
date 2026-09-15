@@ -212,13 +212,33 @@ public sealed class ChangeReaderFirstPassContractTests
         // for a dependency that was never missing from the real build output at all. Requiring the
         // grandparent-of-grandparent segment to be literally "bin" (the real `bin/{Configuration}/{TFM}/`
         // layout) excludes obj/ outright, regardless of enumeration order.
+        //
+        // Phase 140: the same trap had two more doors left open, both of which produce
+        // `FileLoadException: Assembly with same name is already loaded` rather than the
+        // `ReflectionTypeLoadException` above — a *second* path holding the same assembly identity.
+        // (1) Only the TFM segment was matched, not the Configuration one, so a working tree that has
+        // ever been built in both configurations offers `bin/Debug/net10.0` *and* `bin/Release/net10.0`
+        // copies of every driver test assembly. CI builds one configuration and never saw it; any
+        // developer machine that has built both does. (2) `DbDataSync.Drivers.Loader.Tests` is a real
+        // ProjectReference of this project, so a copy of it also sits in *this* assembly's own output
+        // directory and is loaded, from that path, before this test ever runs. Requiring the project
+        // directory to be named after the assembly leaves exactly one candidate path per assembly, and
+        // preferring an already-loaded instance over re-loading one covers the Loader.Tests case, where
+        // the copy that won the identity is the one this project itself pulled in.
         var here = new FileInfo(typeof(ChangeReaderFirstPassContractTests).Assembly.Location).Directory!;
+        var alreadyLoaded = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => !a.IsDynamic)
+            .GroupBy(a => a.GetName().Name!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
         var testAssemblies = here.Parent!.Parent!.Parent!.Parent!
             .EnumerateFiles("DbDataSync.Drivers.*.Tests.dll", SearchOption.AllDirectories)
-            .Where(f => f.Directory!.Name == here.Name && f.Directory.Parent?.Parent?.Name == "bin")
-            .Select(f => f.FullName)
-            .Distinct()
-            .Select(Assembly.LoadFrom)
+            .Where(f => f.Directory!.Name == here.Name
+                && f.Directory.Parent?.Name == here.Parent!.Name
+                && f.Directory.Parent.Parent?.Name == "bin"
+                && f.Directory.Parent.Parent.Parent?.Name == Path.GetFileNameWithoutExtension(f.Name))
+            .Select(f => alreadyLoaded.TryGetValue(Path.GetFileNameWithoutExtension(f.Name), out var loaded)
+                ? loaded
+                : Assembly.LoadFrom(f.FullName))
             .ToList();
 
         Assert.NotEmpty(testAssemblies);

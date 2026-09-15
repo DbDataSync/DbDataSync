@@ -80,12 +80,19 @@ public sealed class SystemdServiceTests : IDisposable
             File.Exists(Path.Combine(root!, "dotnet")) || File.Exists(Path.Combine(root!, "dotnet.exe")));
     }
 
-    [Fact]
+    // Linux-only for a reason unrelated to the two real-binary cases below: the refusal under test
+    // fires only when the resolved root *is* SystemdService.ManagedStateDirectoryRoot
+    // ("/var/lib/dbdatasync"), and CliOptions.DefaultRoot equals that on Linux alone — Windows resolves
+    // %ProgramData%\DbDataSync and macOS /Library/Application Support/DbDataSync, so on either there is
+    // no "hardened default root" for this to be about and Install takes the warn-and-proceed branch.
+    // Passing --repo cannot manufacture it either: Path.GetFullPath roots a leading slash onto the
+    // current drive on Windows. Found by phase 140's windows-latest run; latently true on macOS all
+    // along, where nothing has ever run this suite.
+    [LinuxOnlyFact]
     public void Install_ExecutableUnderHomeWithTheHardenedDefaultRoot_RefusesRatherThanRegisteringABrokenUnit()
     {
         var env = new FakeSystemdEnvironment();
-        var homeExecutable = Path.Combine(
-            Environment.GetEnvironmentVariable("HOME") ?? "/home/someone", "dbdatasync");
+        var homeExecutable = AnExecutableUnderTheUserProfile();
 
         var (exitCode, output) = RunCaptured(() => SystemdService.Install(
             ["--user", "testsvc"], env, executableOverride: homeExecutable));
@@ -101,8 +108,7 @@ public sealed class SystemdServiceTests : IDisposable
     public void Install_ExecutableUnderHomeWithANonHardenedRoot_WarnsButStillRegisters()
     {
         var env = new FakeSystemdEnvironment();
-        var homeExecutable = Path.Combine(
-            Environment.GetEnvironmentVariable("HOME") ?? "/home/someone", "dbdatasync");
+        var homeExecutable = AnExecutableUnderTheUserProfile();
 
         var (exitCode, output) = RunCaptured(() => SystemdService.Install(
             ["--repo", _root, "--user", "testsvc"], env, executableOverride: homeExecutable));
@@ -227,6 +233,36 @@ public sealed class SystemdServiceTests : IDisposable
         var env = new RealSystemdEnvironment();
 
         Assert.Equal(0, env.RunSystemctl("--version"));
+    }
+
+    /// <summary>
+    /// A path under *this* platform's user profile, for the two tests about installing a unit whose
+    /// executable lives somewhere a service must not point at.
+    /// <para>
+    /// Both previously hardcoded <c>$HOME ?? "/home/someone"</c>. On Windows that yields either a
+    /// mixed-separator <c>/home/someone\dbdatasync</c> or a path under whatever <c>$HOME</c> a shell
+    /// happened to export — and <see cref="CliOptions.IsUnderUserProfile"/>'s Windows branch checks
+    /// <see cref="Environment.SpecialFolder.UserProfile"/> and deliberately skips the <c>/home/</c>
+    /// fallback, so it matched neither and both tests failed on the first real <c>windows-latest</c> run
+    /// (phase 140). Gating them would have been the cheaper answer and the wrong one: unlike the two
+    /// <see cref="LinuxOnlyFactAttribute"/> cases in this class, these drive
+    /// <see cref="FakeSystemdEnvironment"/> rather than real <c>id</c>/<c>systemctl</c>, so the logic
+    /// they cover — "is this executable somewhere a service will stop being able to reach" — runs, and
+    /// is worth covering, on every platform. Only the *path* was POSIX-specific.
+    /// </para>
+    /// <para>
+    /// <see cref="Environment.SpecialFolder.UserProfile"/> is what <see cref="CliOptions.IsUnderUserProfile"/>
+    /// itself reads on Windows, and resolves to <c>$HOME</c> elsewhere — so one expression matches the
+    /// production check on both branches rather than re-deriving it per platform here.
+    /// </para>
+    /// </summary>
+    private static string AnExecutableUnderTheUserProfile()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrEmpty(profile))
+            profile = Environment.GetEnvironmentVariable("HOME") ?? "/home/someone";
+
+        return Path.Combine(profile, "dbdatasync");
     }
 
     private static (int ExitCode, string Output) RunCaptured(Func<int> action)

@@ -15,7 +15,18 @@ public sealed class InstallDocsTests
         Assert.True(File.Exists(docsPath), $"'{docsPath}' does not exist.");
         var text = File.ReadAllText(docsPath);
 
-        Assert.Contains(CliOptions.DefaultToolDir, text);
+        // docs/install.md spells the Windows directory as PowerShell's `$env:ProgramFiles\DbDataSync`,
+        // not the expanded `C:\Program Files\DbDataSync` — deliberately, since %ProgramFiles% is both
+        // relocatable and localized and the literal would be wrong advice on plenty of real machines.
+        // Rebuilding that same spelling from the constant keeps the drift-detection this test exists
+        // for: rename or re-root DefaultToolDir and the string stops appearing in the doc. Phase 140,
+        // where a real windows-latest run first evaluated this on the platform it is named after.
+        var documented = OperatingSystem.IsWindows()
+            ? @"$env:ProgramFiles\" + Path.GetRelativePath(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), CliOptions.DefaultToolDir)
+            : CliOptions.DefaultToolDir;
+
+        Assert.Contains(documented, text);
     }
 
     private static string FindRepoRoot()

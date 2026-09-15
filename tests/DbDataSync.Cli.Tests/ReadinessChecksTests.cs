@@ -135,8 +135,8 @@ public sealed class ReadinessChecksTests : IDisposable
     public async Task ConfiguredCertificateFileMissing_CertificateCheckFails()
     {
         ServeCommand.Prepare(_root);
-        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "Path", Path.Combine(_root, "missing.pem"));
-        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "KeyPath", Path.Combine(_root, "missing-key.pem"));
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", Path.Combine(_root, "missing.pem"));
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "KeyPath", Path.Combine(_root, "missing-key.pem"));
 
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
         var results = await ReadinessChecks.RunChecksAsync(context);
@@ -152,8 +152,8 @@ public sealed class ReadinessChecksTests : IDisposable
         ServeCommand.Prepare(_root);
         var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
         DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
-        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "Path", certPath);
-        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "KeyPath", keyPath);
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", certPath);
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "KeyPath", keyPath);
 
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
         var results = await ReadinessChecks.RunChecksAsync(context);
@@ -168,8 +168,8 @@ public sealed class ReadinessChecksTests : IDisposable
         ServeCommand.Prepare(_root);
         var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
         DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://a-different-host.example:5080");
-        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "Path", certPath);
-        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "KeyPath", keyPath);
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", certPath);
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "KeyPath", keyPath);
 
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
         var results = await ReadinessChecks.RunChecksAsync(context);
@@ -186,8 +186,7 @@ public sealed class ReadinessChecksTests : IDisposable
     {
         ServeCommand.Prepare(_root);
         DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
-
-        Assert.Equal(0, CertCommand.Run(["new-self-signed", "--repo", _root, "--days", "90"]));
+        BindAManagedSelfSignedCertificate("console.local", DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(90));
 
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
         var results = await ReadinessChecks.RunChecksAsync(context);
@@ -204,10 +203,7 @@ public sealed class ReadinessChecksTests : IDisposable
     {
         ServeCommand.Prepare(_root);
         DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
-        CertCommand.Run(["new-self-signed", "--repo", _root, "--days", "90"]);
-
-        using (var expired = WriteAgedSelfSigned("console.local", DateTimeOffset.UtcNow.AddDays(-10), DateTimeOffset.UtcNow.AddDays(-1)))
-            ManagedSelfSignedCertificate.Write(_root, expired);
+        BindAManagedSelfSignedCertificate("console.local", DateTimeOffset.UtcNow.AddDays(-10), DateTimeOffset.UtcNow.AddDays(-1));
 
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
         var results = await ReadinessChecks.RunChecksAsync(context);
@@ -216,6 +212,28 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Equal(CheckStatus.Fail, check.Status);
         Assert.Contains("self-signed (managed)", check.Detail);
         Assert.Contains("expired", check.Detail);
+    }
+
+    /// <summary>
+    /// Puts a managed self-signed certificate at the well-known path and points Kestrel at it — what
+    /// <c>dbdatasync config cert new-self-signed</c> does off Windows.
+    /// <para>
+    /// Written directly rather than by invoking that command, since phase 140: on Windows
+    /// <c>CertCommand</c> dispatches <c>new-self-signed</c> to the certificate-*store* implementation
+    /// instead, so the setup silently produced no managed PFX at all and these two tests failed on the
+    /// first real <c>windows-latest</c> run. The subject here is <see cref="ReadinessChecks"/>' reading
+    /// of a managed certificate, which is cross-platform (<c>DbDataSyncHost</c> runs its renewal service
+    /// on Windows too) — so the setup is made platform-independent and the coverage kept, rather than
+    /// the tests being skipped on the one platform whose CLI cannot currently produce this state.
+    /// </para>
+    /// </summary>
+    private void BindAManagedSelfSignedCertificate(string host, DateTimeOffset notBefore, DateTimeOffset notAfter)
+    {
+        using (var certificate = WriteAgedSelfSigned(host, notBefore, notAfter))
+            ManagedSelfSignedCertificate.Write(_root, certificate);
+
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", ManagedSelfSignedCertificate.PfxPath(_root));
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "AllowInvalid", "true");
     }
 
     /// <summary>Phase 130 — a self-signed certificate at any path *other* than the managed one keeps
@@ -227,8 +245,8 @@ public sealed class ReadinessChecksTests : IDisposable
         ServeCommand.Prepare(_root);
         var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
         DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
-        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "Path", certPath);
-        DbDataSyncConfigFile.SetValue(_root, "Kestrel:Certificates:Default", "KeyPath", keyPath);
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", certPath);
+        DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "KeyPath", keyPath);
 
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
         var results = await ReadinessChecks.RunChecksAsync(context);
