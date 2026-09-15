@@ -92,43 +92,86 @@ see phase 141's own doc for the row-count side, which this file does not resolve
 
 ## Candidate fix directions
 
-Not agreed — options, roughly ordered by how much they actually fix vs. how much they cost:
+**An earlier draft of this doc proposed the losing caller "ride along" on the winning batch — reported
+back which batch actually won, and pending-load bookkeeping redirected to it.** Ruled out on discussion:
+two independent triggers (an operator's manual reload, a mapping's own auto-triggered initial load)
+racing for the same segment are not one action that happens to arrive in two pieces — they're two
+separate requests, and merging them silently means the loser's *caller* (the Primary pass that captured
+a position and asked for this) never finds out its own request didn't happen the way it thinks it did.
+Silently attaching its watermark-promotion bookkeeping to someone else's unrelated, differently-scoped
+reload is worse than just saying no.
 
-1. **Full fix — the losing caller rides along on the winning batch.** Change
-   `IInitialLoadEnqueuer.EnqueueForInitialLoadAsync`'s contract so it reports back which batch actually
-   ends up owning the enqueued work (which may not be the batch id the caller minted and passed in, if
-   every segment collided with pre-existing in-flight work). `RequestInitialLoad` would then call
-   `SetPendingLoad` with *that* batch id, not its own, so the mapping's pending-load bookkeeping is tied
-   to a batch that really will complete and really will promote it. Correct, but touches a shared
-   interface (two implementations: production `BulkLoadService`, and `RealInitialLoadEnqueuer` in
-   `tests/DbDataSync.TaskRunner.Tests/`) and needs care around the multi-segment case (a batch whose
-   segments partially land under a foreign batch and partially under its own is *also* doomed — its own
-   `SegmentCount` will never be satisfied by its own completions alone — so "which batch really owns
-   this" has to be resolved per-segment or the whole batch treated as foreign, not by a single top-level
-   flag).
-2. **Reorder without full redirection.** Enqueue first, and only call `SetPendingLoad` if the caller's
-   own batch id ends up owning *all* of its segments; otherwise skip `SetPendingLoad` entirely. Simpler
-   — no interface change beyond a boolean/void distinction — but leaves `ReadHold` at whatever it already
-   was (`None`, in the scenario this doc describes, since an ordinary operator reload never touches
-   `ReadHold` at all) rather than correctly reflecting "a load covering this mapping is genuinely in
-   flight, started by someone else." The mapping's own watermark stays unset, so its *next* Primary pass
-   captures a position and requests an initial load all over again — survivable (it will eventually
-   converge, once no concurrent reload is racing it) but wasteful, and not obviously correct if the
-   winning reload's Kinds override differ from what the mapping's own incremental sync expects on
-   convergence.
-3. **Leave it and add operator recovery instead.** Accept that the strand can happen, and give
-   `ReadHold.Loading` the same kind of explicit recovery endpoint `PositionExpired` already has, so an
-   operator (or an automated health check) can un-stick a mapping that fell into this state. Doesn't fix
-   the root cause, but bounds the damage and is far cheaper than 1 or 2. Could be paired with either.
+**The direction now agreed: reorder so the enqueue attempt happens first, and treat losing the race as an
+ordinary, expected failure of *this* request — not something to route around.**
+
+```csharp
+public void RequestInitialLoad(
+    string taskName, string mappingName, string sourceTable,
+    string capturedPosition, DateTimeOffset? capturedPositionTimeUtc)
+{
+    var batchId = Guid.NewGuid().ToString("N");
+
+    // Throws if this loses the WorkQueue race — see below. Only on success does this mapping's
+    // pending-load state get written at all.
+    initialLoadEnqueuer.Value.EnqueueForInitialLoadAsync(taskName, mappingName, batchId, CancellationToken.None)
+        .GetAwaiter().GetResult();
+
+    watermarks.SetPendingLoad(taskName, mappingName, sourceTable, capturedPosition, capturedPositionTimeUtc, batchId);
+}
+```
+
+Mechanically this needs `WorkQueueStore.Enqueue`'s own `if (!inserted)` branch (currently: "return the
+existing item's RunId instead") to have a variant that throws instead, used specifically by the
+auto-triggered-initial-load call path — every *other* caller (`ReconcileService`, `SchedulerService`, the
+operator-facing `POST .../bulk-load` endpoint) keeps today's silent-collapse behaviour, which is correct
+for *them* (two identical requests from the same kind of source really should collapse — see the
+adjacent, passing `TwoIdenticalBulkLoadTriggers_CollapseIntoOneRun`).
+
+This needs no change to `IInitialLoadEnqueuer`'s own contract (still `Task`, not `Task<...>`) — the
+thrown exception already has a route to the surface with no new plumbing: `RunExecutor.RunMappingAsync`
+doesn't catch around this call (`IRunnerState.RequestInitialLoad`'s own doc already calls it a
+"Prerequisite" call for exactly this reason — its failure is deliberately not swallowed), so it
+propagates to `ProcessWorkItemAsync`'s existing generic catch and lands as an ordinary `RunStatus.Failed`
+row with a clear `errorSummary` ("a Bulk Load is already in progress for mapping 'map-1', segment
+'full'" or similar) — the same path `PositionExpiredException`/`MetadataNotCachedException` already use,
+possibly with its own `FailureKind` if a distinct, more helpful message ends up worth it (see open
+questions).
+
+Because `SetPendingLoad` never runs for the losing attempt, `ReadHold` never leaves `None` for it — the
+strand this doc is about becomes structurally impossible, not merely harder to hit. The mapping's next
+scheduled Primary pass (ordinary `SchedulerService` cadence, `FrequencySeconds`) simply tries the whole
+capture-and-request sequence again; if the winning reload has finished by then it succeeds cleanly, if
+not it fails again the same way and tries again next tick. No operator recovery endpoint needed — the
+system self-heals on its own schedule.
+
+**Still open: the multi-segment case.** An auto-triggered initial load enqueues one segment per
+`mapping.DefaultSegmenting` entry (empty meaning a single `FullSegment`) inside one batch
+(`BulkLoadBatchStore.CreateBatch`, `SegmentCount = segments.Count`). For a mapping with more than one
+configured segment, it's possible for *some* segments to win their own `WorkQueue` race and others to
+lose theirs — a partial result, not the clean single-request win/lose this doc otherwise describes. The
+simplest resolution — treat *any* segment losing as the whole request losing, and throw — still leaves
+whichever segments *did* win already real, enqueued, in-flight work belonging to a batch this attempt is
+about to declare a loss on; that batch's own `SegmentCount` will then never be satisfied by its own
+completions (a smaller, more contained version of today's bug — a batch that never reaches
+`BulkLoadState.Completed` — rather than a new one). A fully clean fix needs the batch-create-plus-enqueue
+sequence to be one atomic operation (currently two separate store calls, each its own transaction), which
+is a real but separable piece of work. Worth noting that this multi-segment collision needs the *same*
+rare "an operator manually reloads exactly the same custom segment scheme a mapping's own
+`DefaultSegmenting` already uses, in the same narrow window" circumstance the single-segment case needs —
+narrower still, and probably fine to land the common case first and treat this as a known, smaller
+follow-on rather than a blocker.
 
 ## Open questions
 
-- How often does this actually matter in practice? A mapping only reaches this exact race in the
-  narrow window between its creation and its first successful pass, *and* only if an operator (or
-  automation) reloads it in that same window. Worth knowing whether this is a real operational
-  footgun or a mostly-theoretical one before investing in option 1.
-- Should `ReadHold.Loading` even be settable by two independent, uncoordinated callers (auto-trigger and
-  operator-trigger) in the first place, or should an operator's manual reload of a mapping that is
-  *already* mid-initial-load be refused/coalesced at the API layer instead of silently racing at the
-  `WorkQueue` layer? That would shrink this to "can't happen" rather than "handled correctly when it
-  happens."
+- Is a dedicated exception type / `FailureKind` (matching `PositionExpiredException`'s "known cause, known
+  fix" treatment) worth adding here, so the run's `errorSummary` reads as "will retry automatically, no
+  action needed" rather than an undifferentiated failure? Given the fix above makes this fully
+  self-healing, the UI/operator-facing framing matters more than the mechanism.
+- How often does this actually matter in practice? A mapping only reaches this race in the narrow window
+  between its creation and its first successful pass, *and* only if an operator (or automation) reloads
+  it in that same window — worth knowing whether repeated collisions (a very short `FrequencySeconds`
+  racing a slow reload) would produce a noisy run history worth suppressing/collapsing in the UI, versus
+  being rare enough not to matter.
+- The multi-segment atomicity gap above — worth its own follow-up once the common (single-segment) case
+  is fixed, or worth solving in the same pass since the underlying "one atomic batch-create-and-enqueue"
+  primitive would fix both at once?
