@@ -36,7 +36,22 @@ So the order lives here, and is the one to work through:
 | 5 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 6 | **038** — Postgres COPY staging, and the columnar decision | |
 
-Updated 2026-09-14 (latest of all): **133 is done and removed** — the full `Backfill` → `BulkLoad`
+Updated 2026-09-14 (latest of all): **136 is done and removed** — built in a background fork while 134
+was in progress elsewhere, independently of the table above (never added to it — same situation as 135
+and 137). `WindowsServiceEventLog` (new, `[SupportedOSPlatform("windows")]`) writes directly to the
+Windows Event Log, bypassing `ILogger` entirely since the failure class this phase exists for (an
+exception from `ServeCommand.Prepare()`/`DbDataSyncHost.Build()`) predates the DI container that would
+carry one. `ServeCommand.RunAsync` now wraps its whole body in one outer try/catch, routed through a
+new `Fail` helper (Event Log under a real Windows service, `Console.Error` otherwise) — the existing
+`Prepare()`-specific catch nests inside it unchanged, so phase 135's own richer failure message (the
+registered service's account/platform) still reaches the log, not a generic `Type: Message` line.
+`ServiceCommand.Install` registers the event source at install time, elevated, rather than lazily.
+Verified for real where this sandbox allows it (138 passed, 4 skipped, 0 failed — the 3 new Windows-only
+tests report `[SKIP]` here, honestly, not faked); the real EventLog round-trip and a real installed
+service's Error 1053 repro both remain genuinely unverified, named as such in the retrospective rather
+than assumed.
+
+Updated 2026-09-14 (earlier than the note above, same day): **133 is done and removed** — the full `Backfill` → `BulkLoad`
 rename, plus the `BulkLoadConfig` pipeline it was for: a reader (defaulting to `BatchReload`), a cache
 and a writer, at the replication with a per-mapping override, resolved through `PipelineResolution`
 independently of `ChangeProcessingConfig` (cache/writer fall through to it when unset). Save-time

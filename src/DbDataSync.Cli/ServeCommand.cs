@@ -16,60 +16,119 @@ namespace DbDataSync.Cli;
 /// </summary>
 public static class ServeCommand
 {
+    /// <summary>
+    /// Phase 136: everything from repo-root resolution through the moment <c>app.RunAsync()</c> starts
+    /// serving is inside one outer <c>try</c> now — before this phase, an exception from
+    /// <c>DbDataSyncHost.Build</c> or the first moments of <c>app.RunAsync()</c> propagated fully
+    /// uncaught, with unverified behavior under a real Windows service (Event Viewer showed nothing but
+    /// Service Control Manager's own generic "failed to start"/timeout entries). The narrow
+    /// <c>Prepare()</c>-specific catch below is unchanged in what it catches and the message it builds —
+    /// it is a second, more specific net inside the broader one, not replaced by it.
+    /// </summary>
     public static async Task<int> RunAsync(string[] args)
     {
         var root = DbDataSyncRoot.Resolve(args);
 
-        // Phase 112: resolution fell through to the new machine-wide default, and the only real
-        // configuration this install has ever had is still sitting at the old per-user one. Printing
-        // and continuing would silently bootstrap a second, empty repo right next to a working one —
-        // refuse instead, and name both paths.
-        if (LegacyRootMigration.DetectAt(root) is { } legacyRoot)
-        {
-            Console.WriteLine(LegacyRootMigration.Message(legacyRoot, root));
-            return 1;
-        }
-
-        var stateDb = CliOptions.Read(args, "--state-db") ?? Path.Combine(root, "state.db");
-        // --url / DbDataSync__Url still override the file, exactly like every other DbDataSync:* key
-        // (see DbDataSyncHost.InsertConfigFile) — the file is read here, rather than through
-        // DbDataSyncHost.Build's own configuration chain, because the translation to --urls, below, has
-        // to happen before that chain exists.
-        var url = CliOptions.Read(args, "--url")
-            ?? Environment.GetEnvironmentVariable("DbDataSync__Url")
-            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:Url")
-            ?? "http://localhost:5080";
-
         try
         {
-            Prepare(root);
+            // Phase 112: resolution fell through to the new machine-wide default, and the only real
+            // configuration this install has ever had is still sitting at the old per-user one.
+            // Printing and continuing would silently bootstrap a second, empty repo right next to a
+            // working one — refuse instead, and name both paths.
+            if (LegacyRootMigration.DetectAt(root) is { } legacyRoot)
+            {
+                Console.WriteLine(LegacyRootMigration.Message(legacyRoot, root));
+                return 1;
+            }
+
+            var stateDb = CliOptions.Read(args, "--state-db") ?? Path.Combine(root, "state.db");
+            // --url / DbDataSync__Url still override the file, exactly like every other DbDataSync:*
+            // key (see DbDataSyncHost.InsertConfigFile) — the file is read here, rather than through
+            // DbDataSyncHost.Build's own configuration chain, because the translation to --urls, below,
+            // has to happen before that chain exists.
+            var url = CliOptions.Read(args, "--url")
+                ?? Environment.GetEnvironmentVariable("DbDataSync__Url")
+                ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:Url")
+                ?? "http://localhost:5080";
+
+            try
+            {
+                Prepare(root);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or LibGit2SharpException)
+            {
+                return Fail(ex, PrepareFailureMessage(root, ex));
+            }
+
+            await EnsureDuckDbInstalledAsync(root);
+
+            // Passed as configuration rather than mutated into the environment, so the same values
+            // reach the host the same way they would from appsettings.json or an operator's own
+            // environment.
+            var hostArgs = new List<string>(args.Where(a => !IsCliOnly(a)))
+            {
+                "--DbDataSync:RepoRoot", root,
+                "--DbDataSync:StateDbPath", stateDb,
+                "--urls", url,
+            };
+
+            var app = DbDataSyncHost.Build([.. hostArgs]);
+
+            // Phase 136: right now, under a service, there is no confirmation anywhere that startup
+            // *completed* — only SCM's own Running status, which says nothing about whether the app
+            // itself is healthy. One milestone, deliberately not every routine Console.WriteLine below —
+            // turning the Application log into a duplicate console transcript would bury the one line
+            // that matters.
+            if (OperatingSystem.IsWindows()
+                && Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService())
+            {
+                // The OperatingSystem.IsWindows() guard above only covers this synchronous branch —
+                // the platform-compat analyzer can't see through the delegate below, which runs later,
+                // so it needs its own (here, always-true) guard to avoid a CA1416 warning.
+                app.Lifetime.ApplicationStarted.Register(() =>
+                {
+                    if (OperatingSystem.IsWindows())
+                        WindowsServiceEventLog.WriteInformation($"DbDataSync started — console at {url}");
+                });
+            }
+
+            Console.WriteLine($"DbDataSync is starting.");
+            Console.WriteLine($"  config repository  {Path.Combine(root, "config")}");
+            Console.WriteLine($"  state database     {stateDb}");
+            Console.WriteLine($"  console            {url}");
+
+            await app.RunAsync();
+            return 0;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or LibGit2SharpException)
+        catch (Exception ex)
         {
-            Console.Error.WriteLine(PrepareFailureMessage(root, ex));
-            return 1;
+            return Fail(ex, null);
+        }
+    }
+
+    /// <summary>
+    /// Where a startup failure actually goes: the Windows Event Log under a real service (nothing else
+    /// is visible to an operator there), or <c>Console.Error</c> otherwise — interactive <c>serve</c>,
+    /// or Linux/systemd, where an uncaught exception already reaches an operator via the terminal or
+    /// (phase 136's own design doc, carried over rather than re-verified independently) systemd's
+    /// default journal capture of a unit's stdout/stderr.
+    /// </summary>
+    /// <param name="message">A specific, already-built message (e.g. <see cref="PrepareFailureMessage"/>'s
+    /// own output) when one exists; null falls back to <paramref name="exception"/>'s own type and
+    /// message, formatted identically on both paths.</param>
+    internal static int Fail(Exception exception, string? message)
+    {
+        if (OperatingSystem.IsWindows()
+            && Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService())
+        {
+            WindowsServiceEventLog.WriteError(exception, message);
+        }
+        else
+        {
+            Console.Error.WriteLine(message ?? $"{exception.GetType().Name}: {exception.Message}");
         }
 
-        await EnsureDuckDbInstalledAsync(root);
-
-        // Passed as configuration rather than mutated into the environment, so the same values reach
-        // the host the same way they would from appsettings.json or an operator's own environment.
-        var hostArgs = new List<string>(args.Where(a => !IsCliOnly(a)))
-        {
-            "--DbDataSync:RepoRoot", root,
-            "--DbDataSync:StateDbPath", stateDb,
-            "--urls", url,
-        };
-
-        var app = DbDataSyncHost.Build([.. hostArgs]);
-
-        Console.WriteLine($"DbDataSync is starting.");
-        Console.WriteLine($"  config repository  {Path.Combine(root, "config")}");
-        Console.WriteLine($"  state database     {stateDb}");
-        Console.WriteLine($"  console            {url}");
-
-        await app.RunAsync();
-        return 0;
+        return 1;
     }
 
     /// <summary>

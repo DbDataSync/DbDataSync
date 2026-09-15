@@ -65,6 +65,13 @@
          adds nothing to worry about for `dotnet tool install -g` or the container image. Pinned
          exact, not a floating range, matching how this repo pins everywhere else. -->
     <PackageReference Include="Terminal.Gui" Version="2.5.0" />
+    <!-- Phase 136: WindowsServiceEventLog writes/registers directly against the Windows Event Log —
+         cross-platform to reference (its own APIs throw PlatformNotSupportedException off Windows,
+         which is why every call site is [SupportedOSPlatform("windows")]), same "safe to reference
+         everywhere, only does anything real on Windows" reasoning as
+         Microsoft.Extensions.Hosting.WindowsServices in DbDataSync.Api.csproj. Pinned to the same
+         "10.0.0" this repo already uses for that package and for Microsoft.Extensions.Hosting.Systemd. -->
+    <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.0" />
   </ItemGroup>
 
   <ItemGroup>

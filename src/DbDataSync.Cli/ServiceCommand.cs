@@ -129,6 +129,13 @@ public static class ServiceCommand
 
         GrantDataDirectoryAccess(root, account);
 
+        // Phase 136: registered here, elevated, rather than lazily at the moment a startup failure
+        // first needs to write to it — see WindowsServiceEventLog.EnsureSourceRegistered's own doc
+        // comment. A registration failure is visible in this command's own output, not silently
+        // deferred to the first real failure under the service.
+        if (OperatingSystem.IsWindows())
+            WindowsServiceEventLog.EnsureSourceRegistered();
+
         var exitCode = Sc([.. arguments]);
         if (exitCode == 0)
         {

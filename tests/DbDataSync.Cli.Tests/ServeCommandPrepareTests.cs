@@ -84,4 +84,51 @@ public sealed class ServeCommandPrepareTests : IDisposable
         Assert.Contains("not owned by current user", message);
         Assert.Contains("registered for the 'LocalSystem' windows service account", message);
     }
+
+    /// <summary>
+    /// Phase 136's dispatch helper, exercised on this real (non-Windows) sandbox — the
+    /// <c>WindowsServiceEventLog</c> half of its behavior can only be proven on a real Windows box (see
+    /// <c>WindowsServiceEventLogTests</c>, Windows-only), but the "not running as a Windows service"
+    /// branch is exactly what every non-Windows CI run and every interactive terminal on any platform
+    /// actually exercises, and is real, runnable coverage of the restructuring itself — not skipped here.
+    /// </summary>
+    [Fact]
+    public void Fail_NotAWindowsService_WritesTheGivenMessageToConsoleErrorAndReturnsOne()
+    {
+        var originalErr = Console.Error;
+        using var output = new StringWriter();
+        Console.SetError(output);
+        try
+        {
+            var exitCode = ServeCommand.Fail(new InvalidOperationException("unused"), "a specific message");
+
+            Assert.Equal(1, exitCode);
+            Assert.Equal($"a specific message{Environment.NewLine}", output.ToString());
+        }
+        finally
+        {
+            Console.SetError(originalErr);
+        }
+    }
+
+    /// <summary>No message given falls back to the exception's own type and text, identically on both
+    /// the service and non-service paths.</summary>
+    [Fact]
+    public void Fail_NoMessageGiven_FallsBackToTheExceptionTypeAndMessage()
+    {
+        var originalErr = Console.Error;
+        using var output = new StringWriter();
+        Console.SetError(output);
+        try
+        {
+            var exitCode = ServeCommand.Fail(new InvalidOperationException("boom"), message: null);
+
+            Assert.Equal(1, exitCode);
+            Assert.Equal($"InvalidOperationException: boom{Environment.NewLine}", output.ToString());
+        }
+        finally
+        {
+            Console.SetError(originalErr);
+        }
+    }
 }
