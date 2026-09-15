@@ -201,12 +201,15 @@ public sealed class SystemdServiceTests : IDisposable
     /// The one test here against the *real* environment, not the fake — read-only and side-effect-free
     /// (<c>id -u</c> answers whether a user exists; it never creates, deletes, or changes anything), so
     /// it's safe to run against this host directly. Proves <see cref="RealSystemdEnvironment"/>'s own
-    /// process-invocation plumbing (argument passing, exit-code capture) actually works on this real
+    /// process-invocation plumbing (argument passing, exit-code capture) actually works on a real
     /// Linux sandbox, which the fake-driven tests above cannot — they only prove <see
     /// cref="SystemdService"/> calls the interface correctly, not that the interface's real
-    /// implementation does what it says.
+    /// implementation does what it says. <see cref="LinuxOnlyFactAttribute"/>: the real <c>id</c>
+    /// binary this calls doesn't exist on Windows or macOS — added once a Windows CI runner started
+    /// actually running this project's tests instead of only ever Linux, which is what finally forced
+    /// this gap into the open (previously a bare <c>[Fact]</c>, silently only ever exercised on Linux).
     /// </summary>
-    [Fact]
+    [LinuxOnlyFact]
     public void RealSystemdEnvironment_UserExists_TellsRootFromANameThatCannotExist()
     {
         var env = new RealSystemdEnvironment();
@@ -218,7 +221,7 @@ public sealed class SystemdServiceTests : IDisposable
     /// <summary>Same reasoning as the test above, for the <c>systemctl</c> half of the seam —
     /// <c>--version</c> is read-only and proves the process actually launches and its exit code comes
     /// back correctly, without registering, starting, or changing anything.</summary>
-    [Fact]
+    [LinuxOnlyFact]
     public void RealSystemdEnvironment_RunSystemctl_ActuallyInvokesSystemctl()
     {
         var env = new RealSystemdEnvironment();

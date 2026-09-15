@@ -37,6 +37,32 @@ jobs:
         # below, which stands two up as service containers (architecture/implementation/phase-7-e2e-validation.md).
         run: dotnet test --no-build --configuration Release --filter "Category!=Integration"
 
+  # A real windows-latest runner for the `[WindowsOnlyFact]`-gated tests scattered across
+  # DbDataSync.Cli.Tests/Api.Tests/Certificates.Tests (real icacls, the real Windows Event Log, the
+  # real certificate store, real DPAPI-backed key storage — phases 82/83/123/135/136 and others) —
+  # every one of those reports [SKIP] on the `dotnet` job above, by design (`WindowsOnlyFactAttribute`),
+  # so this is the only place any of them actually run and prove anything. Mirrors the `dotnet` job
+  # exactly (same restore/build/test flow, same `Category!=Integration` filter — the DB-backed
+  # integration suite needs the Linux-only service containers `dotnet-integration` stands up, which
+  # have no equivalent here) rather than hand-picking which projects to run: any future Windows-only
+  # test anywhere in the solution is covered automatically, with no second list to keep in sync.
+  dotnet-windows:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: "**/*.csproj"
+      - name: Restore
+        run: dotnet restore
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+      - name: Test
+        run: dotnet test --no-build --configuration Release --filter "Category!=Integration"
+
   dotnet-integration:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
