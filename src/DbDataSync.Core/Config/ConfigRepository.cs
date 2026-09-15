@@ -93,7 +93,7 @@ public sealed class ConfigRepository
         if (!File.Exists(path))
             throw new FileNotFoundException($"Connection '{name}' was not found.", path);
 
-        return YamlConfigSerializer.Deserialize<ConnectionConfig>(File.ReadAllText(path));
+        return YamlConfigSerializer.Deserialize<ConnectionConfig>(ReadAllTextAllowingConcurrentReplace(path));
     }
 
     public IReadOnlyList<string> ListConnections() =>
@@ -105,7 +105,7 @@ public sealed class ConfigRepository
         if (!File.Exists(path))
             return;
 
-        var existing = YamlConfigSerializer.Deserialize<ConnectionConfig>(File.ReadAllText(path));
+        var existing = YamlConfigSerializer.Deserialize<ConnectionConfig>(ReadAllTextAllowingConcurrentReplace(path));
         if (existing.CredentialSecretRef is not null)
             _secrets.Delete(existing.CredentialSecretRef);
 
@@ -148,14 +148,14 @@ public sealed class ConfigRepository
         if (!File.Exists(manifestPath))
             throw new FileNotFoundException($"Script '{name}' was not found.", manifestPath);
 
-        var manifest = YamlConfigSerializer.Deserialize<ScriptConfig>(File.ReadAllText(manifestPath));
+        var manifest = YamlConfigSerializer.Deserialize<ScriptConfig>(ReadAllTextAllowingConcurrentReplace(manifestPath));
         var codePath = ConfigPaths.ScriptCodeFile(_configRoot, name, manifest.Language);
         return new ScriptDefinition
         {
             Manifest = manifest,
             // A manifest with no code beside it is a broken script, not an empty one — but it fails at
             // compile/validate with a message about the code rather than here with one about the file.
-            Code = File.Exists(codePath) ? File.ReadAllText(codePath) : "",
+            Code = File.Exists(codePath) ? ReadAllTextAllowingConcurrentReplace(codePath) : "",
         };
     }
 
@@ -202,7 +202,7 @@ public sealed class ConfigRepository
         if (!File.Exists(path))
             throw new FileNotFoundException($"Replication task '{replicationName}' was not found.", path);
 
-        return YamlConfigSerializer.Deserialize<ReplicationTaskConfig>(File.ReadAllText(path));
+        return YamlConfigSerializer.Deserialize<ReplicationTaskConfig>(ReadAllTextAllowingConcurrentReplace(path));
     }
 
     public IReadOnlyList<string> ListReplications()
@@ -290,7 +290,7 @@ public sealed class ConfigRepository
             throw new FileNotFoundException(
                 $"Table mapping '{mappingName}' was not found on replication '{replicationName}'.", path);
 
-        return YamlConfigSerializer.Deserialize<TableMappingConfig>(File.ReadAllText(path));
+        return YamlConfigSerializer.Deserialize<TableMappingConfig>(ReadAllTextAllowingConcurrentReplace(path));
     }
 
     public void DeleteTableMapping(string replicationName, string mappingName, GitAuthor author)
@@ -408,5 +408,26 @@ public sealed class ConfigRepository
         var temporary = path + ".tmp";
         File.WriteAllText(temporary, contents);
         File.Move(temporary, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// The read half of the same atomicity <see cref="WriteAtomically"/> promises — found missing by a
+    /// real, reproducible Windows-only failure in <c>ConcurrentConfigReadTests</c>:
+    /// <see cref="File.ReadAllText(string)"/> opens with the BCL default <see cref="FileShare.Read"/>,
+    /// which does not include <see cref="FileShare.Delete"/>. POSIX <c>rename()</c> (what
+    /// <see cref="File.Move(string, string, bool)"/> becomes on Linux) can always replace a path even
+    /// while another process holds it open — existing handles just keep pointing at the old inode — but
+    /// Windows' <c>MoveFileEx</c> refuses to replace a file that has any open handle lacking
+    /// <c>FILE_SHARE_DELETE</c>, throwing "being used by another process." A reader that merely opened
+    /// with the default share mode was, without meaning to, blocking the exact atomic swap this class
+    /// exists to make safe. Explicit <see cref="FileShare.ReadWrite"/> alongside <see cref="FileShare.Delete"/>
+    /// matches what a concurrent atomic write needs to still succeed while this read is in flight.
+    /// </summary>
+    private static string ReadAllTextAllowingConcurrentReplace(string path)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 }
