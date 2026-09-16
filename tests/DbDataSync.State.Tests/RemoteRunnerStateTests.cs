@@ -125,6 +125,52 @@ public sealed class RemoteRunnerStateTests : IDisposable
         Assert.Equal(3, StateJournal.Read(JournalPath).Count);
     }
 
+    // ---- RequestInitialLoad (phase 134/143/follow-up) ----
+
+    /// <summary>
+    /// Phase 143's own wire contract — the 409 body carries enough to reconstruct
+    /// <see cref="WorkQueueCollisionException"/> client-side with the same fields and message it would
+    /// have had in-process, rather than a bare <see cref="HttpRequestException"/> that
+    /// <see cref="IsUnreachable"/>-style callers could misread as the owner being gone. Not previously
+    /// covered here — <c>LocalRunnerStateInitialLoadTests</c> only exercises the in-process throw.
+    /// </summary>
+    [Fact]
+    public void RequestInitialLoad_OnA409_ReconstructsTheCollisionException()
+    {
+        var owner = new FakeOwner { Status = HttpStatusCode.Conflict };
+        using var state = Create(owner);
+
+        var ex = Assert.Throws<WorkQueueCollisionException>(
+            () => state.RequestInitialLoad("sales", "orders", "dbo.Orders", "999", null));
+
+        Assert.Equal("sales", ex.TaskName);
+        Assert.Equal("orders", ex.MappingName);
+        Assert.Contains("already in progress", ex.Message);
+        Assert.False(state.OwnerLost);
+    }
+
+    /// <summary>
+    /// The follow-up phase 134's own retrospective left open: everything <c>RequestInitialLoad</c> can
+    /// throw that is not a <see cref="WorkQueueCollisionException"/> (an <c>AutoSegment</c> failing to
+    /// expand against an unreachable source, most likely) now comes back as a 400, reconstructed as a
+    /// plain <see cref="InvalidOperationException"/> carrying the server's own message — not an
+    /// unhandled 500 that <see cref="IsUnreachable"/> would misread as the owner being gone and start
+    /// journalling.
+    /// </summary>
+    [Fact]
+    public void RequestInitialLoad_OnA400_ReconstructsAPlainException_NotAnUnreachableOwner()
+    {
+        var owner = new FakeOwner { Status = HttpStatusCode.BadRequest };
+        using var state = Create(owner);
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => state.RequestInitialLoad("sales", "orders", "dbo.Orders", "999", null));
+
+        Assert.Contains("could not be expanded", ex.Message);
+        Assert.False(state.OwnerLost);
+        Assert.False(File.Exists(JournalPath));
+    }
+
     // ---- Read intent and hold (phase 100) ----
 
     /// <summary>Nothing consumes these yet, but an owner that goes away must not silently drop them any
@@ -224,12 +270,16 @@ public sealed class RemoteRunnerStateTests : IDisposable
             HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(Send(request, cancellationToken));
 
-        private static string Body(string path) => path switch
+        private string Body(string path) => path switch
         {
             var p when p.EndsWith("has-outstanding-work") => """{"value":true}""",
             var p when p.EndsWith("try-acquire-lock") => """{"value":true}""",
             var p when p.EndsWith("try-claim-next") => """{"item":null}""",
             var p when p.EndsWith("watermark") => """{"watermark":null}""",
+            var p when p.EndsWith("request-initial-load") && Status == HttpStatusCode.Conflict =>
+                """{"taskName":"sales","runKind":"BulkLoad","mappingName":"orders","segmentLabel":"full"}""",
+            var p when p.EndsWith("request-initial-load") && Status == HttpStatusCode.BadRequest =>
+                """{"message":"Segment 'auto' could not be expanded: the source is unreachable."}""",
             _ => "{}",
         };
     }

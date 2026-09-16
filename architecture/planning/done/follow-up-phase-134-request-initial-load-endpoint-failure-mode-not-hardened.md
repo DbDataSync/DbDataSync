@@ -1,6 +1,6 @@
 # `/request-initial-load`'s failure mode is only hardened for one exception type
 
-**Status: diagnosed, partially fixed, general case not agreed.** Extracted from
+**Status: fixed 2026-09-15.** See "Fix" at the end. Extracted from
 `architecture/implementation/done/phase-134-initial-load-becomes-a-bulk-load.md`'s own "Known follow-up
 / not done here" section, where it sat unactioned — moved here per
 `architecture/implementation/README.md`'s "Follow-up work gets its own doc, not a paragraph."
@@ -44,3 +44,29 @@ the endpoint today, unchanged by phase 143.
   the generic `Required` helper) — worth checking whether that dedicated `SendRequestInitialLoad` method
   is the right place to extend, or whether a more general "this Prerequisite call can distinguish 4xx
   causes" helper is worth factoring out now that there are two reasons to need one.
+
+## Fix
+
+Took the first candidate direction: a broad `catch (Exception ex)` added to `/request-initial-load`,
+after the existing `catch (WorkQueueCollisionException ex)`, mapping anything else to
+`Results.BadRequest(new RequestInitialLoadFailedResponse(ex.Message))` — a 400, not phase 143's 409,
+since these are not a collision, they're the request itself being invalid. `SendRequestInitialLoad`
+(same dedicated method phase 143 built, extended rather than factored out — a second `if
+(response.StatusCode == ...)` block reads more plainly here than a general "distinguish 4xx causes"
+helper would for just two cases) reconstructs a plain `InvalidOperationException` carrying the server's
+message when it sees a 400, rather than the `WorkQueueCollisionException` the 409 branch reconstructs.
+
+Went with the generic mapping (direction one), not per-cause typed handling (direction two): the
+`AutoSegment` expansion failure phase 134 named is the only concrete cause currently known, and
+`RunExecutor`'s own outer `catch (Exception ex) when (ex is not StateOwnerUnavailableException)`
+already turns any such exception into an ordinary `Failed` run with the message preserved — the same
+outcome an in-process `InvalidOperationException` from this call would already have produced before
+phase 39's remote/local split existed. A typed `FailureKind` only earns its keep for a cause the product
+can act on specifically (see `ConcurrentLoadInProgress`, `MappingStillLoading`) — a config error an
+operator has to go and fix isn't that, at least not yet.
+
+Also closed a real gap noticed while doing this: phase 143's own 409 reconstruction had **no test
+covering the wire round-trip at all** — `LocalRunnerStateInitialLoadTests` only exercised the in-process
+throw. Added `RemoteRunnerStateTests.RequestInitialLoad_OnA409_ReconstructsTheCollisionException`
+alongside the new `..._OnA400_ReconstructsAPlainException_NotAnUnreachableOwner`, both using the
+existing `FakeOwner` harness. 12/12 in `RemoteRunnerStateTests`, all local.

@@ -73,6 +73,16 @@ public static class RunnerStateEndpoints
                 return Results.Conflict(
                     new WorkQueueCollisionResponse(ex.TaskName, ex.RunKind, ex.MappingName, ex.SegmentLabel));
             }
+            catch (Exception ex)
+            {
+                // Everything else RequestInitialLoad can throw (an AutoSegment failing to expand
+                // against an unreachable source, most likely) — same reasoning as the WorkQueueCollision
+                // catch above, generalized: this is the request itself being invalid, not the owner
+                // being gone, so it must not become an unhandled 500 either. A 400, not a 409 — there is
+                // no collision to name, just a message to carry across. Phase 134's own follow-up left
+                // this unhardened; phase 143 only hardened the one specific, named cause.
+                return Results.BadRequest(new RequestInitialLoadFailedResponse(ex.Message));
+            }
         });
 
         // ---- Outcomes ----

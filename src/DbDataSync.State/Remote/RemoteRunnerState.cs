@@ -113,6 +113,20 @@ public sealed class RemoteRunnerState : IRunnerState, IDisposable
                 collision.TaskName, collision.RunKind, collision.MappingName, collision.SegmentLabel);
         }
 
+        // Everything else RequestInitialLoad can throw server-side — an AutoSegment failing to expand
+        // against an unreachable source, most likely. A 400, not a 5xx: IsUnreachable only treats 500+
+        // as "the owner is gone" — this reconstructs a plain, ordinary exception instead, which is
+        // exactly what RunExecutor's own generic catch already handles as an ordinary Failed run (the
+        // same path an in-process InvalidOperationException from this call would already have taken).
+        // Not a distinct type the way WorkQueueCollisionException is: there is no one specific cause to
+        // name here, only a message to carry across.
+        if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            using var stream = response.Content.ReadAsStream();
+            var failure = JsonSerializer.Deserialize<RequestInitialLoadFailedResponse>(stream, Json)!;
+            throw new InvalidOperationException(failure.Message);
+        }
+
         response.EnsureSuccessStatusCode();
     }
 

@@ -46,6 +46,13 @@ public sealed record RequestInitialLoadRequest(
 /// the wire. See <c>RemoteRunnerState.RequestInitialLoad</c>.</summary>
 public sealed record WorkQueueCollisionResponse(
     string TaskName, RunKind RunKind, string MappingName, string SegmentLabel);
+/// <summary>The 400 body <c>/request-initial-load</c> returns for any failure that is not a
+/// <see cref="WorkQueueCollisionException"/> — an <c>AutoSegment</c> failing to expand against an
+/// unreachable source, most likely. Not a distinct exception type crossing the wire, unlike
+/// <see cref="WorkQueueCollisionResponse"/>: this is the general "the request itself was invalid" case
+/// phase 134's own follow-up left unhardened, not one specific, named cause — see
+/// <c>RemoteRunnerState.RequestInitialLoad</c>.</summary>
+public sealed record RequestInitialLoadFailedResponse(string Message);
 public sealed record WorkItemRequest(long WorkItemId);
 public sealed record CompleteRunRequest(
     Guid RunId, RunStatus Status, long RowsRead, long RowsWritten, string? ErrorSummary,
