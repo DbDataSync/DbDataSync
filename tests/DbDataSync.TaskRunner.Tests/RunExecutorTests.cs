@@ -355,6 +355,56 @@ public sealed class RunExecutorTests : IDisposable
     }
 
     /// <summary>
+    /// Follow-up to phase 143: a manual "Run Now" landing on a mapping still <see cref="ReadHold.Loading"/>
+    /// (the state a mapping's own first-ever pass leaves it in mid-load — see
+    /// <c>LocalRunnerState.RequestInitialLoad</c>'s own <c>SetPendingLoad</c> call) used to fall through
+    /// to whichever reader's <c>Changes</c> branch was configured, against a watermark that was never
+    /// made live — an unhandled, unhelpful exception. Deterministic here, unlike
+    /// <c>BulkLoadIntegrationTests</c>' own HTTP-level coverage of the same fix, which depends on
+    /// winning a real wall-clock race against an actual Bulk Load: the hold is set directly, so there is
+    /// nothing to race.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteWorkerAsync_AManualTriggerWhileStillLoading_FailsCleanly_BeforeAnyConnectionIsOpened()
+    {
+        SaveTask("crm-sync");
+        _configRepository.SaveTableMapping("crm-sync", new TableMappingConfig
+        {
+            Name = "orders",
+            Sources = [new SourceTableSpec { ConnectionName = "src", Database = "App", Table = "Orders" }],
+            Targets = [new TableSpec { ConnectionName = "tgt", Database = "DW", Table = "Orders" }],
+        }, Author);
+
+        // Unreachable — if the guard did not fire first, this connection attempt is what would fail
+        // instead, and the two failures read very differently (see the assertions below).
+        _configRepository.SaveConnection(new ConnectionInput
+        {
+            Name = "src",
+            DriverType = DriverIds.MsSql,
+            Host = "127.0.0.1",
+            Port = 1,
+            Database = "App",
+            AuthMode = AuthMode.IntegratedAuth,
+            Properties = new Dictionary<string, string> { ["Connect Timeout"] = "1" },
+        }, Author);
+
+        var watermarks = new ChangeWatermarkStore(_stateDatabase);
+        var watermarkKey = WatermarkKey.Build(
+            new SourceTableRef { ConnectionName = "src", Database = "App", Schema = "dbo", Table = "Orders" },
+            MsSqlDialect.Instance);
+        watermarks.SetReadHold("crm-sync", "orders", watermarkKey, ReadHold.Loading);
+
+        var runId = await EnqueueAndDrainAsync("crm-sync", "orders");
+
+        var run = _taskRunStore.GetRun(runId)!;
+        Assert.Equal(RunStatus.Failed, run.Status);
+        Assert.Equal("MappingStillLoading", run.FailureKind);
+        Assert.Contains("still loading", run.ErrorSummary);
+        // Not a connectivity failure — the whole point is that this never got as far as trying.
+        Assert.DoesNotContain("Failed to open connection", run.ErrorSummary);
+    }
+
+    /// <summary>
     /// The retarget's own guarantee: <see cref="ReadIntent.InitialLoad"/> is never refused, regardless
     /// of what a reader declares — the Watermark reader here declares only <c>Changes</c> and
     /// <c>ChangesFromLatest</c> (see <see cref="DbDataSync.Drivers.Generic.WatermarkReader.SupportedIntents"/>),

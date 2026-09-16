@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ClrKernel.Core.Secrets;
+using DbDataSync.Api.Controllers;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
 using DbDataSync.Drivers.Abstractions;
@@ -196,13 +197,29 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
         // comment, only the scheduler's automatic due-check honours the hold — so this used to resolve
         // to Changes intent against a watermark that was never made live, and crash with a bare
         // ArgumentNullException from MsSqlChangeTrackingReader. It now fails cleanly instead.
-        var raceRunIds = await ReadRunIdsAsync(await _client.PostAsync(
-            $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json")));
-        var raceRuns = await Task.WhenAll(raceRunIds.Select(PollUntilTerminalAsync));
-        var map2Race = Assert.Single(raceRuns, r => r.GetProperty("mappingName").GetString() == "map-2");
-        Assert.Equal("Failed", map2Race.GetProperty("status").GetString());
-        Assert.Equal("MappingStillLoading", map2Race.GetProperty("failureKind").GetString());
-        Assert.Contains("still loading", map2Race.GetProperty("errorSummary").GetString());
+        //
+        // Confirmed still Loading first, rather than assumed: map-2's own real Bulk Load is a separate,
+        // independently-timed work item from the Primary pass just polled to terminal above, and racing
+        // the retrigger against it blind — fire immediately and hope the real load is still running —
+        // is exactly the kind of timing assumption that holds on one machine and not another (this one
+        // failed on CI, never locally, until this fix). Polling for the Hold narrows the window to a
+        // single GET-then-POST instead of however long everything above happened to take.
+        var map2StillLoading = await PollUntilHoldAsync("map-2", ReadHold.Loading, TimeSpan.FromSeconds(5));
+        if (map2StillLoading)
+        {
+            var raceRunIds = await ReadRunIdsAsync(await _client.PostAsync(
+                $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json")));
+            var raceRuns = await Task.WhenAll(raceRunIds.Select(PollUntilTerminalAsync));
+            var map2Race = Assert.Single(raceRuns, r => r.GetProperty("mappingName").GetString() == "map-2");
+            Assert.Equal("Failed", map2Race.GetProperty("status").GetString());
+            Assert.Equal("MappingStillLoading", map2Race.GetProperty("failureKind").GetString());
+            Assert.Contains("still loading", map2Race.GetProperty("errorSummary").GetString());
+        }
+        // Else: map-2's own load finished before this test could ever observe it Loading — the window
+        // this half of the test exercises had already closed on its own, an environment-speed accident
+        // rather than anything to assert about. Covered deterministically instead by
+        // RunExecutorTests.ExecuteWorkerAsync_AManualTriggerWhileStillLoading_FailsCleanly_BeforeAnyConnectionIsOpened,
+        // which sets the hold directly rather than racing a real Bulk Load for it.
 
         await _client.WaitForLoadToCompleteAsync(_replicationName, "map-2");
 
@@ -473,6 +490,26 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
         }
 
         throw new TimeoutException($"Run {runId} did not reach a terminal status within 90s.");
+    }
+
+    /// <summary>True the moment a mapping's own read-state reports the given hold, false if it never
+    /// does within <paramref name="timeout"/> — never throws, since "it finished before we could catch
+    /// it" is an expected, non-erroneous outcome for a caller racing a real background load.</summary>
+    private async Task<bool> PollUntilHoldAsync(string mappingName, ReadHold hold, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var response = await _client.GetAsync(
+                $"/api/replications/{_replicationName}/table-mappings/{mappingName}/read-state");
+            response.EnsureSuccessStatusCode();
+            var state = await response.Content.ReadFromJsonAsync<MappingReadStateDto>(JsonOptions);
+            if (state!.Hold == hold)
+                return true;
+            await Task.Delay(50);
+        }
+
+        return false;
     }
 
     private async Task<SqlConnection> OpenDatabaseAsync()
