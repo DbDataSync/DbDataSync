@@ -90,6 +90,30 @@ public sealed class ServiceCommandTests : IDisposable
         Assert.Equal(ownerBefore, ownerAfter);
     }
 
+
+    /// <summary>
+    /// The quieter half of the same bug <see cref="Install_NotElevated_RefusesBeforeTouchingAnything"/>
+    /// covers. <c>Uninstall</c> deleted the local registration record *before* running
+    /// <c>sc delete</c>, so a non-elevated run reported sc.exe's own failure while having already told
+    /// the rest of the tool no service was registered — and that record is what
+    /// <see cref="ReadinessChecks"/> and <c>ServeCommand</c>'s startup-failure message read to name a
+    /// registered service's account. Losing it is how an Error 1053 goes back to naming nothing, which
+    /// is the whole thing phases 135 and 136 exist to prevent.
+    /// </summary>
+    [WindowsOnlyFact]
+    [SupportedOSPlatform("windows")]
+    public void Uninstall_NotElevated_RefusesAndKeepsTheRegistrationRecord()
+    {
+        ServiceRegistration.Write(_root, "LocalSystem", "windows");
+
+        var (exitCode, output) = RunCaptured(
+            () => ServiceCommand.Uninstall(["uninstall", "--repo", _root], elevatedOverride: false));
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Administrator", output);
+        Assert.NotNull(ServiceRegistration.Read(_root));
+    }
+
     private static (int ExitCode, string Output) RunCaptured(Func<int> action)
     {
         var originalOut = Console.Out;

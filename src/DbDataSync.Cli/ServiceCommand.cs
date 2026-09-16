@@ -178,11 +178,38 @@ public static class ServiceCommand
         return exitCode;
     }
 
-    private static int Uninstall(string[] args)
+    /// <param name="elevatedOverride">Only for <c>ServiceCommandTests</c> — see <see cref="Install"/>'s
+    /// own parameter of the same name.</param>
+    internal static int Uninstall(string[] args, bool? elevatedOverride = null)
     {
         var root = Path.GetFullPath(CliOptions.Read(args, "--repo") ?? CliOptions.DefaultRoot);
-        ServiceRegistration.Clear(root);
-        return Sc("delete", ServiceName);
+
+        // Same guard as Install, for the quieter half of the same bug. `sc delete` needs elevation, and
+        // without this the command answered with sc.exe's own "Access is denied" *after* having already
+        // deleted the local registration record below — a failed uninstall that left the service
+        // installed and running while telling the rest of the tool it was gone.
+        var elevated = elevatedOverride ?? (!OperatingSystem.IsWindows() || WindowsElevation.IsAdministrator());
+
+        if (!elevated)
+        {
+            Console.Error.WriteLine("Needs Administrator. Removing a Windows service requires elevation.");
+            Console.Error.WriteLine(
+                "Re-run this command from an elevated prompt (right-click the terminal, Run as " +
+                "administrator). Nothing has been changed.");
+            return 1;
+        }
+
+        var exitCode = Sc("delete", ServiceName);
+
+        // After sc.exe, and only on success. The record is what ReadinessChecks (`config check`) and
+        // ServeCommand's own startup-failure message read to report which account a registered service
+        // runs as — the diagnostic context phases 135 and 136 added precisely so an Error 1053 names
+        // something. Clearing it while the service is still installed does not just lose a file, it
+        // makes both of those quietly report a machine that does not exist.
+        if (exitCode == 0)
+            ServiceRegistration.Clear(root);
+
+        return exitCode;
     }
 
     /// <summary>
