@@ -120,3 +120,39 @@ Item 2 is exactly the kind of gap a real operator could hit that CI structurally
 elevated, and the reproduction needs a hand-installed, hand-broken service. Item 3 turned out to be
 precisely that kind of gap too, and it was a live crash on the most ordinary mistake an operator can
 make: forgetting to open the terminal as administrator.
+
+## Update 2 — the trx landed, and reading it found two more things
+
+The `.trx` upload went into `dotnet-windows` and the first artifact was retrieved and read. Two findings,
+both from looking at the artifact rather than trusting the change.
+
+**The first version of the trx step was wrong.** It passed
+`--logger "trx;LogFileName=dotnet-windows.trx"`, and `dotnet test` on the solution runs each test project
+separately — so every project overwrote the same file and the artifact held **207 results out of ~1,500**
+(`State.Tests` alone, the last to finish). The mechanism had been verified on a single project and not on
+the multi-project case that CI actually runs. Fixed by dropping `LogFileName`: the default name is
+per-project and timestamped, so they coexist (checked by running two projects into one directory).
+
+**What actually made `dotnet-windows` red for three consecutive runs.** Not the "No test matches" line on
+`Drivers.Loader.Tests` — that was checked and exits 0 on its own. Buried mid-log:
+
+```
+[xUnit.net] [Test Class Cleanup Failure (DbDataSync.Api.Tests.ResyncTests)] System.IO.IOException
+```
+
+A fixture teardown throw. xUnit reports it as a *cleanup* failure, which sets the run's exit code **while
+appearing in no project's pass/fail counts** — so every project printed `Passed!` and the job still went
+red, with nothing in the summary to explain it. Correlation confirms it: the three red runs have exactly
+one such line each, the green run has none.
+
+The cause is `GitTempDirectory.DeleteRecursively`. It already handled the half of Windows deletion that
+libgit2 causes (read-only object files → `UnauthorizedAccessException`), but not the other half: an
+**open handle**, which throws `IOException` and which clearing attributes does nothing for. At the end of
+a test that ran a real host there is always something still letting go — a pooled SQLite connection,
+libgit2's pack files, a spawned worker on its way out. All six copies now retry for five seconds, and if
+they still lose, throw naming the directory *and* the files another handle still holds — so the next
+person reads a cause instead of an exception type.
+
+This is the same lesson as the tests above, one level out: the failure existed, it was reported, and it
+was unreadable. Three sessions' worth of red CI was attributed to a filter quirk that turned out to be
+innocent.

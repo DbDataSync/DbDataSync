@@ -61,7 +61,11 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Test
-        run: dotnet test --no-build --configuration Release --filter "Category!=Integration" --logger "trx;LogFileName=dotnet-windows.trx" --results-directory TestResults
+        # Plain `--logger trx`, deliberately without LogFileName: `dotnet test` on the solution runs each
+        # test project separately, and a fixed name makes every one of them overwrite the last — the
+        # first version of this step shipped that way and its artifact held one project's 207 results out
+        # of the suite's ~1,500. The default name is per-project and timestamped, so they coexist.
+        run: dotnet test --no-build --configuration Release --filter "Category!=Integration" --logger trx --results-directory TestResults
       # The Windows-only tests — real Event Log write/read-back, the real icacls ownership transfer —
       # report what they actually observed now rather than asserting a bare boolean. But `dotnet test`'s
       # console reporter prints a *passing* test's captured output nowhere, which is precisely why this
@@ -76,7 +80,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: dotnet-windows-trx
-          path: TestResults/*.trx
+          path: TestResults/
           retention-days: 7
 
   dotnet-integration:
