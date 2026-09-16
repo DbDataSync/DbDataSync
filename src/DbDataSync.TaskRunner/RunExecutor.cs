@@ -651,6 +651,23 @@ public sealed class RunExecutor(
         var reader = driverRegistry.FindReader(sourceDriverForResolution.DriverType, readerKind)
             ?? throw new InvalidOperationException($"Source driver does not support reader kind '{readerKind}'.");
 
+        // Phase 134 removed the previousWatermark-is-null full-load branch from every reader that
+        // captures its own position (IPositionCapturing) — its initial load runs through the Bulk Load
+        // pipeline instead now (see the capture-and-request block below). But nothing stops one of them
+        // being configured as a mapping's own Bulk Load reader override (BulkLoadReaderOverride /
+        // PipelineResolution.BulkLoadReader) — a real, if unusual, surface unrelated to what the
+        // mapping's incremental reader is, reachable through the SPA's own pipeline editor (its reader
+        // dropdown is not filtered by this). A RunKind.BulkLoad pass always dispatches with (null
+        // watermark, InitialLoad) — the one case these readers no longer have anywhere to go with — so
+        // without this check the failure would be whatever ReadChangesAsync's own internals do with a
+        // null they were never written to expect, unrelated to what actually went wrong.
+        if (item.RunKind == RunKind.BulkLoad && reader is IPositionCapturing)
+            throw new InvalidOperationException(
+                $"Table mapping '{mapping.Name}' has its Bulk Load reader set to '{reader.Kind}', which " +
+                "reads changes and can no longer perform a full load. Remove the Bulk Load reader " +
+                "override, or point it at a reader built for reloading a table (BatchReload, or this " +
+                "driver's own equivalent).");
+
         // Only a Primary pass ever reads or advances the incremental cursor — a BulkLoad must never be
         // able to disturb the watermark or the intent a replication's ongoing incremental sync depends
         // on, regardless of which reader/writer Kind it happens to use internally. A BulkLoad's reader

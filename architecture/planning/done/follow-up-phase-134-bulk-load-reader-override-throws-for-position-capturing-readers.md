@@ -1,6 +1,6 @@
 # A position-capturing reader configured as a mapping's Bulk Load override now throws
 
-**Status: diagnosed, no fix agreed.** Extracted from
+**Status: fixed 2026-09-15.** See "Fix" at the end. Extracted from
 `architecture/implementation/done/phase-134-initial-load-becomes-a-bulk-load.md`'s own "Known follow-up
 / not done here" section, where it sat unactioned — moved here per
 `architecture/implementation/README.md`'s "Follow-up work gets its own doc, not a paragraph."
@@ -43,3 +43,27 @@ failing, with no obvious link back to "you configured a reader that can no longe
 - Worth checking first whether this configuration is reachable *at all* through the SPA's own UI (a
   dropdown that only offers sensible choices would make this theoretical rather than real), or only
   through hand-edited YAML.
+
+## Fix
+
+Checked first, as suggested above: reachable, not theoretical. `MappingPipelineCard.tsx`'s `kindsFor`
+builds the reader dropdown from the source driver's capabilities alone, filtered only by
+`RECONCILE_ONLY_KINDS` — the same list backs both the Change Processing and Bulk Load pipeline tabs, so
+Change Tracking/CDC/TriggerAudit are offered as a Bulk Load reader override exactly as readily as
+BatchReload is.
+
+Took the first candidate direction: `RunExecutor.RunMappingAsync` now checks
+`item.RunKind == RunKind.BulkLoad && reader is IPositionCapturing` immediately after the reader is
+resolved (before any connection opens, before the mapping+segment even reach `ReadChangesAsync`), and
+throws `InvalidOperationException` naming the actual mismatch plainly — mirroring the existing "intent
+the reader cannot honour" check a few lines below it, which uses the same plain-exception, no-FailureKind
+posture for a configuration error an operator needs to go and fix, rather than one that resolves itself
+(contrast `RunFailureKinds.ConcurrentLoadInProgress`/`MappingStillLoading`, both self-healing).
+
+Checking `reader is IPositionCapturing` rather than naming the three readers individually catches any
+future reader that adopts the interface too, by construction — no allowlist to keep in sync.
+
+Verified with a new integration test,
+`RunExecutorIntegrationTests.BulkLoad_ConfiguredWithAPositionCapturingReaderOverride_FailsWithAClearMessage`:
+saves the fixture's own mapping with `BulkLoadReaderOverride` set to Change Tracking, enqueues a
+`RunKind.BulkLoad` directly, and asserts a clean `Failed` run with the new message — not a crash.

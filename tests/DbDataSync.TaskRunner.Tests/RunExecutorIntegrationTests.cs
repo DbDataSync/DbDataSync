@@ -611,6 +611,32 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Phase 134's own follow-up: nothing stops a mapping's Bulk Load reader override
+    /// (<c>TableMappingConfig.BulkLoadReaderOverride</c>) naming a reader that captures its own position
+    /// (<c>IPositionCapturing</c> — Change Tracking here) — a real, if unusual, surface, reachable
+    /// through the SPA's own pipeline editor. Phase 134 removed the <c>previousWatermark is null</c>
+    /// full-load branch from exactly these readers, so a <c>RunKind.BulkLoad</c> pass against one of
+    /// them — which always dispatches with a null watermark — used to fail with whatever
+    /// <c>ReadChangesAsync</c>'s own internals did with a null they were never written to expect. It now
+    /// fails fast, before any connection opens, with a message naming the actual mismatch.
+    /// </summary>
+    [Fact]
+    public async Task BulkLoad_ConfiguredWithAPositionCapturingReaderOverride_FailsWithAClearMessage()
+    {
+        var mapping = _configRepository.LoadTableMapping("e2e-sync", "main");
+        mapping.BulkLoadReaderOverride = new ReaderConfig { Kind = MsSqlDriverKinds.ChangeTracking };
+        _configRepository.SaveTableMapping("e2e-sync", mapping, Author);
+
+        var bulkLoadRunId = _workQueueStore.Enqueue("e2e-sync", RunKind.BulkLoad, "main",
+            new FullSegment().Describe(), SegmentSerializer.Serialize(new FullSegment()));
+        await _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
+
+        var run = _taskRunStore.GetRun(bulkLoadRunId)!;
+        Assert.Equal(RunStatus.Failed, run.Status);
+        Assert.Contains("can no longer perform a full load", run.ErrorSummary);
+    }
+
+    /// <summary>
     /// A standalone reload replication has no watermark and no change feed — it re-reads its source
     /// every pass, divided into the segments configured on its reader. Those are iterated within one
     /// Primary pass, so the mapping still has exactly one run per pass rather than one per segment.
