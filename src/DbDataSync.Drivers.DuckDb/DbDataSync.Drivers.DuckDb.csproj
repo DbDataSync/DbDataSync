@@ -21,13 +21,23 @@
     <!--
       Phase 109i: ExcludeAssets="runtime", the identical treatment 109h gave Microsoft.Data.SqlClient/
       Npgsql. The reference assembly still compiles every DuckDBConnection/DuckDBConnectionStringBuilder
-      call site in DuckDbDriver.cs unchanged; the managed DLL and its native libduckdb asset are neither
-      copied here nor into DbDataSync.Api/.Cli's own output. At first touch, the assembly loads through
-      LibraryRegistry's AssemblyLoadContext.Default.Resolving hook instead, once ServeCommand's
-      unconditional install has put it under <repo>/libraries/duckdb/lib/ — see ServeCommand.
-      EnsureDuckDbInstalledAsync. No .cs file in this project changed.
+      call site in DuckDbDriver.cs unchanged; the managed DLL is neither copied here nor into
+      DbDataSync.Api/.Cli's own output. At first touch, the assembly loads through LibraryRegistry's
+      AssemblyLoadContext.Default.Resolving hook instead, once ServeCommand's unconditional install has
+      put it under <repo>/libraries/duckdb/lib/ — see ServeCommand.EnsureDuckDbInstalledAsync.
+
+      Phase 146 added ";native": 109i's own "What's explicitly out of scope" left the runtimes/<rid>/
+      native/ assets shipping unconditionally — NuGet treats "native" as a distinct asset bucket from
+      "runtime", so excluding one never touched the other, and all five platforms' libduckdb copies
+      (~150MB uncompressed) rode along in every install regardless of which one a machine could ever
+      use. Nothing new to build: LibraryInstaller.RestorePackagesAsync already resolves against
+      RuntimeInformation.RuntimeIdentifier (the "SqlClient's SNI shim, DuckDB's libs" case its own
+      comment names), so the same install 109i already made unconditional at every `serve` start already
+      picks up the one native binary this machine needs — confirmed for real, not assumed: a fresh
+      install followed by an actual DuckDBConnection query through the freshly-loaded assembly. No .cs
+      file in this project changed either phase.
     -->
-    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" ExcludeAssets="runtime" />
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" ExcludeAssets="runtime;native" />
   </ItemGroup>
 
   <PropertyGroup>

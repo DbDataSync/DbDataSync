@@ -680,6 +680,13 @@ native assets — per-RID split packages so a Linux container does not carry the
 `<RuntimeIdentifiers>` at pack time, or dropping platforms we do not ship — and none of it touches
 this design.
 
+**Update, phase 146**: it came down, without any of the three levers above. DuckDB does still ship to
+every real deployment "regardless," exactly as argued — but the package no longer has to carry all five
+platforms' native binaries to make that true, because the loader this doc designed was already
+RID-aware for the *managed* half (109i) and turned out to need zero new code to also carry the native
+half once the packaging exclusion widened to cover it. See
+`architecture/implementation/done/phase-146-duckdb-native-asset-exclusion.md`.
+
 ---
 
 ## Open questions

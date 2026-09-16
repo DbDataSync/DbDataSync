@@ -34,7 +34,20 @@ So the order lives here, and is the one to work through:
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 | 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
-Updated 2026-09-15 (latest of all): **five open follow-ups resolved**, all not requiring Windows or
+Updated 2026-09-16 (latest of all): **146 is done and removed.** The published `dbdatasync` tool's
+nupkg was 152.6MB, ~330MB uncompressed of it DuckDB's own native binaries for all five platforms,
+shipped unconditionally on every install regardless of which one a machine could load — phase 109i's
+"DuckDB decoupling" only ever excluded the *managed* assembly (NuGet treats `native` as a separate
+asset bucket `ExcludeAssets="runtime"` never touched, and said so in its own "out of scope" section).
+Widened the exclusion to `ExcludeAssets="runtime;native"` on the three consumers — 46.4MB after, a 70%
+cut, zero new code: `LibraryInstaller`'s already-existing RID-aware install (109i's own unconditional
+`serve`-start hook) was already restoring the correct single-platform native binary alongside the
+managed one, it just had nothing to matter against while the package carried a redundant copy of every
+platform regardless. Verified for real, not assumed — a fresh install through a throwaway console
+project followed by an actual `SELECT 6 * 7` through the freshly-loaded DuckDB connection. See
+`architecture/implementation/done/phase-146-duckdb-native-asset-exclusion.md`.
+
+Updated 2026-09-15 (previously latest): **five open follow-ups resolved**, all not requiring Windows or
 further user input, per a walkthrough of `architecture/planning/todo/`'s remaining backlog:
 - A manual "Run Now" against a still-`Loading` mapping now fails cleanly (`MappingLoadingException` /
   `RunFailureKinds.MappingStillLoading`) instead of crashing with a bare `ArgumentNullException`.

@@ -237,7 +237,8 @@ restore ran, not merely that it finished fast.
   managed `lib/` assembly (`DuckDB.NET.Data.dll`/`DuckDB.NET.Bindings.dll`), never the `runtimes/*/native/`
   ones. This is not a gap in the phase; it is the same thing 109h's own retrospective noted for
   `Microsoft.Data.SqlClient.SNI.dll`, and per the doc's own "What this phase does not build," removing
-  native assets/trimming is separate, unstarted packaging work.
+  native assets/trimming is separate, unstarted packaging work. **Closed by phase 146** — see
+  `architecture/implementation/done/phase-146-duckdb-native-asset-exclusion.md`.
 - **DuckDB is not made optional or not-shipped.** The unconditional install in item 4 exists precisely
   because it is not optional.
 - **No `DbProviderFactory`-based rewrite of any of the three consumers.** Confirmed by the diff: the only
