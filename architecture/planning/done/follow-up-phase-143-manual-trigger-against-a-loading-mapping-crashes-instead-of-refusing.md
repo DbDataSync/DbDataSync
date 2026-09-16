@@ -1,6 +1,6 @@
 # A manual "Run Now" against a still-`Loading` mapping crashes with an unhelpful exception
 
-**Status: observed, not investigated further.** Found writing phase 143's own new integration test
+**Status: fixed 2026-09-15.** See "Fix" at the end. Found writing phase 143's own new integration test
 (`BulkLoadIntegrationTests.ARaceBetweenAConcurrentReloadAndAMappingsOwnFirstPass_TheLoserFailsCleanly_AndSelfHeals`,
 `architecture/implementation/todo/phase-143-initial-load-race-loses-cleanly.md`) — not part of that
 phase's own scope, and not chased further there since it's a distinct, pre-existing gap unrelated to
@@ -71,3 +71,26 @@ the cases considered when readers' `Changes` branches were written.
   operator asking through is fine" design — it just makes what happens next legible instead of a crash.
 - Worth checking which other readers' `Changes` branches share this same unhandled-null-watermark shape
   before picking a fix — this doc only confirms `MsSqlChangeTrackingReader`'s own, by direct reproduction.
+
+## Fix
+
+Took the second candidate direction: `RunExecutor.RunMappingAsync` now checks
+`item.RunKind == RunKind.Primary && readState?.Hold == ReadHold.Loading` immediately after resolving
+`readState`, before the intent-support check and before any connection opens, and throws the new
+`MappingLoadingException` (`DbDataSync.Core.Config`) — one message regardless of which reader is
+configured, rather than depending on every reader's own `Changes` branch to handle a null watermark. Not
+the first direction (a per-reader null check): that would need auditing and fixing every reader's
+`Changes` branch individually and would still miss a new one written later, where this check can't be
+bypassed by construction.
+
+`RunExecutor`'s outer catch gained a `catch (MappingLoadingException ex)` clause mirroring
+`WorkQueueCollisionException`'s own — records `RunFailureKinds.MappingStillLoading` (new), same posture:
+nothing for an operator to do, the run that already has `ReadHold.Loading` will clear it, and this
+mapping's own next scheduled pass (or another manual trigger, once that happens) proceeds normally.
+
+Verified against `BulkLoadIntegrationTests.ARaceBetweenAConcurrentReloadAndAMappingsOwnFirstPass_
+TheLoserFailsCleanly_AndSelfHeals`, extended to cover exactly this: a manual re-trigger while map-2's own
+unrelated Bulk Load is still genuinely `Loading` now asserts `Failed` / `MappingStillLoading` / an
+error summary containing "still loading", instead of what that test used to have to route around (a
+`WaitForLoadToCompleteAsync` call standing in for "don't hit the bug"). 4/4 clean local runs, plus the
+full `BulkLoadIntegrationTests` class (8/8).

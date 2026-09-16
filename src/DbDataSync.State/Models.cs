@@ -242,6 +242,12 @@ public static class RunFailureKinds
     /// the mapping's own next scheduled pass retries this on its own once the winner finishes — phase
     /// 143.</summary>
     public const string ConcurrentLoadInProgress = "ConcurrentLoadInProgress";
+
+    /// <summary>A manual "Run Now" landed on a mapping still <c>ReadHold.Loading</c> — see
+    /// <c>MappingLoadingException</c>. Like <see cref="ConcurrentLoadInProgress"/>, not an operator
+    /// action: the initial load already in flight will clear the hold itself, and this mapping's next
+    /// scheduled pass runs normally once it does.</summary>
+    public const string MappingStillLoading = "MappingStillLoading";
 }
 
 /// <param name="ResultPath">Where the parquet is. The index says where; the file says what.</param>

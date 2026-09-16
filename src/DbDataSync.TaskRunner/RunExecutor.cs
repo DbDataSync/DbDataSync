@@ -444,6 +444,19 @@ public sealed class RunExecutor(
                 errorDetail: ex.ToString());
             state.MarkFailed(item.Id);
         }
+        catch (MappingLoadingException ex)
+        {
+            // A manual "Run Now" landed on a mapping still ReadHold.Loading — see the exception's own
+            // doc comment. Same posture as WorkQueueCollisionException just above: nothing for an
+            // operator to do, the mapping's own next scheduled pass (or this load finishing) resolves
+            // it, but it still gets a named FailureKind instead of reading like a mystery.
+            Log(item.RunId, LogSeverity.Error, ex.Message);
+            state.Flush();
+            state.CompleteRun(
+                item.RunId, RunStatus.Failed, 0, 0, ex.Message, RunFailureKinds.MappingStillLoading,
+                errorDetail: ex.ToString());
+            state.MarkFailed(item.Id);
+        }
         // Deliberately not caught: the owner being gone is not this item failing. Recording it as
         // Failed would be this process asserting an outcome it is in no position to observe — and it
         // is the one exception that must reach ConsumeAsync, which stops rather than starting more.
@@ -652,6 +665,15 @@ public sealed class RunExecutor(
         var intent = item.RunKind == RunKind.Primary
             ? readState?.Intent ?? ReadIntentResolution.Default(task, mapping)
             : ReadIntent.InitialLoad;
+
+        // A manual "Run Now" is deliberately not stopped by SchedulerService.FilterHeld (that's the
+        // scheduled path's own enforcement point for ReadHold) — but nothing about that design means
+        // this pass should actually run while the mapping is Loading: no watermark is durable yet, only
+        // a PendingWatermark, and dispatching to a reader's Changes branch against that is the mystery
+        // ArgumentNullException this exists to replace with a named, expected failure. BulkLoad passes
+        // are exempt — this hold is protecting the load this check would otherwise be blocking.
+        if (item.RunKind == RunKind.Primary && readState?.Hold == ReadHold.Loading)
+            throw new MappingLoadingException(task.Name, mapping.Name);
 
         // An intent the reader cannot honour is never quietly downgraded to InitialLoad. Save-time
         // validation cannot close this — the reader can change, or a replication-level default can be

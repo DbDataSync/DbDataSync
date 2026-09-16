@@ -181,16 +181,24 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
         Assert.Equal("ConcurrentLoadInProgress", map1Primary.GetProperty("failureKind").GetString());
         Assert.Contains("already in progress", map1Primary.GetProperty("errorSummary").GetString());
 
-        // map-2 was never part of the race — its own auto-trigger had nothing to collide with. Wait
-        // for its own (unrelated) Bulk Load to finish before triggering again below: the manual trigger
-        // endpoint enqueues a Primary pass per mapping regardless of ReadHold (only
-        // SchedulerService.FilterHeld checks that, for the scheduler's own automatic due-check), so
-        // re-triggering while map-2 is still genuinely Loading would race *it* too — a real, separate,
-        // pre-existing gap this test isn't about (see the planning doc this investigation also wrote
-        // up: a manual re-trigger against a still-Loading mapping resolves to Changes intent, once its
-        // ChangeWatermarks row exists at all, against a watermark that isn't live yet).
+        // map-2 was never part of the race — its own auto-trigger had nothing to collide with.
         var map2Primary = Assert.Single(primaryRuns, r => r.GetProperty("mappingName").GetString() == "map-2");
         Assert.Equal("Succeeded", map2Primary.GetProperty("status").GetString());
+
+        // The other, still-open half of this same window: a manual re-trigger while map-2's own
+        // (unrelated) Bulk Load is still genuinely Loading. The endpoint enqueues a Primary pass per
+        // mapping regardless of ReadHold — deliberately, per SchedulerService.FilterHeld's own doc
+        // comment, only the scheduler's automatic due-check honours the hold — so this used to resolve
+        // to Changes intent against a watermark that was never made live, and crash with a bare
+        // ArgumentNullException from MsSqlChangeTrackingReader. It now fails cleanly instead.
+        var raceRunIds = await ReadRunIdsAsync(await _client.PostAsync(
+            $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json")));
+        var raceRuns = await Task.WhenAll(raceRunIds.Select(PollUntilTerminalAsync));
+        var map2Race = Assert.Single(raceRuns, r => r.GetProperty("mappingName").GetString() == "map-2");
+        Assert.Equal("Failed", map2Race.GetProperty("status").GetString());
+        Assert.Equal("MappingStillLoading", map2Race.GetProperty("failureKind").GetString());
+        Assert.Contains("still loading", map2Race.GetProperty("errorSummary").GetString());
+
         await _client.WaitForLoadToCompleteAsync(_replicationName, "map-2");
 
         // Self-healing: map-1 still has no live watermark (its own attempt never promoted one), so its
