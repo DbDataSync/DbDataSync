@@ -34,7 +34,30 @@ So the order lives here, and is the one to work through:
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 | 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
-Updated 2026-09-15 (latest of all): **144 is done and removed.** Fixed two independent bugs that had
+Updated 2026-09-15 (latest of all): **five open follow-ups resolved**, all not requiring Windows or
+further user input, per a walkthrough of `architecture/planning/todo/`'s remaining backlog:
+- A manual "Run Now" against a still-`Loading` mapping now fails cleanly (`MappingLoadingException` /
+  `RunFailureKinds.MappingStillLoading`) instead of crashing with a bare `ArgumentNullException`.
+- A Bulk Load reader override pointed at a position-capturing reader (reachable through the SPA's own
+  pipeline editor) now fails with a clear message instead of crashing.
+- `/request-initial-load` hardens every failure now, not just `WorkQueueCollisionException` — a 400,
+  reconstructed client-side, rather than an unhandled 500 `IsUnreachable` could misread as the owner
+  being gone. Also closed a real gap: phase 143's own 409 reconstruction had no wire-level test at all.
+- A multi-segment initial load that partly collides no longer leaves an orphaned, permanently-`Running`
+  batch — the segments it already enqueued are cancelled and the batch row removed, rollback rather than
+  true cross-store atomicity.
+- `RunWatermarkTimeTests`' own flaky-on-CI helper (`follow-up-phase-140-...`) is fixed: a dead test pid
+  was racing `ProcessSupervisor.ReconcileOrphanedRuns()` for real, reopening a claim mid-flight — reproduced
+  directly (not just reasoned about) by calling `ReconcileOrphanedRuns()` mid-sequence, then fixed with a
+  live pid and a permanent regression test.
+
+Each is a real code change with its own commit and test coverage, not a documentation-only resolution —
+see each follow-up doc's own "Fix" section in `architecture/planning/done/` for specifics. The two
+Windows-only remaining follow-ups (`follow-up-phase-136-140-windows-service-event-log-output-never-read-
+by-a-human.md`, `follow-up-phase-140-windows-cannot-reach-the-managed-self-signed-certificate-from-the-
+cli.md`) are still open in `architecture/planning/todo/` — both need a real elevated Windows box.
+
+Updated 2026-09-15 (previously latest): **144 is done and removed.** Fixed two independent bugs that had
 made the `playwright` job fail most runs on `main` for weeks: golden-path test 18 raced phase 134's Bulk
 Load divert (the same shape phase 141 already fixed in `Api.Tests`, now with a TypeScript sibling of
 `MappingLoadWaiter`), and `DbDataSync.TaskRunner` — a separate process spawned per replication — had no
