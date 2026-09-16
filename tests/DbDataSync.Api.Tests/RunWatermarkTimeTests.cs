@@ -152,6 +152,49 @@ public sealed class RunWatermarkTimeTests(TestApiFactory factory) : IClassFixtur
         Assert.DoesNotContain(runId, times.Keys);
     }
 
+    /// <summary>
+    /// Regression for follow-up-phase-140-runwatermarktimetests-claims-the-wrong-queue-row-on-ci.md:
+    /// this class's own <see cref="CompleteRun"/> helper used to hand <c>BeginRun</c> a dead pid (4242),
+    /// indistinguishable from a genuinely orphaned run to <c>RunMonitorService</c>'s real, once-at-host-
+    /// startup <c>ProcessSupervisor.ReconcileOrphanedRuns()</c> — which could release a run's
+    /// <c>WorkQueue</c> claim back to <c>Pending</c> while a helper call's own sequence still had it in
+    /// flight (between <c>BeginRun</c> and <c>MarkDone</c>). A stale <c>Pending</c> row left behind that
+    /// way then outranks (by <c>EnqueuedAtUtc</c>) whatever a later call enqueues next, since
+    /// <c>TryClaimNext</c> claims per task, not per mapping.
+    /// <para>
+    /// Reproduced here directly, calling <c>ReconcileOrphanedRuns()</c> mid-sequence rather than racing
+    /// a real background thread — which is exactly how the flake was originally found and how it stayed
+    /// unreproducible for so long: one failure in 457 CI runs, 0 in 9 local attempts at the time. With
+    /// <see cref="CompleteRun"/>'s live pid, this call finds its own claim undisturbed; deliberately
+    /// left in the class alongside that fix (not folded silently into <c>CompleteRun</c>'s own doc
+    /// comment) so the mechanism this depends on stays under a test that would go red if it regressed.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task AClaimedRun_SurvivesReconciliation_SoALaterEnqueueForADifferentMappingIsNotStolen()
+    {
+        var (task, _) = await SetUpAsync();
+        var queue = factory.Services.GetRequiredService<WorkQueueStore>();
+        var runs = factory.Services.GetRequiredService<TaskRunStore>();
+        var supervisor = factory.Services.GetRequiredService<ProcessSupervisor>();
+
+        var runIdOrders = queue.Enqueue(task.Name, RunKind.Primary, "orders");
+        var claimedOrders = queue.TryClaimNext(task.Name, workerId: "w1");
+        Assert.Equal(runIdOrders, claimedOrders!.RunId);
+        runs.BeginRun(runIdOrders, pid: Environment.ProcessId);
+
+        // Exactly the race window: reconcile fires while this run is still Claimed, not yet Done.
+        supervisor.ReconcileOrphanedRuns();
+
+        // A fresh, unrelated mapping's own claim must find its own fresh row — not the still-
+        // legitimately-in-flight "orders" one reconcile would have stolen back had the pid above been
+        // a dead one, which TryClaimNext (claims per task, not per mapping) would then have preferred
+        // over this genuinely new row by EnqueuedAtUtc.
+        var runIdAudit = queue.Enqueue(task.Name, RunKind.Primary, "audit");
+        var claimedAudit = queue.TryClaimNext(task.Name, workerId: "w2");
+        Assert.Equal(runIdAudit, claimedAudit!.RunId);
+    }
+
     [Fact]
     public async Task EveryRunOnThePageIsDatedFromOneReadOfTheGroupsHistory()
     {
@@ -360,7 +403,17 @@ public sealed class RunWatermarkTimeTests(TestApiFactory factory) : IClassFixtur
         Assert.NotNull(item);
         Assert.Equal(runId, item.RunId);
 
-        runs.BeginRun(runId, pid: 4242);
+        // A live pid, not a made-up dead one — see follow-up-phase-140-runwatermarktimetests-claims-
+        // the-wrong-queue-row-on-ci.md. This class's TestApiFactory host runs RunMonitorService for
+        // real, which calls ProcessSupervisor.ReconcileOrphanedRuns() once at startup on a background
+        // thread; a dead pid here is indistinguishable from a genuinely orphaned run, and reconcile can
+        // release this run's WorkQueue claim back to Pending while it's still in flight between this
+        // BeginRun and the MarkDone below — reproduced directly by calling ReconcileOrphanedRuns() mid-
+        // sequence. A stale Pending row then outranks (by EnqueuedAtUtc) whatever this test enqueues
+        // next, since TryClaimNext claims per task, not per mapping — the exact shape of the CI failure
+        // this replaces. The test process's own pid is always alive for the run's whole duration, so
+        // reconcile's liveness check leaves it alone.
+        runs.BeginRun(runId, pid: Environment.ProcessId);
         runs.CompleteRun(
             runId, status, rowsRead: 1, rowsWritten: 1, errorSummary: null,
             previousWatermark: previousWatermark, newWatermark: newWatermark);

@@ -1,8 +1,8 @@
 # `RunWatermarkTimeTests` intermittently claims a queue row it did not enqueue
 
-**Status: reproduced on CI once, not reproducible locally in 9 attempts; mechanism narrowed, not
-confirmed. No fix applied.** Found while reviewing PR #3's CI (phase 144), where it turned
-`dotnet-windows` red on a commit that changed no .NET source at all.
+**Status: fixed 2026-09-15.** See "Confirmed, and fixed" at the end — the mechanism below turned out to
+be exactly right, reproduced directly rather than by further reasoning. Found while reviewing PR #3's
+CI (phase 144), where it turned `dotnet-windows` red on a commit that changed no .NET source at all.
 
 ## The failure
 
@@ -92,3 +92,43 @@ It is not a Windows bug — nothing in the mechanism is platform-specific — bu
 `dotnet-windows`, which phase 140 had just brought to green, on a commit that touched no .NET code. A
 rare red in a job that was freshly trusted is disproportionately expensive: the next person to see it
 has to re-derive whether phase 140's work regressed before they can conclude it did not.
+
+## Confirmed, and fixed
+
+Did exactly what "What would actually settle it" above prescribed — called
+`ProcessSupervisor.ReconcileOrphanedRuns()` directly from a scratch test, mid-sequence, rather than
+reasoning further. It turned the assertion red immediately and deterministically: a run begun with
+`pid: 4242` had its `WorkQueue` claim released back to `Pending` by `ReconcileOrphanedRuns()` while still
+genuinely in flight (between `BeginRun` and `MarkDone`) — a second `TryClaimNext` from a different worker
+id successfully reclaimed the exact same `RunId`. Swapping in `Environment.ProcessId` (a pid guaranteed
+alive for the test's own duration) in the same scratch test left the claim completely undisturbed after
+the identical `ReconcileOrphanedRuns()` call. Mechanism confirmed, not merely plausible.
+
+The precise path from "a claim got released" to "a *different* run's id gets claimed instead" needed one
+more piece this doc's own draft hadn't stated precisely: it is not the *same* mapping's own next enqueue
+that collides (that would hit `WorkQueueStore`'s own partial-unique-index and just return the reopened
+row's id again — consistent, not a mismatch). It is a **different mapping under the same task** —
+`RunWatermarkTimeTests`' own fixture has two ("orders", "audit") — whose fresh `Enqueue` succeeds cleanly
+(different key, no index collision) while the stale reopened row from the *other* mapping is still
+sitting there `Pending`. `TryClaimNext` claims by task alone, ordered `EnqueuedAtUtc ASC`, so the older,
+stale row wins over the genuinely fresh one — the exact "wrong queue row" shape from the CI log.
+
+**Fix**: `CompleteRun`'s own `BeginRun` call now passes `Environment.ProcessId` instead of `4242` — one
+line, exactly the candidate the earlier draft declined to ship on reasoning alone. A permanent regression
+test, `AClaimedRun_SurvivesReconciliation_SoALaterEnqueueForADifferentMappingIsNotStolen`, keeps the
+scratch reproduction's own shape (enqueue+claim "orders", `BeginRun` with a live pid, call
+`ReconcileOrphanedRuns()` mid-flight, then enqueue+claim "audit" and assert it gets its own fresh row) —
+so the mechanism stays under a test that would go red again if this regressed, rather than living only in
+this doc's prose.
+
+**Not swept wider.** The same `pid: 4242`/`pid: null` convention appears in several other test files
+(`RunsControllerTests.cs`, `NotificationsEndpointTests.cs`, `RunnerStateEndpointTests.cs`, and a few in
+`DbDataSync.State.Tests`) — but the State.Tests ones never start a real host, so `RunMonitorService` and
+its `ReconcileOrphanedRuns()` never run there at all, and none of the others reproduced were checked for
+the specific "multiple mappings under one task, claim survives past a reconcile boundary" shape this fix
+addresses. Worth a pass if another flake in this family turns up, not assumed fixed by this one.
+
+Verified: `RunWatermarkTimeTests` 9/9 three times in a row; the whole `DbDataSync.Api.Tests`
+non-integration suite 435/435 (458 total, 23 Windows-only skips) after a stale, concurrently-built driver
+test DLL — unrelated to this change, caused by another session's build landing mid-scan — was ruled out
+by rebuilding and rerunning clean.
