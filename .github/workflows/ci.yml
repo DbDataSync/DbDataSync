@@ -61,7 +61,23 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Test
-        run: dotnet test --no-build --configuration Release --filter "Category!=Integration"
+        run: dotnet test --no-build --configuration Release --filter "Category!=Integration" --logger "trx;LogFileName=dotnet-windows.trx" --results-directory TestResults
+      # The Windows-only tests — real Event Log write/read-back, the real icacls ownership transfer —
+      # report what they actually observed now rather than asserting a bare boolean. But `dotnet test`'s
+      # console reporter prints a *passing* test's captured output nowhere, which is precisely why this
+      # repo could never state, after a green windows-latest run, that the Event Log text those tests
+      # assert had been read by anybody (see
+      # architecture/planning/todo/follow-up-phase-136-140-windows-service-event-log-output-never-read-by-a-human.md).
+      # A .trx carries each test's own output including passing ones — verified against a real run, not
+      # assumed — so the record exists whether this job is red or green. Always, like the playwright
+      # job's own report below and for the same reason: read-on-failure only is what made this a gap.
+      - name: Upload the test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dotnet-windows-trx
+          path: TestResults/*.trx
+          retention-days: 7
 
   dotnet-integration:
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}

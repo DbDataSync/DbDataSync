@@ -1,4 +1,6 @@
 using System.Runtime.Versioning;
+using DbDataSync.Certificates;
+using DbDataSync.Core.Config;
 
 namespace DbDataSync.Cli.Tests;
 
@@ -55,6 +57,68 @@ public sealed class CertElevationTests
         {
             GitTempDirectory.DeleteRecursively(root);
         }
+    }
+
+
+    /// <summary>
+    /// Phase 130's tier 2, reached from Windows — the gap
+    /// <c>planning/todo/follow-up-phase-140-windows-cannot-reach-the-managed-self-signed-certificate-from-the-cli.md</c>
+    /// records. Before <c>--file</c>, <c>CertCommand</c> dispatched on the OS before the subcommand, so
+    /// a Windows operator could not produce a managed PFX from the CLI at all even though
+    /// <c>DbDataSyncHost</c> would run its renewal service there.
+    /// <para>
+    /// Deliberately **not** <c>elevatedOverride: false</c>-driven: the point is that this route needs no
+    /// elevation, so it is run exactly as an operator would and must succeed on its own.
+    /// </para>
+    /// </summary>
+    [WindowsOnlyFact]
+    [SupportedOSPlatform("windows")]
+    public void NewSelfSigned_WithFile_TakesTheManagedFileRouteOnWindowsWithoutElevation()
+    {
+        var root = Directory.CreateTempSubdirectory("dbdatasync-cert-file-route-").FullName;
+        try
+        {
+            ServeCommand.Prepare(root);
+
+            var (exitCode, output) = RunCaptured(
+                () => CertCommand.Run(["new-self-signed", "--file", "--days", "30", "--repo", root]));
+
+            Assert.True(
+                exitCode == 0,
+                $"`new-self-signed --file` exited {exitCode} on Windows. Its output was: {output}");
+
+            var pfx = ManagedSelfSignedCertificate.PfxPath(root);
+            Assert.True(File.Exists(pfx), $"Expected a managed PFX at '{pfx}'. The command said: {output}");
+
+            var config = DbDataSyncConfigFile.Read(root);
+            Assert.Equal(pfx, config[$"{CertificateBinding.Section}:Path"]);
+        }
+        finally
+        {
+            GitTempDirectory.DeleteRecursively(root);
+        }
+    }
+
+    /// <summary>The default is untouched: no flag on Windows still means the certificate store, which
+    /// still needs elevation. Guards against `--file` quietly becoming the default for everyone.</summary>
+    [WindowsOnlyFact]
+    [SupportedOSPlatform("windows")]
+    public void NewSelfSigned_WithNoTargetFlag_StillTakesTheStoreRouteOnWindows()
+    {
+        var (exitCode, output) = RunCaptured(
+            () => CertCommand.Run(["new-self-signed", "--dns", "unused.invalid"], elevatedOverride: false));
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("machine certificate store", output);
+    }
+
+    [Fact]
+    public void NewSelfSigned_WithBothTargetFlags_RefusesRatherThanPickingOne()
+    {
+        var (exitCode, output) = RunCaptured(() => CertCommand.Run(["new-self-signed", "--file", "--store"]));
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("mutually exclusive", output);
     }
 
     private static (int ExitCode, string Output) RunCaptured(Func<int> action)

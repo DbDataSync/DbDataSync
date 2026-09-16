@@ -1,6 +1,6 @@
 # On Windows, `config cert new-self-signed` cannot produce phase 130's managed certificate
 
-**Status: diagnosed, no fix agreed.** Extracted from
+**Status: fixed 2026-09-15** — see "Resolution" at the end. Extracted from
 `architecture/implementation/done/phase-140-windows-ci-verification-and-remaining-failure.md`'s own
 "Item 2b" section, where it was named as a real product gap and deliberately left alone — moved here per
 `architecture/implementation/README.md`'s "Follow-up work gets its own doc, not a paragraph."
@@ -60,3 +60,36 @@ write. Those tests are now `[NonWindowsFact]`, which is correct for them and lea
   `ReadinessChecks`' managed-certificate reporting is cross-platform (phase 140 made its tests
   platform-independent precisely because the check itself is), so at minimum the readiness output can
   describe a state Windows cannot currently get into.
+
+## Resolution — 2026-09-15
+
+The first candidate, chosen by the repo owner: **`new-self-signed` takes `--file` and `--store`.** The OS
+now picks a *default* rather than being the only option.
+
+- `--file` writes `<repo>/tls/dbdatasync.pfx` and points Kestrel at it, on any OS — so Windows can reach
+  tier 2 from the CLI, which was the whole gap.
+- `--store` forces the Windows certificate store, and off Windows refuses with a message naming why
+  rather than quietly producing the other kind of certificate.
+- No flag behaves exactly as before: the store on Windows, a file everywhere else. Nothing changes for
+  anyone not asking for it, which is why this closed additively rather than by changing a default.
+
+Two details worth keeping:
+
+**`--file` deliberately does not require elevation.** The elevation guard added alongside this (see
+`follow-up-phase-136-140-…`) refuses the store-writing subcommands when not Administrator, and
+`new-self-signed` is one of them — but only when it is actually going to the store. The guard now tests
+the resolved target rather than the subcommand name, so `new-self-signed --file` runs unelevated as it
+should; it writes under the repo root and touches no machine store. Getting that wrong would have made
+the new route unusable in exactly the situation it exists for.
+
+**Verified by running it, not only by test.** On a real non-elevated Windows shell,
+`config cert new-self-signed --file --days 30 --repo <tmp>` exits 0, writes the PFX, and
+`config cert status` then reports `Bound certificate (file):` against it. The default (no flag) still
+refuses without elevation, and `--file --store` together refuses as mutually exclusive.
+
+Covered by `CertElevationTests`: the file route succeeds on Windows with no elevation override (run as
+an operator would, so it has to work on its own), the default still takes the guarded store route, and
+the conflicting-flags case refuses. The usage text documents both flags and which is the default where.
+
+The doc's last bullet — that `ReadinessChecks` could describe a state Windows could not reach — resolves
+itself: Windows can now reach it.

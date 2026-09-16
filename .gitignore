@@ -38,3 +38,7 @@ coverage/
 
 # Stray Playwright output if the suite is ever run from the repo root instead of tests/DbDataSync.Web.Tests
 test-results/
+
+# `dotnet test --results-directory TestResults` (ci.yml's dotnet-windows job writes a .trx there, and
+# anyone reproducing that run locally gets one too) — test output, not source.
+TestResults/

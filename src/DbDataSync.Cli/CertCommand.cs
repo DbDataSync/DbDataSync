@@ -38,6 +38,53 @@ public static class CertCommand
     private static readonly HashSet<string> StoreWritingSubcommands =
         new(["new-self-signed", "enroll", "renew", "retrieve"], StringComparer.Ordinal);
 
+    /// <summary>
+    /// Where <c>new-self-signed</c> should put the certificate it issues.
+    /// <para>
+    /// The OS picks the default — the Windows certificate store on Windows (phase 82), a managed PFX
+    /// under the repo root everywhere else (phase 130, "tier 2") — and <c>--file</c>/<c>--store</c>
+    /// override it. Before these flags the OS was not a default but the only option, so Windows could
+    /// not reach tier 2 from the CLI at all, while <c>DbDataSyncHost</c> would happily run tier 2's own
+    /// renewal service there whenever the config named the managed path. A half-open door: the runtime
+    /// supported a state the tool could not create, and a Windows operator who wanted a self-renewing
+    /// file certificate had to hand-edit <c>dbdatasync.config.yaml</c> and place the PFX themselves.
+    /// </para>
+    /// <para>
+    /// <c>--store</c> exists so the choice can be stated rather than inferred, and so asking for it
+    /// where it cannot work fails loudly instead of silently producing the other kind of certificate.
+    /// </para>
+    /// </summary>
+    private enum SelfSignedTarget { File, Store }
+
+    /// <summary>Null when the flags asked for something impossible — the message is already printed.</summary>
+    private static SelfSignedTarget? ResolveSelfSignedTarget(string[] args)
+    {
+        var wantsFile = CliOptions.Has(args, "--file");
+        var wantsStore = CliOptions.Has(args, "--store");
+
+        if (wantsFile && wantsStore)
+        {
+            Console.Error.WriteLine("--file and --store are mutually exclusive: a certificate goes to one or the other.");
+            return null;
+        }
+
+        if (wantsStore && !OperatingSystem.IsWindows())
+        {
+            Console.Error.WriteLine(
+                "--store needs the Windows certificate store, which this platform does not have. Drop the flag " +
+                "to write a managed certificate file instead (the default here).");
+            return null;
+        }
+
+        if (wantsFile)
+            return SelfSignedTarget.File;
+
+        if (wantsStore)
+            return SelfSignedTarget.Store;
+
+        return OperatingSystem.IsWindows() ? SelfSignedTarget.Store : SelfSignedTarget.File;
+    }
+
     /// <param name="elevatedOverride">Only for <c>CertElevationTests</c> — CI's windows-latest runners
     /// are elevated, so the refusal below is unreachable there without one. Same idiom as
     /// <c>ServiceCommand.Install</c>'s own parameter of the same name.</param>
@@ -52,6 +99,17 @@ public static class CertCommand
         var sub = args[0].ToLowerInvariant();
         var rest = args[1..];
 
+        // Resolved up front because two decisions below depend on it: which implementation runs, and
+        // whether elevation is needed at all. `new-self-signed --file` writes under the repo root and
+        // touches no machine store, so refusing it for lack of Administrator would be wrong.
+        SelfSignedTarget? selfSignedTarget = null;
+        if (sub == "new-self-signed")
+        {
+            selfSignedTarget = ResolveSelfSignedTarget(rest);
+            if (selfSignedTarget is null)
+                return 1;
+        }
+
         // A plain `if (OperatingSystem.IsWindows())` guard, not folded into the condition below, is
         // what the CA1416 platform-compatibility analyzer actually recognises as making everything
         // inside it safe to call — a combined condition (`!IsWindows() && sub is not (...)`) does not
@@ -62,8 +120,12 @@ public static class CertCommand
             // for write without elevation — so without this guard a non-elevated run died with an
             // unhandled CryptographicException("Access is denied") out of X509Store.Open and exit code
             // 127, the same shape `service install` had. Read-only subcommands (status, list,
-            // templates) genuinely work unelevated and are deliberately not listed.
-            if (StoreWritingSubcommands.Contains(sub) && !(elevatedOverride ?? WindowsElevation.IsAdministrator()))
+            // templates) genuinely work unelevated and are deliberately not listed, and so does
+            // `new-self-signed --file`, which is why the store target is checked rather than the name.
+            var needsTheStore = StoreWritingSubcommands.Contains(sub)
+                && (sub != "new-self-signed" || selfSignedTarget == SelfSignedTarget.Store);
+
+            if (needsTheStore && !(elevatedOverride ?? WindowsElevation.IsAdministrator()))
             {
                 Console.Error.WriteLine(
                     $"Needs Administrator. '{sub}' installs into the machine certificate store " +
@@ -78,7 +140,9 @@ public static class CertCommand
             {
                 "status" => Status(rest),
                 "list" => List(rest),
-                "new-self-signed" => NewSelfSigned(rest),
+                "new-self-signed" => selfSignedTarget == SelfSignedTarget.File
+                    ? NewSelfSignedFile(rest)
+                    : NewSelfSigned(rest),
                 "enroll" => Enroll(rest),
                 "renew" => Renew(rest),
                 "retrieve" => Retrieve(rest),
@@ -832,8 +896,8 @@ public static class CertCommand
             Usage: dbdatasync config cert use-pem --cert <path> --key <path> [--repo <path>]     (any OS)
                    dbdatasync config cert use-pfx --pfx <path> [--repo <path>]                    (any OS)
                    dbdatasync config cert status [--account <account>]                            (any OS; --account is Windows-only)
-                   dbdatasync config cert new-self-signed [--days <n>] [--repo <path>]             (any OS; writes <repo>/tls/dbdatasync.pfx)
-                   dbdatasync config cert new-self-signed --dns <names> [--days <n>] [--account <account>]  (Windows only; installs into the certificate store instead)
+                   dbdatasync config cert new-self-signed [--file] [--days <n>] [--repo <path>]       (any OS; writes <repo>/tls/dbdatasync.pfx and points Kestrel at it — the default off Windows, --file asks for it on Windows too)
+                   dbdatasync config cert new-self-signed [--store] --dns <names> [--days <n>] [--account <account>]  (Windows only; installs into the certificate store — the default there, and needs an elevated prompt)
                    dbdatasync config cert list [--location LocalMachine|CurrentUser]               (Windows only)
                    dbdatasync config cert enroll --dns <names> [--ca <config>] [--template <name>] [--account <account>]  (Windows only)
                    dbdatasync config cert renew [--ca <config>] [--template <name>] [--account <account>] [--days <n>]    (Windows only)
