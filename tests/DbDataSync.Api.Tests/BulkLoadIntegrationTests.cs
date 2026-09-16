@@ -7,6 +7,7 @@ using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.State;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -36,6 +37,8 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
 
     private readonly HttpClient _client;
     private readonly SecretStore _secrets;
+    private readonly WorkQueueStore _workQueueStore;
+    private readonly TaskRunStore _taskRunStore;
     private readonly string _databaseName = $"DbDataSyncBulkLoadTest_{Guid.NewGuid():N}";
     private readonly string _connectionName = $"bf-conn-{Guid.NewGuid():N}";
     private readonly string _replicationName;
@@ -44,6 +47,8 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
     {
         _client = factory.CreateClient();
         _secrets = factory.Services.GetRequiredService<SecretStore>();
+        _workQueueStore = factory.Services.GetRequiredService<WorkQueueStore>();
+        _taskRunStore = factory.Services.GetRequiredService<TaskRunStore>();
         _replicationName = $"bf-{Guid.NewGuid():N}";
     }
 
@@ -209,6 +214,80 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
         AssertAllSucceeded(await Task.WhenAll(retryRunIds.Select(PollUntilTerminalAsync)));
         await _client.WaitForLoadToCompleteAsync(_replicationName, "map-1");
         Assert.Equal(RowsPerTable, await CountAsync("Tgt_1"));
+    }
+
+    /// <summary>
+    /// Follow-up to phase 143: a mapping with a multi-segment <c>DefaultSegmenting</c> can win some of
+    /// its own auto-triggered initial load's segments' <c>WorkQueue</c> races and lose others — a
+    /// narrower version of the single-segment case phase 143 fixed. Without the rollback this covers,
+    /// the segment(s) that won before the loss (segment 1 here) would be left durably enqueued as real
+    /// work under a batch whose own <c>SegmentCount</c> (2) could never be satisfied by its own
+    /// completions, since nothing ever enqueues the segment that lost — the batch would report
+    /// <c>BulkLoadState.Running</c> forever. It now rolls back cleanly instead: segment 1 is cancelled,
+    /// and the batch itself is removed, leaving no trace, the same as the single-segment case leaves
+    /// none.
+    /// </summary>
+    [Fact]
+    public async Task AMultiSegmentInitialLoad_ThatPartlyCollides_RollsBackWhatItAlreadyEnqueued()
+    {
+        await SetUpSegmentedMappingAsync();
+        var segment2 = new RangeSegment("Id", "5", "10");
+
+        // Simulates "an operator's own reload of the identical segment scheme is already in flight" for
+        // segment 2 alone — pre-seeded directly rather than raced over HTTP, so which segment collides
+        // is deterministic rather than a timing gamble.
+        _workQueueStore.Enqueue(
+            _replicationName, RunKind.BulkLoad, "map-3", segment2.Describe(), SegmentSerializer.Serialize(segment2));
+
+        var primaryRunIds = await ReadRunIdsAsync(await _client.PostAsync(
+            $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json")));
+        var primaryRuns = await Task.WhenAll(primaryRunIds.Select(PollUntilTerminalAsync));
+
+        var map3Primary = Assert.Single(primaryRuns, r => r.GetProperty("mappingName").GetString() == "map-3");
+        Assert.Equal("Failed", map3Primary.GetProperty("status").GetString());
+        Assert.Equal("ConcurrentLoadInProgress", map3Primary.GetProperty("failureKind").GetString());
+
+        // The batch this attempt created is gone — not lingering as a permanently-Running row nobody
+        // will ever finish. GetHistory(BulkLoad) for map-3 has nothing beyond the pre-seeded segment-2
+        // reload itself (which is unaffected by any of this — it was never this attempt's own work).
+        var history = await _client.GetFromJsonAsync<JsonElement>(
+            $"/api/replications/{_replicationName}/runs?kind=BulkLoad&mappingName=map-3&limit=50", JsonOptions);
+        var map3BulkLoadRuns = history.GetProperty("runs").EnumerateArray().ToList();
+        Assert.DoesNotContain(map3BulkLoadRuns, r => r.GetProperty("status").GetString() == "Queued");
+
+        // Segment 1 — the one this attempt actually got enqueued before segment 2 collided — was
+        // cancelled, not left Pending/Queued forever.
+        var segment1Runs = map3BulkLoadRuns.Where(r => r.GetProperty("segmentLabel").GetString() == "Id [1, 5)").ToList();
+        Assert.All(segment1Runs, r => Assert.Equal("Cancelled", r.GetProperty("status").GetString()));
+    }
+
+    private async Task SetUpSegmentedMappingAsync()
+    {
+        await using var db = await OpenDatabaseAsync();
+        await ExecuteAsync(db, "CREATE TABLE dbo.[Src_3] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+        await ExecuteAsync(db, "ALTER TABLE dbo.[Src_3] ENABLE CHANGE_TRACKING;");
+        await ExecuteAsync(db, "CREATE TABLE dbo.[Tgt_3] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);");
+        var values = string.Join(", ", Enumerable.Range(1, RowsPerTable).Select(r => $"({r}, 'Row3_{r}')"));
+        await ExecuteAsync(db, $"INSERT INTO dbo.[Src_3] (Id, Name) VALUES {values};");
+
+        (await _client.PutAsJsonAsync($"/api/replications/{_replicationName}/table-mappings/map-3", new TableMappingConfig
+        {
+            Name = "map-3",
+            Sources = [new SourceTableSpec { ConnectionName = _connectionName, Database = _databaseName, Schema = "dbo", Table = "Src_3" }],
+            Targets = [new TableSpec { ConnectionName = _connectionName, Database = _databaseName, Schema = "dbo", Table = "Tgt_3" }],
+            ColumnMappings =
+            [
+                new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
+            ],
+            // Empty means Full otherwise — this is the one thing that distinguishes this mapping from
+            // CreateMappingAsync's own map-1/map-2: an initial load requests one segment per entry here.
+            DefaultSegmenting = [new RangeSegment("Id", "1", "5"), new RangeSegment("Id", "5", "10")],
+        }, JsonOptions)).EnsureSuccessStatusCode();
+
+        (await _client.PostAsync(
+            $"/api/replications/{_replicationName}/table-mappings/map-3/refresh-metadata", null))
+            .EnsureSuccessStatusCode();
     }
 
     /// <summary>

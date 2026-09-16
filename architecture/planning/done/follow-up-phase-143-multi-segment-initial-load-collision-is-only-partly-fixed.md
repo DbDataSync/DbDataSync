@@ -1,6 +1,6 @@
 # A multi-segment initial load can still leave an orphaned, never-completing batch
 
-**Status: diagnosed, no fix agreed — narrower version of a bug phase 143 already fixed.** Extracted
+**Status: fixed 2026-09-15.** See "Fix" at the end. Extracted
 from `architecture/implementation/done/phase-143-initial-load-race-loses-cleanly.md`'s own "Out of
 scope" section, where it sat as an inert bullet — moved here per
 `architecture/implementation/README.md`'s "Follow-up work gets its own doc, not a paragraph."
@@ -53,3 +53,35 @@ set up `DefaultSegmenting` with more than one entry at all).
   cosmetic one (worth checking against `BulkLoadHistoryPanel`, phase 139, for how a
   perpetually-`InProgress` batch actually renders there), not a functional one. Lower priority than
   phase 143's own fix was.
+
+## Fix
+
+Took the first candidate direction, but as a compensating rollback rather than true cross-store
+transactional atomicity (`WorkQueueStore`, `BulkLoadBatchStore` and `TaskRunStore` each open their own
+connection; spanning one transaction across all three would have meant a larger refactor for a bug this
+doc's own analysis already argued is narrow and non-critical). `BulkLoadService.
+CreateBatchAndEnqueueAsync` now enqueues segments in an explicit loop instead of one LINQ projection, and
+on `WorkQueueCollisionException` from a later segment: every segment this same call already got enqueued
+is cancelled the same way an operator's own `CancelRun` cancels a pending item (`WorkQueueStore.
+TryCancelPending`, then `TaskRunStore.CompleteRun(..., RunStatus.Cancelled, ...)`), and the batch row
+itself is removed (new `BulkLoadBatchStore.DeleteBatch`) rather than left recording a `SegmentCount` none
+of its segments can still reach. Matches the single-segment case's own behaviour exactly: a losing
+collision there leaves no trace at all (the `WorkQueue` insert that would have created it never commits),
+so a partial collision here should not leave a visible-but-dead batch and orphaned-but-real segment runs
+either.
+
+Confirmed the third bullet above still holds after this change: `ReadHold` never strands in the partial
+case, with or without this fix — `LocalRunnerState.RequestInitialLoad`'s own `SetPendingLoad` call is
+positioned after the enqueuer call (phase 143's own reordering), so it never runs once
+`CreateBatchAndEnqueueAsync` rethrows. This fix only removes the dead batch/segment rows the old code
+left behind; the mapping's own next scheduled pass already retried cleanly either way.
+
+Verified with a new integration test,
+`BulkLoadIntegrationTests.AMultiSegmentInitialLoad_ThatPartlyCollides_RollsBackWhatItAlreadyEnqueued`: a
+dedicated mapping (`map-3`) with a two-entry `DefaultSegmenting`, a pre-seeded collision on the second
+segment (deterministic — seeded directly rather than raced over HTTP, so which segment collides isn't a
+timing gamble), asserting the batch leaves no `Queued` runs behind and the segment that did enqueue first
+ends up `Cancelled`. Passed 3/3 in isolation, then 9/9 for the whole `BulkLoadIntegrationTests` class once
+the shared MSSQL test container's concurrent-session load (sustained 75–98% CPU across repeated checks
+mid-verification, timing out every test in the class at connection-open, including pre-existing ones
+untouched by this change) settled back down.

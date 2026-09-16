@@ -27,6 +27,7 @@ public sealed class BulkLoadService(
     DriverConnectionFactory connections,
     WorkQueueStore workQueueStore,
     BulkLoadBatchStore batchStore,
+    TaskRunStore taskRunStore,
     ProcessSupervisor supervisor,
     CustomSegmentExpansion customSegments) : IInitialLoadEnqueuer
 {
@@ -141,15 +142,45 @@ public sealed class BulkLoadService(
         var (estimatedRows, estimateCaveat) = await EstimateRowsAsync(task, mapping, cancellationToken);
         batchStore.CreateBatch(batchId, replicationName, mappingName, segments.Count, estimatedRows, estimateCaveat);
 
-        return segments
-            .Select(segment => throwOnCollision
-                ? workQueueStore.EnqueueOrThrow(
-                    replicationName, RunKind.BulkLoad, mappingName, segment.Describe(),
-                    SegmentSerializer.Serialize(segment), kinds, batchId)
-                : workQueueStore.Enqueue(
-                    replicationName, RunKind.BulkLoad, mappingName, segment.Describe(),
-                    SegmentSerializer.Serialize(segment), kinds, batchId))
-            .ToList();
+        // Enqueued one at a time, not via a single LINQ projection, so a later segment's collision can
+        // be rolled back against the earlier ones this same call already committed — see the follow-up
+        // doc this closes: a multi-segment DefaultSegmenting mapping racing an operator's own reload of
+        // the identical scheme used to leave a mix of real and orphaned segments under one batch that
+        // could never reach BulkLoadState.Completed, since nothing would ever enqueue the segment that
+        // lost. Only relevant when throwOnCollision is true — the operator-facing path's own collisions
+        // collapse instead of throwing, so there is nothing here to roll back for it.
+        var runIds = new List<Guid>();
+        try
+        {
+            foreach (var segment in segments)
+            {
+                var runId = throwOnCollision
+                    ? workQueueStore.EnqueueOrThrow(
+                        replicationName, RunKind.BulkLoad, mappingName, segment.Describe(),
+                        SegmentSerializer.Serialize(segment), kinds, batchId)
+                    : workQueueStore.Enqueue(
+                        replicationName, RunKind.BulkLoad, mappingName, segment.Describe(),
+                        SegmentSerializer.Serialize(segment), kinds, batchId);
+                runIds.Add(runId);
+            }
+        }
+        catch (WorkQueueCollisionException)
+        {
+            // Whatever this call already enqueued is real, durable work that nobody else will ever
+            // finish on this batch's behalf — cancelled the same way an operator's own CancelRun does
+            // (TryCancelPending, then CompleteRun records the terminal status), not merely left Pending,
+            // so nothing here reports Queued forever either. The batch row itself is removed rather than
+            // left recording a SegmentCount none of its segments can still reach — matching the single-
+            // segment case, which leaves no trace of a losing attempt at all.
+            foreach (var runId in runIds)
+                if (workQueueStore.TryCancelPending(runId))
+                    taskRunStore.CompleteRun(runId, RunStatus.Cancelled, 0, 0,
+                        "Cancelled: a later segment in the same initial load lost its WorkQueue race.");
+            batchStore.DeleteBatch(batchId);
+            throw;
+        }
+
+        return runIds;
     }
 
     /// <summary>

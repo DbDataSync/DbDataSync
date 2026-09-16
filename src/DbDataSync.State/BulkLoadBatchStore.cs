@@ -99,6 +99,25 @@ public sealed class BulkLoadBatchStore(StateDatabase database)
         });
 
     /// <summary>
+    /// Removes a batch row outright — used only by <c>BulkLoadService.CreateBatchAndEnqueueAsync</c>'s
+    /// own rollback when a later segment loses its <c>WorkQueue</c> race partway through enqueuing a
+    /// multi-segment batch (see the follow-up doc this closes). The segments already enqueued before the
+    /// collision are cancelled at the same time, by the same caller — this just removes the batch record
+    /// their existence would otherwise leave permanently reporting <c>BulkLoadState.Running</c>, since
+    /// nothing will ever enqueue the remaining segments to complete it. A real delete rather than a
+    /// terminal status, matching the single-segment case this mirrors: a losing collision there leaves no
+    /// trace at all, not a visible-but-dead row.
+    /// </summary>
+    public void DeleteBatch(string batchId) =>
+        database.Retry(() =>
+        {
+            using var connection = database.OpenConnection();
+            using var cmd = database.Command(connection, "DELETE FROM BulkLoadBatches WHERE BatchId = $batchId;");
+            cmd.Bind(database, "batchId", batchId);
+            cmd.ExecuteNonQuery();
+        });
+
+    /// <summary>
     /// One batch's rolled-up state, by id alone — a batch id is already globally unique, so there is no
     /// need for the caller to know which replication it belongs to. Used by
     /// <c>LocalRunnerState.CompleteRun</c> (phase 134) to decide whether a just-completed segment run
