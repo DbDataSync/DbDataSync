@@ -1,6 +1,6 @@
 # Installing dbdatasync
 
-[DbDataSync](../README.md) · **Install** · [Configuration](configuration.md) · [Getting started](getting-started.md) · [Drivers and libraries](drivers-and-libraries.md) · [Building from source](development.md)
+[DbDataSync](../README.md) · **Install** · [Configuration](configuration.md) · [Getting started](getting-started.md) · [Replication concepts](replication-concepts.md) · [Drivers and libraries](drivers-and-libraries.md) · [State database](state-database.md) · [Building from source](development.md)
 
 `dbdatasync` ships as a .NET global tool. Pick the install below that matches how you plan to run it.
 

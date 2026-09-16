@@ -1,6 +1,6 @@
 # Configuration
 
-[DbDataSync](../README.md) · [Install](install.md) · **Configuration** · [Getting started](getting-started.md) · [Drivers and libraries](drivers-and-libraries.md) · [Building from source](development.md)
+[DbDataSync](../README.md) · [Install](install.md) · **Configuration** · [Getting started](getting-started.md) · [Replication concepts](replication-concepts.md) · [Drivers and libraries](drivers-and-libraries.md) · [State database](state-database.md) · [Building from source](development.md)
 
 Every CLI flag and environment variable that configures a running DbDataSync, across every way it can
 be started. There are two separate entry points into the same host, with different defaults — that
@@ -263,8 +263,8 @@ always reaches state over the phase 39 loopback endpoint rather than opening the
 Two things worth being explicit about:
 - **No cross-engine migration.** Pointing an existing deployment at a different `StateEngine` starts an
   empty store — it does not move anything. Choose once, at stand-up.
-- **An unrecognized `StateEngine` value falls back to `Sqlite`** rather than refusing to start — a typo
-  shouldn't take down an API that has a perfectly good store already.
+- **An unrecognized `StateEngine` value refuses to start**, naming the three built-in engines in the
+  error — a typo here is worth surfacing loudly rather than silently landing on `Sqlite`.
 - **`MsSql`/`Postgres` need their library installed.** Neither ships as a package this build carries by
   default — each resolves its connection through the same restorable-library mechanism
   `config driver install` uses. Run `dbdatasync config library install microsoft-data-sqlclient` (for

@@ -1,6 +1,6 @@
 # Drivers and libraries
 
-[DbDataSync](../README.md) · [Install](install.md) · [Configuration](configuration.md) · [Getting started](getting-started.md) · **Drivers and libraries** · [Building from source](development.md)
+[DbDataSync](../README.md) · [Install](install.md) · [Configuration](configuration.md) · [Getting started](getting-started.md) · [Replication concepts](replication-concepts.md) · **Drivers and libraries** · [State database](state-database.md) · [Building from source](development.md)
 
 Two separate concepts, easy to conflate because they usually show up together:
 
@@ -260,7 +260,8 @@ code references at all.
 From here, running, backfilling, and monitoring this replication works exactly like any other — nothing
 about descriptor vs. built-in is visible anywhere past the driver dropdown.
 
-## Next: Building from source
+## Next: State database
 
-If you're modifying DbDataSync itself rather than configuring a deployment of it, see
-[Building from source](development.md).
+Drivers and libraries need somewhere to record what a replication has done and what it's about to do —
+see [The state database](state-database.md), which resolves its own `MsSql`/`Postgres` engine choice
+through this exact same library mechanism.

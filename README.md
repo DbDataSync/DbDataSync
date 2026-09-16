@@ -2,7 +2,7 @@
 
 [![NuGet](https://img.shields.io/nuget/v/DbDataSync.svg?label=NuGet)](https://www.nuget.org/packages/DbDataSync)
 
-**DbDataSync** · [Install](https://github.com/DbDataSync/DbDataSync/blob/main/docs/install.md) · [Configuration](https://github.com/DbDataSync/DbDataSync/blob/main/docs/configuration.md) · [Getting started](https://github.com/DbDataSync/DbDataSync/blob/main/docs/getting-started.md) · [Drivers and libraries](https://github.com/DbDataSync/DbDataSync/blob/main/docs/drivers-and-libraries.md) · [Building from source](https://github.com/DbDataSync/DbDataSync/blob/main/docs/development.md)
+**DbDataSync** · [Install](https://github.com/DbDataSync/DbDataSync/blob/main/docs/install.md) · [Configuration](https://github.com/DbDataSync/DbDataSync/blob/main/docs/configuration.md) · [Getting started](https://github.com/DbDataSync/DbDataSync/blob/main/docs/getting-started.md) · [Replication concepts](https://github.com/DbDataSync/DbDataSync/blob/main/docs/replication-concepts.md) · [Drivers and libraries](https://github.com/DbDataSync/DbDataSync/blob/main/docs/drivers-and-libraries.md) · [State database](https://github.com/DbDataSync/DbDataSync/blob/main/docs/state-database.md) · [Building from source](https://github.com/DbDataSync/DbDataSync/blob/main/docs/development.md)
 
 DbDataSync is a cross-database replication tool. You define a replication in a web UI — the source
 table, the target table, column mappings, a schedule, and how changes are processed — and DbDataSync
@@ -48,7 +48,11 @@ systemd service, a machine-wide install, or running in a container. The package 
   every flag and environment variable.
 - [**Getting started**](https://github.com/DbDataSync/DbDataSync/blob/main/docs/getting-started.md) —
   set up your first replication, with screenshots.
+- [**Replication concepts**](https://github.com/DbDataSync/DbDataSync/blob/main/docs/replication-concepts.md) —
+  change detection, bulk loading, and delete reconciliation.
 - [**Drivers and libraries**](https://github.com/DbDataSync/DbDataSync/blob/main/docs/drivers-and-libraries.md) —
   add another engine (MySQL, Oracle, ...) without a rebuild.
+- [**State database**](https://github.com/DbDataSync/DbDataSync/blob/main/docs/state-database.md) —
+  what DbDataSync tracks about its own runs, and where it lives.
 - [**Building from source**](https://github.com/DbDataSync/DbDataSync/blob/main/docs/development.md) —
   the dev loop, tests, and repository layout.
