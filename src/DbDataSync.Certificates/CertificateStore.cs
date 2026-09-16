@@ -36,6 +36,20 @@ public static class CertificateStore
     /// </summary>
     public static X509Certificate2 Install(X509Certificate2 certificate, StoreLocation location)
     {
+        // The store is opened BEFORE any key material is written, not after. LoadPkcs12 with
+        // PersistKeySet writes a real private key container to disk — under
+        // %ProgramData%\Microsoft\Crypto\RSA\MachineKeys for LocalMachine — and that directory is
+        // deliberately writable without elevation, while LocalMachine\My is not. In the original order
+        // a non-elevated `config cert new-self-signed` therefore persisted a private key and *then*
+        // threw "Access is denied" opening the store, orphaning that key with no certificate anywhere
+        // referencing it, once per attempt. Confirmed by running it on a real non-elevated Windows
+        // shell and finding the container left behind.
+        //
+        // Opening first makes any failure to reach the store happen before anything exists to clean
+        // up, whatever the reason for it — not only the missing-elevation case that exposed this.
+        using var store = new X509Store(StoreName.My, location);
+        store.Open(OpenFlags.ReadWrite);
+
         var exportPassword = Guid.NewGuid().ToString("N");
         var pfxBytes = certificate.Export(X509ContentType.Pfx, exportPassword);
 
@@ -43,9 +57,6 @@ public static class CertificateStore
             | (location == StoreLocation.LocalMachine ? X509KeyStorageFlags.MachineKeySet : X509KeyStorageFlags.UserKeySet);
 
         var persisted = X509CertificateLoader.LoadPkcs12(pfxBytes, exportPassword, flags);
-
-        using var store = new X509Store(StoreName.My, location);
-        store.Open(OpenFlags.ReadWrite);
         store.Add(persisted);
 
         return persisted;

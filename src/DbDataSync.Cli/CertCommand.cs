@@ -29,7 +29,19 @@ namespace DbDataSync.Cli;
 /// </summary>
 public static class CertCommand
 {
-    public static int Run(string[] args)
+    /// <summary>
+    /// The subcommands that issue or import a certificate into <c>LocalMachine\My</c> and therefore
+    /// cannot work without elevation — see the guard in <see cref="Run"/>. <c>bind</c> is absent
+    /// deliberately: it only reads the store and writes <c>dbdatasync.config.yaml</c>, so it is usable
+    /// unelevated, as are <c>status</c>, <c>list</c> and <c>templates</c>.
+    /// </summary>
+    private static readonly HashSet<string> StoreWritingSubcommands =
+        new(["new-self-signed", "enroll", "renew", "retrieve"], StringComparer.Ordinal);
+
+    /// <param name="elevatedOverride">Only for <c>CertElevationTests</c> — CI's windows-latest runners
+    /// are elevated, so the refusal below is unreachable there without one. Same idiom as
+    /// <c>ServiceCommand.Install</c>'s own parameter of the same name.</param>
+    public static int Run(string[] args, bool? elevatedOverride = null)
     {
         if (args.Length == 0)
         {
@@ -46,6 +58,22 @@ public static class CertCommand
         // get the same recognition, and every Windows-only case below would warn.
         if (OperatingSystem.IsWindows())
         {
+            // Everything here that issues or imports writes to LocalMachine\My, which is not openable
+            // for write without elevation — so without this guard a non-elevated run died with an
+            // unhandled CryptographicException("Access is denied") out of X509Store.Open and exit code
+            // 127, the same shape `service install` had. Read-only subcommands (status, list,
+            // templates) genuinely work unelevated and are deliberately not listed.
+            if (StoreWritingSubcommands.Contains(sub) && !(elevatedOverride ?? WindowsElevation.IsAdministrator()))
+            {
+                Console.Error.WriteLine(
+                    $"Needs Administrator. '{sub}' installs into the machine certificate store " +
+                    @"(LocalMachine\My), which requires elevation.");
+                Console.Error.WriteLine(
+                    "Re-run this command from an elevated prompt (right-click the terminal, Run as " +
+                    "administrator). Nothing has been changed.");
+                return 1;
+            }
+
             return sub switch
             {
                 "status" => Status(rest),
