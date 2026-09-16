@@ -1,6 +1,6 @@
-# Phase 135/136's Windows Event Log and `icacls` work: pass/fail confirmed on CI, literal output never read
+# Phase 135/136's Windows Event Log and `icacls` work: output now read; one manual check left
 
-**Status: partly closed 2026-09-15 — item 3 answered and fixed, items 1 and 2 still open.** Extracted
+**Status: items 1 and 3 closed 2026-09-15; only item 2 (a manual, elevated reproduction) remains.** Extracted
 from `architecture/implementation/done/phase-136-windows-service-startup-diagnostics.md`'s own "What's
 honestly still unverified" section and
 `architecture/implementation/done/phase-140-windows-ci-verification-and-remaining-failure.md`'s own "CI
@@ -21,10 +21,10 @@ Naming the remaining gap rather than calling it closed."
 
 **What remains open, precisely:**
 
-1. **Nobody has read the literal Event Log / `icacls` text the tests produced.** *(Largely addressed —
-   the tests now report what they observed; what remains is only the passing-run case, see "Update"
-   below.)* The tests asserted specific content and passed, but the actual log lines had never been read
-   by a human, only inferred from a green checkmark.
+1. ~~**Nobody has read the literal Event Log / `icacls` text the tests produced.**~~ **CLOSED** — read
+   from a real windows-latest run's trx artifact; the output is quoted at the end of this doc. The tests
+   asserted specific content and passed, but the actual log lines had never been read by a human — only
+   inferred from a green checkmark.
 
 2. **Phase 136's own Checkpoint 6 — a *manual* scenario, not a test** — reproducing phase 135's original
    Error 1053 startup failure against a real installed Windows service, and confirming the diagnostic
@@ -156,3 +156,48 @@ person reads a cause instead of an exception type.
 This is the same lesson as the tests above, one level out: the failure existed, it was reported, and it
 was unreadable. Three sessions' worth of red CI was attributed to a filter quirk that turned out to be
 innocent.
+
+## Item 1: CLOSED — the output, read from a real `windows-latest` run
+
+Run 35052289837 (`4ae7905`), `dotnet-windows` green, `dotnet-windows-trx` artifact (16 `.trx` files, one
+per project). Quoted verbatim from `DbDataSync.Cli.Tests`' own file, all four tests `[Passed]`:
+
+```
+WriteError_ARealEntryIsReadableBackFromTheApplicationLog  [Passed]
+  Scanned the newest 50 'Application' entries for source 'DbDataSync' / marker
+  'dbdatasync-test-ef953b083bfc4bda8fab5745d9e5440a'. 1 were from this source:
+    [2026-09-16T03:36:45.0000000+00:00] Error: dbdatasync-test-ef953b083bfc4bda8fab5745d9e5440a
+  Matched entry, verbatim:
+  dbdatasync-test-ef953b083bfc4bda8fab5745d9e5440a
+
+WriteInformation_ARealEntryIsReadableBackFromTheApplicationLog  [Passed]
+  Scanned the newest 50 'Application' entries ... 2 were from this source:
+    [2026-09-16T03:36:45.0000000+00:00] Information: dbdatasync-test-92356790fe33465c96430124078fac25
+    [2026-09-16T03:36:45.0000000+00:00] Error: dbdatasync-test-ef953b083bfc4bda8fab5745d9e5440a
+
+EnsureSourceRegistered_CalledTwice_LeavesTheSourceBoundToTheApplicationLog  [Passed]
+  After two EnsureSourceRegistered() calls: source 'DbDataSync' exists=True, log='Application'.
+
+GrantDataDirectoryAccess_LocalSystem_TakesOwnershipInsteadOfReturningEarly  [Passed]
+  'C:\Users\runneradmin\AppData\Local\Temp\dbdatasync-service-command-tests-jh0ywvk5.55m'
+  after GrantDataDirectoryAccess(account: null):
+    owner: NT AUTHORITY\SYSTEM
+    ace:   NT AUTHORITY\SYSTEM Allow FullControl
+    ace:   BUILTIN\Administrators Allow FullControl
+    ace:   runnervmvmocb\runneradmin Allow FullControl
+    ...plus the three inherited equivalents
+```
+
+So: phase 136's checkpoint 5 wrote real entries under source `DbDataSync`, as `Error` and `Information`
+respectively, and read them back; the source is registered against `Application` and survives being
+registered twice; and phase 135's `icacls` checkpoint really does transfer ownership to `SYSTEM` and add
+an explicit, non-inherited FullControl ACE. Confirmed by reading the output, not by a green checkmark
+and not by arithmetic. **Item 1 is closed.**
+
+One incidental difference worth recording, since it is the kind of thing that misleads later: on the
+elevated runner the explicit grant is `FullControl`, while on a non-elevated developer box the same code
+leaves `Modify, Synchronize` and the owner unchanged — `/setowner` fails there and `/grant` still
+applies. That is the same two-halves distinction the test's own output now makes visible.
+
+**Only item 2 remains**: phase 136's Checkpoint 6, the manual Error 1053 reproduction against a real
+installed service. It was never a test, so no CI run — green, artifact-carrying, or otherwise — closes it.
