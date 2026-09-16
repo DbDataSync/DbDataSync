@@ -2,7 +2,7 @@
 
 [![NuGet](https://img.shields.io/nuget/v/DbDataSync.svg?label=NuGet)](https://www.nuget.org/packages/DbDataSync)
 
-**DbDataSync** · [Install](https://github.com/DbDataSync/DbDataSync/blob/main/docs/install.md) · [Configuration](https://github.com/DbDataSync/DbDataSync/blob/main/docs/configuration.md) · [Getting started](https://github.com/DbDataSync/DbDataSync/blob/main/docs/getting-started.md) · [Building from source](https://github.com/DbDataSync/DbDataSync/blob/main/docs/development.md)
+**DbDataSync** · [Install](https://github.com/DbDataSync/DbDataSync/blob/main/docs/install.md) · [Configuration](https://github.com/DbDataSync/DbDataSync/blob/main/docs/configuration.md) · [Getting started](https://github.com/DbDataSync/DbDataSync/blob/main/docs/getting-started.md) · [Drivers and libraries](https://github.com/DbDataSync/DbDataSync/blob/main/docs/drivers-and-libraries.md) · [Building from source](https://github.com/DbDataSync/DbDataSync/blob/main/docs/development.md)
 
 DbDataSync is a cross-database replication tool. You define a replication in a web UI — the source
 table, the target table, column mappings, a schedule, and how changes are processed — and DbDataSync
@@ -26,6 +26,10 @@ DuckDB is a source only, for query-based sources like Parquet, CSV, an S3 glob, 
 database. It is not a replication target. See `architecture/planning/done/overview.md` for the
 broader ambition and `architecture/detailed-design.md` for the full system design.
 
+The table above is the three built-in drivers. Anything else reachable through an ADO.NET
+provider — MySQL, Oracle, SQLite, Firebird, anything ODBC — plugs in as a source without a DbDataSync
+rebuild, through a YAML descriptor. See [Drivers and libraries](https://github.com/DbDataSync/DbDataSync/blob/main/docs/drivers-and-libraries.md).
+
 ## Install
 
 ```sh
@@ -44,5 +48,7 @@ systemd service, a machine-wide install, or running in a container. The package 
   every flag and environment variable.
 - [**Getting started**](https://github.com/DbDataSync/DbDataSync/blob/main/docs/getting-started.md) —
   set up your first replication, with screenshots.
+- [**Drivers and libraries**](https://github.com/DbDataSync/DbDataSync/blob/main/docs/drivers-and-libraries.md) —
+  add another engine (MySQL, Oracle, ...) without a rebuild.
 - [**Building from source**](https://github.com/DbDataSync/DbDataSync/blob/main/docs/development.md) —
   the dev loop, tests, and repository layout.

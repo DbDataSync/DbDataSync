@@ -1,6 +1,6 @@
 # Building DbDataSync from source
 
-[DbDataSync](../README.md) · [Install](install.md) · [Configuration](configuration.md) · [Getting started](getting-started.md) · **Building from source**
+[DbDataSync](../README.md) · [Install](install.md) · [Configuration](configuration.md) · [Getting started](getting-started.md) · [Drivers and libraries](drivers-and-libraries.md) · **Building from source**
 
 This is for working on DbDataSync itself — contributing, running the dev loop, or building it rather
 than installing the packaged CLI. If you just want to run DbDataSync, see [Install](install.md)

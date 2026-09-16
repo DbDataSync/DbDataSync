@@ -1,6 +1,6 @@
 # Getting started
 
-[DbDataSync](../README.md) · [Install](install.md) · [Configuration](configuration.md) · **Getting started** · [Building from source](development.md)
+[DbDataSync](../README.md) · [Install](install.md) · [Configuration](configuration.md) · **Getting started** · [Drivers and libraries](drivers-and-libraries.md) · [Building from source](development.md)
 
 This walks through setting up your first replication. If you haven't installed DbDataSync yet, see
 [Install](install.md) first. Everything below happens in the web UI, once DbDataSync is running.
@@ -96,3 +96,9 @@ its normal schedule.
 > editor. A config that still has that option behaves as though it had none (full table, unsegmented)
 > until you fill in the mapping's *Default reload segmenting*. There is no automatic conversion between
 > the two.
+
+## Next: Drivers and libraries
+
+Everything above assumed a connection to SQL Server. See [Drivers and libraries](drivers-and-libraries.md)
+for replicating other engines — MySQL, PostgreSQL, Oracle, and anything else reachable through an
+ADO.NET provider — without a DbDataSync rebuild.

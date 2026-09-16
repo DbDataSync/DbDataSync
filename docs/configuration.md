@@ -1,6 +1,6 @@
 # Configuration
 
-[DbDataSync](../README.md) · [Install](install.md) · **Configuration** · [Getting started](getting-started.md) · [Building from source](development.md)
+[DbDataSync](../README.md) · [Install](install.md) · **Configuration** · [Getting started](getting-started.md) · [Drivers and libraries](drivers-and-libraries.md) · [Building from source](development.md)
 
 Every CLI flag and environment variable that configures a running DbDataSync, across every way it can
 be started. There are two separate entry points into the same host, with different defaults — that
@@ -269,7 +269,10 @@ Two things worth being explicit about:
   default — each resolves its connection through the same restorable-library mechanism
   `config driver install` uses. Run `dbdatasync config library install microsoft-data-sqlclient` (for
   `MsSql`) or `dbdatasync config library install npgsql` (for `Postgres`) once; a `StateEngine` set to
-  either without its library installed fails at startup naming that exact command.
+  either without its library installed fails at startup naming that exact command. See
+  [Drivers and libraries](drivers-and-libraries.md) for the general mechanism — the same one a
+  replication's own `MsSql`/`Postgres` connections use, and the one a descriptor driver's own `library:`
+  field points at.
 
 A run failing *either* retention cap is pruned along with its log lines; a run that hasn't finished is
 never pruned regardless of age. Verification results are **not** covered by this pruning — a
