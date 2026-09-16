@@ -1,4 +1,7 @@
 using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using Xunit.Abstractions;
 
 namespace DbDataSync.Cli.Tests;
 
@@ -9,8 +12,9 @@ namespace DbDataSync.Cli.Tests;
 /// <see cref="SystemdServiceTests"/> exists to test safely instead — this file never calls those three
 /// on this real host.
 /// </summary>
-public sealed class ServiceCommandTests : IDisposable
+public sealed class ServiceCommandTests(ITestOutputHelper output) : IDisposable
 {
+    private readonly ITestOutputHelper _output = output;
     private readonly string _root = Directory.CreateTempSubdirectory("dbdatasync-service-command-tests-").FullName;
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
@@ -40,6 +44,13 @@ public sealed class ServiceCommandTests : IDisposable
     /// mocked" precedent for install-time OS interaction — proving ownership actually transfers to
     /// <c>SYSTEM</c> (icacls's own name for <c>LocalSystem</c>) rather than just asserting the method
     /// returns without throwing.
+    /// <para>
+    /// Reports the ACL it actually found, not just the owner. <c>/setowner</c> and <c>/grant</c> are two
+    /// separate operations and only the first is visible in the owner — taking ownership alone gives
+    /// implicit <c>WRITE_DAC</c>, not data access, which is the distinction
+    /// <see cref="ServiceCommand.GrantDataDirectoryAccess"/>'s own doc comment turns on. A failure that
+    /// printed only "expected SYSTEM, got AD\someone" could not tell those two halves apart.
+    /// </para>
     /// </summary>
     [WindowsOnlyFact]
     [SupportedOSPlatform("windows")]
@@ -47,10 +58,24 @@ public sealed class ServiceCommandTests : IDisposable
     {
         ServiceCommand.GrantDataDirectoryAccess(_root, account: null);
 
-        var owner = new System.Security.AccessControl.DirectorySecurity(_root, System.Security.AccessControl.AccessControlSections.Owner)
-            .GetOwner(typeof(System.Security.Principal.NTAccount))!.Value;
+        var security = new DirectorySecurity(
+            _root, AccessControlSections.Owner | AccessControlSections.Access);
+        var owner = security.GetOwner(typeof(NTAccount))!.Value;
+        var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(NTAccount))
+            .Cast<FileSystemAccessRule>()
+            .Select(r => $"{r.IdentityReference.Value} {r.AccessControlType} {r.FileSystemRights}"
+                + (r.IsInherited ? " (inherited)" : ""))
+            .ToList();
 
-        Assert.Contains("SYSTEM", owner, StringComparison.OrdinalIgnoreCase);
+        _output.WriteLine($"'{_root}' after GrantDataDirectoryAccess(account: null):");
+        _output.WriteLine($"  owner: {owner}");
+        foreach (var rule in rules)
+            _output.WriteLine($"  ace:   {rule}");
+
+        Assert.True(
+            owner.Contains("SYSTEM", StringComparison.OrdinalIgnoreCase),
+            $"Expected ownership of '{_root}' to transfer to SYSTEM, but the owner is '{owner}'. "
+            + $"Its {rules.Count} access rules were: {string.Join(" | ", rules)}");
     }
 
 

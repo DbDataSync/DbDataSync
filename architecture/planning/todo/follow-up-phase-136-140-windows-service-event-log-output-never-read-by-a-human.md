@@ -21,10 +21,10 @@ Naming the remaining gap rather than calling it closed."
 
 **What remains open, precisely:**
 
-1. **Nobody has read the literal Event Log / `icacls` text the tests produced.** *(Still open — and
-   harder to close than this doc originally assumed; see "Correction" below.)* The tests assert specific
-   content (an event exists under source `DbDataSync`, with certain fields), and they passed — but the
-   actual log lines have never been read by a human, only inferred from a green checkmark.
+1. **Nobody has read the literal Event Log / `icacls` text the tests produced.** *(Largely addressed —
+   the tests now report what they observed; what remains is only the passing-run case, see "Update"
+   below.)* The tests asserted specific content and passed, but the actual log lines had never been read
+   by a human, only inferred from a green checkmark.
 
 2. **Phase 136's own Checkpoint 6 — a *manual* scenario, not a test** — reproducing phase 135's original
    Error 1053 startup failure against a real installed Windows service, and confirming the diagnostic
@@ -79,18 +79,40 @@ This doc previously said item 1 was "cheap to close once someone has authenticat
 wrong, and was checked rather than assumed: with `gh` authenticated, the `dotnet-windows` job log for a
 real run contains **zero** occurrences of any Event Log content — no written entry text, no `icacls`
 output, nothing matching `DbDataSync started`. `dotnet test`'s console reporter names only failures and
-skips, never what a passing test read back, and `WindowsServiceEventLogTests` prints nothing of its own.
+skips, never what a passing test read back, and the tests printed nothing of their own.
 
-So the CI log can never close item 1, no matter who reads it. The only routes are:
+## Update: the tests now report what they observed
 
-- **Run the tests from an elevated shell on a real Windows box and read the output** — they would still
-  have to be made to print what they assert, or be stepped through in a debugger.
-- **Have the tests emit what they read back**, so a future CI log does carry it. Cheap, and it turns a
-  permanently-unverifiable claim into one any run answers — but it is a deliberate change to tests that
-  currently assert silently, so it is a decision, not an obvious win.
+The real fix was not to read harder but to make the tests say something. Both offenders asserted an
+opaque boolean with a fixed sentence — `Assert.True(RecentEntryExists(marker), "the entry just written
+was not found in the real Application log")` — which is useless in both directions: a failure said
+nothing about what *was* in the log, and a pass showed nothing at all.
 
-Item 1 is the lowest-stakes of the three (a green test is a real signal), but it should stop being
-described as one authentication away from closed.
+They now carry the observed state in the assertion message itself, and write what they scanned to
+`ITestOutputHelper`:
+
+- `WindowsServiceEventLogTests` reports how many `Application` entries it scanned, every entry it found
+  from source `DbDataSync` (timestamp, type, first line), and the matched entry verbatim — then asserts
+  the entry type separately, quoting the message if it is wrong. `EnsureSourceRegistered_CalledTwice…`
+  no longer asserts merely "did not throw": it checks the source really exists afterwards and is bound
+  to `Application`, reporting both. A silently no-op'd registration used to pass it.
+- `ServiceCommandTests.GrantDataDirectoryAccess_LocalSystem…` now reports the owner **and every ACE**.
+  That immediately paid for itself: the first failing run showed
+  `NT AUTHORITY\SYSTEM Allow Modify, Synchronize` present as an explicit, non-inherited ACE while the
+  owner was still `AD\dlshryoc` — i.e. `/grant` had succeeded and only `/setowner` needed elevation.
+  The old message ("expected SYSTEM, got AD\dlshryoc") had been read all session as the whole operation
+  failing. Those are exactly the two halves `GrantDataDirectoryAccess`'s own doc comment distinguishes.
+- The elevation failure explains itself rather than surfacing a raw `SecurityException` from
+  `FindSourceRegistration`: "This process is NOT elevated, and EventLog.SourceExists must search every
+  log (including Security) to answer, which requires Administrator."
+
+**What this closes, and what it does not.** A *failing* run is now fully inspectable, on CI as well as
+locally — VSTest includes a failed test's captured output in the console at ordinary verbosity
+(confirmed by running it). A *passing* run still shows nothing, because the console reporter does not
+print output for passing tests. Closing that last piece needs either
+`--logger "console;verbosity=detailed"` (which would flood a 1,400-test log) or `--logger trx` with the
+`.trx` uploaded as an artifact — the same shape phase 144 already gave the `playwright` job for its JSON
+report, and what phase 140's doc originally wished for. Not done here; it is a CI change, not a test one.
 
 ## Why the rest is worth closing, not just noting again
 

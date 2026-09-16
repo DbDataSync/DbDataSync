@@ -19,6 +19,10 @@ dist-ssr/
 # DbDataSync.Api dev-time default RepoRoot/StateDbPath (auto-created git repo + state db from running
 # the API locally) — runtime state, not source.
 src/DbDataSync.Api/dbdatasync-repo/
+# The same default one command below, created by anything run from the repo root without --repo
+# (DbDataSyncHost falls back to <cwd>/dbdatasync-repo). A stray state.db from a manual CLI run all but
+# committed itself once; this is what stops the next one.
+/dbdatasync-repo/
 
 # IDE
 .vs/
