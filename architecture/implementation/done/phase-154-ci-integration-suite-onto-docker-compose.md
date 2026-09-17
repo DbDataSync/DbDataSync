@@ -1,6 +1,9 @@
 # Phase 154 — `dotnet-integration` onto `docker-compose.yml`, not a second container definition
 
-**Status**: Built, not yet confirmed by a real CI run from this session (see "How to verify").
+**Status**: Complete. Confirmed on a real CI run (`35283992102`) — every job green, `dotnet-integration`'s
+new "Start the databases" step (`docker compose up -d --wait`, no explicit service list) brought up all
+six containers including Oracle, whose bind-mount provisioning ran correctly with no manual `docker exec`
+step — see "Real CI confirmation" below.
 **Plan reference**: none — raised directly in conversation (comparing `dotnet-integration`'s native
 `services:` block against the `playwright` job's own `docker-compose.yml` usage) and agreed on the same
 day. `architecture/implementation/done/phase-153-ci-mariadb-and-oracle-service-containers.md` is the
@@ -66,3 +69,21 @@ Edits `.github/workflows/ci.yml` only — no source code changes.
   and every developer's local `oracle` container already reports "healthy" against, running *after* its
   own init scripts) is the same file `docker-compose.yml` already declares. Should be watched on this
   phase's own first real run rather than assumed.
+
+## Real CI confirmation
+
+Run `35283992102` (this phase's own commit, `cd8c35d`) went fully green — `dotnet`, `dotnet-windows`,
+`dotnet-integration`, `web`, `playwright` all passed. `dotnet-integration`'s "Start the databases" step
+brought up all six containers via `docker compose up -d --wait` in the same run duration ballpark as the
+old `services:`-based job (~8 minutes), and `DbDataSync.Drivers.Oracle.Tests` passed 21/21 with no manual
+provisioning step at all — confirming the bind-mount ordering concern above was unfounded in practice, not
+just in theory.
+
+A second push (the `BulkLoadIntegrationTests` fix, `01fe87f`) triggered run `35284322323`:
+`dotnet-integration` went red again, but on a genuinely unrelated, pre-existing test —
+`DbDataSync.Drivers.MsSql.Tests.Scd2CdcGuaranteedDeliveryIntegrationTests.APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation`
+failed an `Assert.NotEqual` on two CDC-captured timestamps landing identical (a timing/granularity flake
+in SQL Server CDC's own capture job, nothing this phase or the `BulkLoadIntegrationTests` fix touches).
+`DbDataSync.Api.Tests` (which holds `BulkLoadIntegrationTests`) passed 71/71 on that same run, confirming
+that fix. The new CDC flake is out of this phase's scope — noted here for whoever picks it up next, not
+investigated further.

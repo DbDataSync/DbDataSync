@@ -34,7 +34,27 @@ So the order lives here, and is the one to work through:
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 | 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
-Updated 2026-09-17 (latest of all): **153 is done.** CI's `dotnet-integration` job was missing the
+Updated 2026-09-17 (latest of all): **154 is done.** `dotnet-integration`'s `services:` block — a
+hand-maintained second copy of `docker-compose.yml`'s own container topology — is gone, replaced by a
+`docker compose up -d --wait` step (no explicit service list; this job needs every engine the file
+defines). That duplication is exactly what let phase 153's own mariadb/oracle gap happen in the first
+place, and removing it also removed phase 153's manual "Provision Oracle" `docker exec`/`sqlplus`
+workaround entirely — that only ever existed because a `services:` container is created before
+`actions/checkout` puts the repo on disk, so `docker-compose.yml`'s own bind mount of
+`docker/oracle-init/*.sql` couldn't work there; running `docker compose up` after checkout removes the
+reason for the workaround. Confirmed on a real, fully green CI run (`35283992102`) — every job passed,
+Oracle's tests included, with no manual provisioning step at all. Two real, unrelated test bugs found and
+fixed along the way, discovered while verifying phase 153's own first CI run: `LibraryLoadTests`' MySQL
+canary test was stale since phase 147 legitimately gave `DbDataSync.Drivers.MySql.csproj` a real
+(`ExcludeAssets="runtime"`) reference to MySqlConnector, and `BulkLoadIntegrationTests`' race assertion
+assumed an explicit reload always beats a mapping's own auto-triggered first pass — untrue given
+`RunExecutor.ExecuteWorkerAsync` runs both lanes concurrently on the same worker process, confirmed by a
+real CI failure and fixed to accept either legitimate outcome. See
+`architecture/implementation/done/phase-154-ci-integration-suite-onto-docker-compose.md`. A third,
+genuinely unrelated flake (`Scd2CdcGuaranteedDeliveryIntegrationTests`, a CDC timestamp-granularity race)
+turned up on the very next run — out of this phase's scope, noted in its doc for whoever picks it up next.
+
+Updated 2026-09-17 (previously latest): **153 is done.** CI's `dotnet-integration` job was missing the
 MariaDB and Oracle service containers phases 147/148's own new `Category=Integration` tests need — every
 `MariaDb*`/`Oracle*` test in `DbDataSync.Drivers.MySql.Tests`/`DbDataSync.Drivers.Oracle.Tests` had been
 failing on `main` with a connection refused since phase 147 merged. Fixed by adding both services to
