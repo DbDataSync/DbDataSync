@@ -32,8 +32,27 @@ So the order lives here, and is the one to work through:
 | 1 | **151** — deprovisioning: source-side state goes when the config does | split out of 034. Not a Postgres phase — phase 33's trigger-audit shadow tables and triggers are left behind the same way, and have been since they shipped |
 | 2 | **152** — replication slot lag, and slots nobody claims | split out of 034. Smaller than it looks: the statements exist and are tested; the work is an API surface and a place on the connection card |
 | 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
+| 4 | **155** — `pgoutput`: logical decoding with nothing installed on the source | **gated on a product decision, not on engineering** — last deliberately, because if the answer is "managed Postgres" it should never be built at all. See the phase doc's own "Why this might not be worth building" |
 
-Updated 2026-09-17 (latest of all): **153 is done.** CI's `dotnet-integration` job was missing the
+Updated 2026-09-17 (latest of all): **155 is new, and deliberately conditional.** The other half of
+phase 34's own still-open product question, written up so the decision can be made once against a real
+design rather than re-argued. `pgoutput` is the output plugin PostgreSQL's native logical replication
+uses; it ships with Postgres, so it decodes the same WAL through the same replication slots with
+**nothing third-party installed on the source server** — which is the one prerequisite `wal2json`
+carries that an operator may be unable to satisfy without a change-control ticket, and the reason this
+repo now maintains its own Postgres image at all. The prerequisites split better by kind than by count:
+settings (a restart) and SQL objects (a slot, and for `pgoutput` a publication) are the same either
+way; only the third-party-software row differs, and `pgoutput` empties it. **What it does not buy is
+the restart** — `wal_level = logical` is what makes Postgres write the old tuple an update or delete
+needs, so no plugin and no client-side decoding recovers information that was never written; if the
+restart alone is the blocker, `TriggerAudit` is the honest answer. The phase is a *sibling* reader, not
+a rewrite: slot lifecycle, every provisioning check, the expiry handling and the advance-is-off default
+all carry over unchanged, and Npgsql's typed columns remove the JSON conversion layer phase 34 needed.
+Its biggest open question is recorded rather than deferred — `IChangeReader` hands a reader an open
+`DbConnection`, and a replication session cannot use one. See
+`architecture/implementation/todo/phase-155-pgoutput-logical-decoding.md`.
+
+Updated 2026-09-17 (previously latest): **153 is done.** CI's `dotnet-integration` job was missing the
 MariaDB and Oracle service containers phases 147/148's own new `Category=Integration` tests need — every
 `MariaDb*`/`Oracle*` test in `DbDataSync.Drivers.MySql.Tests`/`DbDataSync.Drivers.Oracle.Tests` had been
 failing on `main` with a connection refused since phase 147 merged. Fixed by adding both services to

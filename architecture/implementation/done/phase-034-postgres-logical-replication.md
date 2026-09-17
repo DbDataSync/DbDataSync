@@ -202,8 +202,16 @@ at a target LSN rather than by the query doing it, which means it is not a `SELE
 anything else in this codebase.
 
 **Nothing here has to be undone either way.** If `pgoutput` is wanted, it is a second reader beside this
-one, and the slot lifecycle, the provisioning checks, the value conversion and the environment are all
-shared. The question is only whether it is wanted *before* anyone uses this.
+one, and the slot lifecycle and the provisioning checks are shared. The question is only whether it is
+wanted *before* anyone uses this.
+
+**It is now designed rather than merely named**, so the decision can be made against something real:
+`architecture/implementation/todo/phase-155-pgoutput-logical-decoding.md`. Two things that write-up
+settled and this doc had not. The prerequisites split better by *kind* than by count — settings (the
+restart) and SQL objects (the slot, plus a publication for `pgoutput`) are the same either way, and only
+the third-party-software row differs, which `pgoutput` empties. And the environment is *not* shared
+after all: `docker/postgres-logical/Dockerfile` and the `output_plugin_libraries` check exist solely for
+`wal2json`, so a `pgoutput` reader would let them go if this one were ever retired.
 
 The second open question — **DDL**, since Postgres does not decode it, so a column added to a tracked
 table changes what `wal2json` emits with no warning — is partly answered by construction: a column the

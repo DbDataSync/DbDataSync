@@ -15,6 +15,9 @@ table mapping or a replication removes configuration, and nothing else. What is 
 | A shadow table | Phase 33's `EnableSourceChangeCapture` | Grows for as long as the trigger fires; storage only |
 | An `AFTER` trigger and its `plpgsql` function | Phase 33 | **A write cost on every insert, update and delete on that table, forever** |
 
+If phase 155 (`pgoutput`) is ever built, a **publication** joins that list — same shape as the slot, and
+created the same way.
+
 The slot is the one that can take a production database down, which is why phase 34 surfaced this; the
 trigger is the one that silently costs somebody throughput on a table they may no longer associate with
 this tool at all.
