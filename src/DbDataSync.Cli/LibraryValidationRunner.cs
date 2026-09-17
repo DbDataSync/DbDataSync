@@ -305,10 +305,20 @@ public static class LibraryValidationRunner
         ];
     }
 
+    /// <summary>
+    /// **The timestamp's <see cref="DateTimeKind"/> is not incidental.** The scratch column is
+    /// <c>TIMESTAMP</c> — without a time zone — on every engine but SQL Server, and Npgsql refuses to
+    /// write a <c>Kind=Utc</c> DateTime into one, because doing so would silently drop the fact that it
+    /// was UTC. <c>DateTime.UtcNow</c> was what this used until phase 38, and it worked only because
+    /// Postgres's first-registered staging provider was then the generic batched-INSERT one, where the
+    /// *server* coerces a parameter. Phase 38 made binary COPY the native path, which coerces nothing,
+    /// and this became a real failure — in the harness, not in the driver. Unspecified is the faithful
+    /// value for a column with no zone, and SQL Server's DATETIME2 is indifferent to it either way.
+    /// </summary>
     private static List<ChangeRow> BuildSyntheticRows()
     {
         var schema = new ChangeSchema(["Id", "Name", "UpdatedAt"]);
-        var now = DateTime.UtcNow;
+        var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
         var rows = new List<ChangeRow>();
         for (var i = 0; i < SyntheticNames.Length; i++)
             rows.Add(new ChangeRow(ChangeOperation.Insert, schema, [i + 1, SyntheticNames[i], now]));

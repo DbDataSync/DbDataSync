@@ -91,6 +91,29 @@ than being replaced. It gets three things:
   contract test was deliberately *not* made lenient, because a sweep that silently covers fewer readers
   than it appears to is the exact failure mode that file exists to prevent.
 
+### Two real bugs this phase found, in CI rather than locally
+
+Both were found by the first `dotnet-integration` run, and both are fixed. Neither is in the new
+provider; both are things it was the first caller to expose, which is the argument for having built the
+integration tests around a *comparison* rather than around the new path alone.
+
+- **A staged read leaked its source reader when the consumer threw on the first row.**
+  `ChangeOrdering.DetectAsync` peeks the first row and replays it through an iterator whose
+  `yield return first` sat *outside* its own `try`. An iterator suspended at a `yield` outside its `try`
+  runs no `finally` when disposed — so the source data reader was never closed, and the next thing to
+  use that connection failed with "a command is already in progress" instead of with whatever actually
+  went wrong. Present since phase 132 and reachable by any staging provider that throws on the first
+  row; this phase's own "fails legibly" test is the first thing whose bad value is in row one.
+- **`library validate` was relying on the lenient path's coercion.** Its synthetic row wrote a
+  `DateTime.UtcNow` — `Kind=Utc` — into a `TIMESTAMP` column, which has no time zone. That worked only
+  because Postgres's first-registered staging provider was the batched-`INSERT` one, where the server
+  coerces; making `COPY` the native path (and first-registered means native, per `IDriver`'s own
+  documented convention, exactly as `MsSqlStagingTableProvider` is for SQL Server) turned it into a real
+  failure. The harness is what was wrong, not the driver: `Unspecified` is the faithful Kind for a
+  column with no zone, and SQL Server's `DATETIME2` is indifferent either way. Its own doc comment
+  already carried two "real bug found running this against the real Postgres container" notes; this is
+  the third, and the same lesson each time.
+
 ### What is not verified
 
 **Nothing here was run against a real Postgres on the implementing machine** — no Docker — so the
