@@ -51,8 +51,8 @@ assumed an explicit reload always beats a mapping's own auto-triggered first pas
 `RunExecutor.ExecuteWorkerAsync` runs both lanes concurrently on the same worker process, confirmed by a
 real CI failure and fixed to accept either legitimate outcome. See
 `architecture/implementation/done/phase-154-ci-integration-suite-onto-docker-compose.md`. A third,
-genuinely unrelated flake (`Scd2CdcGuaranteedDeliveryIntegrationTests`, a CDC timestamp-granularity race)
-turned up on the very next run — out of this phase's scope, noted in its doc for whoever picks it up next.
+genuinely unrelated failure turned up on the very next run — out of this phase's scope, written up in
+`architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md`.
 
 Updated 2026-09-17 (previously latest): **153 is done.** CI's `dotnet-integration` job was missing the
 MariaDB and Oracle service containers phases 147/148's own new `Category=Integration` tests need — every

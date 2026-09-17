@@ -80,10 +80,7 @@ provisioning step at all — confirming the bind-mount ordering concern above wa
 just in theory.
 
 A second push (the `BulkLoadIntegrationTests` fix, `01fe87f`) triggered run `35284322323`:
-`dotnet-integration` went red again, but on a genuinely unrelated, pre-existing test —
-`DbDataSync.Drivers.MsSql.Tests.Scd2CdcGuaranteedDeliveryIntegrationTests.APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation`
-failed an `Assert.NotEqual` on two CDC-captured timestamps landing identical (a timing/granularity flake
-in SQL Server CDC's own capture job, nothing this phase or the `BulkLoadIntegrationTests` fix touches).
-`DbDataSync.Api.Tests` (which holds `BulkLoadIntegrationTests`) passed 71/71 on that same run, confirming
-that fix. The new CDC flake is out of this phase's scope — noted here for whoever picks it up next, not
-investigated further.
+`dotnet-integration` went red again, but on a genuinely unrelated, pre-existing test — `DbDataSync.Api.Tests`
+(which holds `BulkLoadIntegrationTests`) itself passed 71/71 on that same run, confirming that fix. The
+unrelated failure is its own follow-up, not this phase's scope: see
+`architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md`.
