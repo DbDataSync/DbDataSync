@@ -107,6 +107,29 @@ Worth noting how it was found: the plan's own verification list asked for integr
 real `wal_level=logical` container, and this is exactly what they were for. Nothing about the reader
 was wrong.
 
+### The provisioning dispatch was never wired up, and three things hid it
+
+The second CI run — the first in which the tests could get past the allowlist — failed all three
+provisioning tests with `Satisfied` and no steps, which is `PlanEnableSourceChangeCaptureAsync`'s
+*default* answer for a reader Kind that needs nothing of the source. The line dispatching
+`PgLogicalSlot` to `PlanLogicalSlotAsync` had never landed at all.
+
+Three things had to line up for that to survive as long as it did, and all three are worth knowing:
+
+1. **The edit silently did nothing.** It was applied with a `perl` substitution whose pattern did not
+   match the file's line endings. A substitution that matches nothing is not an error.
+2. **An unreferenced `private` method is not a compiler warning.** `PlanLogicalSlotAsync` sat there,
+   fully written and called by nothing, and the build stayed clean.
+3. **The blanket default is `Satisfied`.** A missing dispatch does not fail — it reports that there is
+   nothing to provision, which for this reader means no slot gets created, which surfaces much later as
+   every pass failing against a slot that does not exist.
+
+The integration tests caught it the first time they were able to. That is the system working, and it
+is also slower than it needed to be, so there is now a unit test for it:
+`TheLogicalSlotKind_ReachesItsOwnPlanner_RatherThanTheNothingToDoDefault` asserts this Kind gets far
+enough to touch the connection rather than being answered from the default — verified by removing the
+dispatch again and watching it fail.
+
 ## What became its own phase
 
 Neither of these is a boundary that was considered and declined — both are work that should genuinely

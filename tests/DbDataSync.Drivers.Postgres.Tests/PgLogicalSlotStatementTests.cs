@@ -1,6 +1,7 @@
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Sql;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Generic;
 using Xunit;
 
 namespace DbDataSync.Drivers.Postgres.Tests;
@@ -169,5 +170,57 @@ public sealed class PgLogicalSlotStatementTests
 
         Assert.Equal("false", advance.Default);
         Assert.Equal(ParameterType.Bool, advance.Type);
+    }
+
+    /// <summary>
+    /// `PgLogicalSlot` reaches the slot planner at all — which sounds too small to test, and is the
+    /// bug this file gained the test for.
+    /// <para>
+    /// `PostgresProvisioner.PlanEnableSourceChangeCaptureAsync` answers `Satisfied` with no steps for
+    /// every reader Kind that needs nothing of the source, and that blanket answer is the *default*.
+    /// A Kind whose dispatch line is missing therefore does not fail — it silently reports that there
+    /// is nothing to provision, which for this reader means no slot, which means every pass failing
+    /// later with a message about a slot that does not exist. Phase 34 shipped exactly that: the
+    /// dispatch line never landed, an unreferenced private method is not a compiler warning, and the
+    /// only thing that could catch it was an integration test needing a real server.
+    /// </para>
+    /// <para>
+    /// Asserted by what it *cannot* be. A closed connection cannot produce a real plan, so the honest
+    /// claim here is that this Kind gets as far as touching the connection rather than being answered
+    /// from the default — anything but `Satisfied`-with-no-steps proves the dispatch happened.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task TheLogicalSlotKind_ReachesItsOwnPlanner_RatherThanTheNothingToDoDefault()
+    {
+        using var closed = new Npgsql.NpgsqlConnection();
+        var request = new ProvisioningRequest(
+            ProvisioningActions.EnableSourceChangeCapture,
+            new TableRef { ConnectionName = "src", Database = "d", Schema = "public", Table = "orders" },
+            PostgresDriverKinds.LogicalSlot,
+            new Dictionary<string, string>(),
+            []);
+
+        await Assert.ThrowsAnyAsync<Exception>(
+            () => PostgresProvisioner.PlanAsync(closed, request, CancellationToken.None));
+    }
+
+    /// <summary>The other side of the same claim: a Kind that genuinely needs nothing of the source is
+    /// still answered from the default without touching the connection at all.</summary>
+    [Fact]
+    public async Task AKindThatNeedsNothingOfTheSource_IsSatisfiedWithoutOpeningAnything()
+    {
+        using var closed = new Npgsql.NpgsqlConnection();
+        var request = new ProvisioningRequest(
+            ProvisioningActions.EnableSourceChangeCapture,
+            new TableRef { ConnectionName = "src", Database = "d", Schema = "public", Table = "orders" },
+            GenericDriverKinds.Watermark,
+            new Dictionary<string, string>(),
+            []);
+
+        var plan = await PostgresProvisioner.PlanAsync(closed, request, CancellationToken.None);
+
+        Assert.Equal(ProvisioningState.Satisfied, plan.State);
+        Assert.Empty(plan.Steps);
     }
 }

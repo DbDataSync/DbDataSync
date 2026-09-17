@@ -38,6 +38,9 @@ public static class PostgresProvisioner
     private static async Task<ProvisioningPlan> PlanEnableSourceChangeCaptureAsync(
         DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)
     {
+        if (request.ReaderKind == PostgresDriverKinds.LogicalSlot)
+            return await PlanLogicalSlotAsync(connection, request, cancellationToken);
+
         if (request.ReaderKind != GenericDriverKinds.TriggerAudit)
             return new ProvisioningPlan(ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Satisfied, [], []);
 
