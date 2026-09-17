@@ -12,23 +12,25 @@ or on demand.
 A replication's source and target can be different engines — a SQL Server source can feed a
 PostgreSQL target, for example. Support varies by engine:
 
-| Feature                      | SQL Server                     | PostgreSQL               | DuckDB           |
-| ---------------------------- | ------------------------------ | ------------------------ | ---------------- |
-| Source (read from)           | Yes                            | Yes                      | Yes (query only) |
-| Target (write to)            | Yes                            | Yes                      | No               |
-| Incremental sync             | Native (Change Tracking / CDC) | Watermark column         | N/A              |
-| Backfill / batch reload      | Yes                            | Yes                      | N/A              |
-| Bulk staging                 | Native (SqlBulkCopy)           | Generic (batched insert) | N/A              |
-| Delete detection (reconcile) | Yes                            | Yes                      | N/A              |
-| SCD2 target                  | Yes                            | Yes                      | N/A              |
+| Feature                       | SQL Server                     | PostgreSQL                | MySQL / MariaDB           | Oracle                            | DuckDB           |
+| ------------------------------ | ------------------------------- | -------------------------- | --------------------------- | ----------------------------------- | ------------------ |
+| Source (read from)            | Yes                             | Yes                        | Yes                         | Yes                                  | Yes (query only) |
+| Target (write to)             | Yes                             | Yes                        | Yes                         | Yes                                  | No               |
+| Incremental sync              | Native (Change Tracking / CDC)  | Watermark column            | Watermark column             | Native (Flashback Version Query)    | N/A              |
+| Backfill / batch reload       | Yes                             | Yes                        | Yes                         | Yes                                  | N/A              |
+| Bulk staging                  | Native (SqlBulkCopy)            | Generic (batched insert)    | Generic (batched insert)     | Generic (batched insert)            | N/A              |
+| Delete detection (reconcile)  | Yes                             | Yes                        | Yes                         | Yes                                  | N/A              |
+| SCD2 target                   | Yes                             | Yes                        | Yes                         | Yes                                  | N/A              |
 
+Every engine above also offers `TriggerAudit`, a portable trigger-based option — see
+[Replication concepts](https://github.com/DbDataSync/DbDataSync/blob/main/docs/replication-concepts.md#reader-kinds).
 DuckDB is a source only, for query-based sources like Parquet, CSV, an S3 glob, or an attached
 database. It is not a replication target. See `architecture/planning/done/overview.md` for the
 broader ambition and `architecture/detailed-design.md` for the full system design.
 
-The table above is the three built-in drivers. Anything else reachable through an ADO.NET
-provider — MySQL, Oracle, SQLite, Firebird, anything ODBC — plugs in as a source without a DbDataSync
-rebuild, through a YAML descriptor. See [Drivers and libraries](https://github.com/DbDataSync/DbDataSync/blob/main/docs/drivers-and-libraries.md).
+The table above is the five built-in drivers. Anything else reachable through an ADO.NET
+provider — SQLite, Firebird, anything ODBC — plugs in as a source without a DbDataSync rebuild, through
+a YAML descriptor. See [Drivers and libraries](https://github.com/DbDataSync/DbDataSync/blob/main/docs/drivers-and-libraries.md).
 
 ## Install
 

@@ -34,7 +34,18 @@ So the order lives here, and is the one to work through:
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 | 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
-Updated 2026-09-17 (latest of all): **148 is done.** Oracle driver (`DbDataSync.Drivers.Oracle`) plus
+Updated 2026-09-17 (latest of all): **149 is done.** Docs updated for MySQL/MariaDB and Oracle now that
+phases 147/148 actually shipped — `docs/replication-concepts.md`, `docs/drivers-and-libraries.md`,
+`README.md`, and both `additional-database-drivers.md`/`change-tracking-strategies.md`'s own outcome
+tables. The plan predicted three new reader-kind rows; shipped as one (MySQL's and Oracle's trigger-audit
+options are the same existing `TriggerAudit` Kind Postgres/SQL Server already use, not new ones — only
+`OracleFlashback` needed a row of its own). One finding the plan didn't anticipate at all: the MySQL
+descriptor worked example, written before phase 147 existed, had become a stale, false claim ("an engine
+no part of DbDataSync's own compiled code references at all") now that MySQL is a compiled built-in —
+fixed by reframing the section rather than deleting a still-useful descriptor-mechanism walkthrough. No
+source code changed. See `architecture/implementation/done/phase-149-mysql-oracle-docs-update.md`.
+
+Updated 2026-09-17 (previously latest): **148 is done.** Oracle driver (`DbDataSync.Drivers.Oracle`) plus
 trigger-audit *and* Flashback Version Query change tracking, verified against a real
 `gvenzl/oracle-free:23-slim` instance throughout the build. Five real findings, more than any prior driver
 phase: `OVERRIDING SYSTEM VALUE` does not parse on Oracle at all (confirmed via `sqlplus`) — a

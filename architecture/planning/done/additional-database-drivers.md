@@ -111,9 +111,15 @@ everything at once.
 | 19 | Connection testing as an opt-in driver capability — placed here so a new driver arrives to an interface that already has it | `implementation/todo/phase-019-connection-testing.md` |
 | 20 | **PostgreSQL driver** — the first cross-engine replication | `implementation/todo/phase-020-postgres-driver.md` |
 | 21 | Postgres binary `COPY` staging — and with it, the answer `columnar-change-batches` is waiting for | not yet written |
-| 22 | Connection model for DSN/URL engines, and `AuthMode` beyond SqlAuth/IntegratedAuth | not yet written |
-| 23–24 | MySQL, then Oracle — Oracle exercises the most divergence, so it is the better test of what 17–18 extracted | not yet written |
+| 22 | Connection model for DSN/URL engines, and `AuthMode` beyond SqlAuth/IntegratedAuth | resolved without its own phase — phase 31 (connection addressing) settled `AuthMode.None` for exactly this (Oracle wallets, Postgres `.pgpass`, MySQL auth plugins) well before any of 23–24 needed it. ODBC/JDBC's own DSN/URL shape is still genuinely open. |
+| 23–24 | MySQL, then Oracle — Oracle exercises the most divergence, so it is the better test of what 17–18 extracted | **built as phases 147 and 148, not 23/24** — the intervening phase numbers went to other work first. Order was MySQL-then-Oracle in practice too, matching this row's own plan, not the reversed order `change-tracking-strategies.md`'s own "Suggested order" section had settled on. See `implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`/`phase-148-oracle-driver-trigger-audit-and-flashback.md` — both name real findings (Oracle's did turn out to exercise the most divergence, exactly as predicted here: five genuine engine-behavior surprises against MySQL's one). |
 | 25–26 | ODBC, then JDBC via `ClrKernel.Database.Provider.Jdbc`. Both are *meta*-drivers reaching an arbitrary engine, so neither can assume a dialect; both want the generic paths that 18 establishes | not yet written |
+
+**The "metadata browsing is per-engine" question is also settled for MySQL and Oracle specifically**,
+by phases 147/148: MySQL's database *is* its schema (no third level), so a browsed table's schema and
+database are the same value by construction; Oracle's database (service name) and schema (`ALL_TAB_COLUMNS.OWNER`)
+are genuinely separate, matching `TableRef`'s own three-level shape directly with no special-casing
+needed. Still open for ODBC/JDBC, which have no fixed shape to assume at all.
 
 Phase 16 (replication endpoints) sits ahead of all of this — it is a redesign follow-up with no driver
 dependency, and it changes the config model, so it is better done before five drivers are reading it.

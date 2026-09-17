@@ -194,4 +194,11 @@ post-write acknowledgement hook it left open is built in **phase 33**.
 | --- | --- |
 | `PositionExpiredException` + Resync recovery | `implementation/todo/phase-032-mssql-cdc.md` |
 | `IPositionAcknowledging` | `implementation/todo/phase-033-trigger-audit-change-tracking.md` |
-| the suggested order (CDC → trigger audit → Postgres → Oracle → MySQL) | followed, with trigger audit promoted ahead of Postgres because it serves every engine at once |
+| the suggested order (CDC → trigger audit → Postgres → Oracle → MySQL) | followed, with trigger audit promoted ahead of Postgres because it serves every engine at once, and with MySQL and Oracle's *relative* order reversed from what's suggested here (MySQL shipped first, as phase 147; Oracle followed, as phase 148) — no argument against the suggested Oracle-then-MySQL order, just the order the work was picked up in |
+
+MySQL's and Oracle's own trigger-audit options — the mechanism `TriggerAuditReader`/`IPositionAcknowledging`
+above exist for — are `implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md` and
+`implementation/done/phase-148-oracle-driver-trigger-audit-and-flashback.md`. Oracle's phase also builds
+Flashback Version Query (this doc's own `change-tracking-oracle.md` Option 1) in the same pass; LogMiner
+(Option 2) and MySQL's binlog alternative both remain deferred, unchanged from `change-tracking-mysql.md`'s
+and `change-tracking-oracle.md`'s own "ruled out for now" reasoning.

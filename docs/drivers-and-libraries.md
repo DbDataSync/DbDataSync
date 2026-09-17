@@ -10,9 +10,9 @@ Two separate concepts, easy to conflate because they usually show up together:
   machine that needs it, the first time something asks for it.
 - **A driver** is what actually runs a replication against one engine — the readers, staging providers,
   and writers DbDataSync's pipeline dispatches to for a given `DriverType`. There are three kinds: the
-  three **built-in** drivers compiled into the tool (`MsSql`, `Postgres`, `DuckDb`), any number of
-  **descriptor** drivers (a YAML file, no rebuild needed), and any number of **compiled plugin** drivers
-  (your own compiled `IDriver`, a heavier lift covered only briefly below).
+  five **built-in** drivers compiled into the tool (`MsSql`, `Postgres`, `MySql`, `Oracle`, `DuckDb`), any
+  number of **descriptor** drivers (a YAML file, no rebuild needed), and any number of **compiled plugin**
+  drivers (your own compiled `IDriver`, a heavier lift covered only briefly below).
 
 Every driver — built-in or descriptor — names exactly one library its connectivity depends on
 (`IDriver.RequiredLibraryId` in code; the descriptor's own `library:` field in YAML). Trying to use a
@@ -100,18 +100,20 @@ either one is visible to the other.
 
 ### Built-in drivers
 
-Compiled into the tool — no install step for the driver itself, ever. Two of the three still need their
+Compiled into the tool — no install step for the driver itself, ever. Four of the five still need their
 library installed before they can actually connect to anything, exactly like a descriptor driver does:
 
 | `DriverType` | library it needs | notes |
 | --- | --- | --- |
 | `MsSql` | `microsoft-data-sqlclient` | Change Tracking, CDC, and TriggerAudit readers |
 | `Postgres` | `npgsql` | logical replication is still open work — see `phase-034-postgres-logical-replication.md` |
+| `MySql` | `mysql-connector` | MySQL and MariaDB, one driver — Watermark, TriggerAudit, BatchReload and KeyReconcile readers; the binlog-based native alternative is still open work, see `architecture/planning/todo/change-tracking-mysql.md` |
+| `Oracle` | `oracle-managed-data-access` | Watermark, TriggerAudit, BatchReload, KeyReconcile, and Flashback Version Query readers; LogMiner is still open work, see `architecture/planning/todo/change-tracking-oracle.md` |
 | `DuckDb` | `duckdb` (installs itself — see above) | embedded, file path or `:memory:`, nothing to authenticate to |
 
-Configuring a connection with `DriverType: MsSql`/`Postgres` before its library is installed doesn't
-fail at save time — the config itself is valid — it fails the first time something actually tries to
-open it, with:
+Configuring a connection with `DriverType: MsSql`/`Postgres`/`MySql`/`Oracle` before its library is
+installed doesn't fail at save time — the config itself is valid — it fails the first time something
+actually tries to open it, with:
 
 ```
 Library 'microsoft-data-sqlclient' is not installed. Install it with `dbdatasync config library install microsoft-data-sqlclient`.
@@ -206,18 +208,25 @@ implementation yourself — and is out of scope for this page beyond the command
 
 ### From the web console
 
-Admin → **Drivers** lists every registered driver — the three built-ins plus whatever descriptors or
+Admin → **Drivers** lists every registered driver — the five built-ins plus whatever descriptors or
 compiled plugins are on disk — and offers an "Add" flow for the same starter catalog `--from` draws
 from (`POST /api/drivers/from-catalog`). Admin → **Libraries** (above) is where the library a new
 driver needs gets installed, either before or as part of adding the driver. A newly installed driver
 needs a process restart to take effect — both the API and any already-running `TaskRunner` worker
 loaded their driver set once, at startup.
 
-## Worked example: MySQL, with no rebuild
+## Worked example: a descriptor driver, with no rebuild
 
-This walks the same path `DescriptorDriverTests`/`DescriptorDriverApiFactory` prove end to end: a real
-MySQL source, replicating into a SQL Server target, using an engine no part of DbDataSync's own compiled
-code references at all.
+**For a real MySQL or MariaDB replication, use the built-in `MySql` driver above instead** — it has
+real provisioning support, doesn't need a restart after installing its library, and offers the same
+readers this walkthrough's descriptor does plus `KeyReconcile`. This section keeps MySQL as its example
+engine anyway, because `mysql.generic` is the one starter template `KnownDrivers.cs` ships — but what
+it is actually demonstrating is the *descriptor mechanism itself*, for an engine that has no built-in or
+descriptor coverage yet (an engine reachable through `System.Data.Odbc`, Firebird, or any other ADO.NET
+provider DbDataSync has never seen). The mechanics below are unchanged and still real: this is the same
+path `DescriptorDriverTests`/`DescriptorDriverApiFactory` prove end to end, and `mysql.generic` genuinely
+is a driver no part of DbDataSync's own compiled code references — it just happens to duplicate, through
+a slower path, an engine that also has a compiled driver now.
 
 1. **Install the driver from the starter template.** This installs the `mysql-connector` library (if
    not already installed) and writes `<RepoRoot>/drivers/mysql.generic/driver.yaml`:
@@ -254,7 +263,7 @@ code references at all.
    goes through the same `information_schema` path every descriptor driver uses.
 
 7. **Confirm it's really a descriptor driver, not a built-in one**: `GET /api/drivers` lists
-   `mysql.generic` with `"builtIn": false, "source": "descriptor"` alongside the three built-ins — added,
+   `mysql.generic` with `"builtIn": false, "source": "descriptor"` alongside the five built-ins — added,
    not substituted.
 
 From here, running, backfilling, and monitoring this replication works exactly like any other — nothing
