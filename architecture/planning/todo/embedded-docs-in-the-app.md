@@ -55,19 +55,25 @@ an operator and isn't shipped either; a real, pre-existing bug this plan would a
 3. **Serving.** Ship the raw `.md` files as static assets under `wwwroot/docs/`, fetched directly by the
    SPA — no new API controller needed purely to serve bytes that `UseStaticFiles` already knows how to
    serve.
-4. **Rendering.** `Markdown.tsx`'s restricted subset can't render these pages as written (no tables). Two
-   real options, genuinely open:
-   - Extend `Markdown.tsx` itself to add table/image support, keeping its existing no-`dangerouslySetInnerHTML`,
-     restricted-link-scheme posture.
-   - Bring in a real markdown library (e.g. `react-markdown` + `remark-gfm`) scoped to a new Docs viewer
-     only — leaving `Markdown.tsx` exactly as it is for Notes.
+4. **Rendering — resolved 2026-09-16: adopt a real renderer.** `Markdown.tsx`'s restricted subset can't
+   render these pages as written (no tables — every doc page this session is full of them). Bring in
+   `react-markdown` + `remark-gfm` (tables, strikethrough, task lists — the GitHub-flavored subset these
+   docs are already written in) for a new, shared rich-rendering component, used unconditionally for the
+   Docs viewer.
 
-   Leaning toward the second: these threat models are genuinely different. `Markdown.tsx` exists because
-   Notes are *operator-typed, stored input rendered in someone else's session* — real stored-XSS risk.
-   Embedded docs are *developer-authored content baked into the build*, no different in trust level from
-   the SPA's own JavaScript. Hand-extending a note-renderer to full CommonMark-with-tables is real,
-   avoidable engineering effort for a problem a maintained library already solves — the safety
-   justification for reinventing it doesn't carry over.
+   The concrete injection-defense story, not just "a library instead of hand-rolled code": `react-markdown`
+   never uses `dangerouslySetInnerHTML` — it parses markdown into a React element tree directly. Left
+   without the `rehype-raw` plugin (which this plan deliberately does not add), embedded raw HTML in the
+   *source* markdown is never interpreted as markup at all — it's inert text, not a DOM injection vector,
+   by construction rather than by a sanitization pass run afterward. Link and image URLs still need the
+   same scheme allowlist `Markdown.tsx` already correctly enforces (`http:`/`https:`/`mailto:`, anything
+   else rendered as literal text) — reused, not reinvented, since `remark-gfm`/`react-markdown` don't
+   police URL schemes on their own.
+
+   This is a genuinely different trust level than Notes: embedded docs are developer-authored content
+   baked into the build, no different in kind from the SPA's own JavaScript. See "Extending rich rendering
+   to Notes," below, for why Notes get this same renderer only as an explicit, warned-about opt-in rather
+   than unconditionally.
 5. **Navigation.** A new top-level nav destination, not under Admin — `AdminTabs`' four destinations are
    all Admin-only, and docs should be readable by a Viewer-role user too. Where exactly (its own route,
    or folded into an existing non-admin area) is open.
@@ -82,6 +88,31 @@ an operator and isn't shipped either; a real, pre-existing bug this plan would a
    `AdminDriversPage.tsx`'s broken pointer at an internal, unshipped planning doc gets corrected to point
    at the real, shipped `drivers-and-libraries.md`.
 
+## Extending rich rendering to Notes (opt-in, settled 2026-09-16)
+
+The same renderer, built for Docs, should also be available for `NotesPanel.tsx`'s own content — but
+never unconditionally, and never silently. `Markdown.tsx`'s restricted subset stays the *default* for
+Notes; rich rendering is a deployment-wide, explicit opt-in, off by default:
+
+- **A new setting**, tentatively `DbDataSync:Notes:RichMarkdown` (bool, default `false`) — an app-level
+  config key, the same shape as every other `DbDataSync:*` deployment setting, not a per-replication or
+  per-mapping choice. This is exactly the kind of setting `cli-setup-and-api-parity.md` is about: it
+  should be reachable consistently from Admin Config (web), `setup`, and the CLI, not added to only one
+  surface as an afterthought.
+- **A visible, persistent indicator, not a one-time confirmation.** Two places, both while the setting is
+  on: (1) where the setting itself is toggled (Admin Config / the relevant `setup` tab), a plain-language
+  warning next to the control — Notes are operator-authored, stored input rendered in *other* users'
+  sessions, and richer rendering widens that surface even with strong injection defenses (a convincing
+  crafted link, a future library issue) — this is a real, if bounded, trade-off, not a solved problem; (2)
+  wherever Notes are actually shown while the setting is active, a small, ambient badge/indicator near the
+  panel — a reminder that persists for as long as the setting does, not something seen once at toggle-time
+  and then forgotten.
+- **The same shared component, the same defenses.** No separate, weaker sanitization path for Notes — if
+  rich rendering is on, Notes get the identical `react-markdown` + `remark-gfm`, no-`rehype-raw`,
+  scheme-allowlisted renderer Docs always uses. The opt-in is about *exposure* (whether stored,
+  multi-author content gets the richer renderer at all), not about a different, less-defended
+  implementation for Notes specifically.
+
 ## What this does not do
 
 - **Not editable in the app.** `docs/*.md` in the git repo stays the one source of truth; this is a
@@ -92,14 +123,18 @@ an operator and isn't shipped either; a real, pre-existing bug this plan would a
   it later if the docs set grows enough to need it.
 - **Not a live version-mismatch resolver.** An operator looking at embedded docs always sees exactly what
   shipped with their running instance — there is no "compare against latest" feature here.
+- **Does not make rich rendering the default for Notes.** `Markdown.tsx`'s restricted subset stays the
+  out-of-the-box behavior; rich rendering is opt-in and warned about, never silently turned on.
+- **Does not attempt a second, Notes-specific sanitization scheme.** One renderer, one defense posture,
+  shared by both consumers — see above.
 
 ## Open questions (UNDECIDED)
 
-- **Extend `Markdown.tsx` vs. adopt a real markdown library for the Docs viewer** — leaning toward
-  adopting one (see above), but this is a new runtime dependency and worth a deliberate decision, not a
-  default.
 - **Where in navigation** — leaning toward a new top-level destination outside Admin (Viewer-visible),
   exact placement undecided.
+- **`DbDataSync:Notes:RichMarkdown`'s exact key name, and exactly which two places the ambient indicator
+  appears** — the toggle location and the shape of the persistent in-panel badge aren't designed in
+  detail here, just the requirement that both exist.
 - **Screenshots.** `getting-started.md`'s images are hosted on `raw.githubusercontent.com`, not local
   files — embedding the page as-is means those images still need network access even once the text is
   offline-available. Leaning: leave them pointing at GitHub for now (the text is the part worth having
