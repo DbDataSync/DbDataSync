@@ -99,6 +99,15 @@ Server and Postgres, and everything engine-specific goes through `SqlDialect` as
 `MsSqlCdcReader` is still the only reader that produces an ordered batch, so Postgres portability is
 asserted in the statement text and not yet by a running server.
 
+**Oracle is a real exception and is worth naming**, now that phase 148 has added a driver for it. Two
+of these statements are `WITH … UPDATE` and `WITH … INSERT`, and Oracle accepts the second but **not
+the first** — subquery factoring prefixes a `SELECT`, and an `UPDATE` there has no `WITH` clause at
+all. It costs nothing today, because the duplicate path only runs for a batch that carries
+`ChangeOrdering` and no Oracle reader produces one. It would stop costing nothing the moment one did,
+which is the kind of thing worth finding in a doc rather than in a failing pass. (The table aliases
+here carry no `AS`, per the rule phase 148 found and `TriggerAuditStatement` states — that half is
+already portable.)
+
 **Whether to keep a cheap up-front guard**, or let `WHERE __DS_KeyCount > 1` do the filtering with no
 separate query. **Kept — and the reason is not the duplicate statements, it is the bulk ones.**
 `BuildDuplicateKeyExclusion` is only worth adding to the bulk close/open when there is something to

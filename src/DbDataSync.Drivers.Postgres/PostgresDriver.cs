@@ -11,13 +11,18 @@ namespace DbDataSync.Drivers.Postgres;
 /// <summary>
 /// PostgreSQL, on Npgsql.
 /// <para>
-/// Almost nothing here is its own. Every reader, every writer and one of the two staging providers is
-/// <c>DbDataSync.Drivers.Generic</c>'s, driven by <see cref="PostgresDialect"/>; the exception is
-/// <see cref="PgCopyStagingProvider"/>, added by phase 38. That is the claim phases 17 and 18 made — a
-/// new engine is a dialect, a connection factory and a catalog — and it held for twenty phases. What
-/// broke it is worth naming: <c>COPY … FROM STDIN (FORMAT BINARY)</c> is a protocol on the connection
-/// rather than a statement, so there was no dialect hook it could have been expressed through. The
-/// generic staging provider is still registered alongside it.
+/// Most of this is not its own. Every writer, four of the five readers and one of the two staging
+/// providers is <c>DbDataSync.Drivers.Generic</c>'s, driven by <see cref="PostgresDialect"/>. That is
+/// the claim phases 17 and 18 made — a new engine is a dialect, a connection factory and a catalog —
+/// and it held unbroken for twenty phases.
+/// </para>
+/// <para>
+/// **Two things broke it, and what broke it is the same thing twice**: a mechanism that is not a
+/// statement, so no <see cref="SqlDialect"/> hook could have expressed it.
+/// <see cref="PgCopyStagingProvider"/> (phase 38) is a protocol on the connection, and
+/// <see cref="PgLogicalSlotReader"/> (phase 34) reads a Postgres function no other engine has. The
+/// generic staging provider stays registered alongside the first, as the fallback for anything binary
+/// <c>COPY</c> will not carry.
 /// </para>
 /// </summary>
 public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvider, ITableCatalogProvider, IProvisioner, ITableRowEstimator

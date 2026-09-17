@@ -9,6 +9,11 @@ namespace DbDataSync.Drivers.Postgres;
 /// which *function* is called (<c>peek</c>, never <c>get</c>), and the difference between the safe one
 /// and the one that loses data is four characters.
 /// </para>
+/// <para>
+/// Table aliases carry no <c>AS</c>, following the rule <c>TriggerAuditStatement</c> states — these
+/// statements are Postgres-only, which accepts either, but a reader copying the shape into the generic
+/// layer should not find a trap here.
+/// </para>
 /// </summary>
 public static class PgLogicalSlotStatement
 {
@@ -49,7 +54,7 @@ public static class PgLogicalSlotStatement
                s.confirmed_flush_lsn::text,
                COALESCE(s.confirmed_flush_lsn > @stored::pg_lsn, false) AS past_stored,
                COALESCE(pg_current_wal_lsn() - s.confirmed_flush_lsn, 0)::text AS retained_bytes
-        FROM pg_replication_slots AS s
+        FROM pg_replication_slots s
         WHERE s.slot_name = @slot;
         """;
 
@@ -77,7 +82,7 @@ public static class PgLogicalSlotStatement
                  @slot::name, @uptoLsn::pg_lsn, NULL,
                  'format-version', '2',
                  'include-transaction', 'false',
-                 'add-tables', @table) AS p;
+                 'add-tables', @table) p;
         """;
 
     /// <summary>
@@ -161,7 +166,7 @@ public static class PgLogicalSlotStatement
                s.restart_lsn::text,
                s.confirmed_flush_lsn::text,
                COALESCE(pg_current_wal_lsn() - s.confirmed_flush_lsn, 0)::text AS retained_bytes
-        FROM pg_replication_slots AS s
+        FROM pg_replication_slots s
         WHERE s.slot_type = 'logical' AND s.slot_name LIKE '{SlotNamePrefix}%'
         ORDER BY s.slot_name;
         """;
@@ -182,8 +187,8 @@ public static class PgLogicalSlotStatement
     public const string ReplicaIdentity = """
         SELECT c.relreplident,
                EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.oid AND i.indisprimary) AS has_primary_key
-        FROM pg_class AS c
-        JOIN pg_namespace AS n ON n.oid = c.relnamespace
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = @schema AND c.relname = @table;
         """;
 

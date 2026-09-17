@@ -22,9 +22,10 @@ get in differs, so every writer downstream is unaffected and a mapping can be mo
 without anything else noticing. The interchangeability is what the integration tests assert — one test
 body, run against both Kinds.
 
-This is the **first thing `PostgresDriver` has ever registered that is not
-`DbDataSync.Drivers.Generic`'s**, and the reason is worth recording: `COPY` is a protocol on the
-connection, not a statement. There is nothing for `SqlDialect` to render, so there was no hook it could
+This is the **first thing `PostgresDriver` had ever registered that was not
+`DbDataSync.Drivers.Generic`'s** (phase 34, later the same day, added the second — see that
+retrospective), and the reason is worth recording: `COPY` is a protocol on the connection, not a
+statement. There is nothing for `SqlDialect` to render, so there was no hook it could
 have gone through. Phases 17 and 18's claim — a new engine is a dialect, a connection factory and a
 catalog — held for twenty phases and this is the shape of its first exception.
 
