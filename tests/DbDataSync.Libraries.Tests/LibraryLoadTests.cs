@@ -5,9 +5,21 @@ using Xunit;
 namespace DbDataSync.Libraries.Tests;
 
 /// <summary>
-/// Proves the whole point: <c>MySqlConnector</c> is referenced by **no** <c>.csproj</c> in this
-/// solution, yet <c>library install</c> restores it, <see cref="LibraryRegistry"/> loads it, and a
-/// factory it hands out opens a real connection to a MySQL container the build never compiled against.
+/// Proves the point phase 109c established: <c>library install</c> restores <c>MySqlConnector</c>,
+/// <see cref="LibraryRegistry"/> loads it, and a factory it hands out opens a real connection to a MySQL
+/// container, all with no compile-time reference in this solution.
+/// <para>
+/// **Phase 147 changed one half of that**: <c>DbDataSync.Drivers.MySql.csproj</c> now carries a real
+/// <c>PackageReference Include="MySqlConnector" ... ExcludeAssets="runtime"</c> — the built-in driver
+/// needs the typed provider API at compile time, the same way <c>DbDataSync.Drivers.MsSql.csproj</c>
+/// references <c>Microsoft.Data.SqlClient</c>. <c>ExcludeAssets="runtime"</c> is what keeps the actual
+/// invariant this class demonstrates true: the assembly still isn't physically shipped by that
+/// reference, and still has to be loadable at first touch through an installed library's armed resolver
+/// (phase 144's <c>BuiltInDriverLibraries</c>) — a compile-time reference to the typed API, not a
+/// runtime dependency on the package being present. This suite's own tests below still use
+/// MySqlConnector purely as the generic library-install mechanism's example package, independent of
+/// that one driver project.
+/// </para>
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class LibraryLoadTests : IAsyncLifetime
@@ -27,7 +39,7 @@ public sealed class LibraryLoadTests : IAsyncLifetime
     }
 
     [Fact]
-    public void MySqlConnector_IsReferencedByNoCsprojInTheSolution()
+    public void MySqlConnector_IsReferencedOnlyByItsOwnBuiltInDriver_WithRuntimeAssetsExcluded()
     {
         var repoRoot = FindRepoRoot();
         var csprojFiles = Directory.EnumerateFiles(repoRoot, "*.csproj", SearchOption.AllDirectories)
@@ -35,11 +47,36 @@ public sealed class LibraryLoadTests : IAsyncLifetime
                      && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
 
         // A real <PackageReference Include="MySqlConnector" ...>, not a bare substring — MySqlConnector
-        // is this whole test suite's own canary example of "restored, never compiled against" (phase
-        // 109c), so a comment explaining that pattern elsewhere is expected to name it too, the same way
+        // is this whole test suite's own canary example of "restored, only ever compiled against by its
+        // one built-in driver (and that driver's own test project)" (phase 109c, narrowed by phase 147),
+        // so a comment explaining that pattern elsewhere is expected to name it too, the same way
         // DbDataSync.State.Tests.csproj's own comment on LibraryInstallFixture does.
+        //
+        // Exactly two legitimate references, the same split every other built-in driver's package has
+        // (e.g. Microsoft.Data.SqlClient in DbDataSync.Drivers.MsSql.csproj vs. DbDataSync.Api.Tests.csproj):
+        // the driver itself, ExcludeAssets="runtime" so the assembly still isn't physically shipped by it
+        // (loadable only through an installed library's armed resolver — BuiltInDriverLibraries, phase
+        // 144); and that driver's own test project, which needs the real runtime assembly directly to
+        // exercise it and carries no such exclusion.
+        var referencingProjects = new List<string>();
         foreach (var path in csprojFiles)
-            Assert.DoesNotContain("Include=\"MySqlConnector\"", File.ReadAllText(path), StringComparison.Ordinal);
+        {
+            var content = File.ReadAllText(path);
+            if (!content.Contains("Include=\"MySqlConnector\"", StringComparison.Ordinal))
+                continue;
+
+            var fileName = Path.GetFileName(path);
+            referencingProjects.Add(fileName);
+
+            if (fileName == "DbDataSync.Drivers.MySql.csproj")
+                Assert.Contains("ExcludeAssets=\"runtime\"", content, StringComparison.Ordinal);
+            else
+                Assert.Equal("DbDataSync.Drivers.MySql.Tests.csproj", fileName);
+        }
+
+        Assert.Equal(
+            new HashSet<string> { "DbDataSync.Drivers.MySql.csproj", "DbDataSync.Drivers.MySql.Tests.csproj" },
+            referencingProjects.ToHashSet());
     }
 
     [Fact]
