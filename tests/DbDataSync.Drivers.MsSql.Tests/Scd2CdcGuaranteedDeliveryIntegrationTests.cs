@@ -335,4 +335,79 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         // rows (2 + 1 + 3 - the Note-only no-op is staged but opens nothing).
         Assert.Equal(5, written.RowsWritten);
     }
+
+    /// <summary>
+    /// Phase 145's two new edge cases, neither of which phase 132's row-by-row loop needed a test for —
+    /// its per-row state made them fall out — and both of which are real defects available in a
+    /// window-function rewrite.
+    /// <para>
+    /// **A duplicate key whose first staged row is a delete** (Id 4, deleted and re-inserted between
+    /// reads). The delete has no version of its own to open, but it is still what ends the version the
+    /// target already had, so it has to stay in the ordering while being excluded from the insert. The
+    /// row after it must open whatever its values are — there is no open version left for it to match
+    /// against — which is the one case the <c>LAG</c> comparison cannot answer on values alone.
+    /// </para>
+    /// <para>
+    /// **A duplicate key whose last staged row is a delete** (Id 5, updated and then deleted). The key
+    /// ends the pass with no open version at all, unlike every other duplicate-key scenario: the
+    /// version this pass opened is opened already closed, by the delete that follows it.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid()
+    {
+        await ExecuteAsync(_sourceConnection, $"""
+            INSERT INTO dbo.[{_sourceTable}] (Id, Name, Note) VALUES (4, 'd0', 'n0'), (5, 'e0', 'n0');
+            """);
+
+        await CdcCaptureJob.ScanAsync(_sourceConnection);
+        var watermark = await InitialLoadAsync();
+
+        // Id 4: gone, then back — a delete first, an insert second. Scanning between them is what gives
+        // the two rows distinct __$start_lsn values, the same reason the test above scans between its
+        // two updates.
+        await ExecuteAsync(_sourceConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 4;");
+        await CdcCaptureJob.ScanAsync(_sourceConnection);
+        await ExecuteAsync(_sourceConnection, $"""
+            INSERT INTO dbo.[{_sourceTable}] (Id, Name, Note) VALUES (4, 'd1', 'n0');
+            """);
+        await CdcCaptureJob.ScanAsync(_sourceConnection);
+
+        // Id 5: changed, then gone.
+        await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'e1' WHERE Id = 5;");
+        await CdcCaptureJob.ScanAsync(_sourceConnection);
+        await ExecuteAsync(_sourceConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 5;");
+        await CdcCaptureJob.ScanAsync(_sourceConnection);
+
+        var (_, staged, written) = await RunPassAsync(watermark, ReadIntent.Changes);
+        Assert.True(staged.HasChangeOrdering);
+
+        // Id 4: the delete ends 'd0' — at its own time, not the re-insert's — and opens nothing; the
+        // insert after it opens 'd1' as the current version. The gap between the two is the period the
+        // row did not exist at the source, and recording it is the point of an SCD2 target.
+        var id4 = await ReadVersionsAsync(4);
+        Assert.Equal(["d0", "d1"], id4.Select(v => v.Name));
+        Assert.False(id4[0].IsCurrent);
+        Assert.True(id4[1].IsCurrent);
+        Assert.NotNull(id4[0].ValidTo);
+        Assert.Null(id4[1].ValidTo);
+        Assert.True(id4[0].ValidTo < id4[1].ValidFrom, "the delete closed 'd0' before the re-insert opened 'd1'");
+        Assert.Matches("^[0-9A-Fa-f]{40}\\|4$", id4[1].VersionKey);
+
+        // Id 5: two versions, neither current — the update's own version is opened already closed, by
+        // the delete that follows it in the same pass.
+        var id5 = await ReadVersionsAsync(5);
+        Assert.Equal(["e0", "e1"], id5.Select(v => v.Name));
+        Assert.All(id5, v => Assert.False(v.IsCurrent));
+        Assert.All(id5, v => Assert.NotNull(v.ValidTo));
+        // The update is one transition: it ends 'e0' and begins 'e1' at the same moment.
+        Assert.Equal(id5[0].ValidTo, id5[1].ValidFrom);
+        // ... and the delete ends 'e1' later, at its own moment rather than the update's.
+        Assert.NotEqual(id5[1].ValidTo, id5[1].ValidFrom);
+        Assert.Matches("^[0-9A-Fa-f]{40}\\|5$", id5[1].VersionKey);
+
+        // Two versions opened this pass — Id 4's re-insert and Id 5's update. The two deletes open
+        // nothing, which is why this is 2 and not the 4 rows that were staged.
+        Assert.Equal(2, written.RowsWritten);
+    }
 }

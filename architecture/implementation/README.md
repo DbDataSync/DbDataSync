@@ -32,7 +32,6 @@ So the order lives here, and is the one to work through:
 | 1 | **034** — PostgreSQL logical replication | |
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
-| 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
 Updated 2026-09-17 (latest of all): **154 is done.** `dotnet-integration`'s `services:` block — a
 hand-maintained second copy of `docker-compose.yml`'s own container topology — is gone, replaced by a
@@ -115,6 +114,22 @@ doc's own Finding 2. Verified against real `mysql:9` **and** `mariadb:11` contai
 body per pair, 28 integration tests green on both — the empirical half of the sibling planning doc's
 "one implementation covers both forks" claim. See
 `architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`.
+Updated 2026-09-16 (previously latest): **145 is done and removed.** Phase 132's per-key/per-row loop for a
+duplicate natural key is gone, replaced by two window-function statements over one derived table:
+`1 + K + 2KR` round trips for `K` duplicate keys of `R` staged rows each became **3**, whatever `K` and
+`R` are. Two things the plan had not worked out turned up in the building and are the parts worth
+knowing about. **Its own SQL sketch was wrong** — a plain `LEAD` over every staged row would have opened
+a spurious second version for any change that touches no mapped column, which
+`Scd2CdcGuaranteedDeliveryIntegrationTests`' Id 3 already covers and would have failed on; the mechanism
+that actually reproduces the loop is `LAG` (a row's predecessor *is* the version open when it arrives, so
+only a key's first row consults the target) with `LEAD` over the *boundary* rows only. And **the two
+statements had an ordering hazard the plan did not anticipate**: both need the pre-pass answer to "what
+was open for this key", and whichever runs second reads a target the first has written to — fixed by
+having both ignore the rows this pass itself opened, matched on a surrogate key that is a pure function
+of staged data. Timing was *not* measured (no Docker on the implementing machine, and CI runs correctness
+tests rather than benchmarks) — carried forward, for the second time, as
+`architecture/planning/todo/follow-up-phase-145-set-based-scd2-duplicates-never-timed.md`. See
+`architecture/implementation/done/phase-145-scd2-duplicate-keys-set-based.md`.
 
 Updated 2026-09-16 (previously latest): **146 is done and removed.** The published `dbdatasync` tool's
 nupkg was 152.6MB, ~330MB uncompressed of it DuckDB's own native binaries for all five platforms,
