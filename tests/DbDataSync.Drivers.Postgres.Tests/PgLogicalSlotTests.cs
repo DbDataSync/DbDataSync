@@ -424,13 +424,24 @@ public sealed class PgLogicalSlotTests(PostgresTestDatabase db) : IClassFixture<
         Assert.Contains("wal2json", ex.Message);
     }
 
-    /// <summary>The environment this whole phase needs, asserted rather than assumed — if the container
-    /// stops carrying the plugin, this is the test that says so instead of eleven others failing with
-    /// "could not access file".</summary>
+    /// <summary>
+    /// The environment this whole phase needs, asserted rather than assumed — if the container stops
+    /// carrying the plugin, or stops permitting it, this is the test that says so instead of a dozen
+    /// others failing with something that reads like a bug in the reader.
+    /// <para>
+    /// The allowlist is the half that is easy to miss, and it caught this phase out in CI: the plugin
+    /// was installed and still refused, because PostgreSQL 18.6/17.11/16.15/15.19/14.24 added
+    /// <c>output_plugin_libraries</c> as the fix for CVE-2026-6471 and its default holds only the two
+    /// plugins that ship with Postgres.
+    /// </para>
+    /// </summary>
     [Fact]
-    public async Task TheTestServer_DecodesLogicallyAndHasTheOutputPlugin()
+    public async Task TheTestServer_DecodesLogically_AndPermitsTheOutputPlugin()
     {
         Assert.Equal("logical", await ScalarAsync<string>(PgLogicalSlotStatement.WalLevel));
+        Assert.Contains(
+            PgLogicalSlotStatement.Plugin,
+            await ScalarAsync<string>(PgLogicalSlotStatement.OutputPluginLibraries));
 
         await CreateSlotAsync();
         Assert.Equal(

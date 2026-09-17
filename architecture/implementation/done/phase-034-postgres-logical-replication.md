@@ -19,12 +19,14 @@ plain SQL function returning rows, so it needed no change to `IChangeReader` and
 provisioner. More is pinned here than usual, and the first unit test in the file is why: the difference
 between the safe function and the one that silently loses data is four characters (`peek` vs `get`).
 
-**Provisioning** — `EnableSourceChangeCapture` for this Kind checks `wal_level`, refuses a table that
-cannot report its own deletes, warns about `REPLICA IDENTITY FULL`, and proposes the slot as a previewed
-step whose rationale says plainly that nothing drops it afterwards.
+**Provisioning** — `EnableSourceChangeCapture` for this Kind checks `wal_level` and the
+`output_plugin_libraries` allowlist, refuses a table that cannot report its own deletes, warns about
+`REPLICA IDENTITY FULL`, and proposes the slot as a previewed step whose rationale says plainly that
+nothing drops it afterwards.
 
 **The environment** — `docker/postgres-logical/Dockerfile`, wired into `docker-compose.yml` with
-`wal_level=logical`, and CI's Postgres moved off `services:`.
+`wal_level=logical`, `output_plugin_libraries` and a raised `max_replication_slots`, and CI's Postgres
+moved off `services:`.
 
 ## The plan's slot model was unsafe, and this is the most important thing here
 
@@ -86,6 +88,24 @@ can only pull). It now comes up through `docker compose up -d --wait postgres` i
 image, port and credentials, which changes nothing about the tests. The Dockerfile itself is two lines:
 the official Debian-based `postgres:17` already has the PGDG apt repository configured and PGDG
 publishes `postgresql-17-wal2json`, so there is no compiler, no headers and no source checkout.
+
+### A prerequisite that did not exist when the plan was written
+
+The first CI run failed every integration test here with `library "wal2json" may not be used as an
+output plugin`, on a server where the plugin was installed correctly. PostgreSQL 18.6, 17.11, 16.15,
+15.19 and 14.24 added **`output_plugin_libraries`** as the fix for CVE-2026-6471: an output plugin
+library now has to be on an allowlist before a slot may use it, and the default holds only the two that
+ship with Postgres.
+
+So **installing the plugin is no longer the same as permitting it**, and that is a third prerequisite
+alongside `wal_level` and the package — one that produces a message leading nowhere obvious. The
+provisioner checks it before proposing a slot, with `current_setting('output_plugin_libraries', true)`
+so an older minor version reads as "restricts nothing" rather than "allows nothing", and the refusal
+quotes the setting to add and says that this one needs only a reload rather than a restart.
+
+Worth noting how it was found: the plan's own verification list asked for integration tests against a
+real `wal_level=logical` container, and this is exactly what they were for. Nothing about the reader
+was wrong.
 
 ## What became its own phase
 

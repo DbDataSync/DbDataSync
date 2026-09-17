@@ -130,6 +130,24 @@ public static class PgLogicalSlotStatement
     public const string WalLevel = "SELECT current_setting('wal_level');";
 
     /// <summary>
+    /// Which output plugin libraries this server will let a slot use.
+    /// <para>
+    /// A prerequisite that did not exist until recently: PostgreSQL 18.6, 17.11, 16.15, 15.19 and
+    /// 14.24 added this allowlist as the fix for CVE-2026-6471, and its default holds only the two
+    /// plugins that ship with Postgres. A server that has the <c>wal2json</c> library installed and not
+    /// listed here refuses slot creation with <c>library "wal2json" may not be used as an output
+    /// plugin</c> — a message that leads nowhere obvious, which is exactly why this is checked before a
+    /// slot is proposed rather than left to surface at Apply.
+    /// </para>
+    /// <para>
+    /// <c>missing_ok</c>, because an older minor version has no such setting and is not missing
+    /// anything — a null here means "this server does not restrict output plugins", not "it allows
+    /// none".
+    /// </para>
+    /// </summary>
+    public const string OutputPluginLibraries = "SELECT current_setting('output_plugin_libraries', true);";
+
+    /// <summary>
     /// Every slot this tool could have created, with what it is pinning. Both halves of the operational
     /// story come from here: the lag of a slot that *is* configured, and the existence of one that is
     /// not — a slot nobody consumes pins WAL indefinitely, which is the failure mode where this tool

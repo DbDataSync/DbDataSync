@@ -95,7 +95,11 @@ public static class PostgresProvisioner
     /// anything else rather than letting slot creation fail with the server's own wording.
     /// </para>
     /// <para>
-    /// The table's ability to report its own deletes is second, and it is a **refusal** rather than a
+    /// The output-plugin allowlist is second, and it is newer than this phase's own plan: a recent
+    /// security fix means a plugin that is installed is not thereby permitted.
+    /// </para>
+    /// <para>
+    /// The table's ability to report its own deletes is third, and it is a **refusal** rather than a
     /// warning. A table with no primary key and <c>REPLICA IDENTITY DEFAULT</c> produces no delete
     /// records at all — not an error, not a warning, the deletes simply are not in the WAL — and this
     /// reader declares <c>DetectsDeletes</c>. Discovering that as a target which never loses rows is
@@ -126,6 +130,23 @@ public static class PostgresProvisioner
                  "is a postgresql.conf setting (or an RDS/Aurora parameter group) and it requires a " +
                  "server restart, so it is not something DbDataSync can apply for you. Nothing else " +
                  "about this mapping can be planned until it is changed."]);
+        }
+
+        // Second, and newer than this phase's own plan: since PostgreSQL 18.6/17.11/16.15/15.19/14.24
+        // an output plugin library has to be on an allowlist before a slot may use it (the fix for
+        // CVE-2026-6471). A null means this server predates the setting and restricts nothing.
+        var allowed = await ScalarAsync(connection, PgLogicalSlotStatement.OutputPluginLibraries, cancellationToken) as string;
+        if (allowed is not null && !allowed.Split(',').Select(p => p.Trim()).Contains(PgLogicalSlotStatement.Plugin))
+        {
+            return new ProvisioningPlan(
+                ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Unsupported, [],
+                [$"This server's output_plugin_libraries is '{allowed}', which does not include " +
+                 $"'{PgLogicalSlotStatement.Plugin}'. Since PostgreSQL 18.6, 17.11, 16.15, 15.19 and " +
+                 "14.24 an output plugin has to be listed there before a slot may use it — the fix for " +
+                 $"CVE-2026-6471 — so a slot created with it would be refused with \"library " +
+                 $"\\\"{PgLogicalSlotStatement.Plugin}\\\" may not be used as an output plugin\". Add it: " +
+                 $"output_plugin_libraries = '{allowed}, {PgLogicalSlotStatement.Plugin}'. Unlike " +
+                 "wal_level this one only needs a reload (SELECT pg_reload_conf()), not a restart."]);
         }
 
         var identity = await ReadReplicaIdentityAsync(connection, table.Schema, table.Table, cancellationToken);
