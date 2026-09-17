@@ -29,9 +29,10 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **034** — PostgreSQL logical replication | |
-| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
+| 1 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
+| 2 | **151** — deprovisioning: source-side state goes when the config does | split out of 034. Not a Postgres phase — phase 33's trigger-audit shadow tables and triggers are left behind the same way, and have been since they shipped |
+| 3 | **152** — replication slot lag, and slots nobody claims | split out of 034. Smaller than it looks: the statements exist and are tested; the work is an API surface and a place on the connection card |
+| 4 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
 
 Updated 2026-09-17 (latest of all): **154 is done.** `dotnet-integration`'s `services:` block — a
 hand-maintained second copy of `docker-compose.yml`'s own container topology — is gone, replaced by a
@@ -69,51 +70,26 @@ needs) rather than the PDB the password-based form used during phase 148's own l
 landed in. No source code changed. The one thing this phase could not itself verify: a real GitHub Actions
 run — everything was tested against an equivalent local container, not the actual runner. See
 `architecture/implementation/done/phase-153-ci-mariadb-and-oracle-service-containers.md`.
+Updated 2026-09-16 (previously latest): **034 is done and removed, and split twice.** `PgLogicalSlotReader`
+reads PostgreSQL logical decoding as a query — `pg_logical_slot_peek_changes` through `wal2json`, the
+slot's LSN as the watermark — and the plan's central claim held: it needed no change to `IChangeReader`
+and no streaming subsystem. **The plan's slot model did not hold, and that is the thing to know.** It
+said one slot per replication; advancing a slot is `IPositionAcknowledging`, which is per-mapping by its
+own signature, so a shared slot advanced by whichever mapping ran last discards changes the others have
+not read — silent data loss, arriving through a different door than the one "peek, never get" guards.
+Resolved by defaulting to a slot per source table and making advancement opt-in and **off**, the same
+call `TriggerAuditReader`'s pruning option already makes here. The cost is named rather than hidden:
+`max_replication_slots` defaults to 10. Three other things the plan did not anticipate are in the
+retrospective — `wal2json` cannot apply a column transform (refused by name), decoded JSON values have
+to be converted or the same mapping works through one staging provider and fails through the other, and
+**no public image carries `wal2json` any more** (Debezium's build only `decoderbufs` as of 3.x), so
+the environment is a two-line Dockerfile and CI's Postgres moved off `services:`. **One product question
+is still open and wants a decision, not more work**: whether `wal2json` is an acceptable prerequisite or
+`pgoutput` has to come first. Nothing built here has to be undone either way. Split out: **148**
+(deprovisioning — there is no such concept anywhere in this codebase, and phase 33's shadow tables have
+the same gap) and **149** (slot lag and orphan reporting). See
+`architecture/implementation/done/phase-034-postgres-logical-replication.md`.
 
-Updated 2026-09-17 (previously latest): **149 is done.** Docs updated for MySQL/MariaDB and Oracle now that
-phases 147/148 actually shipped — `docs/replication-concepts.md`, `docs/drivers-and-libraries.md`,
-`README.md`, and both `additional-database-drivers.md`/`change-tracking-strategies.md`'s own outcome
-tables. The plan predicted three new reader-kind rows; shipped as one (MySQL's and Oracle's trigger-audit
-options are the same existing `TriggerAudit` Kind Postgres/SQL Server already use, not new ones — only
-`OracleFlashback` needed a row of its own). One finding the plan didn't anticipate at all: the MySQL
-descriptor worked example, written before phase 150 existed, had become a stale, false claim ("an engine
-no part of DbDataSync's own compiled code references at all") now that MySQL is a compiled built-in —
-fixed by reframing the section rather than deleting a still-useful descriptor-mechanism walkthrough. No
-source code changed. See `architecture/implementation/done/phase-149-mysql-oracle-docs-update.md`.
-
-Updated 2026-09-17 (previously latest): **148 is done.** Oracle driver (`DbDataSync.Drivers.Oracle`) plus
-trigger-audit *and* Flashback Version Query change tracking, verified against a real
-`gvenzl/oracle-free:23-slim` instance throughout the build. Five real findings, more than any prior driver
-phase: `OVERRIDING SYSTEM VALUE` does not parse on Oracle at all (confirmed via `sqlplus`) — a
-`GENERATED BY DEFAULT ON NULL AS IDENTITY` target column needs no override machinery instead, and a
-`GENERATED ALWAYS` one has no working one; `INSERT ALL` cannot generate a unique value per branch because
-Oracle evaluates a sequence at most once per *statement*, however many times it's referenced — fixed by
-switching the multi-row insert to `INSERT ... SELECT ... UNION ALL ... FROM dual`; Oracle bind variables
-reject both a colon baked into `ParameterName` and a small set of reserved words (`table`, `trigger`) as
-names outright; and `AS` before a table/subquery alias is invalid Oracle syntax, which surfaced two
-latent portability bugs in **shared** `DbDataSync.Drivers.Generic` code (`TriggerAuditStatement`,
-`HistorizedStatement`, `SegmentScope`, `BatchInsertStagingProvider`) now fixed for every engine. One
-finding named but not resolved: Flashback Version Query cannot see history for a table created too
-recently, regardless of the requested SCN window — practically irrelevant for a real deployment, but real
-enough that its own test suite needed a container-init-provisioned table with real age rather than one
-created fresh per test. Verified: 58 tests (37 unit, 21 integration) against a live server, plus the full
-solution's entire test run (2000+ tests, every project) confirming the two shared-code fixes broke
-nothing on Postgres/MsSql/MySQL. See
-`architecture/implementation/done/phase-148-oracle-driver-trigger-audit-and-flashback.md`.
-
-Updated 2026-09-16 (previously latest): **147 is done.** MySQL/MariaDB driver
-(`DbDataSync.Drivers.MySql`) plus trigger-audit change tracking, built directly against the Postgres
-driver as its structural template and phase 33's already-built generic trigger-audit mechanism — every
-reader/writer/staging provider it registers is `DbDataSync.Drivers.Generic`'s, unmodified. Two real bugs
-caught before they shipped: `InformationSchemaQueries.ListTablesAsync` (correct for Postgres, silently
-wrong for MySQL — `information_schema.tables` is server-wide there, not database-scoped, so it needed
-its own override) and three ANSI-default DDL forms MySQL doesn't actually accept (`CAST ... AS VARCHAR`,
-`ALTER COLUMN ... TYPE`, needing a stated `RENAME COLUMN` version floor). One real, unresolved gap named
-rather than papered over: `RenderTieSafeRowLimit` has no tie-safe MySQL implementation — see the phase
-doc's own Finding 2. Verified against real `mysql:9` **and** `mariadb:11` containers from one shared test
-body per pair, 28 integration tests green on both — the empirical half of the sibling planning doc's
-"one implementation covers both forks" claim. See
-`architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`.
 Updated 2026-09-16 (previously latest): **038 is done and removed, and split.** Part 1 shipped:
 `PgCopyStagingProvider` stages through `COPY … FROM STDIN (FORMAT BINARY)`, registered ahead of the
 generic batched-`INSERT` provider, creating the identical staging table from that provider's own DDL

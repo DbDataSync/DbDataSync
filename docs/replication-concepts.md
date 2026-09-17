@@ -34,18 +34,21 @@ replication behaves.
 | --- | --- | --- | --- | --- |
 | `MsSqlChangeTracking` | SQL Server **Change Tracking** — the *net* change since a version, one row per key | Yes | Enable Change Tracking on the database and table (an operator's own DBA task — DbDataSync only ever queries it, never enables it) | The recommended default for SQL Server: simpler to enable than CDC, and its net-change semantics match what mirroring wants |
 | `MsSqlCdc` | SQL Server **Change Data Capture** — every intermediate change harvested from the transaction log | Yes | Enable CDC capture on the table | Reach for this over Change Tracking specifically for **read consistency under concurrent writes** — Change Tracking's own reader joins live table data with its change list, and the two can move against each other under load; CDC's reader needs no such join. Not an "upgrade" to Change Tracking — a different trade |
+| `PgLogicalSlot` | PostgreSQL **logical decoding** — every change, read out of the write-ahead log through a replication slot with the `wal2json` output plugin | Yes | `wal_level = logical` (a **server restart**), the `wal2json` plugin installed, and a replication slot DbDataSync previews and creates | PostgreSQL's equivalent of CDC, and the only Postgres mechanism that reports deletes without costing every write to the table. The obstacles are real and worth knowing up front: the restart, the plugin, and a slot that pins WAL on the source until something advances it |
 | `TriggerAudit` | A trigger-maintained shadow audit table, engine-neutral | Yes | DbDataSync generates the trigger/table DDL; an operator previews and applies it | Any engine with no native change-tracking metadata — the one mechanism that reaches SQL Server, PostgreSQL, MySQL/MariaDB, Oracle, and anything ODBC/JDBC-reachable identically. Costs every write to the table, forever — that trade is worth naming to an operator before they turn it on |
 | `Watermark` | A monotonic column (an `updated_at`, a version) — reads rows where it exceeds the stored position | **No** | A monotonic watermark column on the table | Any engine, when the table has such a column and either never deletes rows or deletes are handled separately by [reconciliation](#reconciliation-delete-detection) below |
 | `BatchReload` | A full (or segmented) table read — not incremental | N/A (a reload always converges) | None beyond read access | A standalone reload replication, or as the mechanism a [Bulk Load](#bulk-loading-backfill) actually runs under |
 | `OracleFlashback` | Oracle **Flashback Version Query** — `VERSIONS BETWEEN SCN` reads a table's own committed row history directly. No shadow table, no trigger | Yes | None beyond ordinary `SELECT`, `FLASHBACK` privilege (only if the connection doesn't own the table), and `EXECUTE` on `DBMS_FLASHBACK` | Oracle sources, when the per-write trigger cost isn't wanted. Bounded by the source's undo retention — a replication paused longer than that needs a reload to catch back up, the same way any log-based mechanism's history can expire |
-| `ScriptedQuery` | An operator-supplied SQL script | Depends on the script | Write the script | A change-tracking mechanism DbDataSync has no built-in driver for — Postgres logical replication slots, Oracle LogMiner — as an escape hatch |
+| `ScriptedQuery` | An operator-supplied SQL script | Depends on the script | Write the script | A change-tracking mechanism DbDataSync has no built-in driver for — the MySQL binlog, Oracle LogMiner — as an escape hatch |
 | `DuckDbQuery` | An operator-written query against DuckDB's own scanners | No — not incremental | Write the query | A query-first source: Parquet, CSV, an S3 glob, an attached database — the query *is* the configuration |
 
-PostgreSQL has no CDC-equivalent today — its options are `Watermark`, `TriggerAudit`, and `BatchReload`,
-same as any generic engine reached through a [descriptor driver](drivers-and-libraries.md#descriptor-drivers).
-MySQL/MariaDB's options are the same three — the binlog-based native alternative is still open work, see
-`architecture/planning/todo/change-tracking-mysql.md`. Oracle adds `OracleFlashback` to that same set as
-its own native option; LogMiner is still open work, see `architecture/planning/todo/change-tracking-oracle.md`.
+PostgreSQL has `PgLogicalSlot` as its CDC-equivalent; without it, its options are `Watermark`,
+`TriggerAudit` and `BatchReload`, the same as any generic engine reached through a
+[descriptor driver](drivers-and-libraries.md#descriptor-drivers). MySQL/MariaDB's options are those
+same three — the binlog-based native alternative is still open work, see
+`architecture/planning/todo/change-tracking-mysql.md`. Oracle adds `OracleFlashback` to them as its own
+native option; LogMiner is still open work, see
+`architecture/planning/todo/change-tracking-oracle.md`.
 
 **MySQL/MariaDB's `Watermark` reader has one real, unresolved gap worth knowing before combining it with
 a per-pass row cap**: the bounded read that caps a `Primary` pass at N rows relies on the engine
@@ -92,12 +95,12 @@ and every change made during a multi-hour load is lost silently: the load succee
 right, and the rows in between are simply never seen again.
 
 Readers that can report their current position **without reading a row** (`MsSqlChangeTracking`,
-`Watermark`, `TriggerAudit`) do exactly that on a mapping's first-ever pass: capture the position, stash
-it, set `ReadHold.Loading`, and hand the actual table read to the [Bulk Load](#bulk-loading-backfill)
-pipeline as a normal `RunKind.BulkLoad`. Only once every segment of that load finishes does the captured
-position become the mapping's live watermark and its intent flip to `Changes`. A reader with no honest
-answer to "what's my position" (`BatchReload`, `DuckDbQuery`) has nothing to capture — its first pass
-just is the reload, with no separate position step.
+`MsSqlCdc`, `Watermark`, `TriggerAudit`, `PgLogicalSlot`) do exactly that on a mapping's first-ever
+pass: capture the position, stash it, set `ReadHold.Loading`, and hand the actual table read to the
+[Bulk Load](#bulk-loading-backfill) pipeline as a normal `RunKind.BulkLoad`. Only once every segment of
+that load finishes does the captured position become the mapping's live watermark and its intent flip
+to `Changes`. A reader with no honest answer to "what's my position" (`BatchReload`, `DuckDbQuery`)
+has nothing to capture — its first pass just is the reload, with no separate position step.
 
 ### Scheduling
 

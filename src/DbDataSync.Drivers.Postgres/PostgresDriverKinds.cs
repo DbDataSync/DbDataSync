@@ -20,6 +20,13 @@ public static class PostgresDriverKinds
     /// </summary>
     public const string CopyStaging = "PgCopyStaging";
 
+    /// <summary>
+    /// Logical decoding through a replication slot — phase 34. Prefixed for the same reason
+    /// <see cref="CopyStaging"/> is: it is one engine's mechanism, not a strategy every driver could
+    /// offer.
+    /// </summary>
+    public const string LogicalSlot = "PgLogicalSlot";
+
     /// <summary>Re-exported from <see cref="GenericDriverKinds"/>: batched multi-row <c>INSERT</c>
     /// staging is engine-neutral, and it stays registered as the fallback for an instance that will
     /// not permit <c>COPY</c> or a column <see cref="CopyStaging"/> cannot write in binary.</summary>
