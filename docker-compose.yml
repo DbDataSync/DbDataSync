@@ -104,9 +104,33 @@ services:
       retries: 10
       start_period: 30s
 
+  # Phase 148. gvenzl/oracle-free — the realistic modern free, unauthenticated option named in the
+  # phase doc: Oracle's own official images require accepting a license and are not on a registry CI
+  # can pull from without authentication. docker/oracle-init/10-grants.sql (mounted below) grants the
+  # one privilege OracleFlashbackReader needs beyond ordinary CONNECT, automatically, on first start.
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    container_name: dbdatasync-oracle
+    environment:
+      ORACLE_PASSWORD: ${DBDATASYNC_ORACLE_PASSWORD:-DbDataSync_Test_Pw1}
+      APP_USER: dbdatasync
+      APP_USER_PASSWORD: ${DBDATASYNC_ORACLE_APP_PASSWORD:-DbDataSync_Test_Pw1}
+    ports:
+      - "15210:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      - ./docker/oracle-init:/container-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
 volumes:
   mssql-source-data:
   mssql-target-data:
   postgres-data:
   mysql-data:
   mariadb-data:
+  oracle-data:

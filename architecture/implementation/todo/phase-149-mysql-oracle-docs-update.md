@@ -7,7 +7,7 @@ the same "verify against source, not assumption" posture used throughout the pla
 147/148 in the first place.
 
 **Plan reference**: `architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`,
-`architecture/implementation/todo/phase-148-oracle-driver-trigger-audit-and-flashback.md`.
+`architecture/implementation/done/phase-148-oracle-driver-trigger-audit-and-flashback.md`.
 
 ## Why a separate phase, not folded into 147/148
 

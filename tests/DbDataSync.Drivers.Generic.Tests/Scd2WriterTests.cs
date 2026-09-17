@@ -43,7 +43,7 @@ public sealed class Scd2WriterTests
     {
         var sql = HistorizedStatement.BuildDuplicateKeyExclusion(BracketDialect.Instance, "#staging", ["Id"]);
 
-        Assert.Equal("(SELECT COUNT(*) FROM #staging AS dup WHERE dup.[Id] = s.[Id]) = 1", sql);
+        Assert.Equal("(SELECT COUNT(*) FROM #staging dup WHERE dup.[Id] = s.[Id]) = 1", sql);
     }
 
     [Fact]
@@ -77,10 +77,10 @@ public sealed class Scd2WriterTests
     {
         var sql = HistorizedStatement.BuildCloseChanged(
             BracketDialect.Instance, "[dbo].[Hist]", "#staging", ["Id"], ["Name"],
-            stagingFilter: "(SELECT COUNT(*) FROM #staging AS dup WHERE dup.[Id] = s.[Id]) = 1");
+            stagingFilter: "(SELECT COUNT(*) FROM #staging dup WHERE dup.[Id] = s.[Id]) = 1");
 
         Assert.Contains(
-            "AND (SELECT COUNT(*) FROM #staging AS dup WHERE dup.[Id] = s.[Id]) = 1", sql);
+            "AND (SELECT COUNT(*) FROM #staging dup WHERE dup.[Id] = s.[Id]) = 1", sql);
         // Still the pass-wide @now: a staging filter alone (no validToExpression) does not change what
         // closes the version, only which staged rows are allowed to.
         Assert.Contains("[DS_ValidTo] = @now", sql);
@@ -112,7 +112,7 @@ public sealed class Scd2WriterTests
             stagingFilter: "s.[__DS_ChangeOrdering] = @ordering");
 
         Assert.Contains(
-            "SET [DS_ValidTo] = (SELECT s.[__DS_ChangedAtUtc] FROM #staging AS s WHERE s.[Id] = [dbo].[Hist].[Id]", sql);
+            "SET [DS_ValidTo] = (SELECT s.[__DS_ChangedAtUtc] FROM #staging s WHERE s.[Id] = [dbo].[Hist].[Id]", sql);
         Assert.Contains("AND s.[__DS_ChangeOrdering] = @ordering)", sql);
         Assert.DoesNotContain("@now", sql);
     }
@@ -206,10 +206,10 @@ public sealed class Scd2WriterTests
             """
             INSERT INTO [dbo].[Hist] ([DS_VersionKey], [Id], [Name], [DS_ValidFrom], [DS_IsCurrent])
             SELECT s.[__DS_ChangeOrdering] + '|' || CAST(s.[Id] AS VARCHAR(4000)), s.[Id], s.[Name], s.[__DS_ChangedAtUtc], TRUE
-            FROM #staging AS s
+            FROM #staging s
             WHERE s.[__Operation] <> 'D' AND s.[__DS_ChangeOrdering] = @ordering
               AND NOT EXISTS (
-                SELECT 1 FROM [dbo].[Hist] AS t
+                SELECT 1 FROM [dbo].[Hist] t
                 WHERE t.[Id] = s.[Id] AND t.[DS_IsCurrent] = TRUE
               );
             """,

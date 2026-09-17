@@ -45,7 +45,7 @@ public sealed class MsSqlSegmentScopeTests
     {
         var scope = MsSqlSegmentScope.Build(new ListSegment("Region", ["EU", "US", "APAC"]), Columns);
 
-        Assert.Equal("[Region] IN (@__seg0, @__seg1, @__seg2)", scope.Predicate);
+        Assert.Equal("[Region] IN (@seg0, @seg1, @seg2)", scope.Predicate);
         Assert.Equal(["EU", "US", "APAC"], scope.Parameters.Select(p => p.Value));
         Assert.All(scope.Parameters, p => Assert.Equal(SqlDbType.NVarChar, TypeOf(p)));
     }
@@ -55,7 +55,7 @@ public sealed class MsSqlSegmentScopeTests
     {
         var scope = MsSqlSegmentScope.Build(new RangeSegment("OrderId", "1", "1000"), Columns);
 
-        Assert.Equal("[OrderId] >= @__segMin AND [OrderId] < @__segMax", scope.Predicate);
+        Assert.Equal("[OrderId] >= @segMin AND [OrderId] < @segMax", scope.Predicate);
         Assert.Equal([1, 1000], scope.Parameters.Select(p => p.Value));
         Assert.All(scope.Parameters, p => Assert.Equal(SqlDbType.Int, TypeOf(p)));
     }
@@ -90,7 +90,7 @@ public sealed class MsSqlSegmentScopeTests
 
         var scope = MsSqlSegmentScope.Build(new ListSegment("SourceRegion", ["EU"]), Columns, mappings);
 
-        Assert.Equal("[Region] IN (@__seg0)", scope.Predicate);
+        Assert.Equal("[Region] IN (@seg0)", scope.Predicate);
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public sealed class MsSqlSegmentScopeTests
 
         var scope = MsSqlSegmentScope.Build(new ListSegment("Region", ["EU"]), Columns, mappings);
 
-        Assert.Equal("[Region] IN (@__seg0)", scope.Predicate);
+        Assert.Equal("[Region] IN (@seg0)", scope.Predicate);
     }
 
     [Fact]

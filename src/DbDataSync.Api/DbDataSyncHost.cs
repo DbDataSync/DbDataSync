@@ -15,6 +15,7 @@ using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.MySql;
+using DbDataSync.Drivers.Oracle;
 using DbDataSync.Scripting;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.Postgres;
@@ -182,6 +183,7 @@ public static class DbDataSyncHost
             registry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
             registry.RegisterWithScripting(new PostgresDriver(), scriptHost);
             registry.RegisterWithScripting(new MySqlDriver(), scriptHost);
+            registry.RegisterWithScripting(new OracleDriver(), scriptHost);
             // DuckDb takes the same call and gets no ScriptedQuery reader out of it: it names a dialect
             // but supplies no ITableCatalog, and a scripted query builder is handed the source table's
             // columns by contract. Registered through the same helper anyway, so there is one

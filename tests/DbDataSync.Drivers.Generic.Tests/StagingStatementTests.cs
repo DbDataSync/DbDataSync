@@ -51,7 +51,7 @@ public sealed class StagingStatementTests
     {
         Assert.Equal(
             "INSERT INTO t ([Id], [Name], [__Operation]) VALUES " +
-            "(@__s0_0, @__s0_1, @__s0_2), (@__s1_0, @__s1_1, @__s1_2);",
+            "(@s0_0, @s0_1, @s0_2), (@s1_0, @s1_1, @s1_2);",
             StagingStatement.BuildInsert(BracketDialect.Instance, "t", ["Id", "Name"], rowCount: 2));
     }
 
@@ -59,7 +59,7 @@ public sealed class StagingStatementTests
     public void Insert_FollowsTheDialectForQuotingAndPlaceholders()
     {
         Assert.Equal(
-            "INSERT INTO t (\"Id\", \"__Operation\") VALUES (:__s0_0, :__s0_1);",
+            "INSERT INTO t (\"Id\", \"__Operation\") VALUES (:s0_0, :s0_1);",
             StagingStatement.BuildInsert(ColonDialect.Instance, "t", ["Id"], rowCount: 1));
     }
 
@@ -125,7 +125,7 @@ public sealed class StagingStatementTests
 
         Assert.Equal(
             "INSERT INTO t ([Id], [__DS_ChangeOrdering], [__DS_ChangedAtUtc], [__Operation]) VALUES " +
-            "(@__s0_0, @__s0_1, @__s0_2, @__s0_3);",
+            "(@s0_0, @s0_1, @s0_2, @s0_3);",
             sql);
     }
 

@@ -42,8 +42,8 @@ public sealed class SegmentScopeTests
         var brackets = Build(BracketDialect.Instance, new ListSegment("Region", ["EU", "US"]), out _);
         var colons = Build(ColonDialect.Instance, new ListSegment("Region", ["EU", "US"]), out _);
 
-        Assert.Equal("[Region] IN (@__seg0, @__seg1)", brackets.Predicate);
-        Assert.Equal("\"Region\" IN (:__seg0, :__seg1)", colons.Predicate);
+        Assert.Equal("[Region] IN (@seg0, @seg1)", brackets.Predicate);
+        Assert.Equal("\"Region\" IN (:seg0, :seg1)", colons.Predicate);
     }
 
     [Fact]
@@ -52,19 +52,19 @@ public sealed class SegmentScopeTests
         var brackets = Build(BracketDialect.Instance, new RangeSegment("OrderId", "1", "1000"), out _);
         var colons = Build(ColonDialect.Instance, new RangeSegment("OrderId", "1", "1000"), out _);
 
-        Assert.Equal("[OrderId] >= @__segMin AND [OrderId] < @__segMax", brackets.Predicate);
-        Assert.Equal("\"OrderId\" >= :__segMin AND \"OrderId\" < :__segMax", colons.Predicate);
+        Assert.Equal("[OrderId] >= @segMin AND [OrderId] < @segMax", brackets.Predicate);
+        Assert.Equal("\"OrderId\" >= :segMin AND \"OrderId\" < :segMax", colons.Predicate);
     }
 
     [Fact]
     public void BoundParameterNames_ComeFromParameterName_NotFromTheStatementPlaceholder()
     {
-        // The distinction the two dialect methods exist for: Oracle's statement says `:__segMin` while
-        // the parameter it binds is named `__segMin`. Rendering placeholders from the parameter's own
+        // The distinction the two dialect methods exist for: Oracle's statement says `:segMin` while
+        // the parameter it binds is named `segMin`. Rendering placeholders from the parameter's own
         // name — the obvious shortcut — produces a statement that cannot bind on such a provider.
         Build(ColonDialect.Instance, new RangeSegment("OrderId", "1", "1000"), out var binder);
 
-        Assert.Equal(["__segMin", "__segMax"], binder.Calls.Select(c => c.Name));
+        Assert.Equal(["segMin", "segMax"], binder.Calls.Select(c => c.Name));
         Assert.Equal(["1", "1000"], binder.Calls.Select(c => c.Value));
     }
 
@@ -77,7 +77,7 @@ public sealed class SegmentScopeTests
         var scope = SegmentScope.Build(
             BracketDialect.Instance, binder, new ListSegment("SourceRegion", ["EU"]), Columns, mappings);
 
-        Assert.Equal("[Region] IN (@__seg0)", scope.Predicate);
+        Assert.Equal("[Region] IN (@seg0)", scope.Predicate);
     }
 
     [Fact]

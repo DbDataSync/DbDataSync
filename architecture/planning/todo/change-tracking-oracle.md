@@ -1,15 +1,18 @@
 # Change tracking — Oracle, native (Flashback / LogMiner)
 
-**Status: partially resolved 2026-09-16.** Flashback Version Query (Option 1 below) has been turned into
-an implementation plan — see `architecture/implementation/todo/phase-148-oracle-driver-trigger-audit-and-flashback.md`,
-which builds it alongside the trigger-audit option and the rest of the Oracle driver in one phase,
-answering this doc's own "should Flashback ship alongside the trigger option" question with yes. LogMiner
-(Option 2) remains genuinely open and out of that phase's scope — this doc stays `todo/` for LogMiner
-specifically. There is (still, until 148 ships) no Oracle driver; phase 31 removed the connection-model
-blocker (EZConnect and TNS names now fit). Refined 2026-09-16: this doc used to also cover the
-trigger-based option — that's been extracted to `change-tracking-oracle-triggers.md` (now `done/`, see
-phase 148), since phase 33 already built the entire generic half of that mechanism and it turned out to
-need almost no new design work.
+**Status: partially resolved 2026-09-17.** Flashback Version Query (Option 1 below) is built and shipped
+— see `architecture/implementation/done/phase-148-oracle-driver-trigger-audit-and-flashback.md`, which
+built it alongside the trigger-audit option and the rest of the Oracle driver in one phase, answering
+this doc's own "should Flashback ship alongside the trigger option" question with yes. Two real
+divergences from this doc's own assumptions, found by building it: `SELECT CURRENT_SCN FROM V$DATABASE`
+needs a dictionary-view-class grant an ordinary app user lacks, so the built reader uses
+`DBMS_FLASHBACK.GET_SYSTEM_CHANGE_NUMBER()` instead (its own, smaller, but still real grant); and
+`FLASHBACK`/`FLASHBACK ANY TABLE` turned out to be needed only when the connecting user does not own the
+table being read, not unconditionally as stated below. LogMiner (Option 2) remains genuinely open and out
+of that phase's scope — this doc stays `todo/` for LogMiner specifically. Refined 2026-09-16: this doc
+used to also cover the trigger-based option — that's been extracted to `change-tracking-oracle-triggers.md`
+(now `done/`, see phase 148), since phase 33 already built the entire generic half of that mechanism and
+it turned out to need almost no new design work.
 
 Read `change-tracking-strategies.md` first, then `change-tracking-oracle-triggers.md` — this doc covers
 the **more robust native alternatives** to that one. Unlike the MySQL case, one of the two options here

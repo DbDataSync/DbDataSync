@@ -242,7 +242,11 @@ public sealed class BatchInsertStagingProvider(SqlDialect dialect, ITableCatalog
 /// separated so both can be asserted without a live server.</summary>
 public static class StagingStatement
 {
-    public static string ParameterName(int rowIndex, int valueIndex) => $"__s{rowIndex}_{valueIndex}";
+    /// <summary>Starts with a letter, not an underscore — Oracle's bind-variable grammar rejects a
+    /// name beginning with <c>_</c> outright (<c>ORA-00911</c>), confirmed by running this against a
+    /// live server (phase 148). The leading underscores this used to carry bought nothing on any other
+    /// engine, so dropping them is a portability fix, not an Oracle-only workaround.</summary>
+    public static string ParameterName(int rowIndex, int valueIndex) => $"s{rowIndex}_{valueIndex}";
 
     /// <summary>
     /// How many rows one statement may carry. Derived from the column count against the dialect's

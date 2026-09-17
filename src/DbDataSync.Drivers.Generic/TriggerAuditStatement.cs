@@ -116,16 +116,21 @@ public static class TriggerAuditStatement
         selected.AddRange(keyColumns.Select(k => $"c.{dialect.QuoteIdentifier(k)}"));
         selected.AddRange(nonKeyColumns.Select(renderNonKeyColumn));
 
+        // Table/subquery aliases deliberately carry no AS — column aliases (MAX(seq) AS seq below) still
+        // do, since that form is fine everywhere. Oracle's SQL parser rejects AS before a table or
+        // derived-table alias outright (confirmed by running this statement against a live server), and
+        // omitting it is valid on every other engine here too, so this is a portability fix that costs
+        // nothing on the engines that would have accepted either form.
         return $"""
             SELECT {string.Join(", ", selected)}
-            FROM {shadow} AS c
+            FROM {shadow} c
             JOIN (
                 SELECT {keyList}, MAX({seq}) AS {seq}
                 FROM {shadow}
                 WHERE {seq} > {previous} AND {seq} <= {target}
                 GROUP BY {keyList}
-            ) AS latest ON c.{seq} = latest.{seq}
-            LEFT JOIN {baseTable} AS base ON {joinToBase}
+            ) latest ON c.{seq} = latest.{seq}
+            LEFT JOIN {baseTable} base ON {joinToBase}
             ORDER BY c.{seq};
             """;
     }

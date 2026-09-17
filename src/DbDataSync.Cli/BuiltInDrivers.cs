@@ -2,6 +2,7 @@ using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.MySql;
+using DbDataSync.Drivers.Oracle;
 using DbDataSync.Drivers.Postgres;
 
 namespace DbDataSync.Cli;
@@ -28,6 +29,7 @@ internal static class BuiltInDrivers
         new MsSqlDriver(),
         new PostgresDriver(),
         new MySqlDriver(),
+        new OracleDriver(),
         new DuckDbDriver(),
     ];
 }

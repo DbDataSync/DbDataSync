@@ -66,6 +66,11 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
             _ => throw new ArgumentOutOfRangeException(nameof(segment), segment, "Unknown segment mode."),
         };
 
+    // Every generated parameter name below (seg0, seg1, ..., segMin, segMax) starts with a letter, not
+    // an underscore — Oracle's bind-variable grammar rejects a leading underscore outright
+    // (ORA-00911), confirmed by running this against a live server (phase 148). Dropping the leading
+    // underscores this used to carry bought nothing on any other engine, so it is a portability fix.
+
     private static SegmentScope BuildList(
         SqlDialect dialect, ISegmentValueBinder binder, ListSegment list, ColumnMetadata column)
     {
@@ -76,13 +81,13 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
                 "than render 'IN ()' (which isn't valid SQL anyway).");
 
         var parameters = list.Values
-            .Select((value, i) => binder.CreateParameter(dialect.ParameterName($"__seg{i}"), value, column))
+            .Select((value, i) => binder.CreateParameter(dialect.ParameterName($"seg{i}"), value, column))
             .ToList();
 
         // Placeholders come from the dialect rather than from each parameter's own name: the two are
         // the same string on SQL Server, but not on an engine whose bound parameter name drops the
         // sigil its statement text requires.
-        var placeholders = string.Join(", ", Enumerable.Range(0, parameters.Count).Select(i => dialect.ParameterReference($"__seg{i}")));
+        var placeholders = string.Join(", ", Enumerable.Range(0, parameters.Count).Select(i => dialect.ParameterReference($"seg{i}")));
         return new SegmentScope($"{dialect.QuoteIdentifier(column.Name)} IN ({placeholders})", parameters);
     }
 
@@ -92,10 +97,10 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
         var quoted = dialect.QuoteIdentifier(column.Name);
         // Half-open: consecutive ranges tile a value space with no gap and no row processed twice.
         return new SegmentScope(
-            $"{quoted} >= {dialect.ParameterReference("__segMin")} AND {quoted} < {dialect.ParameterReference("__segMax")}",
+            $"{quoted} >= {dialect.ParameterReference("segMin")} AND {quoted} < {dialect.ParameterReference("segMax")}",
             [
-                binder.CreateParameter(dialect.ParameterName("__segMin"), range.RangeMin, column),
-                binder.CreateParameter(dialect.ParameterName("__segMax"), range.RangeMax, column),
+                binder.CreateParameter(dialect.ParameterName("segMin"), range.RangeMin, column),
+                binder.CreateParameter(dialect.ParameterName("segMax"), range.RangeMax, column),
             ]);
     }
 

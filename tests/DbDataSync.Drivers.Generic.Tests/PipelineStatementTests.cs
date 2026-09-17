@@ -12,11 +12,11 @@ public sealed class PipelineStatementTests
         Assert.Equal(
             """
             SELECT * FROM [dbo].[Orders]
-            WHERE [OrderId] >= @__segMin AND [OrderId] < @__segMax AND (Region = 'EU');
+            WHERE [OrderId] >= @segMin AND [OrderId] < @segMax AND (Region = 'EU');
             """,
             BatchReloadStatement.BuildRead(
                 BracketDialect.Instance, "dbo", "Orders",
-                "[OrderId] >= @__segMin AND [OrderId] < @__segMax", "Region = 'EU'"));
+                "[OrderId] >= @segMin AND [OrderId] < @segMax", "Region = 'EU'"));
     }
 
     [Fact]
@@ -42,8 +42,8 @@ public sealed class PipelineStatementTests
     public void Delete_ScopesToTheSegmentRatherThanTheWholeTable()
     {
         Assert.Equal(
-            "DELETE FROM [dbo].[Orders] WHERE [OrderId] >= @__segMin AND [OrderId] < @__segMax;",
-            DeleteInsertStatement.BuildDelete("[dbo].[Orders]", "[OrderId] >= @__segMin AND [OrderId] < @__segMax"));
+            "DELETE FROM [dbo].[Orders] WHERE [OrderId] >= @segMin AND [OrderId] < @segMax;",
+            DeleteInsertStatement.BuildDelete("[dbo].[Orders]", "[OrderId] >= @segMin AND [OrderId] < @segMax"));
     }
 
     [Fact]

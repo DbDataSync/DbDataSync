@@ -94,7 +94,7 @@ public static class HistorizedStatement
         // is the bulk statement, which by construction only ever reaches a key with exactly one.
         var validTo = validToExpression is null
             ? dialect.ParameterReference("now")
-            : $"(SELECT {validToExpression} FROM {staging} AS s WHERE {join} AND {changedPredicate})";
+            : $"(SELECT {validToExpression} FROM {staging} s WHERE {join} AND {changedPredicate})";
 
         return $"""
             UPDATE {quotedTarget}
@@ -102,7 +102,7 @@ public static class HistorizedStatement
                 {isCurrent} = {dialect.FalseLiteral}
             WHERE {isCurrent} = {dialect.TrueLiteral}
               AND EXISTS (
-                SELECT 1 FROM {staging} AS s
+                SELECT 1 FROM {staging} s
                 WHERE {join}
                   AND {changedPredicate}
               );
@@ -174,10 +174,10 @@ public static class HistorizedStatement
         return $"""
             INSERT INTO {quotedTarget} ({columns})
             SELECT {selected}
-            FROM {staging} AS s
+            FROM {staging} s
             WHERE s.{operation} <> 'D'{filterClause}
               AND NOT EXISTS (
-                SELECT 1 FROM {quotedTarget} AS t
+                SELECT 1 FROM {quotedTarget} t
                 WHERE {openMatch} AND t.{isCurrent} = {dialect.TrueLiteral}
               );
             """;
@@ -214,7 +214,7 @@ public static class HistorizedStatement
     {
         var match = string.Join(" AND ", keyColumns.Select(
             k => $"dup.{dialect.QuoteIdentifier(k)} = s.{dialect.QuoteIdentifier(k)}"));
-        return $"(SELECT COUNT(*) FROM {staging} AS dup WHERE {match}) = 1";
+        return $"(SELECT COUNT(*) FROM {staging} dup WHERE {match}) = 1";
     }
 
     /// <summary>
