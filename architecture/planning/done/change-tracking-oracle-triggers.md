@@ -1,6 +1,12 @@
 # Change tracking — Oracle, via trigger audit
 
-**Status: proposal, not agreed — narrower and much less blocked than it looks.** Extracted from
+**Status: resolved 2026-09-16 — turned into an implementation plan.** See
+`architecture/implementation/todo/phase-148-oracle-driver-trigger-audit-and-flashback.md`, which builds
+this design alongside Flashback Version Query and the rest of the Oracle driver in one phase — the
+pre-12c identity-column question below was resolved there by flooring the driver at 12c+. LogMiner
+(`change-tracking-oracle.md`'s Option 2) stays deferred, out of that phase's scope.
+
+**Narrower and much less blocked than it looks.** Extracted from
 `change-tracking-oracle.md`'s own "Option 3" (that doc is being refined to cover Flashback Version Query
 and LogMiner only — see its own updated status line). Same reasoning as the sibling MySQL/MariaDB
 extraction: phase 33 (`architecture/implementation/done/phase-033-trigger-audit-change-tracking.md`)

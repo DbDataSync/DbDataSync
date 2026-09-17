@@ -1,6 +1,11 @@
 # Change tracking — MySQL/MariaDB, via trigger audit
 
-**Status: proposal, not agreed — narrower and much less blocked than it looks.** Extracted from
+**Status: resolved 2026-09-16 — turned into an implementation plan.** See
+`architecture/implementation/todo/phase-147-mysql-mariadb-driver-and-trigger-audit.md`, which builds this
+design (plus the rest of the MySQL/MariaDB driver) directly. The open questions below were carried into
+that phase doc rather than answered here.
+
+**Narrower and much less blocked than it looks.** Extracted from
 `change-tracking-mysql.md`'s own "Option 1" (that doc is being refined to cover the binlog-based native
 alternative only — see its own updated status line). Split out because this option turned out, on
 closer inspection, to need essentially none of the design work the binlog path does: phase 33
