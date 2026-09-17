@@ -1,6 +1,6 @@
 # Phase 147 — MySQL/MariaDB driver, with trigger-audit change tracking
 
-**Status**: Planned, not started.
+**Status**: Built and verified 2026-09-16. See the Retrospective below.
 **Plan reference**: `architecture/planning/done/additional-database-drivers.md` (the general driver
 shape), `architecture/planning/todo/change-tracking-mysql-and-mariadb-triggers.md` (the trigger-audit
 design this phase implements almost verbatim), `architecture/planning/todo/change-tracking-mysql.md`
@@ -175,3 +175,108 @@ than surfacing MySQL's own raw DDL error.
 - A real `tools/dev-harness` run against both MySQL and MariaDB, with concrete numbers reported in the
   retrospective, matching phase 20's own verification shape.
 - Full suite green.
+
+# Retrospective
+
+Built as `DbDataSync.Drivers.MySql` (`MySqlDriver`, `MySqlCatalog`, `MySqlValueBinding`,
+`MySqlProvisioner`, `MySqlTriggerAudit`) plus `MySqlDialect` in `DbDataSync.Core/Sql`, registered in all
+three composition roots (`DbDataSyncHost.cs`, `TaskRunner/Program.cs`, `Cli/BuiltInDrivers.cs`) and the
+solution file. `DriverIds.MySql` added. Every reader, staging provider and writer the driver registers is
+`DbDataSync.Drivers.Generic`'s, unmodified — the same claim `PostgresDriver`'s own doc comment makes,
+confirmed a second time rather than assumed.
+
+## Finding 1: `information_schema.tables` is server-wide on MySQL, not database-scoped
+
+`InformationSchemaQueries.ListTablesAsync` (the shared helper Postgres wraps with no `table_schema`
+filter) is correct for Postgres — whose `information_schema` cannot see another database from the
+current connection — and silently wrong for MySQL, whose `information_schema.tables` spans every
+database on the server. Reused unmodified, a table picker for any MySQL connection would have listed
+every table on the instance, not just the selected database's. Caught before it shipped, not after:
+`MySqlCatalog.ListTablesAsync` is a full override adding `AND table_schema = DATABASE()`, using MySQL's
+own "which database is this session in" function — exactly what `UseDatabaseAsync`'s preceding `USE`
+statement just set. `GetColumnsAsync` needed no equivalent fix; it already takes an explicit schema
+parameter from every caller.
+
+This is the same class of bug phase 20's Finding 1 was (a shared component whose assumptions hold for
+one engine and not the next), caught the same way: by reading what the shared code actually does against
+this engine's real catalog shape rather than assuming "it already works for Postgres" transfers.
+
+## Finding 2: `RenderTieSafeRowLimit` has no correct implementation for MySQL
+
+Every other dialect expresses "cap this ordered read at n rows without splitting ties" as a prefix or
+suffix wrapped around an already-built `SELECT ... ORDER BY` — SQL Server's `TOP (n) WITH TIES`, ANSI's
+`FETCH FIRST n ROWS WITH TIES`. MySQL has no clause like this at all, and the one construction that
+*would* be tie-safe — ranking rows with a window function over a derived table — needs the query
+restructured around a derived table, which the hook's two-string-fragment shape has no room to do. This
+renders a plain `LIMIT n`: correct syntax, not tie-safe. A bounded `Watermark` pass capped exactly on a
+tie can skip a sibling row sharing the boundary value until a later pass happens not to land on that same
+tie. Documented in `MySqlDialect`'s own doc comment and left unresolved — fixing it needs either widening
+the hook's contract (risk: every other dialect's implementation of it) or a MySQL-specific reader
+variant, neither of which is this phase's to decide unilaterally.
+
+## Finding 3: three real MySQL DDL divergences from the ANSI defaults `SqlDialect` assumes
+
+None were anticipated in the planning docs, all caught before the driver ever touched a live server, by
+reading MySQL's actual grammar rather than assuming the base class's ANSI-flavored defaults apply:
+
+- `CAST(expr AS VARCHAR(n))` is not valid MySQL — `CAST`'s target list has no `VARCHAR`, only `CHAR`.
+  `CastToText` overridden.
+- `ALTER TABLE t ALTER COLUMN c TYPE type` (the base default, Postgres's own syntax) is not valid MySQL —
+  a type change is `MODIFY COLUMN c type`, a full column redefinition. `RenderAlterColumnType` overridden,
+  explicitly nullable for the same reason every other dialect's override is.
+- `RenderDeclarations` returned `null` (the base default) until it was pointed out that MySQL's user
+  variables share the exact `@name` syntax `ParameterReference` already uses and need no type
+  declaration — a `SET @p = value;` per parameter turns a preview that used to show only placeholders
+  into one that reproduces exactly what a pass would run, the property the doc comment on the base hook
+  actually asks for.
+
+## Verified rather than assumed, resolving three of the sibling planning docs' open questions
+
+- **`UseDatabaseAsync`: switch, or validate-and-refuse?** Reflected directly against the MySqlConnector
+  2.4.0 assembly: `MySqlConnection.ChangeDatabase` is a real override (issues `USE`), not an inherited
+  one that throws. The base `SqlDialect` implementation is correct unmodified — MySQL switches.
+- **MySQL user/password property names.** `MySqlConnectionStringBuilder.Server`/`.UserID`/`.Port`
+  (`uint`, not `int`) confirmed by reflection rather than guessed from memory.
+- **The trigger-stacking version floor.** Built as a real provisioning-time check (`SupportsTriggerStackingAsync`)
+  rather than left as "MySQL's own DDL error is enough" — `SELECT VERSION()`, split on `MariaDB` to tell
+  the forks apart, compared against 5.7.2/10.2.1. An unparseable version string does not block.
+
+## What the plumbing actually cost
+
+The generic pipeline needed zero changes — every reader, writer and staging provider registered as-is.
+The genuinely new code was: `MySqlDialect` (~210 lines, most of it the type-mapping switch), `MySqlCatalog`
+(~65 lines, the `ListTablesAsync` override being the only non-mechanical part), `MySqlValueBinding` (~55
+lines, a direct port of Postgres's own shape), `MySqlProvisioner` (~215 lines — larger than Postgres's
+because of the three-trigger existence/conflict/version-stacking checks a single-trigger engine does not
+need), `MySqlTriggerAudit` (~75 lines). `MySqlDriver` itself is almost entirely wiring, the same as every
+other driver's.
+
+## Still not built
+
+- The binlog-based native change-tracking alternative (`change-tracking-mysql.md`) — deliberately
+  deferred, unchanged from the plan.
+- A MySQL-native bulk staging provider (`LOAD DATA`) — the generic `BatchInsertStagingProvider` is what
+  shipped, matching Postgres's own precedent.
+- A reconciling incremental writer for MySQL as a target — inherits the pre-existing
+  generic-writers-only gap every non-MsSql driver has.
+- A fix for Finding 2 (`RenderTieSafeRowLimit`) — named, not solved.
+
+## Verification
+
+- `MySqlDialectCanonicalTypeTests`, `MySqlTriggerAuditStatementTests`, `MySqlProvisionerTests` — 34 unit
+  tests, no live server, all green.
+- `MySqlPipelineTests`/`MariaDbPipelineTests` and `MySqlTriggerAuditReaderTests`/`MariaDbTriggerAuditReaderTests`
+  — one shared test body per pair (`MySqlFamilyPipelineTestsBase<TFixture>`,
+  `MySqlFamilyTriggerAuditReaderTestsBase<TFixture>`), run against real `mysql:9` and `mariadb:11`
+  containers (docker-compose.yml, ports 13306/13307) — 28 integration tests, all green against **both**
+  engines, which is the empirical half of `change-tracking-mysql-and-mariadb-triggers.md`'s "one
+  implementation covers both" claim, not only its DDL-text half.
+- Full solution build: 0 warnings, 0 errors. Full non-integration suite across every test project: 458 +
+  141 + 47 + 184 + 137 + 36 + 34 + 33 + 28 + 27 + 58 + 8 passed, 0 failed — confirming the fourth
+  driver's registration in all three composition roots broke nothing already relying on a fixed driver
+  count or list.
+- `CrossEngineReplicationTests` extension: not done this pass — MySQL↔other-engine replication is
+  untested; only MySQL/MariaDB↔MySQL/MariaDB (`MySqlFamilyPipelineTestsBase`) and the trigger-audit
+  reader are verified. Worth closing before this driver is presented as production-ready for
+  cross-engine use.
+- `tools/dev-harness` scenario: not added this pass.

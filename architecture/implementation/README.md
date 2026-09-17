@@ -34,7 +34,21 @@ So the order lives here, and is the one to work through:
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 | 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
-Updated 2026-09-16 (latest of all): **146 is done and removed.** The published `dbdatasync` tool's
+Updated 2026-09-16 (latest of all): **147 is done.** MySQL/MariaDB driver
+(`DbDataSync.Drivers.MySql`) plus trigger-audit change tracking, built directly against the Postgres
+driver as its structural template and phase 33's already-built generic trigger-audit mechanism — every
+reader/writer/staging provider it registers is `DbDataSync.Drivers.Generic`'s, unmodified. Two real bugs
+caught before they shipped: `InformationSchemaQueries.ListTablesAsync` (correct for Postgres, silently
+wrong for MySQL — `information_schema.tables` is server-wide there, not database-scoped, so it needed
+its own override) and three ANSI-default DDL forms MySQL doesn't actually accept (`CAST ... AS VARCHAR`,
+`ALTER COLUMN ... TYPE`, needing a stated `RENAME COLUMN` version floor). One real, unresolved gap named
+rather than papered over: `RenderTieSafeRowLimit` has no tie-safe MySQL implementation — see the phase
+doc's own Finding 2. Verified against real `mysql:9` **and** `mariadb:11` containers from one shared test
+body per pair, 28 integration tests green on both — the empirical half of the sibling planning doc's
+"one implementation covers both forks" claim. See
+`architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`.
+
+Updated 2026-09-16 (previously latest): **146 is done and removed.** The published `dbdatasync` tool's
 nupkg was 152.6MB, ~330MB uncompressed of it DuckDB's own native binaries for all five platforms,
 shipped unconditionally on every install regardless of which one a machine could load — phase 109i's
 "DuckDB decoupling" only ever excluded the *managed* assembly (NuGet treats `native` as a separate

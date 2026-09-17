@@ -1,7 +1,7 @@
 # Change tracking — MySQL/MariaDB, via trigger audit
 
 **Status: resolved 2026-09-16 — turned into an implementation plan.** See
-`architecture/implementation/todo/phase-147-mysql-mariadb-driver-and-trigger-audit.md`, which builds this
+`architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`, which builds this
 design (plus the rest of the MySQL/MariaDB driver) directly. The open questions below were carried into
 that phase doc rather than answered here.
 

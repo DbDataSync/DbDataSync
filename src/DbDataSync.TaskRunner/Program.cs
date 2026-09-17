@@ -5,6 +5,7 @@ using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
+using DbDataSync.Drivers.MySql;
 using DbDataSync.Drivers.Postgres;
 using DbDataSync.Libraries;
 using DbDataSync.Scripting;
@@ -40,6 +41,7 @@ var driverRegistry = new DriverRegistry();
 // and a driver must not depend on Roslyn.
 driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
+driverRegistry.RegisterWithScripting(new MySqlDriver(), scriptHost);
 driverRegistry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
 DriverLoader.LoadDescriptorDrivers(options.RepoRoot, libraryRegistry, driverRegistry);
 DriverLoader.LoadCompiledDrivers(options.RepoRoot, driverRegistry);

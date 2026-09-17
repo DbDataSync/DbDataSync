@@ -13,6 +13,9 @@ public static class DriverIds
     public const string MsSql = "MsSql";
     public const string Postgres = "Postgres";
 
+    /// <summary>MySQL and MariaDB, on MySqlConnector — phase 147.</summary>
+    public const string MySql = "MySql";
+
     /// <summary>
     /// DuckDB, embedded. Unlike the other two it is not a server: the "address" is a file path or
     /// <c>:memory:</c>, there is nothing to authenticate to, and there is no catalog worth browsing

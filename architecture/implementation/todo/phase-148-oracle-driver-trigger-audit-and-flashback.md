@@ -7,7 +7,7 @@
 questions"; Option 2, LogMiner, deliberately not built here), `architecture/implementation/done/phase-020-postgres-driver.md`
 (structural template), `architecture/implementation/done/phase-033-trigger-audit-change-tracking.md`,
 `architecture/implementation/done/phase-031-connection-addressing.md` (EZConnect/TNS/wallet addressing,
-already built and reused unmodified), `architecture/implementation/todo/phase-147-mysql-mariadb-driver-and-trigger-audit.md`
+already built and reused unmodified), `architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`
 (the sibling phase — read that first; this one repeats less of the shared reasoning).
 
 ## Why Oracle now, and why Flashback ships in the same phase as the trigger option

@@ -14,6 +14,7 @@ using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
+using DbDataSync.Drivers.MySql;
 using DbDataSync.Scripting;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.Postgres;
@@ -180,6 +181,7 @@ public static class DbDataSyncHost
             var scriptHost = sp.GetRequiredService<ScriptHost>();
             registry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
             registry.RegisterWithScripting(new PostgresDriver(), scriptHost);
+            registry.RegisterWithScripting(new MySqlDriver(), scriptHost);
             // DuckDb takes the same call and gets no ScriptedQuery reader out of it: it names a dialect
             // but supplies no ITableCatalog, and a scripted query builder is handed the source table's
             // columns by contract. Registered through the same helper anyway, so there is one
@@ -187,7 +189,7 @@ public static class DbDataSyncHost
             registry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
 
             // A descriptor-defined driver's library (resolved above) is already loadable; this is
-            // what actually stands one up and puts it beside the three built-ins.
+            // what actually stands one up and puts it beside the built-ins.
             var libraryRegistry = sp.GetRequiredService<LibraryRegistry>();
             var repoRoot = sp.GetRequiredService<ApiOptions>().RepoRoot;
             var driverErrorLogger = (string message, Exception ex) =>

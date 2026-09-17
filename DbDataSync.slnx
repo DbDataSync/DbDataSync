@@ -9,6 +9,7 @@
     <Project Path="src/DbDataSync.Drivers.DuckDb/DbDataSync.Drivers.DuckDb.csproj" />
     <Project Path="src/DbDataSync.Drivers.Generic/DbDataSync.Drivers.Generic.csproj" />
     <Project Path="src/DbDataSync.Drivers.MsSql/DbDataSync.Drivers.MsSql.csproj" />
+    <Project Path="src/DbDataSync.Drivers.MySql/DbDataSync.Drivers.MySql.csproj" />
     <Project Path="src/DbDataSync.Drivers.Postgres/DbDataSync.Drivers.Postgres.csproj" />
     <Project Path="src/DbDataSync.Libraries/DbDataSync.Libraries.csproj" />
     <Project Path="src/DbDataSync.Scripting/DbDataSync.Scripting.csproj" />
@@ -32,6 +33,7 @@
     <Project Path="tests/DbDataSync.Drivers.Generic.Tests/DbDataSync.Drivers.Generic.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.Loader.Tests/DbDataSync.Drivers.Loader.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.MsSql.Tests/DbDataSync.Drivers.MsSql.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Drivers.MySql.Tests/DbDataSync.Drivers.MySql.Tests.csproj" />
     <Project Path="tests/DbDataSync.Drivers.Postgres.Tests/DbDataSync.Drivers.Postgres.Tests.csproj" />
     <Project Path="tests/DbDataSync.Libraries.Tests/DbDataSync.Libraries.Tests.csproj" />
     <Project Path="tests/DbDataSync.Scripting.Tests/DbDataSync.Scripting.Tests.csproj" />

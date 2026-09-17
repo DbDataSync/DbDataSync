@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Generic\DbDataSync.Drivers.Generic.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ExcludeAssets="runtime" (phase 109h) — see DbDataSync.Drivers.Postgres.csproj's identical comment
+         for why: compiles unchanged, ships nothing, resolved at first touch through LibraryRegistry's
+         AssemblyLoadContext.Resolving handler from <repo>/libraries/mysql-connector/lib/. -->
+    <PackageReference Include="MySqlConnector" Version="2.4.0" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DbDataSync.Drivers.MySql.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

@@ -1,12 +1,13 @@
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.DuckDb;
 using DbDataSync.Drivers.MsSql;
+using DbDataSync.Drivers.MySql;
 using DbDataSync.Drivers.Postgres;
 
 namespace DbDataSync.Cli;
 
 /// <summary>
-/// The three built-in, compiled replication drivers — the ones with a real
+/// The built-in, compiled replication drivers — the ones with a real
 /// <see cref="IDriver.RequiredLibraryId"/> for phase 109j's compatibility checking to apply to. A
 /// descriptor or compiled-plugin driver (109d/109e) is never relevant here: its provider is resolved by
 /// name through <see cref="System.Data.Common.DbProviderFactories"/> rather than through a compiled
@@ -26,6 +27,7 @@ internal static class BuiltInDrivers
     [
         new MsSqlDriver(),
         new PostgresDriver(),
+        new MySqlDriver(),
         new DuckDbDriver(),
     ];
 }

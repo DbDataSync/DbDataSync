@@ -63,9 +63,10 @@ services:
       retries: 10
       start_period: 10s
 
-  # A server engine the build does not reference — phase 109c's proof that a provider restored by
-  # `dbdatasync provider install` (MySqlConnector, here) opens a real connection with no compile-time
-  # dependency anywhere in the solution.
+  # Originally stood up for phase 109c's proof that a provider restored by `dbdatasync provider
+  # install` (MySqlConnector, here) opens a real connection with no compile-time dependency anywhere
+  # in the solution — that is no longer true as of phase 147, which added DbDataSync.Drivers.MySql as
+  # a genuine compiled driver project, and this container now backs its own test suite too.
   mysql:
     image: mysql:9
     container_name: dbdatasync-mysql
@@ -83,8 +84,29 @@ services:
       retries: 10
       start_period: 30s
 
+  # Phase 147: proves the trigger-audit DDL is genuinely identical across both forks (see
+  # change-tracking-mysql-and-mariadb-triggers.md) rather than assumed — TriggerAuditReaderTests runs
+  # against this container too, not only mysql above.
+  mariadb:
+    image: mariadb:11
+    container_name: dbdatasync-mariadb
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DBDATASYNC_MARIADB_ROOT_PASSWORD:-DbDataSync_Test_Pw1}
+      MARIADB_DATABASE: dbdatasync
+    ports:
+      - "13307:3306"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 volumes:
   mssql-source-data:
   mssql-target-data:
   postgres-data:
   mysql-data:
+  mariadb-data:

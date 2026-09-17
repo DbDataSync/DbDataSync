@@ -8,6 +8,7 @@
     <ProjectReference Include="..\DbDataSync.Drivers.DuckDb\DbDataSync.Drivers.DuckDb.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Descriptor\DbDataSync.Drivers.Descriptor.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Postgres\DbDataSync.Drivers.Postgres.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.MySql\DbDataSync.Drivers.MySql.csproj" />
     <ProjectReference Include="..\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
     <ProjectReference Include="..\DbDataSync.State\DbDataSync.State.csproj" />
     <ProjectReference Include="..\DbDataSync.Verification\DbDataSync.Verification.csproj" />
