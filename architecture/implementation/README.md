@@ -52,6 +52,26 @@ Its biggest open question is recorded rather than deferred — `IChangeReader` h
 `DbConnection`, and a replication session cannot use one. See
 `architecture/implementation/todo/phase-155-pgoutput-logical-decoding.md`.
 
+Updated 2026-09-17 (previously latest): **154 is done.** `dotnet-integration`'s `services:` block — a
+hand-maintained second copy of `docker-compose.yml`'s own container topology — is gone, replaced by a
+`docker compose up -d --wait` step (no explicit service list; this job needs every engine the file
+defines). That duplication is exactly what let phase 153's own mariadb/oracle gap happen in the first
+place, and removing it also removed phase 153's manual "Provision Oracle" `docker exec`/`sqlplus`
+workaround entirely — that only ever existed because a `services:` container is created before
+`actions/checkout` puts the repo on disk, so `docker-compose.yml`'s own bind mount of
+`docker/oracle-init/*.sql` couldn't work there; running `docker compose up` after checkout removes the
+reason for the workaround. Confirmed on a real, fully green CI run (`35283992102`) — every job passed,
+Oracle's tests included, with no manual provisioning step at all. Two real, unrelated test bugs found and
+fixed along the way, discovered while verifying phase 153's own first CI run: `LibraryLoadTests`' MySQL
+canary test was stale since phase 147 legitimately gave `DbDataSync.Drivers.MySql.csproj` a real
+(`ExcludeAssets="runtime"`) reference to MySqlConnector, and `BulkLoadIntegrationTests`' race assertion
+assumed an explicit reload always beats a mapping's own auto-triggered first pass — untrue given
+`RunExecutor.ExecuteWorkerAsync` runs both lanes concurrently on the same worker process, confirmed by a
+real CI failure and fixed to accept either legitimate outcome. See
+`architecture/implementation/done/phase-154-ci-integration-suite-onto-docker-compose.md`. A third,
+genuinely unrelated failure turned up on the very next run — out of this phase's scope, written up in
+`architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md`.
+
 Updated 2026-09-17 (previously latest): **153 is done.** CI's `dotnet-integration` job was missing the
 MariaDB and Oracle service containers phases 147/148's own new `Category=Integration` tests need — every
 `MariaDb*`/`Oracle*` test in `DbDataSync.Drivers.MySql.Tests`/`DbDataSync.Drivers.Oracle.Tests` had been
@@ -134,42 +154,6 @@ bug 81 predicted — and the screen for it is
 restoring that file can take the console offline and that needs a decision rather than a dialog. See
 `architecture/implementation/done/phase-035-config-history-diff-and-revert.md`.
 
-Updated 2026-09-17 (latest of all): **154 is done.** `dotnet-integration`'s `services:` block — a
-hand-maintained second copy of `docker-compose.yml`'s own container topology — is gone, replaced by a
-`docker compose up -d --wait` step (no explicit service list; this job needs every engine the file
-defines). That duplication is exactly what let phase 153's own mariadb/oracle gap happen in the first
-place, and removing it also removed phase 153's manual "Provision Oracle" `docker exec`/`sqlplus`
-workaround entirely — that only ever existed because a `services:` container is created before
-`actions/checkout` puts the repo on disk, so `docker-compose.yml`'s own bind mount of
-`docker/oracle-init/*.sql` couldn't work there; running `docker compose up` after checkout removes the
-reason for the workaround. Confirmed on a real, fully green CI run (`35283992102`) — every job passed,
-Oracle's tests included, with no manual provisioning step at all. Two real, unrelated test bugs found and
-fixed along the way, discovered while verifying phase 153's own first CI run: `LibraryLoadTests`' MySQL
-canary test was stale since phase 147 legitimately gave `DbDataSync.Drivers.MySql.csproj` a real
-(`ExcludeAssets="runtime"`) reference to MySqlConnector, and `BulkLoadIntegrationTests`' race assertion
-assumed an explicit reload always beats a mapping's own auto-triggered first pass — untrue given
-`RunExecutor.ExecuteWorkerAsync` runs both lanes concurrently on the same worker process, confirmed by a
-real CI failure and fixed to accept either legitimate outcome. See
-`architecture/implementation/done/phase-154-ci-integration-suite-onto-docker-compose.md`. A third,
-genuinely unrelated failure turned up on the very next run — out of this phase's scope, written up in
-`architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md`.
-
-Updated 2026-09-17 (previously latest): **153 is done.** CI's `dotnet-integration` job was missing the
-MariaDB and Oracle service containers phases 147/148's own new `Category=Integration` tests need — every
-`MariaDb*`/`Oracle*` test in `DbDataSync.Drivers.MySql.Tests`/`DbDataSync.Drivers.Oracle.Tests` had been
-failing on `main` with a connection refused since phase 150 merged. Fixed by adding both services to
-`.github/workflows/ci.yml`, matching `docker-compose.yml`'s own ports exactly so no test fixture's default
-connection string needed to change. One real finding: `docker-compose.yml`'s own mechanism for Oracle's
-grants/probe-table setup — bind-mounting `docker/oracle-init/` into the container — cannot work as a
-GitHub Actions `services:` entry at all, since service containers are created and pass their healthchecks
-*before* `actions/checkout` puts the repository on disk; the container would report healthy having
-silently skipped both scripts. Fixed with an explicit "Provision Oracle" CI step running them via
-`docker exec ... sqlplus -s / as sysdba` after checkout — confirmed against a live container, not assumed,
-that bare peer authentication lands in `CDB$ROOT` (what both scripts' own `ALTER SESSION SET CONTAINER`
-needs) rather than the PDB the password-based form used during phase 148's own local testing would have
-landed in. No source code changed. The one thing this phase could not itself verify: a real GitHub Actions
-run — everything was tested against an equivalent local container, not the actual runner. See
-`architecture/implementation/done/phase-153-ci-mariadb-and-oracle-service-containers.md`.
 Updated 2026-09-16 (previously latest): **034 is done and removed, and split twice.** `PgLogicalSlotReader`
 reads PostgreSQL logical decoding as a query — `pg_logical_slot_peek_changes` through `wal2json`, the
 slot's LSN as the watermark — and the plan's central claim held: it needed no change to `IChangeReader`
@@ -183,8 +167,9 @@ call `TriggerAuditReader`'s pruning option already makes here. The cost is named
 retrospective — `wal2json` cannot apply a column transform (refused by name), decoded JSON values have
 to be converted or the same mapping works through one staging provider and fails through the other, and
 **no public image carries `wal2json` any more** (Debezium's build only `decoderbufs` as of 3.x), so
-the environment is a two-line Dockerfile and CI's Postgres moved off `services:`. **One product question
-is still open and wants a decision, not more work**: whether `wal2json` is an acceptable prerequisite or
+the environment is a two-line Dockerfile and CI brings it up through compose (the workflow change
+itself is phase 154's, per that phase doc's rebase note). **One product question is still open and
+wants a decision, not more work**: whether `wal2json` is an acceptable prerequisite or
 `pgoutput` has to come first. Nothing built here has to be undone either way. Split out: **151**
 (deprovisioning — there is no such concept anywhere in this codebase, and phase 33's shadow tables have
 the same gap) and **152** (slot lag and orphan reporting). See

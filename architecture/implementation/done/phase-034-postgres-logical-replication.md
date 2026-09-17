@@ -25,8 +25,8 @@ between the safe function and the one that silently loses data is four character
 nothing drops it afterwards.
 
 **The environment** — `docker/postgres-logical/Dockerfile`, wired into `docker-compose.yml` with
-`wal_level=logical`, `output_plugin_libraries` and a raised `max_replication_slots`, and CI's Postgres
-moved off `services:`.
+`wal_level=logical`, `output_plugin_libraries` and a raised `max_replication_slots`, and CI's Postgres up through
+compose rather than a `services:` container (see the rebase note below).
 
 ## The plan's slot model was unsafe, and this is the most important thing here
 
@@ -84,8 +84,8 @@ reusing the table `PostgresValueBinding` already had for segment bounds, now sha
 build step". Debezium's Postgres images are the usual answer and are no longer one: as of 3.x their
 Dockerfile builds `decoderbufs` and nothing else — checked against their repository rather than assumed.
 So it is a build step, which in turn means CI cannot start Postgres as a `services:` container (those
-can only pull). It now comes up through `docker compose up -d --wait postgres` in a step, the same
-image, port and credentials, which changes nothing about the tests. The Dockerfile itself is two lines:
+can only pull). It comes up through `docker compose up -d --wait` instead, the same image, port and
+credentials, which changes nothing about the tests. The Dockerfile itself is two lines:
 the official Debian-based `postgres:17` already has the PGDG apt repository configured and PGDG
 publishes `postgresql-17-wal2json`, so there is no compiler, no headers and no source checkout.
 
@@ -174,7 +174,7 @@ left as prose here.
 **Nothing here has run against a real Postgres on the implementing machine** — no Docker — so the
 integration suite, *and the new container image itself*, are first exercised by CI. The image is the
 part worth naming: if `postgresql-17-wal2json` is not resolvable on the runner, the build step fails
-loudly rather than silently, which is why it is a step rather than a `services:` entry. The package was
+loudly rather than silently, which is why it is a compose step rather than a `services:` entry. The package was
 confirmed present in PGDG's `bookworm-pgdg` index before being written down.
 
 **`max_replication_slots` at its default of 10 is untested**, because the dev container raises it. What
@@ -224,3 +224,19 @@ column's type fails with a message naming the column and saying to refresh the m
 `pgoutput`. The trigger fallback (phase 33 covers it generically). Any change to the Postgres driver's
 batch or watermark paths. A bounded read: `pg_logical_slot_peek_changes` has an `upto_nchanges`
 parameter that would fit `BoundedRead`, and nothing here needs it yet.
+
+## Rebase note: the CI change landed on `main` instead
+
+This phase originally edited `.github/workflows/ci.yml` itself — dropping `dotnet-integration`'s
+`postgres:` service and adding a step to bring the built image up. Between that work and this branch
+merging, **main's phase 154 moved the entire job off `services:` and onto a single
+`docker compose up -d --wait`**, for its own unrelated reason (the `services:` block was a
+hand-maintained second copy of `docker-compose.yml`). That subsumes the change described above, so the
+rebase took main's workflow wholesale and this branch's `ci.yml` edit is gone.
+
+Nothing above is invalidated by that: the reasoning for why a `services:` container *cannot* host
+`wal2json` is what makes compose the right shape, and `docker compose up` builds
+`docker/postgres-logical/Dockerfile` on demand, so the image still reaches CI. The only correction is
+authorship — the workflow change is phase 154's, not this one's. What this phase still owns is
+`docker-compose.yml`'s built Postgres service and its server settings, which is what the compose step
+brings up.
