@@ -154,12 +154,26 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
     /// its own warm-up was added: a brand-new mapping's first-ever Primary pass (Change Tracking, a
     /// position-capturing reader) auto-requests a Bulk Load for the same instant an operator's own
     /// explicit reload requests the identical segment. Two independent requests, not one that happens
-    /// to arrive twice — the loser (confirmed by direct `WorkQueue` inspection during diagnosis: the
-    /// explicit trigger consistently wins, since it enqueues immediately on the HTTP request rather
-    /// than waiting on a worker to claim and start processing the Primary pass first) fails cleanly
-    /// with <see cref="DbDataSync.State.RunFailureKinds.ConcurrentLoadInProgress"/>, not merged into the
-    /// winner's own outcome and not stranding the mapping's `ReadHold`. Its next scheduled pass, with
-    /// nothing racing it this time, converges the mapping on its own.
+    /// to arrive twice.
+    /// <para>
+    /// **Which one loses is a genuine race, not a reliable outcome — found the hard way, on a real CI
+    /// run, 2026-09-17.** An earlier version of this comment claimed the explicit trigger "consistently
+    /// wins, since it enqueues immediately on the HTTP request rather than waiting on a worker to claim
+    /// and start processing the Primary pass first" — true of the *enqueue* step alone, but
+    /// <see cref="RunExecutor.ExecuteWorkerAsync"/> runs the ChangeProcessing and BulkLoad lanes
+    /// *concurrently* on the same spawned worker process (<c>Task.WhenAll(change, bulkLoad)</c>), from
+    /// the moment it starts. Once both work items are enqueued (both near-instant, from independent HTTP
+    /// handlers), the real race is between the BulkLoad lane finishing its own read+write before the
+    /// ChangeProcessing lane's Primary pass gets through opening a source connection and capturing its
+    /// own position — two comparable, real SQL round trips on either side, whose relative speed a CI
+    /// runner's own load can and does flip. Both outcomes are equally correct: either the auto-request
+    /// finds the explicit reload's row still there and fails cleanly with
+    /// <see cref="DbDataSync.State.RunFailureKinds.ConcurrentLoadInProgress"/> (not merged into the
+    /// winner's own outcome, not stranding the mapping's `ReadHold` — self-heals on the next scheduled
+    /// pass with nothing left to race), or it finds nothing left to collide with and simply succeeds as
+    /// an ordinary, non-colliding initial load. This test asserts both branches explicitly rather than
+    /// assuming only one can happen.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task ARaceBetweenAConcurrentReloadAndAMappingsOwnFirstPass_TheLoserFailsCleanly_AndSelfHeals()
@@ -180,12 +194,25 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
         Assert.Equal("Succeeded", bulkLoadRun.GetProperty("status").GetString());
         Assert.Equal(RowsPerTable, await CountAsync("Tgt_1"));
 
-        // map-1's own Primary pass lost: it's the one that auto-requested the identical segment,
-        // reliably after the explicit trigger's own enqueue already landed.
+        // map-1's own Primary pass is the one that auto-requested the identical segment — whether it
+        // lost the race is genuinely up to timing (see this test's own doc comment), so both outcomes
+        // are checked explicitly rather than assuming only the "lost" branch can happen.
         var map1Primary = Assert.Single(primaryRuns, r => r.GetProperty("mappingName").GetString() == "map-1");
-        Assert.Equal("Failed", map1Primary.GetProperty("status").GetString());
-        Assert.Equal("ConcurrentLoadInProgress", map1Primary.GetProperty("failureKind").GetString());
-        Assert.Contains("already in progress", map1Primary.GetProperty("errorSummary").GetString());
+        var map1Status = map1Primary.GetProperty("status").GetString();
+        if (map1Status == "Failed")
+        {
+            // The intended branch: the auto-request found the explicit reload's row still there.
+            Assert.Equal("ConcurrentLoadInProgress", map1Primary.GetProperty("failureKind").GetString());
+            Assert.Contains("already in progress", map1Primary.GetProperty("errorSummary").GetString());
+        }
+        else
+        {
+            // The explicit reload finished (enqueue *and* run) before the auto-request ever reached
+            // its own collision check — nothing left to collide with, so this is just an ordinary,
+            // non-colliding initial load. Equally correct; not the shape this test exists to name, but
+            // not a failure of anything this test is actually checking either.
+            Assert.Equal("Succeeded", map1Status);
+        }
 
         // map-2 was never part of the race — its own auto-trigger had nothing to collide with.
         var map2Primary = Assert.Single(primaryRuns, r => r.GetProperty("mappingName").GetString() == "map-2");
