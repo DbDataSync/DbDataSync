@@ -20,11 +20,12 @@ internal sealed class PostgresValueBinding : ISegmentValueBinder
 
     public DbParameter CreateParameter(string name, string rawValue, ColumnMetadata column)
     {
-        var baseType = SqlTypeName.BaseOf(column.NativeType);
         try
         {
-            var (npgsqlType, value) = Convert(baseType, rawValue);
-            return new Npgsql.NpgsqlParameter(name, npgsqlType) { Value = value };
+            // Which type the column is, and how to read a string as one, were a single switch until
+            // phase 38 needed the first half on its own — see PostgresNpgsqlTypes.
+            var npgsqlType = PostgresNpgsqlTypes.Of(column.NativeType);
+            return new Npgsql.NpgsqlParameter(name, npgsqlType) { Value = Parse(npgsqlType, rawValue) };
         }
         catch (Exception ex) when (ex is FormatException or OverflowException or ArgumentException)
         {
@@ -35,28 +36,26 @@ internal sealed class PostgresValueBinding : ISegmentValueBinder
     }
 
     /// <summary>
-    /// Both the <c>information_schema</c> spellings (<c>integer</c>, <c>character varying</c>) and the
-    /// internal ones (<c>int4</c>, <c>varchar</c>), because a column's type reaches here from either
-    /// depending on which catalog query produced it.
+    /// The CLR value Npgsql wants for each type it was given. Keyed on the resolved
+    /// <see cref="NpgsqlDbType"/> rather than on the column's type name, so the two halves cannot
+    /// disagree about what <c>money</c> or <c>bigserial</c> is.
     /// </summary>
-    private static (NpgsqlDbType Type, object Value) Convert(string baseType, string raw) => baseType switch
+    private static object Parse(NpgsqlDbType type, string raw) => type switch
     {
-        "smallint" or "int2" => (NpgsqlDbType.Smallint, short.Parse(raw, CultureInfo.InvariantCulture)),
-        "integer" or "int" or "int4" or "serial" => (NpgsqlDbType.Integer, int.Parse(raw, CultureInfo.InvariantCulture)),
-        "bigint" or "int8" or "bigserial" => (NpgsqlDbType.Bigint, long.Parse(raw, CultureInfo.InvariantCulture)),
-        "boolean" or "bool" => (NpgsqlDbType.Boolean, ParseBool(raw)),
-        "numeric" or "decimal" or "money" => (NpgsqlDbType.Numeric, decimal.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture)),
-        "double precision" or "float8" => (NpgsqlDbType.Double, double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture)),
-        "real" or "float4" => (NpgsqlDbType.Real, float.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture)),
-        "date" => (NpgsqlDbType.Date, DateOnly.FromDateTime(ParseDateTime(raw))),
-        "timestamp" or "timestamp without time zone" => (NpgsqlDbType.Timestamp, DateTime.SpecifyKind(ParseDateTime(raw), DateTimeKind.Unspecified)),
-        "timestamptz" or "timestamp with time zone" => (NpgsqlDbType.TimestampTz, DateTimeOffset.Parse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)),
-        "time" or "time without time zone" => (NpgsqlDbType.Time, TimeSpan.Parse(raw, CultureInfo.InvariantCulture)),
-        "uuid" => (NpgsqlDbType.Uuid, Guid.Parse(raw)),
-        "bytea" => (NpgsqlDbType.Bytea, ParseBinary(raw)),
-        "character" or "bpchar" or "char" => (NpgsqlDbType.Char, raw),
-        "character varying" or "varchar" => (NpgsqlDbType.Varchar, raw),
-        _ => (NpgsqlDbType.Text, raw),
+        NpgsqlDbType.Smallint => short.Parse(raw, CultureInfo.InvariantCulture),
+        NpgsqlDbType.Integer => int.Parse(raw, CultureInfo.InvariantCulture),
+        NpgsqlDbType.Bigint => long.Parse(raw, CultureInfo.InvariantCulture),
+        NpgsqlDbType.Boolean => ParseBool(raw),
+        NpgsqlDbType.Numeric => decimal.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture),
+        NpgsqlDbType.Double => double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture),
+        NpgsqlDbType.Real => float.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture),
+        NpgsqlDbType.Date => DateOnly.FromDateTime(ParseDateTime(raw)),
+        NpgsqlDbType.Timestamp => DateTime.SpecifyKind(ParseDateTime(raw), DateTimeKind.Unspecified),
+        NpgsqlDbType.TimestampTz => DateTimeOffset.Parse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+        NpgsqlDbType.Time => TimeSpan.Parse(raw, CultureInfo.InvariantCulture),
+        NpgsqlDbType.Uuid => Guid.Parse(raw),
+        NpgsqlDbType.Bytea => ParseBinary(raw),
+        _ => raw,
     };
 
     private static bool ParseBool(string raw) => raw switch

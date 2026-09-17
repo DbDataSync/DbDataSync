@@ -11,11 +11,13 @@ namespace DbDataSync.Drivers.Postgres;
 /// <summary>
 /// PostgreSQL, on Npgsql.
 /// <para>
-/// It registers nothing of its own: every reader, staging provider and writer here is
-/// <c>DbDataSync.Drivers.Generic</c>'s, driven by <see cref="PostgresDialect"/>. That is the claim
-/// phases 17 and 18 made — a new engine is a dialect, a connection factory and a catalog — and this
-/// file is what it looks like when it holds. An engine-specific <c>COPY</c> staging provider is a
-/// later phase; nothing here is waiting on it.
+/// Almost nothing here is its own. Every reader, every writer and one of the two staging providers is
+/// <c>DbDataSync.Drivers.Generic</c>'s, driven by <see cref="PostgresDialect"/>; the exception is
+/// <see cref="PgCopyStagingProvider"/>, added by phase 38. That is the claim phases 17 and 18 made — a
+/// new engine is a dialect, a connection factory and a catalog — and it held for twenty phases. What
+/// broke it is worth naming: <c>COPY … FROM STDIN (FORMAT BINARY)</c> is a protocol on the connection
+/// rather than a statement, so there was no dialect hook it could have been expressed through. The
+/// generic staging provider is still registered alongside it.
 /// </para>
 /// </summary>
 public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvider, ITableCatalogProvider, IProvisioner, ITableRowEstimator
@@ -48,8 +50,18 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
         new KeyReconcileReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
     ];
 
+    /// <summary>
+    /// Binary COPY first, batched INSERT second — phase 38. Both stage into the same table with the
+    /// same DDL, so a mapping can be moved between them without anything downstream noticing; the
+    /// generic one stays registered because binary COPY converts nothing and an instance that will not
+    /// permit COPY, or a column whose value Npgsql cannot write in the column's own wire format, needs
+    /// a path that works. Order matters only for which one a new mapping is offered first.
+    /// </summary>
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =
-        [new BatchInsertStagingProvider(PostgresDialect.Instance, PostgresCatalog.Instance)];
+    [
+        new PgCopyStagingProvider(PostgresDialect.Instance, PostgresCatalog.Instance),
+        new BatchInsertStagingProvider(PostgresDialect.Instance, PostgresCatalog.Instance),
+    ];
 
     public IReadOnlyList<IChangeWriter> Writers { get; } =
     [

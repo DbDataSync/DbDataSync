@@ -31,7 +31,7 @@ So the order lives here, and is the one to work through:
 | --- | --- | --- |
 | 1 | **034** — PostgreSQL logical replication | |
 | 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 3 | **038** — Postgres COPY staging, and the columnar decision | |
+| 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
 
 Updated 2026-09-17 (latest of all): **154 is done.** `dotnet-integration`'s `services:` block — a
 hand-maintained second copy of `docker-compose.yml`'s own container topology — is gone, replaced by a
@@ -56,7 +56,7 @@ genuinely unrelated failure turned up on the very next run — out of this phase
 Updated 2026-09-17 (previously latest): **153 is done.** CI's `dotnet-integration` job was missing the
 MariaDB and Oracle service containers phases 147/148's own new `Category=Integration` tests need — every
 `MariaDb*`/`Oracle*` test in `DbDataSync.Drivers.MySql.Tests`/`DbDataSync.Drivers.Oracle.Tests` had been
-failing on `main` with a connection refused since phase 147 merged. Fixed by adding both services to
+failing on `main` with a connection refused since phase 150 merged. Fixed by adding both services to
 `.github/workflows/ci.yml`, matching `docker-compose.yml`'s own ports exactly so no test fixture's default
 connection string needed to change. One real finding: `docker-compose.yml`'s own mechanism for Oracle's
 grants/probe-table setup — bind-mounting `docker/oracle-init/` into the container — cannot work as a
@@ -76,7 +76,7 @@ phases 147/148 actually shipped — `docs/replication-concepts.md`, `docs/driver
 tables. The plan predicted three new reader-kind rows; shipped as one (MySQL's and Oracle's trigger-audit
 options are the same existing `TriggerAudit` Kind Postgres/SQL Server already use, not new ones — only
 `OracleFlashback` needed a row of its own). One finding the plan didn't anticipate at all: the MySQL
-descriptor worked example, written before phase 147 existed, had become a stale, false claim ("an engine
+descriptor worked example, written before phase 150 existed, had become a stale, false claim ("an engine
 no part of DbDataSync's own compiled code references at all") now that MySQL is a compiled built-in —
 fixed by reframing the section rather than deleting a still-useful descriptor-mechanism walkthrough. No
 source code changed. See `architecture/implementation/done/phase-149-mysql-oracle-docs-update.md`.
@@ -114,6 +114,23 @@ doc's own Finding 2. Verified against real `mysql:9` **and** `mariadb:11` contai
 body per pair, 28 integration tests green on both — the empirical half of the sibling planning doc's
 "one implementation covers both forks" claim. See
 `architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`.
+Updated 2026-09-16 (previously latest): **038 is done and removed, and split.** Part 1 shipped:
+`PgCopyStagingProvider` stages through `COPY … FROM STDIN (FORMAT BINARY)`, registered ahead of the
+generic batched-`INSERT` provider, creating the identical staging table from that provider's own DDL
+builder — so a mapping moves between the two without anything downstream noticing, which is what the
+integration tests assert by running one body against both Kinds. It is the first thing `PostgresDriver`
+has ever registered that is not `Drivers.Generic`'s, and the reason is worth keeping: `COPY` is a
+protocol on the connection, not a statement, so there was no `SqlDialect` hook it could have gone
+through. The difference that keeps both providers registered is **not** speed — binary `COPY` sends the
+column's own wire format and the server converts nothing, so a value it cannot be written as fails the
+pass rather than being coerced, and the phase spends its care on making that failure name the column,
+the types, and the alternative. **Part 2 — the columnar decision — is now 147** rather than being
+quietly dropped: its deliverable is a set of benchmark numbers off a real server, this machine has no
+Docker, and the existing harness does not model the one configuration the decision actually turns on
+(typed columnar fed from a boxing source) or use a real `COPY` sink. Writing that harness blind, to
+produce the numbers a large architectural change would be decided on, is worse than specifying it. See
+`architecture/implementation/done/phase-038-postgres-copy-staging.md`.
+
 Updated 2026-09-16 (previously latest): **145 is done and removed.** Phase 132's per-key/per-row loop for a
 duplicate natural key is gone, replaced by two window-function statements over one derived table:
 `1 + K + 2KR` round trips for `K` duplicate keys of `R` staged rows each became **3**, whatever `K` and
