@@ -118,9 +118,13 @@ session is no help there." It resolves `StateEngine`/`StateConnectionString` the
 problem — provisioning a new server means there may be no config repository to point an API at yet, and
 no reason to stand up a full `serve` process just to run a one-time bootstrap.
 
-Leaning proposal: a new CLI command (name TBD — `dbdatasync config restore-from-state`, or folded into
-`dbdatasync setup`'s existing "fresh install or an existing one" TUI as a third path it detects and
-offers) that:
+Leaning proposal, per the CLI/setup parity principle settled 2026-09-16 (see
+`cli-and-setup-parity.md`): **both**, not a choice between them — a real CLI command (name TBD,
+`dbdatasync config restore-from-state`), and `dbdatasync setup`'s existing "fresh install or an existing
+one" TUI gains the same operation as a third, interactive path it detects and offers, driving the same
+underlying logic rather than a separate reimplementation. The CLI command is what an unattended /
+scripted provisioning step calls; `setup` is what a human runs the same operation through interactively.
+Both need to:
 
 1. Opens the state database directly, the same way `invite` does.
 2. Reads every row of `ConfigObjects`.
@@ -163,10 +167,10 @@ offers) that:
   per row — genuinely more relevant now that "analysis" is a named use case, not resolved here.
 - **Delete handling: hard-delete the mirror row, or tombstone it?** Leaning hard-delete, consistent with
   "current state only."
-- **Restore command name and entry point** — a new top-level CLI command, or a path inside `dbdatasync
-  setup`'s existing TUI (which already distinguishes "fresh install" from "existing one," but doesn't
-  today check whether an existing, populated state database is sitting there with no config repo beside
-  it — a real gap this feature would need to add detection for either way).
+- **Restore command's exact name** — settled that it's both a CLI command and a `setup` path (see above),
+  name still TBD. `setup` doesn't today check whether an existing, populated state database is sitting
+  there with no config repo beside it — a real gap this feature adds detection for regardless of which
+  surface is used.
 - **Restore conflict handling.** What happens if the target directory already has *some* config in it —
   refuse outright (restore is for a genuinely empty target only), or offer to merge/overwrite object by
   object? Leaning toward refusing on anything but an empty config root for a first version — merge
