@@ -10,6 +10,8 @@ import type {
   SegmentCandidate,
   SegmentingStrategyConfig,
   ColumnMetadata,
+  ConfigDiff,
+  ConfigRestoreResult,
   CommitInfo,
   ConnectionConfig,
   ConnectionInput,
@@ -202,6 +204,21 @@ export const api = {
       put<ReplicationTaskConfig>(`/api/replications/${encodeURIComponent(name)}`, task),
     delete: (name: string) => request<void>(`/api/replications/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     history: (name: string) => request<CommitInfo[]>(`/api/replications/${encodeURIComponent(name)}/history`),
+    /** The patch one commit made to this replication — phase 35's "View changes". Read-only. */
+    commitDiff: (name: string, sha: string) =>
+      request<ConfigDiff>(
+        `/api/replications/${encodeURIComponent(name)}/history/${encodeURIComponent(sha)}/diff`,
+      ),
+    /** What restoring to that commit would change — *not* the commit's own patch. See ConfigDiff. */
+    restorePreview: (name: string, sha: string) =>
+      request<ConfigDiff>(
+        `/api/replications/${encodeURIComponent(name)}/history/${encodeURIComponent(sha)}/restore-preview`,
+      ),
+    restore: (name: string, sha: string) =>
+      request<ConfigRestoreResult>(
+        `/api/replications/${encodeURIComponent(name)}/history/${encodeURIComponent(sha)}/restore`,
+        { method: 'POST' },
+      ),
     /** Every pause/resume this replication has recorded, over both grains — see phase 131. */
     pauseHistory: (name: string, limit?: number) =>
       request<PauseEvent[]>(

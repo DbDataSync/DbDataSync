@@ -223,7 +223,7 @@ public sealed class ConfigRepository
     /// the SPA's Config History view. Relies on the fixed configRoot == &lt;repoRoot&gt;/config
     /// convention used throughout (see ConfigPaths) to know the path relative to the repo root.</summary>
     public IReadOnlyList<CommitInfo> GetReplicationHistory(string replicationName, int limit = 50) =>
-        _git.GetHistory($"config/replications/{replicationName}", limit);
+        _git.GetHistory(ReplicationPrefix(replicationName), limit);
 
     public void DeleteReplicationTask(string replicationName, GitAuthor author)
     {
@@ -243,37 +243,8 @@ public sealed class ConfigRepository
         ConfigValidation.ValidateName(replicationName, nameof(replicationName));
         ConfigValidation.ValidateName(mapping.Name, nameof(mapping.Name));
 
-        // A mapping that resolves to no connection or database cannot run. Catch it here rather than
-        // at the first run, where it surfaces as a failed run instead of a rejected edit.
         var task = LoadReplicationTask(replicationName);
-        EndpointResolution.Validate(task, mapping);
-        ValidateHooks(mapping.Hooks);
-
-        // The mapping's own primary writer — computed once and reused below, both for the
-        // already-existing historized-target check and for phase 129's Scd2-specific reconcile checks,
-        // which need to know Kind *and* Options (a stated naturalKey) to validate a KeyReconcileScd2Close
-        // pairing.
-        var primaryWriter = PipelineResolution.Writer(task, mapping);
-
-        // Same reasoning, one step further: a historizing writer pointed at its own source grows the
-        // table on every pass, and finding out at run time means finding out after it has.
-        if (mapping.Sources.Count == 1 && mapping.Targets.Count == 1)
-        {
-            ConfigValidation.ValidateHistorizedTarget(
-                primaryWriter.Kind,
-                EndpointResolution.ResolveSource(task, mapping.Sources[0]),
-                EndpointResolution.ResolveTarget(task, mapping.Targets[0]),
-                mapping.Name);
-        }
-
-        ConfigValidation.ValidateKeyReconcilePairing(
-            PipelineResolution.Reader(task, mapping).Kind, PipelineResolution.Writer(task, mapping).Kind, mapping,
-            primaryWriter.Kind, primaryWriter.Options);
-
-        ConfigValidation.ValidateReconcile(
-            PipelineResolution.Reconcile(task, mapping), mapping,
-            PipelineResolution.ReconcileReaderKind(task, mapping), PipelineResolution.ReconcileWriterKind(task, mapping),
-            primaryWriter.Kind, primaryWriter.Options);
+        ValidateTableMapping(task, mapping);
 
         var path = ConfigPaths.TableMappingFile(_configRoot, replicationName, mapping.Name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -326,6 +297,198 @@ public sealed class ConfigRepository
     /// hook that cannot run is rejected here, while the operator is still looking at the edit, rather
     /// than discovered as a failed run. Checks every point's list: exactly one of <c>Sql</c>/<c>Hook</c>
     /// per entry, every token/parameter reference available at that point (<see cref="HookValidation"/>),
+    /// <summary>
+    /// Everything that has to be true of a mapping before it is written. Extracted from
+    /// <see cref="SaveTableMapping"/> by phase 35, which needs the identical checks against a mapping
+    /// it is about to restore rather than one it was handed — "a revert that produces config the tool
+    /// would reject on save must not be reachable through a different door" is only a guarantee if the
+    /// two doors run the same check, rather than two copies of it that can drift.
+    /// </summary>
+    private void ValidateTableMapping(ReplicationTaskConfig task, TableMappingConfig mapping)
+    {
+        // A mapping that resolves to no connection or database cannot run. Catch it here rather than
+        // at the first run, where it surfaces as a failed run instead of a rejected edit.
+        EndpointResolution.Validate(task, mapping);
+        ValidateHooks(mapping.Hooks);
+
+        // The mapping's own primary writer — computed once and reused below, both for the
+        // already-existing historized-target check and for phase 129's Scd2-specific reconcile checks,
+        // which need to know Kind *and* Options (a stated naturalKey) to validate a KeyReconcileScd2Close
+        // pairing.
+        var primaryWriter = PipelineResolution.Writer(task, mapping);
+
+        // Same reasoning, one step further: a historizing writer pointed at its own source grows the
+        // table on every pass, and finding out at run time means finding out after it has.
+        if (mapping.Sources.Count == 1 && mapping.Targets.Count == 1)
+        {
+            ConfigValidation.ValidateHistorizedTarget(
+                primaryWriter.Kind,
+                EndpointResolution.ResolveSource(task, mapping.Sources[0]),
+                EndpointResolution.ResolveTarget(task, mapping.Targets[0]),
+                mapping.Name);
+        }
+
+        ConfigValidation.ValidateKeyReconcilePairing(
+            PipelineResolution.Reader(task, mapping).Kind, PipelineResolution.Writer(task, mapping).Kind, mapping,
+            primaryWriter.Kind, primaryWriter.Options);
+
+        ConfigValidation.ValidateReconcile(
+            PipelineResolution.Reconcile(task, mapping), mapping,
+            PipelineResolution.ReconcileReaderKind(task, mapping), PipelineResolution.ReconcileWriterKind(task, mapping),
+            primaryWriter.Kind, primaryWriter.Options);
+    }
+
+
+    /// <summary>Where this replication's config lives in the repository. One expression, because the
+    /// history, both diffs and the restore all have to mean the same directory.</summary>
+    private static string ReplicationPrefix(string replicationName) =>
+        $"config/replications/{replicationName}";
+
+    /// <summary>The patch one commit made to this replication — phase 35's "View changes".</summary>
+    public ConfigDiff GetReplicationCommitDiff(
+        string replicationName, string sha, int maxContentBytes = GitCommitService.DefaultMaxContentBytes) =>
+        _git.GetCommitDiff(ReplicationPrefix(replicationName), sha, maxContentBytes);
+
+    /// <summary>What <see cref="RestoreReplication"/> would change — the diff from now to then, which
+    /// is what a confirmation has to show and is not the same set as the commit's own patch.</summary>
+    public ConfigDiff GetReplicationRestoreDiff(
+        string replicationName, string sha, int maxContentBytes = GitCommitService.DefaultMaxContentBytes) =>
+        _git.GetRestoreDiff(ReplicationPrefix(replicationName), sha, maxContentBytes);
+
+    /// <summary>
+    /// Puts this replication's config back the way it was at <paramref name="sha"/>, and records that
+    /// as a **new** commit — phase 35.
+    ///
+    /// <para>
+    /// **A restore, not a `git revert`.** A revert computes an inverse patch and conflicts if anything
+    /// touched the same lines since. Restoring the tree at a commit cannot conflict, and it is what an
+    /// operator means by "put it back the way it was". History is never rewritten: the log shows what
+    /// happened, including the undo.
+    /// </para>
+    ///
+    /// <para>
+    /// **Validated before anything is written.** A commit that predates a mapping restores to a state
+    /// without it; one that predates a connection rename restores config naming a connection that no
+    /// longer exists. So the whole restored set is parsed and put through the same validation a save
+    /// would — a restore that produces config this tool would reject on save must not be reachable
+    /// through a different door — and a refusal leaves the working tree untouched, because nothing has
+    /// been written yet when it happens.
+    /// </para>
+    ///
+    /// <para>
+    /// **A dangling connection is a warning, not a refusal**, and that asymmetry is deliberate. Saving
+    /// a mapping that names a connection which does not exist is allowed today — the connection may be
+    /// about to be created — so refusing it here would make the restore stricter than the save it is
+    /// restoring, which is the opposite of the rule above. It is still worth saying out loud, so it
+    /// comes back as a warning the confirmation can show.
+    /// </para>
+    /// </summary>
+    public ConfigRestoreResult RestoreReplication(string replicationName, string sha, GitAuthor author)
+    {
+        ConfigValidation.ValidateName(replicationName, nameof(replicationName));
+
+        var prefix = ReplicationPrefix(replicationName);
+        var restored = _git.GetTextFilesAt(prefix, sha);
+        if (restored.Count == 0)
+            throw new ConfigValidationException(
+                $"Replication '{replicationName}' did not exist at commit '{sha}', so there is nothing " +
+                "to restore it to. Restoring to a commit from before a replication was created would " +
+                "mean deleting it, which is what the Delete action is for.");
+
+        var taskPath = $"{prefix}/task.yaml";
+        if (!restored.TryGetValue(taskPath, out var taskYaml))
+            throw new ConfigValidationException(
+                $"The config at commit '{sha}' has no {taskPath}, so replication '{replicationName}' " +
+                "cannot be rebuilt from it.");
+
+        var task = YamlConfigSerializer.Deserialize<ReplicationTaskConfig>(taskYaml);
+        if (!string.Equals(task.Name, replicationName, StringComparison.Ordinal))
+            throw new ConfigValidationException(
+                $"The task.yaml at commit '{sha}' is for replication '{task.Name}', not " +
+                $"'{replicationName}'. Restoring it here would leave a replication whose directory and " +
+                "declared name disagree.");
+
+        ValidateHooks(task.Hooks);
+
+        var mappingPrefix = $"{prefix}/table-mappings/";
+        var mappings = restored
+            .Where(f => f.Key.StartsWith(mappingPrefix, StringComparison.Ordinal)
+                        && f.Key.EndsWith(".yaml", StringComparison.Ordinal))
+            .Select(f => YamlConfigSerializer.Deserialize<TableMappingConfig>(f.Value))
+            .ToList();
+
+        foreach (var mapping in mappings)
+        {
+            ConfigValidation.ValidateName(mapping.Name, nameof(mapping.Name));
+            ValidateTableMapping(task, mapping);
+        }
+
+        // Read before writing, so the answer describes the restore rather than its aftermath.
+        var diff = _git.GetRestoreDiff(prefix, sha);
+        var warnings = DanglingConnectionWarnings(task, mappings);
+
+        // Everything that has to be staged: what the restore writes, and what it removes. A file on
+        // disk that is not in the restored set is one created after that commit, and leaving it would
+        // make the result neither the old state nor the new one.
+        var root = _git.RepositoryRoot;
+        var touched = new List<string>();
+
+        var replicationDir = ConfigPaths.ReplicationDir(_configRoot, replicationName);
+        if (Directory.Exists(replicationDir))
+        {
+            foreach (var existing in Directory.GetFiles(replicationDir, "*.yaml", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(root, existing).Replace('\\', '/');
+                if (restored.ContainsKey(relative))
+                    continue;
+
+                File.Delete(existing);
+                touched.Add(existing);
+            }
+        }
+
+        foreach (var (relative, content) in restored)
+        {
+            var absolute = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+            WriteAtomically(absolute, content);
+            touched.Add(absolute);
+        }
+
+        var commitSha = _git.CommitChanges(
+            touched, $"Restore replication '{replicationName}' to {Short(sha)}", author);
+
+        return new ConfigRestoreResult(sha, commitSha, diff.Changes, warnings);
+    }
+
+    /// <summary>
+    /// Connections a restored mapping names that no connection file exists for. Not a refusal — see
+    /// <see cref="RestoreReplication"/> — but the single most likely way a restore lands a replication
+    /// that cannot run, so it is worth a sentence in the confirmation rather than a surprise at the
+    /// next pass.
+    /// </summary>
+    private List<string> DanglingConnectionWarnings(ReplicationTaskConfig task, IReadOnlyList<TableMappingConfig> mappings)
+    {
+        var known = ListConnections().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var referenced = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var mapping in mappings)
+        {
+            foreach (var source in mapping.Sources)
+                referenced.Add(EndpointResolution.ResolveSource(task, source).ConnectionName);
+            foreach (var target in mapping.Targets)
+                referenced.Add(EndpointResolution.ResolveTarget(task, target).ConnectionName);
+        }
+
+        return [.. referenced
+            .Where(name => !known.Contains(name))
+            .Select(name =>
+                $"The restored config references connection '{name}', which does not exist. Mappings " +
+                "using it cannot run until it is created.")];
+    }
+
+    private static string Short(string sha) => sha.Length > 8 ? sha[..8] : sha;
+
     /// and — for a reference to a named hook — that it resolves to a <see cref="ScriptLanguage.Sql"/>
     /// script, every required declared parameter is supplied, and no undeclared one is.
     /// </summary>

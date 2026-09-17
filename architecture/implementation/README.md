@@ -29,10 +29,30 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 2 | **151** — deprovisioning: source-side state goes when the config does | split out of 034. Not a Postgres phase — phase 33's trigger-audit shadow tables and triggers are left behind the same way, and have been since they shipped |
-| 3 | **152** — replication slot lag, and slots nobody claims | split out of 034. Smaller than it looks: the statements exist and are tested; the work is an API surface and a place on the connection card |
-| 4 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
+| 1 | **151** — deprovisioning: source-side state goes when the config does | split out of 034. Not a Postgres phase — phase 33's trigger-audit shadow tables and triggers are left behind the same way, and have been since they shipped |
+| 2 | **152** — replication slot lag, and slots nobody claims | split out of 034. Smaller than it looks: the statements exist and are tested; the work is an API surface and a place on the connection card |
+| 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
+
+Updated 2026-09-16 (previously latest): **035 is done and removed.** The Version Control tab has shown the
+auto-commit log since phase 6 and until now that was all it did; it now has **View changes** (an inline
+Monaco diff editor, with `yaml` joining `csharp` and `sql` as a lazy language chunk) and **Restore to
+here**. Three things worth knowing. **The restore preview is a different question from the commit's own
+patch** — the plan said the confirmation is "built from the same diff the first action shows", which is
+right about the machinery and wrong about the anchor: a commit's patch says what it changed, a
+confirmation has to say what *will* change, and restoring to a commit that only renamed a column may
+delete three mappings created since. Two endpoints over one diff engine, anchored differently. **The
+API returns both sides of each file rather than a unified patch**, because that is what a diff editor
+renders from and because a patch elides the context a config file is read for — which settles the
+plan's diff-size question as "complete file list, capped content". And **a dangling connection warns
+rather than refuses**: the plan's rule is that a restore must not reach config a save would reject, and
+its own example (a connection that no longer exists) is not something a save rejects, so refusing it
+would make the restore stricter than the save it restores. The save-time validation is now literally
+shared (`ValidateTableMapping`) so the two doors cannot drift. Phase 81's repo-root
+`dbdatasync.config.yaml` blind spot is fixed at the query layer and tested — it was the one-line prefix
+bug 81 predicted — and the screen for it is
+`architecture/planning/todo/follow-up-phase-035-root-config-has-history-but-no-screen.md`, because
+restoring that file can take the console offline and that needs a decision rather than a dialog. See
+`architecture/implementation/done/phase-035-config-history-diff-and-revert.md`.
 
 Updated 2026-09-17 (latest of all): **154 is done.** `dotnet-integration`'s `services:` block — a
 hand-maintained second copy of `docker-compose.yml`'s own container topology — is gone, replaced by a

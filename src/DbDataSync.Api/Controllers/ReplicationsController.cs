@@ -149,6 +149,84 @@ public sealed class ReplicationsController(
         Ok(configRepository.GetReplicationHistory(name, limit));
 
     /// <summary>
+    /// The patch one commit made to this replication — the Version Control tab's "View changes".
+    /// <para>
+    /// Read-only. Editing a diff is not a thing this offers, and the response carries no way to.
+    /// </para>
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("{name}/history/{sha}/diff")]
+    public ActionResult<ConfigDiff> Diff(string name, string sha)
+    {
+        try
+        {
+            return Ok(configRepository.GetReplicationCommitDiff(name, sha));
+        }
+        catch (GitCommitNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// What restoring to this commit would change — **not** the patch that commit made.
+    /// <para>
+    /// A separate endpoint rather than a flag on the one above because the two answer different
+    /// questions and a confirmation has to show this one. A commit's own patch says what it changed;
+    /// once anything has happened since, "what will this restore change" is a different set — restoring
+    /// to a commit that only renamed a column may well delete three mappings created after it, none of
+    /// which appear in that commit's patch. Both come from the same diff machinery, anchored
+    /// differently.
+    /// </para>
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("{name}/history/{sha}/restore-preview")]
+    public ActionResult<ConfigDiff> RestorePreview(string name, string sha)
+    {
+        try
+        {
+            return Ok(configRepository.GetReplicationRestoreDiff(name, sha));
+        }
+        catch (GitCommitNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Puts this replication's config back the way it was at this commit, recorded as a new commit.
+    /// <para>
+    /// Admin by omission, like every other write here. A restore that would produce config this tool
+    /// would reject on save is refused with what would have broken, and refusing leaves the working
+    /// tree untouched — see <see cref="ConfigRepository.RestoreReplication"/>, which validates the whole
+    /// restored set before writing any of it.
+    /// </para>
+    /// <para>
+    /// **A running replication is not stopped for this.** The work queue may hold items for a mapping
+    /// the restore deletes, and a worker may be mid-pass. The run model already handles a mapping
+    /// disappearing — the work item fails, not the process — so the honest thing is for the
+    /// confirmation to say what will change and let the operator decide, rather than for this endpoint
+    /// to take a replication offline as a side effect.
+    /// </para>
+    /// </summary>
+    [HttpPost("{name}/history/{sha}/restore")]
+    public ActionResult<ConfigRestoreResult> Restore(string name, string sha)
+    {
+        try
+        {
+            return Ok(configRepository.RestoreReplication(name, sha, currentUser.Author));
+        }
+        catch (GitCommitNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (ConfigValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Every pause/resume this replication has recorded, over both grains — see phase 131 and
     /// <see cref="TaskRunStore.GetPauseHistory"/>. Not gated on <c>ListReplications</c> the way most
     /// endpoints here are, matching <see cref="History"/> immediately above: an unknown name simply has

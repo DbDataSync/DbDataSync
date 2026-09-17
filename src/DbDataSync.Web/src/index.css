@@ -765,3 +765,52 @@ select.select {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* --- Config diff (see HistoryPanel.tsx) ------------------------------------------------------ */
+/* Phase 35. The diff sits inside the history table, flush under the commit row it belongs to — the
+   same relationship .run-error-detail has with a run-history row, and for the same reason: an inline
+   panel keeps the row it explains on screen where a modal would replace it. */
+.diff-panel {
+  padding: 10px 14px 14px;
+  border-bottom: 1px solid var(--row-edge);
+  background: var(--sunken);
+}
+
+/* One button per changed file. A commit touching six mappings is six documents, not one long scroll,
+   and wrapping is what keeps a wide commit from pushing the editor off screen. */
+.diff-files {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* A, M, D or R, in the colour the change kind reads as everywhere else — a small square rather than a
+   word, because it sits in front of a filename that is the thing being read. */
+.diff-kind {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px;
+  border-radius: 3px;
+  font: 600 9.5px var(--ui);
+  color: #fff;
+  background: var(--ink-9);
+}
+.diff-kind.added { background: #2f7a55; }
+.diff-kind.deleted { background: #a8402f; }
+.diff-kind.modified { background: #7a5a2e; }
+.diff-kind.renamed { background: #4d6f8a; }
+
+/* What a restore would change, before it does — counts first, because "3 removed" is the sentence an
+   operator needs before any filename is worth reading. */
+.restore-summary {
+  margin: 0; padding: 10px 12px;
+  list-style: none;
+  border: 1px solid var(--card-edge);
+  border-radius: 5px;
+  background: var(--sunken);
+  font: 400 11.5px var(--ui);
+  color: var(--ink-2);
+}
+.restore-summary li + li { margin-top: 4px; }
+
+/* Wider than .modal.wide: a side-by-side diff at 640px is two columns too narrow to read YAML in,
+   which is the one thing this dialog exists to show. */
+.modal.diff { width: min(1040px, 100%); }
