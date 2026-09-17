@@ -33,8 +33,10 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Test
-        # Category=Integration tests need real SQL Server instances — see the dotnet-integration job
-        # below, which stands two up as service containers (architecture/implementation/phase-7-e2e-validation.md).
+        # Category=Integration tests need real database instances (SQL Server, Postgres, MySQL,
+        # MariaDB, Oracle) — see the dotnet-integration job below, which stands up service containers
+        # for all five plus an Oracle provisioning step
+        # (architecture/implementation/phase-7-e2e-validation.md, extended by phase 153).
         run: dotnet test --no-build --configuration Release --filter "Category!=Integration"
 
   # A real windows-latest runner for the `[WindowsOnlyFact]`-gated tests scattered across
@@ -128,8 +130,12 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      # phase 109c: an engine the build does not reference, for ProviderLoadTests' proof that a
-      # `dbdatasync provider install`-restored MySqlConnector opens a real connection.
+      # Originally stood up for phase 109c's proof that a `dbdatasync provider install`-restored
+      # MySqlConnector opens a real connection with no compile-time dependency anywhere in the
+      # solution — phase 147 made that no longer true (DbDataSync.Drivers.MySql is a real compiled
+      # driver project now) and this container's own test suite is what phase 153 is actually fixing
+      # CI for. Same port docker-compose.yml uses, so the tests' localhost-based defaults work
+      # unchanged in CI — see MySqlTestDatabase.
       mysql:
         image: mysql:9
         env:
@@ -142,6 +148,44 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
+      # Phase 147: proves the trigger-audit DDL is genuinely identical across both forks (see
+      # change-tracking-mysql-and-mariadb-triggers.md) rather than assumed — TriggerAuditReaderTests
+      # runs against this container too, not only mysql above. Same port docker-compose.yml uses — see
+      # MariaDbTestDatabase.
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: DbDataSync_Test_Pw1
+          MARIADB_DATABASE: dbdatasync
+        ports:
+          - 13307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      # Phase 148. gvenzl/oracle-free — the realistic modern free, unauthenticated option; Oracle's own
+      # official images require accepting a license and are not on a registry CI can pull from without
+      # authentication. Same port docker-compose.yml uses — see OracleTestDatabase. Unlike that file,
+      # this cannot bind-mount docker/oracle-init/*.sql the way `docker compose up` does: GitHub
+      # Actions creates every `services:` container, and blocks every job step until each one's own
+      # healthcheck passes, *before* actions/checkout runs — so a bind mount of a repo-relative path
+      # here would see an empty directory and Oracle would decide there was nothing to run and never
+      # look again. The "Provision Oracle" step below applies the same two scripts explicitly instead,
+      # once checkout has actually put them on disk.
+      oracle:
+        image: gvenzl/oracle-free:23-slim
+        env:
+          ORACLE_PASSWORD: DbDataSync_Test_Pw1
+          APP_USER: dbdatasync
+          APP_USER_PASSWORD: DbDataSync_Test_Pw1
+        ports:
+          - 15210:1521
+        options: >-
+          --health-cmd "healthcheck.sh"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -158,9 +202,25 @@ jobs:
         run: dotnet restore
       - name: Build
         run: dotnet build --no-restore --configuration Release
+      - name: Provision Oracle (grants + Flashback probe table)
+        # The oracle service above's own doc comment explains why this can't be a bind mount the way
+        # docker-compose.yml's is: checkout above has now actually put docker/oracle-init/*.sql on
+        # disk, and every service already passed its healthcheck before this step (or any step) could
+        # run, so there is nothing to wait for — just apply the same two scripts, in the same order,
+        # against the same container docker/oracle-init/10-grants.sql's own header comment describes.
+        # `docker exec` reaches it directly, the same way `sqlplus / as sysdba` OS-authenticates inside
+        # it either way; `docker ps --filter publish=15210` finds it by the port above rather than
+        # guessing at whatever name GitHub Actions gave the container.
+        run: |
+          oracle_container=$(docker ps --filter "publish=15210" --format "{{.ID}}")
+          for f in docker/oracle-init/*.sql; do
+            echo "Applying $f"
+            docker exec -i "$oracle_container" sqlplus -s / as sysdba < "$f"
+          done
       - name: Test (Integration)
-        # Same two-container topology as docker-compose.yml (source: 14330, target: 14331) so the
-        # tests' localhost-based defaults work unchanged in CI.
+        # Same topology as docker-compose.yml (SQL Server source: 14330, target: 14331; Postgres:
+        # 15432; MySQL: 13306; MariaDB: 13307; Oracle: 15210) so the tests' localhost-based defaults
+        # work unchanged in CI.
         run: dotnet test --no-build --configuration Release --filter "Category=Integration"
 
   web:

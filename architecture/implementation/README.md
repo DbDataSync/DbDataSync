@@ -34,7 +34,24 @@ So the order lives here, and is the one to work through:
 | 3 | **038** — Postgres COPY staging, and the columnar decision | |
 | 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
 
-Updated 2026-09-17 (latest of all): **149 is done.** Docs updated for MySQL/MariaDB and Oracle now that
+Updated 2026-09-17 (latest of all): **153 is done.** CI's `dotnet-integration` job was missing the
+MariaDB and Oracle service containers phases 147/148's own new `Category=Integration` tests need — every
+`MariaDb*`/`Oracle*` test in `DbDataSync.Drivers.MySql.Tests`/`DbDataSync.Drivers.Oracle.Tests` had been
+failing on `main` with a connection refused since phase 147 merged. Fixed by adding both services to
+`.github/workflows/ci.yml`, matching `docker-compose.yml`'s own ports exactly so no test fixture's default
+connection string needed to change. One real finding: `docker-compose.yml`'s own mechanism for Oracle's
+grants/probe-table setup — bind-mounting `docker/oracle-init/` into the container — cannot work as a
+GitHub Actions `services:` entry at all, since service containers are created and pass their healthchecks
+*before* `actions/checkout` puts the repository on disk; the container would report healthy having
+silently skipped both scripts. Fixed with an explicit "Provision Oracle" CI step running them via
+`docker exec ... sqlplus -s / as sysdba` after checkout — confirmed against a live container, not assumed,
+that bare peer authentication lands in `CDB$ROOT` (what both scripts' own `ALTER SESSION SET CONTAINER`
+needs) rather than the PDB the password-based form used during phase 148's own local testing would have
+landed in. No source code changed. The one thing this phase could not itself verify: a real GitHub Actions
+run — everything was tested against an equivalent local container, not the actual runner. See
+`architecture/implementation/done/phase-153-ci-mariadb-and-oracle-service-containers.md`.
+
+Updated 2026-09-17 (previously latest): **149 is done.** Docs updated for MySQL/MariaDB and Oracle now that
 phases 147/148 actually shipped — `docs/replication-concepts.md`, `docs/drivers-and-libraries.md`,
 `README.md`, and both `additional-database-drivers.md`/`change-tracking-strategies.md`'s own outcome
 tables. The plan predicted three new reader-kind rows; shipped as one (MySQL's and Oracle's trigger-audit
