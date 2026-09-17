@@ -436,6 +436,10 @@ public sealed class ConfigRepository
         var replicationDir = ConfigPaths.ReplicationDir(_configRoot, replicationName);
         if (Directory.Exists(replicationDir))
         {
+            // *.yaml, which is everything this layer writes — deliberately not every file. Making the
+            // directory match the tree exactly would also delete whatever else happens to be sitting
+            // there (an editor backup, a note somebody left), and deleting a file this tool never
+            // created is not what "put the config back" asks for.
             foreach (var existing in Directory.GetFiles(replicationDir, "*.yaml", SearchOption.AllDirectories))
             {
                 var relative = Path.GetRelativePath(root, existing).Replace('\\', '/');
@@ -455,10 +459,12 @@ public sealed class ConfigRepository
             touched.Add(absolute);
         }
 
+        // diff.Sha rather than the caller's, which may have been an abbreviation — the message an
+        // operator later reads in the log should name the commit, not however much of it was typed.
         var commitSha = _git.CommitChanges(
-            touched, $"Restore replication '{replicationName}' to {Short(sha)}", author);
+            touched, $"Restore replication '{replicationName}' to {Short(diff.Sha)}", author);
 
-        return new ConfigRestoreResult(sha, commitSha, diff.Changes, warnings);
+        return new ConfigRestoreResult(diff.Sha, commitSha, diff.Changes, warnings);
     }
 
     /// <summary>

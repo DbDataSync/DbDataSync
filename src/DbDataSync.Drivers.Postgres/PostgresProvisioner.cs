@@ -143,8 +143,9 @@ public static class PostgresProvisioner
                 [$"This server's output_plugin_libraries is '{allowed}', which does not include " +
                  $"'{PgLogicalSlotStatement.Plugin}'. Since PostgreSQL 18.6, 17.11, 16.15, 15.19 and " +
                  "14.24 an output plugin has to be listed there before a slot may use it — the fix for " +
-                 $"CVE-2026-6471 — so a slot created with it would be refused with \"library " +
-                 $"\\\"{PgLogicalSlotStatement.Plugin}\\\" may not be used as an output plugin\". Add it: " +
+                 "CVE-2026-6471 — so a slot created with it would be refused with the message " +
+                 $"'library \"{PgLogicalSlotStatement.Plugin}\" may not be used as an output plugin'. " +
+                 "Add it: " +
                  $"output_plugin_libraries = '{allowed}, {PgLogicalSlotStatement.Plugin}'. Unlike " +
                  "wal_level this one only needs a reload (SELECT pg_reload_conf()), not a restart."]);
         }
