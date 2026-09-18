@@ -52,16 +52,20 @@ writing the intended flow down — named as an open item in `architecture/branch
 
 ### Phase numbering: letter + number, not one shared integer
 
-Full design in `architecture/implementation/README.md`'s new "Phase IDs" section, built the same pass:
+Full design in `architecture/implementation/README.md`'s new "Phase IDs" section, built the same pass
+(and corrected once — see the Retrospective — before anyone else had reason to use it):
 
-- `phase-<Letter><N>-<kebab-slug>.md` — one uppercase letter (a lineage: a continuous thread of related
-  phase work, however long it runs), an incrementing number *within* that letter, then a slug.
-- A new, unrelated burst of work picks an unused letter — checked against `todo/`/`done/` first, the
-  same cheap check the old scheme always should have made before claiming its next integer and usually
-  didn't, since the old scheme's whole surface was one number everyone raced for.
-- Two phases sharing a number under different letters imply nothing about relative order. Ordering
-  across lineages, when it matters, still lives only in the "Build order" table beneath this section —
-  unchanged in shape, since it already existed specifically to decouple filename from priority.
+- `phase-<N><Letter>-<kebab-slug>.md` — the number, then one uppercase letter, then a slug. Numbering
+  itself is unchanged from before: check `todo/`/`done/` for the highest one in use, take the next.
+- The letter is picked once per session/worktree — random, ideally checked against letters already in
+  `todo/`/`done/` — and reused for every phase doc that session writes, whatever each one turns out to be
+  about. It carries no meaning of its own; it exists purely so that the rare moment two sessions land on
+  the same *number* (exactly what happened twice already — `phase-150`, `phase-154`, each independently
+  claimed and only caught at rebase) produces two coexisting filenames (`157Q`, `157M`) instead of one
+  real collision needing manual reconciliation.
+- The bare number is still the normal way to refer to a phase in conversation or in a cross-reference —
+  "phase 157" — exactly as before. The letter only has to be said out loud the rare time a number
+  actually collided and there's a real "which one" to answer.
 - **Prospective only.** `phase-001` through `phase-155` keep their names; `phase-156` (this one) is the
   deliberate last integer-only phase, named in its own header so the cutover point is unambiguous to
   anyone reading history later rather than inferred from a date.
@@ -95,23 +99,43 @@ the "Plan reference" above is honestly "none" rather than a fabricated pointer.
 ### The two problems share one shape, which is why one phase covers both
 
 Both fixes are the same move at different layers: replace one shared, flat, racy namespace (a branch
-everyone pushes to; an integer everyone increments) with a namespace partitioned by *lineage* (a staged
-branch a promotion step gates; a letter a continuous thread of work owns), keeping the good property the
-old scheme had (a short, easy-to-say local sequence — `dev`'s own commit history; a letter's own
-incrementing number) while removing the property that caused the actual collisions (global, ungated
-sharing with no check between concurrent claims).
+everyone pushes to; an integer everyone increments) with something that keeps the number's good property
+— a short, easy-to-say sequence, still checked-and-incremented exactly as before — while adding a cheap,
+low-cardinality tag that only has to do real work on the rare occasion two independent claims land on the
+same number at once. `dev`/`test`/`main` gates promotion instead of publishing everything straight to the
+branch releases are cut from; the letter disambiguates a number collision after the fact instead of trying
+to prevent one. Neither fix removes the underlying concurrency (see `architecture/branching-and-releases.md`'s
+own "Why three, not one" section for the branching side of this) — both just move the cost of a collision
+somewhere cheaper to pay it.
 
-### A genuine design choice, not just the user's literal suggestion typed back
+### Got the letter's actual job wrong on the first pass — corrected in the same session
 
-The letter-prefix idea came from the user directly ("a prefix random letter followed by the incrementing
-number") in response to three numbering options this phase's own planning conversation offered first —
-none of which the user picked. Worth being honest about what was and wasn't independently derived: the
-*mechanism* (random letter, checked against existing prefixes before use, persisting for one lineage's
-own subsequent phases) is this phase's own design work, reasoned through from the user's shorter
-one-sentence framing — in particular, why a single random letter is collision-safe enough in practice
-(lineages are started far less often than phase numbers used to be claimed, so a cheap check-before-claim
-step at lineage-start time is enough, unlike the old scheme's high-velocity shared counter where the same
-check was too slow to matter) rather than assumed safe by the letter count alone.
+The first draft of this section (and of the README's "Phase IDs" section it points to) read the user's
+one-sentence suggestion — "a prefix random letter followed by the incrementing number" — and built a
+letter *per lineage*: a fresh random letter for each new topic of work, reused only by phase docs judged to
+belong to that same thread, with the number resetting to count within a letter rather than across the whole
+repo. That's a plausible-sounding design and it is not what was asked for. The user caught it directly:
+
+> If that's how you determine lineage, you'll burn through the alphabet in less than a week… I said
+> *random* letter for a reason. If 2 sessions use the same number, I can distinguish with the letter, if
+> they don't collide, I can just use the number.
+
+The tell was in "random" — a letter assigned by topic isn't random, it's a classification decision, and a
+classification decision needs an agent to keep making judgment calls about what counts as the same lineage,
+exactly the kind of ongoing overhead a short reference ID shouldn't carry. The actual design is simpler
+than what got built first: the letter is a **per-session/per-worktree label**, picked once (randomly) the
+first time a session writes a phase doc and reused for everything that session goes on to write regardless
+of subject — not a property of the work, a property of *who's currently typing*. The number keeps behaving
+exactly as it always has: check `todo/`/`done/` for the highest one in use, take the next, no reset, no
+per-letter counting. The letter only earns its keep the rare time two sessions' independently-computed
+"next number" checks land on the same integer — precisely what already happened twice in this repo's real
+history (`phase-150`, `phase-154`) — at which point the differing session letters keep the two resulting
+*filenames* from colliding even though the numbers did. In the normal, non-colliding case a phase is still
+just "phase 157," exactly as before the letter existed at all.
+
+Both this section and the README's "Phase IDs" section were rewritten in place once the correction landed,
+rather than left as a first draft with a follow-up phase to fix it — the mechanism had not yet been used by
+anyone else when the correction arrived, so there was nothing downstream depending on the wrong shape yet.
 
 ### What's still genuinely open
 
