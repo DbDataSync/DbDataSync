@@ -2,15 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Phase 156: dev/test/main, not main alone — see architecture/branching-and-releases.md. dev is
+    # where everyone's work actually lands; test is what the dev→test promotion workflow fast-forwards
+    # to on green CI; main is what a release is cut from. All three need this suite to actually mean
+    # anything at each stage, not just the last one.
+    branches: [dev, test, main]
     # Only so the package job below can trigger on the same tag push release.yml does — see its `if`.
     # This does not run the rest of the suite a second time: every other job explicitly skips a tag
-    # push, since release.yml's tag is pushed on top of a commit that already went through ci.yml on
-    # main.
+    # push, since release.yml's tag is pushed on top of a commit that already went through this suite on
+    # main (by way of test, by way of dev).
     tags:
       - "release/v*"
   pull_request:
-    branches: [main]
+    branches: [dev, test, main]
 
 jobs:
   dotnet:

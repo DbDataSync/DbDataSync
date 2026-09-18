@@ -1,0 +1,42 @@
+name: Promote dev to test
+
+# Phase 156: the automatic half of dev → test → main (see architecture/branching-and-releases.md).
+# Nobody pushes to `test` directly; this is the only thing that ever moves it, and it only ever
+# fast-forwards — never a force-push over something a human put there, because nothing ever does.
+#
+# workflow_run rather than `push: branches: [dev]` deliberately: this needs to know CI actually passed
+# on the commit dev just advanced to, not merely that dev advanced. Triggering on push and re-running
+# the whole suite a second time here would work but doubles CI cost for no new information; workflow_run
+# reacts to the CI workflow's own conclusion instead, so this runs once, after that suite's already-real
+# result.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [dev]
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: dev
+          fetch-depth: 0
+      - name: Fast-forward test to dev
+        # Refuses rather than force-pushes if test somehow isn't an ancestor of dev's new tip — that
+        # would mean something landed directly on test outside this workflow, which should never happen
+        # given nothing else is supposed to push there, and is worth a human's attention rather than a
+        # silently discarded commit.
+        run: |
+          git fetch origin test
+          if git merge-base --is-ancestor origin/test dev; then
+            git push origin dev:test
+          else
+            echo "::error::test has commits dev doesn't — refusing to fast-forward over them. test may have been pushed to directly; investigate before retrying."
+            exit 1
+          fi

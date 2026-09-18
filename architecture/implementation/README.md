@@ -19,11 +19,40 @@ committed — see "Workflow" below. Nothing is ever deleted; a phase whose plan 
 implementation gets its `todo/` file edited in place (with a note on what changed and why), not
 silently replaced.
 
+## Phase IDs
+
+As of phase 156, a phase doc's filename is `phase-<Letter><N>-<kebab-slug>.md` — one uppercase letter,
+an incrementing number, then a descriptive slug: `phase-Q1-mysql-mariadb-driver.md`,
+`phase-Q2-oracle-driver.md`, `phase-Q3-mysql-oracle-docs-update.md`.
+
+**The letter marks a lineage, not an identity or a priority.** Starting a new, unrelated burst of
+phase-numbered work — a different session, a different topic, anything that isn't a direct continuation
+of a lineage already open — picks a fresh, unused uppercase letter (check `todo/`/`done/` for letters
+already claimed first; the same two-second check the old all-integer scheme should always have done
+before picking its next number, and didn't). The number then increments within that one letter for as
+long as that lineage's own related phases keep being designed. Two phases sharing a number under
+*different* letters (`Q3` and `M3`) imply nothing about their relative order — only same-letter numbers
+do, and only because they really were designed one after another by the same continuous thread of work.
+
+**Why it changed**: the old scheme — one shared, incrementing integer everyone's next phase doc raced
+for — is exactly what let two different sessions both claim `phase-150` (and, separately, `phase-154`)
+at the same time, discovered only at rebase as a real filename collision needing manual reconciliation. A
+letter-per-lineage namespace makes that collision structurally rare instead of routine: two sessions
+would need to pick the *same* letter *and* land on the *same* local number, not merely both be active on
+the same day. See `architecture/implementation/done/phase-156-branching-and-phase-numbering-methodology.md`
+and `architecture/branching-and-releases.md` for the fuller reasoning, including the companion
+branching-flow change made in the same pass for an unrelated but similarly-shaped reason.
+
+**This is prospective only.** Nothing already in `todo/`/`done/` under the old `phase-NNN` scheme is
+renamed — doing so would break every git-history and cross-doc reference to it, exactly the harm the
+"Build order" section below already refuses to inflict by renumbering for priority. `phase-156` is the
+last phase issued under the old all-integer scheme, deliberately.
+
 ## Build order
 
-`todo/` is a set, not a queue — the filename's number records when a phase was *designed*, not when it
-will be built, and renumbering files to express priority would break every reference in git history and
-in the planning docs that point at them.
+`todo/` is a set, not a queue — a phase's own ID records when it was *designed*, not when it will be
+built, and renumbering files to express priority would break every reference in git history and in the
+planning docs that point at them.
 
 So the order lives here, and is the one to work through:
 
@@ -34,7 +63,17 @@ So the order lives here, and is the one to work through:
 | 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
 | 4 | **155** — `pgoutput`: logical decoding with nothing installed on the source | **gated on a product decision, not on engineering** — last deliberately, because if the answer is "managed Postgres" it should never be built at all. See the phase doc's own "Why this might not be worth building" |
 
-Updated 2026-09-17 (latest of all): **155 is new, and deliberately conditional.** The other half of
+Updated 2026-09-17 (latest of all): **156 is done.** Two related collision problems this session's own
+history demonstrated in real time — `phase-150` and `phase-154` each independently claimed by two
+concurrent sessions, discovered only at rebase — fixed in one pass, since both trace back to the same
+root cause: a flat, shared namespace with no structural separation between concurrent lines of work.
+`dev`/`test`/`main` replaces everyone pushing straight to `main` (`architecture/branching-and-releases.md`);
+letter+number (`phase-Q1-...`, `phase-Q2-...`) replaces one shared incrementing integer for phase docs
+(this README's own new "Phase IDs" section, above). Both prospective only — nothing renamed, no branch
+protection turned on, no automation added that wasn't explicitly asked for. See
+`architecture/implementation/done/phase-156-branching-and-phase-numbering-methodology.md`.
+
+Updated 2026-09-17 (previously latest): **155 is new, and deliberately conditional.** The other half of
 phase 34's own still-open product question, written up so the decision can be made once against a real
 design rather than re-argued. `pgoutput` is the output plugin PostgreSQL's native logical replication
 uses; it ships with Postgres, so it decodes the same WAL through the same replication slots with
