@@ -1,6 +1,17 @@
 # Phase 153 — CI: MariaDB and Oracle service containers for the integration suite
 
-**Status**: Built and verified 2026-09-17. See the Retrospective below.
+**Status**: Closed 2026-09-17 — **superseded by phase 154** before this phase's own mechanism was ever
+confirmed by a real CI run. This phase's `services:` block and manual "Provision Oracle" step no longer
+exist in `.github/workflows/ci.yml`; phase 154 replaced both with `docker compose up -d --wait` against
+`docker-compose.yml` directly, closing the root cause (`ci.yml` hand-duplicating that file's topology)
+this phase's own retrospective named but only worked around. See
+`architecture/implementation/done/phase-154-ci-integration-suite-onto-docker-compose.md`, whose own real
+run (`35283992102`) is the actual, real-world proof MariaDB and Oracle work in CI — the proof this
+phase's own "Still not verified" section below says it never got to produce itself. Kept as a full record
+rather than deleted: the finding in its Retrospective (GitHub Actions `services:` containers can't
+bind-mount repo files, because they're created before `actions/checkout` runs) is exactly what phase 154
+cites as its own motivation, and is still true of `services:` blocks in general even though nothing in
+this repo depends on it working around that any more.
 **Plan reference**: `architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`,
 `architecture/implementation/done/phase-148-oracle-driver-trigger-audit-and-flashback.md` (the two phases
 whose new `Category=Integration` test projects this fixes CI for), `.github/workflows/ci.yml`'s own
@@ -103,11 +114,16 @@ FREEPDB1;` meaningless or an error. Second, that the real `10-grants.sql` file �
 `SELECT` — applies cleanly through that exact invocation, piped from the actual checked-out file rather
 than retyped inline.
 
-### Still not verified
+### Never verified — superseded first
 
-The one thing this phase cannot itself confirm from this environment: a real GitHub Actions run of the
-`dotnet-integration` job on `main`, with the actual `docker ps --filter "publish=15210"` container
-discovery working as designed against whatever container-naming scheme GitHub Actions assigns at runtime.
-Everything upstream of that (the service definitions, the provisioning step's SQL and connection form) was
-tested against an equivalent local container; the job's own orchestration was not, and should be watched
-on its first real run rather than assumed correct from here.
+The "Still not verified" gap this section originally named (a real GitHub Actions run of this phase's own
+`services:`-plus-`docker exec` mechanism) was never closed, in either direction: nobody watched this
+phase's own approach fail *or* succeed on a real run. Phase 154 replaced it — `services:` block and
+"Provision Oracle" step both — before this phase's own first push to `main` completed a full
+`dotnet-integration` run, on the reasoning in phase 154's own doc (the duplication between `ci.yml` and
+`docker-compose.yml` was the real problem; this phase's fix was still a second, hand-maintained copy of
+the same topology, just a complete one). So the `docker ps --filter "publish=15210"` container-discovery
+step in particular was never exercised in CI at all — worth stating plainly rather than leaving the
+original wording, which reads as an open question this phase might still resolve. It won't; phase 154's
+own real run (`35283992102`, `DbDataSync.Drivers.Oracle.Tests` 21/21) is the actual answer to the
+question this section used to ask, for a different, better mechanism than the one that asked it.
