@@ -16,9 +16,9 @@ PostgreSQL target, for example. Support varies by engine:
 | ------------------------------ | ------------------------------- | -------------------------- | --------------------------- | ----------------------------------- | ------------------ |
 | Source (read from)            | Yes                             | Yes                        | Yes                         | Yes                                  | Yes (query only) |
 | Target (write to)             | Yes                             | Yes                        | Yes                         | Yes                                  | No               |
-| Incremental sync              | Native (Change Tracking / CDC)  | Watermark column            | Watermark column             | Native (Flashback Version Query)    | N/A              |
+| Incremental sync              | Native (Change Tracking / CDC)  | Native (logical decoding)  | Watermark column             | Native (Flashback Version Query)    | N/A              |
 | Backfill / batch reload       | Yes                             | Yes                        | Yes                         | Yes                                  | N/A              |
-| Bulk staging                  | Native (SqlBulkCopy)            | Generic (batched insert)    | Generic (batched insert)     | Generic (batched insert)            | N/A              |
+| Bulk staging                  | Native (SqlBulkCopy)            | Native (binary COPY)       | Generic (batched insert)     | Generic (batched insert)            | N/A              |
 | Delete detection (reconcile)  | Yes                             | Yes                        | Yes                         | Yes                                  | N/A              |
 | SCD2 target                   | Yes                             | Yes                        | Yes                         | Yes                                  | N/A              |
 

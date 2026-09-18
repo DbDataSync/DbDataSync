@@ -38,6 +38,9 @@ public static class PostgresProvisioner
     private static async Task<ProvisioningPlan> PlanEnableSourceChangeCaptureAsync(
         DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)
     {
+        if (request.ReaderKind == PostgresDriverKinds.LogicalSlot)
+            return await PlanLogicalSlotAsync(connection, request, cancellationToken);
+
         if (request.ReaderKind != GenericDriverKinds.TriggerAudit)
             return new ProvisioningPlan(ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Satisfied, [], []);
 
@@ -85,6 +88,177 @@ public static class PostgresProvisioner
             PostgresDialect.Instance.QualifyTable(table.Schema, table.Table), state, steps);
     }
 
+
+    /// <summary>
+    /// What a logical-decoding source has to have before a slot is worth proposing — phase 34.
+    /// <para>
+    /// Three checks, in the order an operator can act on them. <c>wal_level = logical</c> is first
+    /// because it is the only one that cannot be fixed by a statement: it needs a server restart, and
+    /// it is the single biggest adoption obstacle this mechanism has, so it is worth saying before
+    /// anything else rather than letting slot creation fail with the server's own wording.
+    /// </para>
+    /// <para>
+    /// The output-plugin allowlist is second, and it is newer than this phase's own plan: a recent
+    /// security fix means a plugin that is installed is not thereby permitted.
+    /// </para>
+    /// <para>
+    /// The table's ability to report its own deletes is third, and it is a **refusal** rather than a
+    /// warning. A table with no primary key and <c>REPLICA IDENTITY DEFAULT</c> produces no delete
+    /// records at all — not an error, not a warning, the deletes simply are not in the WAL — and this
+    /// reader declares <c>DetectsDeletes</c>. Discovering that as a target which never loses rows is
+    /// the worst possible way to find out.
+    /// </para>
+    /// <para>
+    /// <c>REPLICA IDENTITY FULL</c> is deliberately *not* recommended: <c>DEFAULT</c> already puts the
+    /// primary key in the delete and update-old record, which is all this needs, and <c>FULL</c> makes
+    /// every update write every column to the WAL. Said out loud because the instinct on reading
+    /// "replica identity" for the first time is to turn it up.
+    /// </para>
+    /// </summary>
+    private static async Task<ProvisioningPlan> PlanLogicalSlotAsync(
+        DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken)
+    {
+        var table = request.Table;
+        var qualified = PostgresDialect.Instance.QualifyTable(table.Schema, table.Table);
+        await PostgresDialect.Instance.UseDatabaseAsync(connection, table.Database, cancellationToken);
+
+        var warnings = new List<string>();
+
+        var walLevel = await ScalarAsync(connection, PgLogicalSlotStatement.WalLevel, cancellationToken) as string;
+        if (!string.Equals(walLevel, "logical", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ProvisioningPlan(
+                ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Unsupported, [],
+                [$"This server's wal_level is '{walLevel}', and logical decoding needs 'logical'. That " +
+                 "is a postgresql.conf setting (or an RDS/Aurora parameter group) and it requires a " +
+                 "server restart, so it is not something DbDataSync can apply for you. Nothing else " +
+                 "about this mapping can be planned until it is changed."]);
+        }
+
+        // Second, and newer than this phase's own plan: since PostgreSQL 18.6/17.11/16.15/15.19/14.24
+        // an output plugin library has to be on an allowlist before a slot may use it (the fix for
+        // CVE-2026-6471). A null means this server predates the setting and restricts nothing.
+        var allowed = await ScalarAsync(connection, PgLogicalSlotStatement.OutputPluginLibraries, cancellationToken) as string;
+        if (allowed is not null && !allowed.Split(',').Select(p => p.Trim()).Contains(PgLogicalSlotStatement.Plugin))
+        {
+            return new ProvisioningPlan(
+                ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Unsupported, [],
+                [$"This server's output_plugin_libraries is '{allowed}', which does not include " +
+                 $"'{PgLogicalSlotStatement.Plugin}'. Since PostgreSQL 18.6, 17.11, 16.15, 15.19 and " +
+                 "14.24 an output plugin has to be listed there before a slot may use it — the fix for " +
+                 "CVE-2026-6471 — so a slot created with it would be refused with the message " +
+                 $"'library \"{PgLogicalSlotStatement.Plugin}\" may not be used as an output plugin'. " +
+                 "Add it: " +
+                 $"output_plugin_libraries = '{allowed}, {PgLogicalSlotStatement.Plugin}'. Unlike " +
+                 "wal_level this one only needs a reload (SELECT pg_reload_conf()), not a restart."]);
+        }
+
+        var identity = await ReadReplicaIdentityAsync(connection, table.Schema, table.Table, cancellationToken);
+        if (identity is null)
+        {
+            return new ProvisioningPlan(
+                ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Unsupported, [],
+                [$"Table {qualified} was not found on this server."]);
+        }
+
+        // 'd' default, 'n' nothing, 'f' full, 'i' a named index.
+        var (relReplIdent, hasPrimaryKey) = identity.Value;
+        if (relReplIdent == 'n' || (relReplIdent == 'd' && !hasPrimaryKey))
+        {
+            var why = relReplIdent == 'n'
+                ? "its REPLICA IDENTITY is NOTHING"
+                : "it has no primary key and its REPLICA IDENTITY is DEFAULT, which means the primary key";
+            return new ProvisioningPlan(
+                ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Unsupported, [],
+                [$"{qualified} cannot report its own deletes through logical decoding, because {why}. " +
+                 "Postgres writes no delete record at all for such a table — the deletes are not " +
+                 "missing from this reader, they are not in the write-ahead log — so a target would " +
+                 "quietly keep rows the source no longer has. Give the table a primary key, or set " +
+                 $"REPLICA IDENTITY USING INDEX to a unique, non-partial, NOT NULL index. (ALTER TABLE {qualified} " +
+                 "REPLICA IDENTITY FULL also works and is not recommended: it makes every update write " +
+                 "every column to the WAL, and DEFAULT already carries everything this needs.)"]);
+        }
+
+        if (relReplIdent == 'f')
+            warnings.Add(
+                $"{qualified} has REPLICA IDENTITY FULL. It works, and it costs more than it needs to: " +
+                "every update writes every column to the WAL, where DEFAULT would write only the key, " +
+                "which is all this reader uses.");
+
+        var slot = LogicalSlotName(request);
+        var existing = await ReadSlotPluginAsync(connection, slot, cancellationToken);
+
+        if (existing is not null && !string.Equals(existing, PgLogicalSlotStatement.Plugin, StringComparison.Ordinal))
+        {
+            return new ProvisioningPlan(
+                ProvisioningActions.EnableSourceChangeCapture, ProvisioningState.Unsupported, [],
+                [$"A replication slot named '{slot}' already exists on this server and uses the " +
+                 $"'{existing}' output plugin, not '{PgLogicalSlotStatement.Plugin}'. Choose another " +
+                 "slot name for this mapping. Dropping and recreating that one would discard everything " +
+                 "it is holding for whatever is reading it."]);
+        }
+
+        var steps = new List<ProvisioningStep>();
+        if (existing is null)
+        {
+            steps.Add(new ProvisioningStep(
+                $"Create the logical replication slot '{slot}'",
+                PgLogicalSlotStatement.RenderCreateSlot(slot),
+                "The slot is what makes the source keep write-ahead log this replication has not read " +
+                "yet, and it is the first thing DbDataSync has ever created that outlives a run. It " +
+                "holds WAL from the moment it is created until something advances it — so a slot left " +
+                "behind by a replication nobody deleted properly will fill the source's disk. Dropping " +
+                $"it is `{PgLogicalSlotStatement.RenderDropSlot(slot)}`, and nothing does that " +
+                "automatically yet.",
+                ProvisioningStepScope.Database));
+        }
+
+        return new ProvisioningPlan(
+            ProvisioningActions.EnableSourceChangeCapture,
+            steps.Count == 0 ? ProvisioningState.Satisfied : ProvisioningState.Missing,
+            steps,
+            warnings);
+    }
+
+    private static string LogicalSlotName(ProvisioningRequest request) =>
+        request.ReaderOptions.TryGetValue(PgLogicalSlotReader.SlotNameOption, out var configured)
+        && !string.IsNullOrWhiteSpace(configured)
+            ? configured.Trim()
+            : PgLogicalSlotStatement.DefaultSlotName(request.Table.Schema, request.Table.Table);
+
+    private static async Task<(char RelReplIdent, bool HasPrimaryKey)?> ReadReplicaIdentityAsync(
+        DbConnection connection, string schema, string table, CancellationToken cancellationToken)
+    {
+        using var cmd = connection.CreateTimedCommand();
+        cmd.CommandText = PgLogicalSlotStatement.ReplicaIdentity;
+        cmd.AddParameter("@schema", schema);
+        cmd.AddParameter("@table", table);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+            return null;
+        return (reader.GetChar(0), reader.GetBoolean(1));
+    }
+
+    private static async Task<string?> ReadSlotPluginAsync(
+        DbConnection connection, string slot, CancellationToken cancellationToken)
+    {
+        using var cmd = connection.CreateTimedCommand();
+        cmd.CommandText = PgLogicalSlotStatement.SlotState;
+        cmd.AddParameter("@slot", slot);
+        cmd.AddParameter("@stored", DBNull.Value);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? reader.GetString(0) : null;
+    }
+
+    private static async Task<object?> ScalarAsync(
+        DbConnection connection, string sql, CancellationToken cancellationToken)
+    {
+        using var cmd = connection.CreateTimedCommand();
+        cmd.CommandText = sql;
+        return await cmd.ExecuteScalarAsync(cancellationToken);
+    }
     private static async Task<bool> ObjectExistsAsync(
         DbConnection connection, string schema, string name, CancellationToken cancellationToken)
     {

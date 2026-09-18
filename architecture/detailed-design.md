@@ -331,9 +331,9 @@ to `InitialLoad` for a `Primary` pass, `RunExecutor` checks one more thing befor
 next: does this mapping's reader implement `IPositionCapturing` — can it report its current position
 without reading a row?
 
-- **If it does** (`MsSqlChangeTrackingReader`, `MsSqlCdcReader`, `TriggerAuditReader`, `WatermarkReader`),
-  the reader's `ReadChangesAsync` is never called for this pass at all. Instead: `CapturePositionAsync`
-  runs first, before anything else touches the table (before even the target connection opens); the
+- **If it does** (`MsSqlChangeTrackingReader`, `MsSqlCdcReader`, `TriggerAuditReader`, `WatermarkReader`,
+  `PgLogicalSlotReader`, `OracleFlashbackReader`), the reader's `ReadChangesAsync` is never called for
+  this pass at all. Instead: `CapturePositionAsync` runs first, before anything else touches the table (before even the target connection opens); the
   captured position is handed to the state owner (`IRunnerState.RequestInitialLoad`), which stashes it
   as `ChangeWatermarks.PendingWatermark` — never the live `Watermark`, see below — sets
   `ReadHold.Loading`, and starts a Bulk Load for this mapping, segmented exactly as an ordinary scheduled

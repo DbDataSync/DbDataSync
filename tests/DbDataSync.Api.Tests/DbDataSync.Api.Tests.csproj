@@ -25,6 +25,17 @@
          previously supplied transitively through DbDataSync.Drivers.DuckDb (or DbDataSync.Verification/
          .Scripting via DbDataSync.Api) before 109i's ExcludeAssets. -->
     <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
+    <!-- Phase 38: the same gap again, for Npgsql, but reached a different way — nothing in this project
+         uses Npgsql directly. ChangeReaderFirstPassContractTests reflects over every driver assembly
+         with GetTypes(), and PgCopyStagingProvider's async methods put NpgsqlConnection and
+         NpgsqlBinaryImporter into compiler-generated state-machine *fields*, which type loading has to
+         resolve. Before phase 38 the Postgres driver touched Npgsql only inside non-async method
+         bodies, so its assembly happened to stay reflectable without it. Production is unaffected:
+         every GetTypes() call in src/ already handles ReflectionTypeLoadException, and
+         LibrarySurfaceExtractor reads metadata without loading at all. That test deliberately does not
+         handle it — a sweep that silently covered fewer readers than it appeared to is the exact
+         failure mode the file exists to prevent. -->
+    <PackageReference Include="Npgsql" Version="9.0.3" />
   </ItemGroup>
 
   <ItemGroup>

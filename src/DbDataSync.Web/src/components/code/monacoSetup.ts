@@ -1,9 +1,11 @@
 import * as monaco from 'monaco-editor/editor/editor.api'
 // Each register.js declares its language with a lazy `loader: () => import('./csharp.js')`, so the
-// tokenizer arrives as its own chunk when a model first uses it. Registering these two costs almost
+// tokenizer arrives as its own chunk when a model first uses it. Registering these three costs almost
 // nothing; importing `monaco-editor` wholesale would register all ninety-odd and pull the LSP client.
 import 'monaco-editor/languages/definitions/csharp/register.js'
 import 'monaco-editor/languages/definitions/sql/register.js'
+// Phase 35: the config store is YAML, and its diffs are the third thing this app renders as code.
+import 'monaco-editor/languages/definitions/yaml/register.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 
 declare global {

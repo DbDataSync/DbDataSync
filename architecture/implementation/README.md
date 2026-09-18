@@ -29,12 +29,30 @@ So the order lives here, and is the one to work through:
 
 | | phase | why here |
 | --- | --- | --- |
-| 1 | **034** — PostgreSQL logical replication | |
-| 2 | **035** — config history diff and revert | now also covers `dbdatasync.config.yaml`'s missing history view, carried forward from 081 |
-| 3 | **038** — Postgres COPY staging, and the columnar decision | |
-| 4 | **145** — SCD2 duplicate-key handling, set-based via window functions | a pure optimization, not a correctness fix — phase 132's own row-by-row design is already correct; this only matters once someone wants the performance |
+| 1 | **151** — deprovisioning: source-side state goes when the config does | split out of 034. Not a Postgres phase — phase 33's trigger-audit shadow tables and triggers are left behind the same way, and have been since they shipped |
+| 2 | **152** — replication slot lag, and slots nobody claims | split out of 034. Smaller than it looks: the statements exist and are tested; the work is an API surface and a place on the connection card |
+| 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
+| 4 | **155** — `pgoutput`: logical decoding with nothing installed on the source | **gated on a product decision, not on engineering** — last deliberately, because if the answer is "managed Postgres" it should never be built at all. See the phase doc's own "Why this might not be worth building" |
 
-Updated 2026-09-17 (latest of all): **154 is done.** `dotnet-integration`'s `services:` block — a
+Updated 2026-09-17 (latest of all): **155 is new, and deliberately conditional.** The other half of
+phase 34's own still-open product question, written up so the decision can be made once against a real
+design rather than re-argued. `pgoutput` is the output plugin PostgreSQL's native logical replication
+uses; it ships with Postgres, so it decodes the same WAL through the same replication slots with
+**nothing third-party installed on the source server** — which is the one prerequisite `wal2json`
+carries that an operator may be unable to satisfy without a change-control ticket, and the reason this
+repo now maintains its own Postgres image at all. The prerequisites split better by kind than by count:
+settings (a restart) and SQL objects (a slot, and for `pgoutput` a publication) are the same either
+way; only the third-party-software row differs, and `pgoutput` empties it. **What it does not buy is
+the restart** — `wal_level = logical` is what makes Postgres write the old tuple an update or delete
+needs, so no plugin and no client-side decoding recovers information that was never written; if the
+restart alone is the blocker, `TriggerAudit` is the honest answer. The phase is a *sibling* reader, not
+a rewrite: slot lifecycle, every provisioning check, the expiry handling and the advance-is-off default
+all carry over unchanged, and Npgsql's typed columns remove the JSON conversion layer phase 34 needed.
+Its biggest open question is recorded rather than deferred — `IChangeReader` hands a reader an open
+`DbConnection`, and a replication session cannot use one. See
+`architecture/implementation/todo/phase-155-pgoutput-logical-decoding.md`.
+
+Updated 2026-09-17 (previously latest): **154 is done.** `dotnet-integration`'s `services:` block — a
 hand-maintained second copy of `docker-compose.yml`'s own container topology — is gone, replaced by a
 `docker compose up -d --wait` step (no explicit service list; this job needs every engine the file
 defines). That duplication is exactly what let phase 153's own mariadb/oracle gap happen in the first
@@ -115,6 +133,81 @@ doc's own Finding 2. Verified against real `mysql:9` **and** `mariadb:11` contai
 body per pair, 28 integration tests green on both — the empirical half of the sibling planning doc's
 "one implementation covers both forks" claim. See
 `architecture/implementation/done/phase-147-mysql-mariadb-driver-and-trigger-audit.md`.
+Updated 2026-09-16 (previously latest): **035 is done and removed.** The Version Control tab has shown the
+auto-commit log since phase 6 and until now that was all it did; it now has **View changes** (an inline
+Monaco diff editor, with `yaml` joining `csharp` and `sql` as a lazy language chunk) and **Restore to
+here**. Three things worth knowing. **The restore preview is a different question from the commit's own
+patch** — the plan said the confirmation is "built from the same diff the first action shows", which is
+right about the machinery and wrong about the anchor: a commit's patch says what it changed, a
+confirmation has to say what *will* change, and restoring to a commit that only renamed a column may
+delete three mappings created since. Two endpoints over one diff engine, anchored differently. **The
+API returns both sides of each file rather than a unified patch**, because that is what a diff editor
+renders from and because a patch elides the context a config file is read for — which settles the
+plan's diff-size question as "complete file list, capped content". And **a dangling connection warns
+rather than refuses**: the plan's rule is that a restore must not reach config a save would reject, and
+its own example (a connection that no longer exists) is not something a save rejects, so refusing it
+would make the restore stricter than the save it restores. The save-time validation is now literally
+shared (`ValidateTableMapping`) so the two doors cannot drift. Phase 81's repo-root
+`dbdatasync.config.yaml` blind spot is fixed at the query layer and tested — it was the one-line prefix
+bug 81 predicted — and the screen for it is
+`architecture/planning/todo/follow-up-phase-035-root-config-has-history-but-no-screen.md`, because
+restoring that file can take the console offline and that needs a decision rather than a dialog. See
+`architecture/implementation/done/phase-035-config-history-diff-and-revert.md`.
+
+Updated 2026-09-16 (previously latest): **034 is done and removed, and split twice.** `PgLogicalSlotReader`
+reads PostgreSQL logical decoding as a query — `pg_logical_slot_peek_changes` through `wal2json`, the
+slot's LSN as the watermark — and the plan's central claim held: it needed no change to `IChangeReader`
+and no streaming subsystem. **The plan's slot model did not hold, and that is the thing to know.** It
+said one slot per replication; advancing a slot is `IPositionAcknowledging`, which is per-mapping by its
+own signature, so a shared slot advanced by whichever mapping ran last discards changes the others have
+not read — silent data loss, arriving through a different door than the one "peek, never get" guards.
+Resolved by defaulting to a slot per source table and making advancement opt-in and **off**, the same
+call `TriggerAuditReader`'s pruning option already makes here. The cost is named rather than hidden:
+`max_replication_slots` defaults to 10. Three other things the plan did not anticipate are in the
+retrospective — `wal2json` cannot apply a column transform (refused by name), decoded JSON values have
+to be converted or the same mapping works through one staging provider and fails through the other, and
+**no public image carries `wal2json` any more** (Debezium's build only `decoderbufs` as of 3.x), so
+the environment is a two-line Dockerfile and CI brings it up through compose (the workflow change
+itself is phase 154's, per that phase doc's rebase note). **One product question is still open and
+wants a decision, not more work**: whether `wal2json` is an acceptable prerequisite or
+`pgoutput` has to come first. Nothing built here has to be undone either way. Split out: **151**
+(deprovisioning — there is no such concept anywhere in this codebase, and phase 33's shadow tables have
+the same gap) and **152** (slot lag and orphan reporting). See
+`architecture/implementation/done/phase-034-postgres-logical-replication.md`.
+
+Updated 2026-09-16 (previously latest): **038 is done and removed, and split.** Part 1 shipped:
+`PgCopyStagingProvider` stages through `COPY … FROM STDIN (FORMAT BINARY)`, registered ahead of the
+generic batched-`INSERT` provider, creating the identical staging table from that provider's own DDL
+builder — so a mapping moves between the two without anything downstream noticing, which is what the
+integration tests assert by running one body against both Kinds. It is the first thing `PostgresDriver`
+has ever registered that is not `Drivers.Generic`'s, and the reason is worth keeping: `COPY` is a
+protocol on the connection, not a statement, so there was no `SqlDialect` hook it could have gone
+through. The difference that keeps both providers registered is **not** speed — binary `COPY` sends the
+column's own wire format and the server converts nothing, so a value it cannot be written as fails the
+pass rather than being coerced, and the phase spends its care on making that failure name the column,
+the types, and the alternative. **Part 2 — the columnar decision — is now 147** rather than being
+quietly dropped: its deliverable is a set of benchmark numbers off a real server, this machine has no
+Docker, and the existing harness does not model the one configuration the decision actually turns on
+(typed columnar fed from a boxing source) or use a real `COPY` sink. Writing that harness blind, to
+produce the numbers a large architectural change would be decided on, is worse than specifying it. See
+`architecture/implementation/done/phase-038-postgres-copy-staging.md`.
+
+Updated 2026-09-16 (previously latest): **145 is done and removed.** Phase 132's per-key/per-row loop for a
+duplicate natural key is gone, replaced by two window-function statements over one derived table:
+`1 + K + 2KR` round trips for `K` duplicate keys of `R` staged rows each became **3**, whatever `K` and
+`R` are. Two things the plan had not worked out turned up in the building and are the parts worth
+knowing about. **Its own SQL sketch was wrong** — a plain `LEAD` over every staged row would have opened
+a spurious second version for any change that touches no mapped column, which
+`Scd2CdcGuaranteedDeliveryIntegrationTests`' Id 3 already covers and would have failed on; the mechanism
+that actually reproduces the loop is `LAG` (a row's predecessor *is* the version open when it arrives, so
+only a key's first row consults the target) with `LEAD` over the *boundary* rows only. And **the two
+statements had an ordering hazard the plan did not anticipate**: both need the pre-pass answer to "what
+was open for this key", and whichever runs second reads a target the first has written to — fixed by
+having both ignore the rows this pass itself opened, matched on a surrogate key that is a pure function
+of staged data. Timing was *not* measured (no Docker on the implementing machine, and CI runs correctness
+tests rather than benchmarks) — carried forward, for the second time, as
+`architecture/planning/todo/follow-up-phase-145-set-based-scd2-duplicates-never-timed.md`. See
+`architecture/implementation/done/phase-145-scd2-duplicate-keys-set-based.md`.
 
 Updated 2026-09-16 (previously latest): **146 is done and removed.** The published `dbdatasync` tool's
 nupkg was 152.6MB, ~330MB uncompressed of it DuckDB's own native binaries for all five platforms,

@@ -11,11 +11,18 @@ namespace DbDataSync.Drivers.Postgres;
 /// <summary>
 /// PostgreSQL, on Npgsql.
 /// <para>
-/// It registers nothing of its own: every reader, staging provider and writer here is
-/// <c>DbDataSync.Drivers.Generic</c>'s, driven by <see cref="PostgresDialect"/>. That is the claim
-/// phases 17 and 18 made — a new engine is a dialect, a connection factory and a catalog — and this
-/// file is what it looks like when it holds. An engine-specific <c>COPY</c> staging provider is a
-/// later phase; nothing here is waiting on it.
+/// Most of this is not its own. Every writer, four of the five readers and one of the two staging
+/// providers is <c>DbDataSync.Drivers.Generic</c>'s, driven by <see cref="PostgresDialect"/>. That is
+/// the claim phases 17 and 18 made — a new engine is a dialect, a connection factory and a catalog —
+/// and it held unbroken for twenty phases.
+/// </para>
+/// <para>
+/// **Two things broke it, and what broke it is the same thing twice**: a mechanism that is not a
+/// statement, so no <see cref="SqlDialect"/> hook could have expressed it.
+/// <see cref="PgCopyStagingProvider"/> (phase 38) is a protocol on the connection, and
+/// <see cref="PgLogicalSlotReader"/> (phase 34) reads a Postgres function no other engine has. The
+/// generic staging provider stays registered alongside the first, as the fallback for anything binary
+/// <c>COPY</c> will not carry.
 /// </para>
 /// </summary>
 public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvider, ITableCatalogProvider, IProvisioner, ITableRowEstimator
@@ -46,10 +53,23 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
         new TriggerAuditReader(PostgresDialect.Instance, PostgresCatalog.Instance),
         new BatchReloadReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
         new KeyReconcileReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
+        // Phase 34: the first Postgres-specific reader. Logical decoding is a plain SQL function
+        // returning rows, which is what lets it be a reader at all rather than a streaming subsystem.
+        new PgLogicalSlotReader(PostgresDialect.Instance),
     ];
 
+    /// <summary>
+    /// Binary COPY first, batched INSERT second — phase 38. Both stage into the same table with the
+    /// same DDL, so a mapping can be moved between them without anything downstream noticing; the
+    /// generic one stays registered because binary COPY converts nothing and an instance that will not
+    /// permit COPY, or a column whose value Npgsql cannot write in the column's own wire format, needs
+    /// a path that works. Order matters only for which one a new mapping is offered first.
+    /// </summary>
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =
-        [new BatchInsertStagingProvider(PostgresDialect.Instance, PostgresCatalog.Instance)];
+    [
+        new PgCopyStagingProvider(PostgresDialect.Instance, PostgresCatalog.Instance),
+        new BatchInsertStagingProvider(PostgresDialect.Instance, PostgresCatalog.Instance),
+    ];
 
     public IReadOnlyList<IChangeWriter> Writers { get; } =
     [

@@ -56,11 +56,23 @@ public static class ChangeOrdering
         return (IsPresent(first.Schema), Replay(first, enumerator));
     }
 
+    /// <summary>
+    /// The peeked row and then the rest, with the inner enumerator disposed however this ends.
+    /// <para>
+    /// <c>yield return first</c> is inside the <c>try</c>, and that is load-bearing rather than tidy.
+    /// An iterator suspended at a <c>yield</c> outside its <c>try</c> runs no <c>finally</c> when it is
+    /// disposed — so with the first yield outside, a consumer that threw while handling the *first*
+    /// staged row left the source reader open, and the next thing to use that connection failed with
+    /// "a command is already in progress" rather than with whatever actually went wrong. Found by phase
+    /// 38's own "a value binary COPY cannot convert fails legibly" test, whose bad value is in the
+    /// first row and which then staged the same rows through the other provider.
+    /// </para>
+    /// </summary>
     private static async IAsyncEnumerable<ChangeRow> Replay(ChangeRow first, IAsyncEnumerator<ChangeRow> rest)
     {
-        yield return first;
         try
         {
+            yield return first;
             while (await rest.MoveNextAsync())
                 yield return rest.Current;
         }

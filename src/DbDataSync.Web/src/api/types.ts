@@ -1292,6 +1292,45 @@ export interface CommitInfo {
   whenUtc: string
 }
 
+/** How one file changed in a config diff — phase 35. */
+export type ConfigChangeKind = 'Added' | 'Modified' | 'Deleted' | 'Renamed'
+
+export interface ConfigFileChange {
+  path: string
+  kind: ConfigChangeKind
+  /** The file as it was — null for an added file, and for one whose content did not fit the diff's
+   * budget (the change is still listed; see `truncated`). */
+  before: string | null
+  /** The file as it became — null for a deleted one, and for a budget-dropped file. */
+  after: string | null
+}
+
+/**
+ * A config diff — phase 35. Two endpoints return this shape and they answer different questions: a
+ * commit's own patch says what that commit changed, and the restore preview says what restoring to it
+ * would change. Once anything has happened since, those are different sets.
+ */
+export interface ConfigDiff {
+  sha: string
+  message: string
+  /** Always complete, even when `truncated` — the answer to "what changed" is not something to elide. */
+  changes: ConfigFileChange[]
+  /** Whether some file's content was too large to carry. A first commit creating forty mappings is a
+   * lot of YAML, and streaming all of it into a browser is not a service to anyone. */
+  truncated: boolean
+}
+
+export interface ConfigRestoreResult {
+  restoredFromSha: string
+  /** Null when the config was already in that state — an empty commit would be a log entry claiming a
+   * change that did not happen. */
+  commitSha: string | null
+  changes: ConfigFileChange[]
+  /** True of the restored config and not reasons to refuse it — a connection it names that does not
+   * exist, most likely. */
+  warnings: string[]
+}
+
 /**
  * One pause or resume, as it happened — mirrors `PauseEventRecord`. See phase 64 (the replication
  * grain) and phase 131 (the table-mapping grain, and the screen that reads both).

@@ -30,6 +30,10 @@ const keys = {
   replications: ['replications'] as const,
   replication: (name: string) => ['replications', name] as const,
   replicationHistory: (name: string) => ['replications', name, 'history'] as const,
+  replicationCommitDiff: (name: string, sha: string) =>
+    ['replications', name, 'history', sha, 'diff'] as const,
+  replicationRestorePreview: (name: string, sha: string) =>
+    ['replications', name, 'history', sha, 'restore-preview'] as const,
   replicationPauseHistory: (name: string) => ['replications', name, 'pause-history'] as const,
   tableMappings: (replicationName: string) => ['replications', replicationName, 'table-mappings'] as const,
   tableMapping: (replicationName: string, mappingName: string) =>
@@ -473,6 +477,50 @@ export function useReplicationHistory(name: string | undefined) {
     queryKey: keys.replicationHistory(name ?? ''),
     queryFn: () => api.replications.history(name!),
     enabled: !!name,
+  })
+}
+
+/**
+ * The patch one commit made — phase 35's "View changes". Fetched only once a commit is chosen, which
+ * is what `enabled` is doing: the Version Control tab renders a log of fifty commits and nobody wants
+ * fifty patches.
+ */
+export function useReplicationCommitDiff(name: string | undefined, sha: string | undefined) {
+  return useQuery({
+    queryKey: keys.replicationCommitDiff(name ?? '', sha ?? ''),
+    queryFn: () => api.replications.commitDiff(name!, sha!),
+    enabled: !!name && !!sha,
+  })
+}
+
+/**
+ * What restoring to that commit would change — *not* the commit's own patch, which is why it is a
+ * second query rather than a reuse of the one above. A commit that only renamed a column may, restored
+ * today, delete three mappings created since; none of those appear in its own patch, and the
+ * confirmation has to name them.
+ */
+export function useReplicationRestorePreview(name: string | undefined, sha: string | undefined) {
+  return useQuery({
+    queryKey: keys.replicationRestorePreview(name ?? '', sha ?? ''),
+    queryFn: () => api.replications.restorePreview(name!, sha!),
+    enabled: !!name && !!sha,
+  })
+}
+
+/**
+ * Puts the config back and records it as a new commit. Invalidates the history — the log grows by the
+ * restore — and the replication and its mappings, which are what just changed underneath whatever
+ * screen the operator came from.
+ */
+export function useRestoreReplication(name: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (sha: string) => api.replications.restore(name, sha),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.replicationHistory(name) })
+      queryClient.invalidateQueries({ queryKey: keys.replication(name) })
+      queryClient.invalidateQueries({ queryKey: keys.tableMappings(name) })
+    },
   })
 }
 

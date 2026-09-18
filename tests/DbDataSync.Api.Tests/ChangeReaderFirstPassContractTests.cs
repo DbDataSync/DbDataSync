@@ -49,6 +49,8 @@ public sealed class ChangeReaderFirstPassContractTests
             "DbDataSync.Drivers.MsSql.Tests.TriggerAuditReaderTests.AnInitialLoad_CapturesThePosition_AndDoesNotFullLoad",
         [typeof(WatermarkReader)] =
             "DbDataSync.Drivers.MsSql.Tests.MsSqlWatermarkReaderTests.FullLoad_ReturnsAllRows",
+        [typeof(Drivers.Postgres.PgLogicalSlotReader)] =
+            "DbDataSync.Drivers.Postgres.Tests.PgLogicalSlotTests.ChangesFromLatest_ReadsNothing_AndTheSlotOnlyMovesWhenAcknowledged",
     };
 
     /// <summary>
@@ -278,6 +280,11 @@ public sealed class ChangeReaderFirstPassContractTests
 
         if (type == typeof(WatermarkReader))
             return Activator.CreateInstance(type, MsSqlDialect.Instance, null, null)!;
+
+        // Phase 34: its own dialect rather than MsSql's, because unlike the readers above it is
+        // engine-specific — the statements it issues are Postgres functions, not rendered SQL.
+        if (type == typeof(Drivers.Postgres.PgLogicalSlotReader))
+            return Activator.CreateInstance(type, PostgresDialect.Instance)!;
 
         throw new InvalidOperationException(
             $"No construction recipe for '{type.Name}' — add one beside this method.");
