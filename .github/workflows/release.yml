@@ -28,6 +28,9 @@ on:
 # `git push` needs nothing further as long as this scope covers it.
 permissions:
   contents: write
+  # The pre-flight check below asks the Actions API whether CI already passed on this exact commit,
+  # rather than re-running the whole suite to re-derive an answer that already exists.
+  actions: read
   # Lets this job request a short-lived OIDC token identifying this exact repo + workflow file, which
   # NuGet/login exchanges for a one-hour, single-use nuget.org API key (phase 127's Trusted
   # Publishing) — no long-lived NuGet secret is stored anywhere. Required for that step to work at
@@ -40,6 +43,49 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The fast-forward of `main` at the end has to prove `main` is an ancestor of this commit
+          # before it pushes; the default shallow clone cannot answer that question at all.
+          fetch-depth: 0
+
+      # A release is cut from `test` — the validated snapshot `promote-test.yml` only ever advances to
+      # a commit whose CI run passed — and ends by fast-forwarding `main` to whatever shipped, so
+      # `main` names the last released commit rather than a staging area. Dispatched against anything
+      # else, this would either release unvalidated work or move `main` somewhere that was never
+      # released, so it is refused outright rather than interpreted.
+      - name: Refuse to release from anything but test
+        run: |
+          if [ "$GITHUB_REF_NAME" != "test" ]; then
+            echo "::error::release.yml must be dispatched against 'test' (got '$GITHUB_REF_NAME'). See architecture/branching-and-releases.md."
+            exit 1
+          fi
+
+      # Deliberately a lookup, not a re-run. This exact commit already has a CI result — that is the
+      # precondition `promote-test.yml` enforces before `test` can point at it — so re-running the
+      # suite here would spend ~15 minutes re-deriving the same answer, and would hand a known-flaky
+      # job (dotnet-windows' temp-dir cleanup, see
+      # architecture/planning/todo/follow-up-a-temp-dir-that-cannot-be-deleted-fails-a-job-whose-tests-all-passed.md)
+      # a veto over releasing at all. What a re-run would *not* establish any better is the thing
+      # actually worth asserting: that a green run for this SHA exists — which is false exactly when a
+      # commit reached `test` by some route other than the promotion, and that is the case this gate
+      # is for.
+      #
+      # Any successful CI run for the SHA counts, not merely the newest: the same commit legitimately
+      # gets more than one (the push to `dev`, then the promotion push to `test`), and a flake that was
+      # re-run to green is the same situation a human would have accepted by hand.
+      - name: Require a green CI run for this exact commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          green=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&status=success" \
+            --jq '[.workflow_runs[] | select(.name == "CI")] | length')
+          echo "successful CI runs for $GITHUB_SHA: $green"
+          if [ "$green" -lt 1 ]; then
+            echo "::error::No successful CI run for $GITHUB_SHA. Releasing a commit whose CI has not passed is exactly what this check exists to prevent."
+            exit 1
+          fi
+
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
@@ -252,7 +298,7 @@ jobs:
           prerelease_flag=()
           [ "$PRERELEASE" = "true" ] && prerelease_flag=(--prerelease)
           # "$VERSION" — the tag the previous step just pushed, not $GITHUB_REF_NAME (that's the
-          # branch this run was dispatched against, e.g. "main"; there is no incoming tag any more).
+          # branch this run was dispatched against, always "test"; there is no incoming tag any more).
           # The exact nupkg path, not artifacts/*.nupkg — same reason as the nuget.org push above:
           # "The nupkg alone" (this step's own comment) was always meant to be one file, not
           # incidentally two.
@@ -261,3 +307,26 @@ jobs:
             --notes-file /tmp/release-notes.md \
             "${prerelease_flag[@]}" \
             "$NUPKG"
+
+      # `main` is moved here, and only ever by fast-forward. This is what makes `main` mean "the last
+      # released commit" instead of a staging branch, and it is why there is no longer a test → main
+      # PR — which also removes the empty merge commit every such PR used to add, since GitHub's PR
+      # merge has no fast-forward option. See architecture/branching-and-releases.md.
+      #
+      # Refuses rather than forcing if `main` is not an ancestor, mirroring promote-test.yml's own
+      # discipline: that means something reached `main` outside this workflow, which is worth a
+      # human's attention rather than a silently discarded commit.
+      #
+      # Last, after the GitHub Release, because everything that constitutes "released" is finished by
+      # this point. A failure here leaves `main` merely lagging a release that genuinely happened,
+      # which is one command to fix (`git push origin <sha>:main`); the opposite order would leave
+      # `main` asserting a release that does not exist.
+      - name: Fast-forward main to this commit
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
+            git push origin "$GITHUB_SHA:refs/heads/main"
+          else
+            echo "::error::main has commits this release doesn't — refusing to fast-forward over them. Something reached main outside this workflow; investigate before retrying."
+            exit 1
+          fi
