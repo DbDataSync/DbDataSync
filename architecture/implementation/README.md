@@ -25,14 +25,24 @@ As of phase 156, a phase doc's filename is `phase-<Letter><N>-<kebab-slug>.md` �
 an incrementing number, then a descriptive slug: `phase-Q1-mysql-mariadb-driver.md`,
 `phase-Q2-oracle-driver.md`, `phase-Q3-mysql-oracle-docs-update.md`.
 
-**The letter marks a lineage, not an identity or a priority.** Starting a new, unrelated burst of
-phase-numbered work — a different session, a different topic, anything that isn't a direct continuation
-of a lineage already open — picks a fresh, unused uppercase letter (check `todo/`/`done/` for letters
-already claimed first; the same two-second check the old all-integer scheme should always have done
-before picking its next number, and didn't). The number then increments within that one letter for as
-long as that lineage's own related phases keep being designed. Two phases sharing a number under
-*different* letters (`Q3` and `M3`) imply nothing about their relative order — only same-letter numbers
-do, and only because they really were designed one after another by the same continuous thread of work.
+**The letter marks a lineage, not an identity or a priority.** A lineage is not a formal unit — no
+branch, session, or calendar day defines its boundary. It just means "phases that are obviously a
+continuation of each other." The judgment call, each time a new phase doc gets written, is: does it pick
+up directly where the last phase under this letter left off, or is it a different piece of work that
+happens to be arriving around the same time? Worked example, from three real phases built in one actual
+session: phases 147, 148 and 149 (a MySQL driver, then an Oracle driver, then the docs update tying both
+together) are one lineage — each picked up exactly where the last left off — so under this scheme they'd
+share one letter: `Q1`, `Q2`, `Q3`. Phase 153, built in the *same session* right after (fixing the CI
+containers 147/148 turned out to need), is a different lineage — not "the next driver phase," a separate
+concern the earlier work happened to expose — so it gets its own letter (`R1`), not `Q4`. Same session,
+different letters, because "same session" was never the boundary; continuity of the actual work is.
+
+Starting a new lineage picks a fresh, unused uppercase letter — check `todo/`/`done/` for letters already
+claimed first, the same two-second check the old all-integer scheme should always have done before
+picking its next number, and didn't. The number then increments within that one letter for as long as
+that lineage's own related phases keep being designed. Two phases sharing a number under *different*
+letters (`Q3` and `M3`) imply nothing about their relative order — only same-letter numbers do, and only
+because they really were designed one after another as part of the same continuous piece of work.
 
 **Why it changed**: the old scheme — one shared, incrementing integer everyone's next phase doc raced
 for — is exactly what let two different sessions both claim `phase-150` (and, separately, `phase-154`)
