@@ -21,27 +21,34 @@ silently replaced.
 
 ## Phase IDs
 
-As of phase 156, a phase doc's filename is `phase-<Letter><N>-<kebab-slug>.md` — one uppercase letter,
-an incrementing number, then a descriptive slug: `phase-Q1-mysql-mariadb-driver.md`,
-`phase-Q2-oracle-driver.md`, `phase-Q3-mysql-oracle-docs-update.md`.
+As of phase 156, a phase doc's filename is `phase-<N><Letter>-<kebab-slug>.md` — the number, one
+uppercase letter, then a descriptive slug: `phase-157Q-mysql-mariadb-driver.md`,
+`phase-158Q-oracle-driver.md`. Almost nothing about how numbers get picked changes: check `todo/`/`done/`
+for the highest one in use, take the next — the exact procedure this repo has always used. **The letter
+is not a topic, a lineage, or anything else that needs a judgment call.** Pick one uppercase letter at
+random, once, the first time a given session/worktree writes a phase doc, and reuse that same letter for
+every phase doc that session goes on to write, regardless of what each one is about. A cheap check
+against letters already in use in `todo/`/`done/` is worth doing before settling on one, but even without
+it the odds are good — a fresh letter only gets claimed once per session, not once per phase, so the
+26-letter space empties far more slowly than the number does.
 
-**The letter marks a lineage, not an identity or a priority.** Starting a new, unrelated burst of
-phase-numbered work — a different session, a different topic, anything that isn't a direct continuation
-of a lineage already open — picks a fresh, unused uppercase letter (check `todo/`/`done/` for letters
-already claimed first; the same two-second check the old all-integer scheme should always have done
-before picking its next number, and didn't). The number then increments within that one letter for as
-long as that lineage's own related phases keep being designed. Two phases sharing a number under
-*different* letters (`Q3` and `M3`) imply nothing about their relative order — only same-letter numbers
-do, and only because they really were designed one after another by the same continuous thread of work.
+**What the letter is actually for**: nothing, in the common case — refer to a phase by its bare number
+("phase 157") exactly as before, and that's almost always all a reader needs, since the letter's whole
+job is to keep the *filename* from colliding even on the rare occasion the number does. Two sessions
+checking `todo/`/`done/` within moments of each other can still both conclude "157" is the next free
+number — that race is exactly what already happened twice in this repo's own history (`phase-150` and
+`phase-154`, each independently claimed and only discovered at rebase, needing a manual reconciliation
+commit each time). Under the new scheme that same race produces `phase-157Q-...md` and
+`phase-157M-...md` — two real files that coexist with no conflict at all, because each session picked its
+own letter independently. The number collided; the filename didn't. Only when a genuine number collision
+like that actually happens does the letter matter for a human or an agent — reach for the full ID
+(`phase 157Q`, not just `phase 157`) to say which one, until someone renumbers the later one to close the
+gap (or doesn't bother, since nothing requires the sequence to be gap-free either).
 
-**Why it changed**: the old scheme — one shared, incrementing integer everyone's next phase doc raced
-for — is exactly what let two different sessions both claim `phase-150` (and, separately, `phase-154`)
-at the same time, discovered only at rebase as a real filename collision needing manual reconciliation. A
-letter-per-lineage namespace makes that collision structurally rare instead of routine: two sessions
-would need to pick the *same* letter *and* land on the *same* local number, not merely both be active on
-the same day. See `architecture/implementation/done/phase-156-branching-and-phase-numbering-methodology.md`
-and `architecture/branching-and-releases.md` for the fuller reasoning, including the companion
-branching-flow change made in the same pass for an unrelated but similarly-shaped reason.
+See `architecture/implementation/done/phase-156-branching-and-phase-numbering-methodology.md` for the
+fuller reasoning, including the companion branching-flow change made in the same pass for an unrelated
+but similarly-shaped reason, and that doc's own Retrospective for how this section's first draft got the
+mechanic wrong (a letter per *topic*, exhausting the alphabet in days) before landing here.
 
 **This is prospective only.** Nothing already in `todo/`/`done/` under the old `phase-NNN` scheme is
 renamed — doing so would break every git-history and cross-doc reference to it, exactly the harm the
@@ -68,10 +75,14 @@ history demonstrated in real time — `phase-150` and `phase-154` each independe
 concurrent sessions, discovered only at rebase — fixed in one pass, since both trace back to the same
 root cause: a flat, shared namespace with no structural separation between concurrent lines of work.
 `dev`/`test`/`main` replaces everyone pushing straight to `main` (`architecture/branching-and-releases.md`);
-letter+number (`phase-Q1-...`, `phase-Q2-...`) replaces one shared incrementing integer for phase docs
-(this README's own new "Phase IDs" section, above). Both prospective only — nothing renamed, no branch
-protection turned on, no automation added that wasn't explicitly asked for. See
-`architecture/implementation/done/phase-156-branching-and-phase-numbering-methodology.md`.
+number+letter (`phase-157Q-...`, `phase-158Q-...` — same incrementing number as always, plus one letter
+picked per session to keep a rare number collision from becoming a filename collision) replaces one shared
+incrementing integer alone for phase docs (this README's own new "Phase IDs" section, above). Both
+prospective only — nothing renamed, no branch protection turned on, no automation added that wasn't
+explicitly asked for. The numbering section's first draft used a per-topic letter instead of a per-session
+one and got corrected in the same pass — see
+`architecture/implementation/done/phase-156-branching-and-phase-numbering-methodology.md`'s own
+Retrospective for the real mistake and the user's correction.
 
 Updated 2026-09-17 (previously latest): **155 is new, and deliberately conditional.** The other half of
 phase 34's own still-open product question, written up so the decision can be made once against a real
