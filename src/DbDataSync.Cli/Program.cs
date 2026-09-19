@@ -17,6 +17,7 @@ return command switch
     "serve" => await ServeCommand.RunAsync(rest),
     "service" => ServiceCommand.Run(rest),
     "tool" => ToolCommand.Run(rest),
+    "update" => await UpdateCommand.RunAsync(rest),
     "health" => await HealthCommand.RunAsync(rest),
     "invite" => InviteCommand.Run(rest),
     "config" => await ConfigCommand.RunAsync(rest),

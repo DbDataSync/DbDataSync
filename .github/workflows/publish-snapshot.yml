@@ -1,0 +1,263 @@
+name: Publish snapshot
+
+# Phase 158: every time `test` advances to a commit whose CI passed, publish it as a GitHub *prerelease*
+# with the tool's nupkg attached — a "snapshot" — so anyone can try the newest validated build without a
+# release having been cut. `dbdatasync update` (the CLI half of phase 158) lists these, downloads the one
+# chosen, and prints the commands to install it. Nothing here is published to nuget.org, and nothing here
+# needs a stored secret or a feed: a snapshot is a release asset, downloadable anonymously, installed by
+# pointing `dotnet tool` at the folder it was downloaded into.
+#
+# Triggered by the promotion, not by CI on `test`, because CI does not run on `test`: promote-test.yml pushes
+# `dev:test` under GITHUB_TOKEN, and a push made with that token does not trigger other workflows.
+#
+# A workflow_run workflow is read from the repository's DEFAULT branch, which is still `main` (see
+# architecture/branching-and-releases.md), and `main` only moves at a release cut. So this file does
+# nothing until a release has put it on `main` — the same reason promote-test.yml took a release to become
+# live. Landing it on `dev` and cutting a release is the rollout; nothing here can be exercised before that
+# except by running its steps on a throwaway branch under a temporary `push` trigger.
+on:
+  workflow_run:
+    workflows: ["Promote dev to test"]
+    types: [completed]
+  # For pruning by hand (a smaller `keep`) and for re-running against whatever `test` currently is. Only
+  # available once this file is on the default branch, like the trigger above.
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: How many of the newest snapshot releases to keep. Older ones, and their tags, are deleted.
+        type: string
+        default: "20"
+
+# `contents: write` creates and deletes releases and their tags. `actions: read` is for the lookup below
+# that asks whether CI already passed on the exact commit — the same one release.yml makes.
+permissions:
+  contents: write
+  actions: read
+
+# One publish at a time, never cancelled half way: a cancelled run could leave a release without its
+# checksum, which the catalog (correctly) refuses to list. A run for a commit that already has its snapshot is
+# a no-op, so queued runs are cheap.
+concurrency:
+  group: publish-snapshot
+  cancel-in-progress: false
+
+env:
+  # A snapshot's tag is this plus its version. No slash, so a tag is always one URL path segment, and never
+  # equal to a real release's bare-version tag. `dbdatasync update` and the retention step below both key on
+  # it; it must match ReleaseSources.SnapshotTagPrefix.
+  SNAPSHOT_TAG_PREFIX: snapshot-
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  publish:
+    # A promotion that failed did not move `test`, so there is nothing new to publish.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      # `test`, explicitly: for a workflow_run the default checkout is `main`, which is the last release,
+      # not what was just promoted.
+      - uses: actions/checkout@v7
+        with:
+          ref: test
+          fetch-depth: 0
+
+      # The commit built is whatever `test` points at now. workflow_run.head_sha is not usable for this — the
+      # promotion run reports the default branch's commit, not the one it moved `test` to.
+      #
+      # The version's clock comes from the *commit's* timestamp, not this run's, so a re-run for the same
+      # commit computes the same version and finds its release already there. It is normalised exactly as
+      # release.yml does: `date` zero-pads, NuGet strips leading zeros, and the assembly's own version
+      # string would otherwise disagree with the nupkg's forever.
+      #
+      # The `g` before the SHA is deliberate. A SemVer 2 prerelease identifier that is all digits must not
+      # have a leading zero, and an abbreviated SHA like 0123456 is exactly that; git describe uses the same
+      # prefix for the same reason.
+      #
+      # Two reasons to publish nothing, both success rather than failure: this commit already has its
+      # snapshot, or it has no green CI run. The second is what stops a snapshot being cut from a commit
+      # that reached `test` some way other than the promotion — or that the promotion advanced to after
+      # CI had passed on an earlier one (it checks out `dev`'s tip, not the SHA CI passed on). The next
+      # promotion covers it.
+      - name: Work out what would be published
+        id: plan
+        run: |
+          sha=$(git rev-parse HEAD)
+          short=$(git rev-parse --short=7 HEAD)
+          committed=$(git show -s --format=%ct HEAD)
+          IFS=. read -r y m d hm <<< "$(date -u -d "@$committed" +%Y.%m.%d.%H%M)"
+          version="$((10#$y)).$((10#$m)).$((10#$d)).$((10#$hm))-snapshot.g${short}"
+          tag="${SNAPSHOT_TAG_PREFIX}${version}"
+          {
+            echo "sha=$sha"
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "test is at $sha; its snapshot would be $version"
+
+          skip=false
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::$tag already exists — nothing to publish."
+            skip=true
+          else
+            green=$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&status=success" \
+              --jq '[.workflow_runs[] | select(.name == "CI")] | length')
+            echo "successful CI runs for $sha: $green"
+            if [ "$green" -lt 1 ]; then
+              echo "::notice::No successful CI run for $sha, so no snapshot is published for it. The next promotion covers it."
+              skip=true
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v6
+        if: steps.plan.outputs.skip != 'true'
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v7
+        if: steps.plan.outputs.skip != 'true'
+        with:
+          node-version: "24"
+
+      # Phase 137: dotnet pack of DbDataSync.Cli.csproj never triggers the SPA build, so a package packed
+      # without this ships with an empty wwwroot.
+      - name: Build the SPA
+        if: steps.plan.outputs.skip != 'true'
+        working-directory: src/DbDataSync.Web
+        run: |
+          npm ci
+          npm run build
+
+      # Packing the Cli also packs DbDataSync.Drivers.Abstractions into the same -o directory (it has
+      # GeneratePackageOnBuild, and -o / -p:Version are global properties), which is why the glob is anchored
+      # to a digit right after "DbDataSync." — the same trap release.yml documents. Only the tool is a
+      # snapshot: Abstractions has its own fixed version and nothing consumes a snapshot of it.
+      #
+      # The packed file's name is checked against the version asked for. `dbdatasync update` builds the asset
+      # names it looks for from the tag, so a nupkg NuGet named differently would be published and then
+      # never listed.
+      - name: Pack the global tool
+        if: steps.plan.outputs.skip != 'true'
+        id: pack
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          dotnet pack src/DbDataSync.Cli/DbDataSync.Cli.csproj \
+            -c Release -o artifacts \
+            -p:Version="$VERSION"
+          nupkg=$(ls artifacts/DbDataSync.[0-9]*.nupkg)
+          if [ "$(basename "$nupkg")" != "DbDataSync.$VERSION.nupkg" ]; then
+            echo "::error::Asked for $VERSION but NuGet produced $(basename "$nupkg"). The catalog looks for DbDataSync.<version>.nupkg exactly."
+            exit 1
+          fi
+          echo "nupkg=$nupkg" >> "$GITHUB_OUTPUT"
+
+      # A snapshot that does not install is worse than no snapshot, so it proves itself first.
+      #
+      # 1. Phase 137's check: the web console really is inside the package.
+      # 2. It installs into a clean tool root and reports the version it was built as. The install uses a
+      #    config file that clears every other source: `--add-source` alone ADDS to nuget.org, so a broken
+      #    local package could be satisfied from there and look fine (this was hit checking the design).
+      - name: Check that it contains the web console, and installs
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          NUPKG: ${{ steps.pack.outputs.nupkg }}
+        run: |
+          rm -rf /tmp/nupkg-contents
+          mkdir -p /tmp/nupkg-contents
+          unzip -q "$NUPKG" -d /tmp/nupkg-contents
+          wwwroot=$(find /tmp/nupkg-contents/tools -type d -name wwwroot | head -n1)
+          if [ -z "$wwwroot" ] || [ -z "$(find "$wwwroot" -type f -print -quit)" ]; then
+            echo "::error::the packed nupkg has no non-empty tools/<tfm>/any/wwwroot/ — the web console did not get packed"
+            exit 1
+          fi
+
+          cat > /tmp/only-artifacts.config <<EOF
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="artifacts" value="$PWD/artifacts" />
+            </packageSources>
+          </configuration>
+          EOF
+          dotnet tool install --tool-path /tmp/dbdatasync-tool --configfile /tmp/only-artifacts.config DbDataSync --version "$VERSION"
+          reported=$(/tmp/dbdatasync-tool/dbdatasync version)
+          echo "dbdatasync version said: $reported"
+          case "$reported" in
+            *"$VERSION"*) ;;
+            *)
+              echo "::error::expected the packed version $VERSION in that output"
+              exit 1
+              ;;
+          esac
+
+      # NuGet's own .nupkg.sha512 format: the base64 SHA-512 of the file, no trailing newline. The CLI checks
+      # a download against it. It is published beside the file it describes, so it catches a truncated or
+      # corrupted download, not a tampered release — see SnapshotStager.
+      - name: Write the checksum
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          NUPKG: ${{ steps.pack.outputs.nupkg }}
+        run: openssl dgst -sha512 -binary "$NUPKG" | base64 -w0 > "$NUPKG.sha512"
+
+      # --latest=false: the repository's "Latest" badge belongs to the last real release.
+      # --target is the SHA, not `test`: the branch may have moved on by the time this runs.
+      - name: Publish the snapshot release
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          SHA: ${{ steps.plan.outputs.sha }}
+          NUPKG: ${{ steps.pack.outputs.nupkg }}
+        run: |
+          subject=$(git log -1 --format=%s "$SHA")
+          ci_run=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SHA&status=success" \
+            --jq '[.workflow_runs[] | select(.name == "CI")][0].html_url')
+          cat > /tmp/snapshot-notes.md <<EOF
+          A snapshot of 'test' at $SHA — a build that has passed CI but has not been released.
+
+          > $subject
+
+          CI: $ci_run
+
+          To install it, let the update command download it, check its checksum and print the commands:
+
+              dbdatasync update --to $VERSION
+
+          This is a development build. Its checksum is published beside it and catches a corrupted download,
+          not a tampered release. Releases are on nuget.org.
+          EOF
+          gh release create "$TAG" "$NUPKG" "$NUPKG.sha512" \
+            --target "$SHA" \
+            --prerelease --latest=false \
+            --title "Snapshot $VERSION" \
+            --notes-file /tmp/snapshot-notes.md
+
+      # Newest N (`keep`, default 20). A release is pruned only if its tag starts with the snapshot prefix
+      # AND it is a prerelease, so nothing that is not a snapshot can ever be deleted, whatever it is named.
+      # Ordered by creation time, newest first — publication order, which is what "newest" means here.
+      #
+      # Runs even when nothing was published above, so a manual dispatch with a smaller `keep` prunes. `keep`
+      # is validated as a positive integer: 0 would delete the snapshot this very run just made.
+      - name: Keep only the newest snapshots
+        env:
+          KEEP: ${{ inputs.keep || '20' }}
+        run: |
+          if ! [[ "$KEEP" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::keep must be a positive whole number, not '$KEEP'"
+            exit 1
+          fi
+
+          gh release list --limit 1000 --json tagName,isPrerelease,createdAt \
+            | jq -r --arg prefix "$SNAPSHOT_TAG_PREFIX" --argjson keep "$KEEP" '
+                [ .[] | select(.isPrerelease and (.tagName | startswith($prefix))) ]
+                | sort_by(.createdAt) | reverse | .[$keep:] | .[].tagName' > /tmp/prune.txt
+
+          echo "keeping the newest $KEEP snapshot(s); pruning $(wc -l < /tmp/prune.txt):"
+          cat /tmp/prune.txt
+          while read -r tag; do
+            [ -n "$tag" ] && gh release delete "$tag" --cleanup-tag --yes
+          done < /tmp/prune.txt
+          exit 0

@@ -1,0 +1,345 @@
+[
+  {
+    "tag_name": "snapshot-2026.9.19.1432-snapshot.g65615e7",
+    "name": "Snapshot 2026.9.19.1432-snapshot.g65615e7",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.19.1432-snapshot.g65615e7",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.19.1432-snapshot.g65615e7.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1432-snapshot.g65615e7/DbDataSync.2026.9.19.1432-snapshot.g65615e7.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.19.1432-snapshot.g65615e7.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1432-snapshot.g65615e7/DbDataSync.2026.9.19.1432-snapshot.g65615e7.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "snapshot-2026.9.19.1615-snapshot.gabcdef1",
+    "name": "Snapshot 2026.9.19.1615-snapshot.gabcdef1",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.19.1615-snapshot.gabcdef1",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.19.1615-snapshot.gabcdef1.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1615-snapshot.gabcdef1/DbDataSync.2026.9.19.1615-snapshot.gabcdef1.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.19.1615-snapshot.gabcdef1.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1615-snapshot.gabcdef1/DbDataSync.2026.9.19.1615-snapshot.gabcdef1.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "snapshot-2026.9.20.0930-snapshot.g0123456",
+    "name": "Snapshot 2026.9.20.0930-snapshot.g0123456",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.20.0930-snapshot.g0123456",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.20.0930-snapshot.g0123456.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.20.0930-snapshot.g0123456/DbDataSync.2026.9.20.0930-snapshot.g0123456.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.20.0930-snapshot.g0123456.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.20.0930-snapshot.g0123456/DbDataSync.2026.9.20.0930-snapshot.g0123456.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "snapshot-2026.9.19.1000-snapshot.gdeadbee",
+    "name": "Snapshot 2026.9.19.1000-snapshot.gdeadbee",
+    "draft": true,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.19.1000-snapshot.gdeadbee",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.19.1000-snapshot.gdeadbee.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1000-snapshot.gdeadbee/DbDataSync.2026.9.19.1000-snapshot.gdeadbee.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.19.1000-snapshot.gdeadbee.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1000-snapshot.gdeadbee/DbDataSync.2026.9.19.1000-snapshot.gdeadbee.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "snapshot-2026.9.19.1001-snapshot.gdeadbee",
+    "name": "Snapshot 2026.9.19.1001-snapshot.gdeadbee",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.19.1001-snapshot.gdeadbee",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.19.1001-snapshot.gdeadbee.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1001-snapshot.gdeadbee/DbDataSync.2026.9.19.1001-snapshot.gdeadbee.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.19.1001-snapshot.gdeadbee.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1001-snapshot.gdeadbee/DbDataSync.2026.9.19.1001-snapshot.gdeadbee.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "snapshot-2026.9.19.1002-snapshot.gdeadbee",
+    "name": "Snapshot 2026.9.19.1002-snapshot.gdeadbee",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.19.1002-snapshot.gdeadbee",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.19.1002-snapshot.gdeadbee.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1002-snapshot.gdeadbee/DbDataSync.2026.9.19.1002-snapshot.gdeadbee.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "snapshot-2026.9.19.1003-snapshot.gdeadbee",
+    "name": "Snapshot 2026.9.19.1003-snapshot.gdeadbee",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.19.1003-snapshot.gdeadbee",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.19.1003-snapshot.gdeadbee.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://example.com/releases/download/snapshot-2026.9.19.1003-snapshot.gdeadbee/DbDataSync.2026.9.19.1003-snapshot.gdeadbee.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.19.1003-snapshot.gdeadbee.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://example.com/releases/download/snapshot-2026.9.19.1003-snapshot.gdeadbee/DbDataSync.2026.9.19.1003-snapshot.gdeadbee.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "snapshot-2026.9.19.1004-snapshot.gdeadbee",
+    "name": "Snapshot 2026.9.19.1004-snapshot.gdeadbee",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.19.1004-snapshot.gdeadbee",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "Something.Else.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1004-snapshot.gdeadbee/DbDataSync.2026.9.19.1004-snapshot.gdeadbee.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.19.1004-snapshot.gdeadbee.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-2026.9.19.1004-snapshot.gdeadbee/DbDataSync.2026.9.19.1004-snapshot.gdeadbee.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "snapshot-scratch-2026.9.19.1005",
+    "name": "Snapshot 2026.9.19.1005-snapshot.gdeadbee",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-scratch-2026.9.19.1005",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.19.1005-snapshot.gdeadbee.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-scratch-2026.9.19.1005/DbDataSync.2026.9.19.1005-snapshot.gdeadbee.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.19.1005-snapshot.gdeadbee.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-scratch-2026.9.19.1005/DbDataSync.2026.9.19.1005-snapshot.gdeadbee.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "nightly-2026.9.19.1006",
+    "name": "Snapshot 2026.9.19.1006-snapshot.gdeadbee",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/nightly-2026.9.19.1006",
+    "created_at": "2026-09-19T14:40:00Z",
+    "published_at": "2026-09-19T14:40:00Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.19.1006-snapshot.gdeadbee.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/nightly-2026.9.19.1006/DbDataSync.2026.9.19.1006-snapshot.gdeadbee.nupkg"
+      },
+      {
+        "name": "DbDataSync.2026.9.19.1006-snapshot.gdeadbee.nupkg.sha512",
+        "size": 88,
+        "content_type": "text/plain",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/nightly-2026.9.19.1006/DbDataSync.2026.9.19.1006-snapshot.gdeadbee.nupkg.sha512"
+      }
+    ]
+  },
+  {
+    "tag_name": "2026.9.18.1918",
+    "name": "DbDataSync 2026.9.18.1918",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/2026.9.18.1918",
+    "created_at": "2026-09-18T19:17:59Z",
+    "published_at": "2026-09-18T19:19:32Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.18.1918.nupkg",
+        "size": 47707890,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/2026.9.18.1918/DbDataSync.2026.9.18.1918.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "2026.9.16.506",
+    "name": "DbDataSync 2026.9.16.506",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/2026.9.16.506",
+    "created_at": "2026-09-16T04:40:50Z",
+    "published_at": "2026-09-16T05:07:23Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.16.506.nupkg",
+        "size": 157215192,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/2026.9.16.506/DbDataSync.2026.9.16.506.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "2026.9.16.1005",
+    "name": "DbDataSync 2026.9.16.1005",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/2026.9.16.1005",
+    "created_at": "2026-09-16T09:47:36Z",
+    "published_at": "2026-09-16T10:06:37Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.16.1005.nupkg",
+        "size": 47593387,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/2026.9.16.1005/DbDataSync.2026.9.16.1005.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "2026.9.12.547",
+    "name": "DbDataSync 2026.9.12.547",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/2026.9.12.547",
+    "created_at": "2026-09-12T05:47:10Z",
+    "published_at": "2026-09-12T05:48:45Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.12.547.nupkg",
+        "size": 159521080,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/2026.9.12.547/DbDataSync.2026.9.12.547.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "2026.9.12.721-beta",
+    "name": "DbDataSync 2026.9.12.721-beta",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/2026.9.12.721-beta",
+    "created_at": "2026-09-12T07:20:48Z",
+    "published_at": "2026-09-12T07:22:29Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.12.721-beta.nupkg",
+        "size": 159522737,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/2026.9.12.721-beta/DbDataSync.2026.9.12.721-beta.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "2026.9.11.532",
+    "name": "DbDataSync 2026.9.11.532",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/2026.9.11.532",
+    "created_at": "2026-09-11T05:32:16Z",
+    "published_at": "2026-09-11T05:33:51Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.11.532.nupkg",
+        "size": 154889377,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/2026.9.11.532/DbDataSync.2026.9.11.532.nupkg"
+      }
+    ]
+  },
+  {
+    "tag_name": "2026.9.11.450-beta",
+    "name": "DbDataSync 2026.9.11.450-beta",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/DbDataSync/DbDataSync/releases/tag/2026.9.11.450-beta",
+    "created_at": "2026-09-11T04:49:49Z",
+    "published_at": "2026-09-11T04:51:24Z",
+    "assets": [
+      {
+        "name": "DbDataSync.2026.9.11.450-beta.nupkg",
+        "size": 154889634,
+        "content_type": "application/octet-stream",
+        "browser_download_url": "https://github.com/DbDataSync/DbDataSync/releases/download/2026.9.11.450-beta/DbDataSync.2026.9.11.450-beta.nupkg"
+      }
+    ]
+  }
+]

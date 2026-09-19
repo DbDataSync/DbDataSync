@@ -16,6 +16,7 @@
     <Project Path="src/DbDataSync.Scripting/DbDataSync.Scripting.csproj" />
     <Project Path="src/DbDataSync.Scripting.Abstractions/DbDataSync.Scripting.Abstractions.csproj" />
     <Project Path="src/DbDataSync.State/DbDataSync.State.csproj" />
+    <Project Path="src/DbDataSync.Updates/DbDataSync.Updates.csproj" />
     <Project Path="src/DbDataSync.Verification/DbDataSync.Verification.csproj" />
     <Project Path="src/DbDataSync.TaskRunner/DbDataSync.TaskRunner.csproj" />
   </Folder>
@@ -40,6 +41,7 @@
     <Project Path="tests/DbDataSync.Libraries.Tests/DbDataSync.Libraries.Tests.csproj" />
     <Project Path="tests/DbDataSync.Scripting.Tests/DbDataSync.Scripting.Tests.csproj" />
     <Project Path="tests/DbDataSync.State.Tests/DbDataSync.State.Tests.csproj" />
+    <Project Path="tests/DbDataSync.Updates.Tests/DbDataSync.Updates.Tests.csproj" />
     <Project Path="tests/DbDataSync.Verification.Tests/DbDataSync.Verification.Tests.csproj" />
     <Project Path="tests/DbDataSync.TaskRunner.Tests/DbDataSync.TaskRunner.Tests.csproj" />
   </Folder>

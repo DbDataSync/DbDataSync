@@ -83,6 +83,7 @@
     <!-- Referenced so the worker lands in the same output directory as the host that spawns it,
          which is what ApiOptions' beside-the-assembly resolution then finds. -->
     <ProjectReference Include="..\DbDataSync.TaskRunner\DbDataSync.TaskRunner.csproj" />
+    <ProjectReference Include="..\DbDataSync.Updates\DbDataSync.Updates.csproj" />
   </ItemGroup>
 
   <ItemGroup>

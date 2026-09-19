@@ -27,6 +27,14 @@ public static class Help
                   or the Machine PATH (Windows). Needs root/an elevated prompt. Defaults --dir to
                   this executable's own directory; see docs/install.md for the full sequence.
 
+              dbdatasync update [--list] [--channel stable|beta|snapshot|all] [--limit <n>] [--json]
+              dbdatasync update --to <version> [--stage-dir <dir>]
+                  Lists the versions available on each release channel (stable and beta from
+                  nuget.org, snapshots of every promoted test build from GitHub), lets you choose
+                  one, downloads it if it is a snapshot, and prints the commands that install it.
+                  It never changes the installation itself — you run the printed commands.
+                  Set GITHUB_TOKEN to raise GitHub's anonymous rate limit; it is never required.
+
               dbdatasync invite [--role Admin|Viewer] [--repo <path>] [--url <url>]
                   Prints a fresh single-use invitation URL. For when the first-run one has scrolled
                   away, or the process is a service with nowhere to print it.

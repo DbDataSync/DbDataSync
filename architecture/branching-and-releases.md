@@ -84,6 +84,22 @@ being wherever the tip of everyone's combined work happened to land.
   `release/v*` tags predate the change — `package` in `ci.yml` still keys off `refs/tags/release/v*`,
   which is why it is the one CI job that does not run on an ordinary push or PR.
 
+- **`test` → snapshots** (phase 158): every time `test` advances to a commit whose CI passed,
+  `.github/workflows/publish-snapshot.yml` publishes it as a GitHub *prerelease* tagged
+  `snapshot-<version>` with the tool's nupkg and its `.sha512` attached, and prunes all but the newest 20.
+  Nothing goes to nuget.org, and nothing needs a feed or a token to read: `dbdatasync update` lists these,
+  downloads the one chosen and prints the commands to install it. The version is
+  `YYYY.M.D.HHmm-snapshot.g<shortsha>`, the clock taken from the *commit* so a re-run is idempotent.
+  It is triggered by the promotion because CI does not run on `test` at all (see the two constraints
+  below), and it refuses to publish a commit without a green CI run of its own.
+
+  Two constraints came out of building it, both about `promote-test.yml`. **A push made with
+  `GITHUB_TOKEN` triggers no other workflow**, so `test` never gets a CI run of its own (`dev` and `test`
+  sat at the same commit with a green run on `dev` and none on `test`) — anything reacting to "`test`
+  moved" has to react to the promotion. And **`workflow_run` workflows are read from the default branch**
+  (`main`), which only moves at a release cut: a new workflow of that kind does nothing until a release has
+  put it there.
+
 ## Branch protection
 
 `main` and `test` carry the **same** protection, for the same reason: force pushes and deletions are
@@ -135,4 +151,9 @@ say the tooling no longer prevents it.
   purpose, and reintroducing one to save a convention is a bad trade.
 - **Whether `dev` should become the repository's default branch.** `main` is still the default, so new
   PRs and fresh clones point at the released state rather than at where work happens. That is arguably
-  correct for anyone browsing the repo and arguably wrong for anyone contributing to it.
+  correct for anyone browsing the repo and arguably wrong for anyone contributing to it. It would also change when a new `workflow_run` workflow goes live: read from the default branch, it would
+  take effect on a push to `dev` instead of waiting for the next release cut.
+- **Whether `promote-test.yml` should check out the SHA CI passed on** rather than `dev`'s tip. It reacts
+  to a CI run finishing but does `ref: dev`, so a push landing in between would advance `test` to a commit
+  no CI run covered. `publish-snapshot.yml` guards its own output against this (no green run for that
+  exact SHA, no snapshot); the promotion itself is unchanged.

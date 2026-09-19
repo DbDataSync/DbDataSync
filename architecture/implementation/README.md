@@ -69,8 +69,28 @@ So the order lives here, and is the one to work through:
 | 2 | **152** — replication slot lag, and slots nobody claims | split out of 034. Smaller than it looks: the statements exist and are tested; the work is an API surface and a place on the connection card |
 | 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
 | 4 | **155** — `pgoutput`: logical decoding with nothing installed on the source | **gated on a product decision, not on engineering** — last deliberately, because if the answer is "managed Postgres" it should never be built at all. See the phase doc's own "Why this might not be worth building" |
+| 5 | **158K** — snapshot releases for every promoted `test` build, and `dbdatasync update` to list, stage and print the install commands | placed after the queue above rather than jumping it — reorder freely, only this table changes. Also the first phase to verify the release pipeline's own rollout: its workflow only goes live once a release has put it on `main` |
+| 6 | **159K** — apply an update automatically, from the CLI and the web console | **must follow 158K** (it executes 158K's `UpdatePlan` and reuses its `DbDataSync.Updates` library). Opens with a spike that needs a real Windows host and a real systemd host |
 
-Updated 2026-09-18 (latest of all): **157 is done** — never added to the table above, same situation as
+Updated 2026-09-19 (latest of all): **158K and 159K join `todo/`, as an ordered pair.** From two planning
+docs (`planning/done/snapshot-packages-on-github-packages.md`, `planning/done/self-update-and-release-channels.md`).
+158K publishes a snapshot GitHub *prerelease* for every promoted `test` build (newest 20 kept) and adds
+`dbdatasync update` — list, choose, stage a snapshot's nupkg, print the commands. 159K makes the swap
+automatic from the CLI and an Admin → Updates page. Three things checked while writing them are worth
+knowing, because each changed the design: GitHub Packages was **not** chosen — its NuGet feed needs a token
+to read even for a public repo, while an anonymously downloaded nupkg in a plain folder installs fine (tested
+against a real release, with nuget.org excluded, since `--add-source` alone *adds* to it and hid a first
+attempt's failure); **`dotnet tool update` refuses a lower `--version`**, so a rollback is uninstall +
+install; and the default Linux unit is hardened enough that an in-process "helper" cannot apply an update
+there at all, which is why 159K proposes a privileged `ExecStartPre=+` step instead.
+
+158K is **implemented and verified as far as it can be before a release exists** — `DbDataSync.Updates`
+(118 tests), `dbdatasync update` (34 end-to-end tests, and run for real against the live sources and from a real
+tool install, including the printed uninstall+install and snapshot-from-a-folder commands), and
+`publish-snapshot.yml` (each step's logic exercised, never run on GitHub). It stays in `todo/` until that first
+real run, as 127 did; its own Progress section lists exactly what is and is not verified.
+
+Updated 2026-09-18 (previously latest): **157 is done** — never added to the table above, same situation as
 135/136/137: written as a `planning/todo/` doc and a phase doc in the same session, picked up directly.
 An interactive CLI command on Windows (`config check`, `setup`, a foreground `serve`, or any other
 command) now disables libgit2's repository-ownership check for itself before touching the config repo,
