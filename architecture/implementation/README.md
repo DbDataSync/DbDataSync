@@ -70,7 +70,25 @@ So the order lives here, and is the one to work through:
 | 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
 | 4 | **155** — `pgoutput`: logical decoding with nothing installed on the source | **gated on a product decision, not on engineering** — last deliberately, because if the answer is "managed Postgres" it should never be built at all. See the phase doc's own "Why this might not be worth building" |
 
-Updated 2026-09-17 (latest of all): **156 is done.** Two related collision problems this session's own
+Updated 2026-09-18 (latest of all): **157 is done** — never added to the table above, same situation as
+135/136/137: written as a `planning/todo/` doc and a phase doc in the same session, picked up directly.
+An interactive CLI command on Windows (`config check`, `setup`, a foreground `serve`, or any other
+command) now disables libgit2's repository-ownership check for itself before touching the config repo,
+warning first — the flip side of phase 135, which transferred that same directory's ownership to the
+service account and left every other command hitting the identical "not owned by current user" error
+phase 135's own fix exists to avoid, just from the other identity. One call
+(`GitOwnershipValidation.DisableIfInteractive`, `Program.cs`) gated on the exact predicate `ServeCommand`
+already uses twice for an unrelated purpose — `WindowsServiceHelpers.IsWindowsService()` — so the
+long-running service process is untouched and keeps failing the way phase 135 already made it fail if it
+somehow isn't the owner. `LibGit2Sharp.GlobalSettings.SetOwnerValidation`'s exact signature was confirmed
+by loading the installed package assembly via reflection, not assumed from a changelog. Verified for real
+on this (Linux) sandbox — the non-Windows no-op branch, and the full `DbDataSync.Cli.Tests` suite (140
+passed, 11 skipped, 0 failed); the actual Windows behavior this phase exists to fix needs a real Windows
+box or CI runner, neither available here, so the `[WindowsOnlyFact]` test covering that branch reports
+`[SKIP]` rather than a faked pass. See
+`architecture/implementation/done/phase-157K-windows-interactive-cli-disables-libgit2-ownership-check.md`.
+
+Updated 2026-09-17 (previously latest): **156 is done.** Two related collision problems this session's own
 history demonstrated in real time — `phase-150` and `phase-154` each independently claimed by two
 concurrent sessions, discovered only at rebase — fixed in one pass, since both trace back to the same
 root cause: a flat, shared namespace with no structural separation between concurrent lines of work.

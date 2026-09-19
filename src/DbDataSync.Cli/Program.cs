@@ -7,6 +7,8 @@ if (args.Length == 0 || CliOptions.Has(args, "--help") || CliOptions.Has(args, "
     return args.Length == 0 ? 1 : 0;
 }
 
+GitOwnershipValidation.DisableIfInteractive();
+
 var command = args[0].ToLowerInvariant();
 var rest = args.Skip(1).ToArray();
 
