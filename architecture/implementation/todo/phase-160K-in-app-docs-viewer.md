@@ -159,3 +159,21 @@ operator-authored Notes. A new shared `RichMarkdown` component is used for docs.
   - **Not tested here:** a Viewer-role user. The suite runs with authentication off (the trusted-network mode), so
     there is no Viewer to sign in as; `AboutControllerTests` covers that a Viewer may read the version, and nothing
     on the Docs screens branches on role.
+- [x] **6. Verified against the real artifacts** — and it found a bug that predates this phase.
+  - **A real `dotnet pack`**: all seven pages under `tools/net10.0/any/wwwroot/docs/`. **A real `docker build`**: the
+    image has `/app/wwwroot/docs/*.md`, and each served page is byte-identical to `docs/`.
+  - **The bug:** in that container, with authentication on (the default), `/`, `/invite`, `/replications/…` and every
+    asset answered **401 with an empty body** — as does the released `2026.9.18.1918`. The closed-by-default fallback
+    policy applied to static files because `UseStaticFiles` and the SPA `MapFallback` were after `UseAuthorization`, so a
+    default deployment could not serve its own sign-in screen. The docs viewer would have been unreachable with it.
+    **Fixed here:** static files moved ahead of authentication/authorization; the SPA fallback is `.AllowAnonymous()`
+    (unmatched `/api` and `/hubs` paths still 404, never the page). `EmbeddedDocsServingTests` now runs with
+    authentication **on** and asserts, for someone who has not signed in: the app and its deep links load, the docs are
+    served, `/api/*` is still 401. Re-verified in a real container. No API test could see this before — they all run
+    with authentication off, as does Playwright.
+  - **A gap in CI, recorded rather than fixed:** `ci.yml`'s `package` job (the only place the image is built) runs only
+    on `release/v*` tags, which nothing pushes any more, so **no workflow builds the Dockerfile**; and its "serves the
+    web console" check was vacuous (`curl -sf | grep -q` passes on a 401). The check is fixed in text; the job still
+    doesn't run. See `architecture/planning/todo/follow-up-phase-160-ci-never-builds-the-dockerfile-and-its-package-job-never-runs.md`.
+    The docs-in-the-nupkg assertion therefore also went into `release.yml` (before it publishes) and
+    `publish-snapshot.yml`, where it does run — the shell logic was run against the real nupkg.

@@ -334,7 +334,10 @@ jobs:
       # fallback text.
       - name: Assert the running container serves the web console, not the fallback
         run: |
-          if curl -sf http://127.0.0.1:18080/ | grep -q "No web assets are published"; then
+          # Not `curl -sf … | grep -q` on its own: -f turns a 401 into empty output, so the grep found nothing and this
+          # passed — which is how a default deployment answering 401 to `/` went unnoticed (phase 160).
+          body=$(curl -sf http://127.0.0.1:18080/) || { echo "the default image's / did not answer 200 to someone who has not signed in"; exit 1; }
+          if echo "$body" | grep -q "No web assets are published"; then
             echo "the default image's / answered with the no-web-assets fallback, not the SPA"
             exit 1
           fi

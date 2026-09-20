@@ -355,18 +355,24 @@ public static class DbDataSyncHost
             app.UseHttpsRedirection();
         }
 
+        // The SPA, served by the same process. In development Vite serves it on its own port and proxies
+        // /api and /hubs here; a published build puts it in wwwroot, which is what makes the tool and the
+        // container one artifact rather than two things to run.
+        //
+        // **Before authentication, and that is the point.** The fallback policy below closes everything that is not
+        // explicitly opened, and it applies to a request no endpoint claims — which is what a static file is. Placed
+        // after UseAuthorization, these answered 401 to `/` itself, so a default deployment (authentication on) could
+        // not serve its own sign-in screen. What is in wwwroot is the app's code and the docs the build shipped, the
+        // same text that is public on GitHub; the data is behind /api, which stays closed.
+        app.UseDefaultFiles();
+        app.UseStaticFiles();
+
         // While an update drains, anything that would change something answers 409. Before authentication: it
         // costs nothing and does not depend on who is asking.
         app.UseMiddleware<UpdateDrainMiddleware>();
 
         app.UseAuthentication();
         app.UseAuthorization();
-
-        // The SPA, served by the same process. In development Vite serves it on its own port and proxies
-        // /api and /hubs here; a published build puts it in wwwroot, which is what makes the tool and the
-        // container one artifact rather than two things to run.
-        app.UseDefaultFiles();
-        app.UseStaticFiles();
 
         app.MapControllers();
         app.MapHub<RunHub>("/hubs/run");
@@ -398,7 +404,11 @@ public static class DbDataSyncHost
 
             context.Response.ContentType = "text/html";
             return context.Response.SendFileAsync(index);
-        });
+        })
+        // The app's own routes (/replications/x, /invite, /docs/...) are the SPA, which has to load before anyone has
+        // signed in — it is what draws the sign-in screen. Without this the fallback policy answers 401 with no body.
+        // Unmatched /api and /hubs paths still get the 404 above rather than the page, whoever asks.
+        .AllowAnonymous();
 
         return app;
     }

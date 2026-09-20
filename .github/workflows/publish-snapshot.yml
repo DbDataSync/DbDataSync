@@ -173,6 +173,14 @@ jobs:
             exit 1
           fi
 
+          # Phase 160: the docs ship in the package, every page of docs/ — compared with the folder rather than a count.
+          for page in docs/*.md; do
+            if [ ! -s "$wwwroot/docs/$(basename "$page")" ]; then
+              echo "::error::the packed nupkg is missing or has an empty wwwroot/docs/$(basename "$page")"
+              exit 1
+            fi
+          done
+
           cat > /tmp/only-artifacts.config <<EOF
           <configuration>
             <packageSources>
