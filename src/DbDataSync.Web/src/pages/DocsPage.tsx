@@ -22,7 +22,8 @@ export function DocsPage() {
     <AppShell crumbs={[{ label: 'Docs', to: page ? '/docs' : undefined }, ...(known ? [{ label: known.title }] : [])]}>
       <div className="pane">
         <div className="page-head">
-          <h1 className="page-title">{known ? known.title : 'Documentation'}</h1>
+          {/* The document brings its own title (its first heading), so the header stays the section's — two of the same is noise. */}
+          <h1 className="page-title">Documentation</h1>
           <span className="page-note" data-testid="docs-version">
             {about?.version ? `For the version running here: ${about.version}` : 'For the version running here'}
           </span>

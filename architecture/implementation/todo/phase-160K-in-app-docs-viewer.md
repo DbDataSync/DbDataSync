@@ -149,3 +149,13 @@ operator-authored Notes. A new shared `RichMarkdown` component is used for docs.
   plugin, so the viewer works unchanged in dev. The three dangling references are fixed: `AdminConfigPage` and
   `AdminCertificatePage` link to `/docs/configuration`, and `AdminDriversPage` now links to
   `/docs/drivers-and-libraries#descriptor-drivers` instead of naming an internal planning doc.
+- [x] **5. Playwright** (`docs-viewer.spec.ts`, 8 tests, passing locally against the real API and the Vite dev
+  server): the rail leads to an index of all seven pages and the running version; a page with a table renders as a
+  table; a cross-page link with an anchor stays in the app and scrolls to its heading; the README link every page
+  opens with goes to the index; an unknown page says so; the three admin references are real links; a hostile
+  document (`<script>`, `<img onerror>`, `javascript:` link and image, `<iframe>`) is shown as text, raises no
+  dialog and sets nothing on `window`; an HTML answer in place of Markdown is refused. Two screenshots are committed
+  under `screenshots/docs-viewer/`.
+  - **Not tested here:** a Viewer-role user. The suite runs with authentication off (the trusted-network mode), so
+    there is no Viewer to sign in as; `AboutControllerTests` covers that a Viewer may read the version, and nothing
+    on the Docs screens branches on role.
