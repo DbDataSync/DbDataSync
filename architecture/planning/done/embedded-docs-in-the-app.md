@@ -5,7 +5,7 @@
 >   the shared renderer, the viewer and the dangling-reference fixes;
 > - `architecture/implementation/done/phase-161K-notes-rich-markdown-opt-in.md` — the Notes opt-in
 >   (`DbDataSync:Notes:RichMarkdown`);
-> - `architecture/implementation/todo/phase-162K-doc-images-doc-audit-and-nuget-readme-preprocessing.md` —
+> - `architecture/implementation/done/phase-162K-doc-images-doc-audit-and-nuget-readme-preprocessing.md` —
 >   embedded images, a docs audit, and relative-link authoring with pack-time rewriting for the NuGet README.
 >
 > Stale in the text below: "no version endpoint exists" (phase 159 added `RunningVersion`, Admin-only;

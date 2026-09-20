@@ -1,4 +1,4 @@
-# Phase 162 — images embedded, the docs audited, and links rewritten at pack time for the NuGet listing (planned)
+# Phase 162 — images embedded, the docs audited, and links rewritten at pack time for the NuGet listing (done)
 
 Third of three phases split from `architecture/planning/done/embedded-docs-in-the-app.md`. Follows 160K
 (the viewer). Independent of 161K.
@@ -159,3 +159,31 @@ the code agree).
     `state-database.md` in particular were written before phases 145–159 and have not been re-read against them.
   - **Small thing noticed, not changed:** `dbdatasync`'s own help says "see docs/install.md", a path that does not exist on a
     machine with only the tool installed. It could point at the console's Docs or the repository.
+- [x] **5. Verified end to end on the real artifacts.** A real `dotnet pack` of the current commit, `dotnet tool install` into a
+  clean tool root, `dbdatasync serve` from an unrelated directory, and a real Chromium opened `/docs/getting-started` with every
+  non-local request refused: all 7 pictures decoded (`naturalWidth` 1280), 0 external requests, the page shows the tool's own
+  version. The packed README (read out of the nupkg) has 0 relative links and every doc link at `blob/<the packed commit>/…`.
+  Container: `docker build` serves exactly the 7 listed pictures, byte-identical, and no other screenshot.
+
+## Outcome
+
+Built, with these differences from the design above:
+
+- **The embedded docs are not rewritten at all.** The package keeps the repository's layout (`wwwroot/docs`,
+  `wwwroot/screenshots/…`), so the docs' own `../screenshots/…` paths resolve unchanged; the "two build-time outputs" table
+  collapsed to one (the NuGet README). Less machinery, and nothing to keep in step between the GitHub copy and the embedded one.
+- **Image size was never a question:** the seven total 0.65 MB.
+- **The transform is Node, not MSBuild or .NET** — small, testable with `node:test` (no dependency), and every workflow that
+  packs already has Node for the SPA. A machine without it packs the original README with a warning, and the release and
+  snapshot workflows refuse to ship that.
+- **The docs audit was mechanical, and said so.** It found two real problems (commands that no longer exist, and no mention of
+  the viewer) and left two tests. It did **not** read the prose for truth; `replication-concepts.md` and `state-database.md`
+  predate phases 145–159.
+
+**Not verified:** Windows (the script uses `path` throughout and the csproj `Exec` quotes its paths, but nothing was run there);
+nuget.org's own rendering of the rewritten README (a real listing needs a real publish — the next release is the first proof, and
+`raw.githubusercontent.com` image links are in nuget.org's trusted-domain list only by the documentation I remember, not by a check
+made here); the Dockerfile in CI (no workflow builds it — see the phase 160 follow-up).
+
+**Left open on purpose:** whether `development.md` belongs in the NuGet README's link list — it is a build-from-source page for a
+reader who just installed a package. Nothing here changes it.
