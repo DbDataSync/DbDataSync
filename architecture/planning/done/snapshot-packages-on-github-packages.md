@@ -118,7 +118,7 @@ verification). The consuming side is the interesting work, and is written up in
 
 # Outcome — resolved 2026-09-19
 
-Agreed, as `architecture/implementation/todo/phase-158K-snapshot-releases-and-cli-update-staging.md`
+Agreed, as `architecture/implementation/done/phase-158K-snapshot-releases-and-cli-update-staging.md`
 (Part A). **GitHub Packages was not chosen**: snapshots are GitHub *prereleases* with the nupkg attached,
 consumed by download-then-install-from-folder, which needs no token. Retention is newest N (default 20).
 Where this doc and the phase disagree, the phase wins — notably the tag prefix is `snapshot-` (no slash),

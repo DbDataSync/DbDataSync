@@ -108,7 +108,7 @@ leaves the risky part (replacing running code) for a second phase once the trust
 
 Agreed as **two ordered phases** rather than one:
 
-1. `architecture/implementation/todo/phase-158K-snapshot-releases-and-cli-update-staging.md` — the read-only
+1. `architecture/implementation/done/phase-158K-snapshot-releases-and-cli-update-staging.md` — the read-only
    half this doc's "smaller first step" described, widened: `dbdatasync update` lists releases, lets the
    operator choose, stages a snapshot's nupkg, and prints the commands to run. Also publishes the snapshots.
 2. `architecture/implementation/todo/phase-159K-automated-update-from-cli-and-web-console.md` — the detached

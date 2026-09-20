@@ -1,9 +1,8 @@
-# Phase 158 — snapshot releases for every promoted `test` build, and `dbdatasync update` to list, choose, stage and print the install commands (planned)
+# Phase 158 — snapshot releases for every promoted `test` build, and `dbdatasync update` to list, choose, stage and print the install commands (done)
 
-**Status**: **Implemented; not yet done.** Everything that can be verified before a release exists is
-built and verified (see "Progress" at the end). It stays in `todo/` — the same way phase 127 did — until the one
-thing it cannot prove without GitHub does happen: `publish-snapshot.yml` running for real after a release has
-put it on `main`. **First of two ordered phases** — phase 159
+**Status**: **Done (2026-09-20)** — the last thing it was waiting for, `publish-snapshot.yml` running for real, has happened and
+`dbdatasync update` has been exercised against what it published (see "Verified against the real release," at the end; what is
+still unverified is listed there too). **First of two ordered phases** — phase 159
 (`phase-159K-automated-update-from-cli-and-web-console.md`) builds on the library and the plan model
 introduced here.
 **Plan reference**: `architecture/planning/done/snapshot-packages-on-github-packages.md` and
@@ -309,3 +308,26 @@ Found while building it:
   135/136/140 also needed.
 - ~~Whether nuget.org's repository signature is checked on install.~~ **It is not, by `dotnet tool install`** —
   tested; see phase 159's "Package signing".
+
+**Verified against the real release (2026-09-20).** The release that put the workflow on `main` was `2026.9.20.2152`; `test` then
+advanced and `publish-snapshot.yml` published `snapshot-2026.9.20.810-snapshot.g9a23c08` and
+`snapshot-2026.9.20.1620-snapshot.ga2a8d66`, each a prerelease with `DbDataSync.<version>.nupkg` and its `.sha512`. Then, from a
+clean scratch tool root holding the older `2026.9.20.517-beta`:
+
+- `dbdatasync update --list` showed the live stable and beta lists **and both snapshots**, each marked `newer`, the installed beta
+  marked `installed`.
+- `update --channel snapshot --to 2026.9.20.1620-snapshot.ga2a8d66 --stage-dir …` downloaded the 46.3 MB package, reported
+  "Downloaded and verified", staged it, changed nothing, and printed the stop / `dotnet tool update … --add-source <staged folder>
+  --version …` / check sequence. The staged file's SHA-512 was recomputed independently (`openssl dgst -sha512 -binary | base64`)
+  and **matches the value published beside the release**.
+- The printed `dotnet tool update` command, run as printed, upgraded the install from the beta to the snapshot
+  (`dbdatasync version` → `2026.9.20.1620-snapshot.ga2a8d66+a2a8d66…`), and `update --list` from the upgraded install marked that
+  snapshot `installed`.
+- The snapshot's package carries the phase 160/162 docs and pictures (7 pages, 7 images) — i.e. the same pack path as a release.
+
+**Still unverified:**
+
+- **Retention on a real repository.** Only two snapshots exist and N is 20, so nothing has been pruned; the `jq` filter was run against
+  realistic inputs earlier but not by the workflow. A `keep=1` dispatch would exercise it (and delete the older snapshot).
+- **Windows** — the printed `sc.exe` sequence is unit-tested as text and follows the locked-file behaviour it exists for, but has not
+  been run on a Windows host.
