@@ -60,3 +60,25 @@ those — worth its own pass, not a rushed guess bolted onto unrelated work.
   test need to tolerate two updates landing in the same mapped-time bucket the way
   `PrimaryAndBulkLoad_TriggeredConcurrently_BothSucceed`'s sibling test now tolerates its own race outcome
   (see `architecture/implementation/done/phase-154-ci-integration-suite-onto-docker-compose.md`)?
+
+## Second occurrence (phase 159 CI run `35482609356`, job `106003003998`)
+
+A different test in the same class, the same shape of failure:
+`ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid`
+(`Scd2CdcGuaranteedDeliveryIntegrationTests.cs`, ~line 357–412) failed
+`Assert.True(id4[0].ValidTo < id4[1].ValidFrom, "the delete closed 'd0' before the re-insert opened 'd1'")`.
+It deletes `Id = 4`, calls `CdcCaptureJob.ScanAsync`, re-inserts `Id = 4`, calls `ScanAsync` again, then
+requires the delete's mapped time to be strictly before the re-insert's — the same "two `ScanAsync`
+calls give two distinct, ordered mapping points" assumption that failed at line 308 above.
+
+- Unrelated to that commit: nothing under `Drivers.MsSql`, `State` or `Scd2` changed, the previous commit's
+  run was green, and the test class passes when run locally (2 of 2).
+- This answers the first open question: it is **not** a one-off. It's two different tests in one class,
+  both resting on `ScanAsync` producing strictly ordered `cdc.lsn_time_mapping` timestamps. That points at
+  the shared assumption (or at `ScanAsync`), not at either test.
+- Not yet checked: whether the failing pair landed on the *same* mapped timestamp (as at line 308) or in
+  the wrong order. The assertion messages didn't print the values, so the CI log couldn't say. The three
+  ordering assertions in the class (lines ~308, ~394, ~406) now print both timestamps, so the next
+  occurrence is diagnosable from the log alone.
+- Separately, two earlier integration failures (jobs `105730239424` and `105489949065`) were in
+  `BulkLoadIntegrationTests`, a different flake — not this one.

@@ -115,12 +115,9 @@ public class UpdateStateStoreTests
 
     // --- the service's directory is hostile ----------------------------------------------------------------
 
-    [Fact]
+    [NonWindowsFact]
     public void ARequestThatIsASymbolicLink_IsNotFollowed()
     {
-        if (OperatingSystem.IsWindows())
-            return;
-
         using var root = new TempDirectory();
         var store = Store(root);
         Directory.CreateDirectory(store.Workspace.Directory);
@@ -131,12 +128,9 @@ public class UpdateStateStoreTests
         Assert.Null(store.ReadPending());
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void AnUpdatesDirectoryThatIsASymbolicLink_IsNotReadFrom_OrWrittenThrough()
     {
-        if (OperatingSystem.IsWindows())
-            return;
-
         using var root = new TempDirectory();
         using var target = new TempDirectory();
         File.WriteAllText(Path.Combine(target.Path, "pending-update.json"), "{\"targetVersion\":\"2026.9.18.1918\",\"requestedUtc\":\"2026-09-19T00:00:00Z\"}");
@@ -149,12 +143,9 @@ public class UpdateStateStoreTests
         Assert.Equal(["pending-update.json"], Directory.GetFiles(target.Path).Select(Path.GetFileName));
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void WritingOverAPathSweptForASymbolicLink_ReplacesTheLink_NotWhatItPointedAt()
     {
-        if (OperatingSystem.IsWindows())
-            return;
-
         using var root = new TempDirectory();
         var store = Store(root);
         Directory.CreateDirectory(store.Workspace.Directory);
@@ -187,12 +178,9 @@ public class UpdateStateStoreTests
         Assert.Equal(["applied-update.json"], Directory.GetFiles(privileged.Path).Select(Path.GetFileName));
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void ThePrivilegedDirectory_IsCreatedReadableByAll_AndWritableOnlyByItsCreator()
     {
-        if (OperatingSystem.IsWindows())
-            return;
-
         using var root = new TempDirectory();
         var privileged = Path.Combine(root.Path, "priv");
         var store = new UpdateStateStore(new UpdateWorkspace(root.Path, privileged));
@@ -208,11 +196,13 @@ public class UpdateStateStoreTests
     [Fact]
     public void WithoutABoundary_BothAreTheSameDirectory()
     {
-        var workspace = new UpdateWorkspace("/var/lib/dbdatasync");
+        // GetFullPath because the workspace normalizes: "/var/lib/..." is rooted on the current drive on Windows.
+        var dataRoot = Path.GetFullPath("/var/lib/dbdatasync");
+        var workspace = new UpdateWorkspace(dataRoot);
 
         Assert.Equal(workspace.Directory, workspace.PrivilegedDirectory);
-        Assert.Equal(Path.Combine("/var/lib/dbdatasync", "updates", "pending-update.json"), workspace.PendingPath);
-        Assert.Equal(Path.Combine("/var/lib/dbdatasync", "updates", "applied-update.json"), workspace.AppliedPath);
+        Assert.Equal(Path.Combine(dataRoot, "updates", "pending-update.json"), workspace.PendingPath);
+        Assert.Equal(Path.Combine(dataRoot, "updates", "applied-update.json"), workspace.AppliedPath);
     }
 
     /// <summary>Found by running the real thing: the CLI was given <c>--state-dir state</c>, the child <c>dotnet</c>
@@ -299,7 +289,7 @@ public class UpdateStateStoreTests
         Assert.Empty(Directory.GetFiles(store.Workspace.Directory, "*.tmp"));
     }
 
-    [Fact]
+    [NonWindowsFact]
     public void AFileTheWriterDidNotCreateCanStillBeReplaced_WhichIsWhatARootOwnedFileNeeds()
     {
         // The privileged step and the service are different users: replacing by rename needs only the
@@ -310,8 +300,7 @@ public class UpdateStateStoreTests
         File.SetAttributes(store.Workspace.PendingPath, FileAttributes.ReadOnly);
         try
         {
-            if (!OperatingSystem.IsWindows())
-                File.SetUnixFileMode(store.Workspace.PendingPath, UnixFileMode.UserRead);
+            File.SetUnixFileMode(store.Workspace.PendingPath, UnixFileMode.UserRead);
 
             store.WritePending(Pending("2026.9.19.200"));
 

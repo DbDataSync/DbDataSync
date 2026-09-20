@@ -305,7 +305,8 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         Assert.True(id1[2].IsCurrent);
         Assert.Equal(id1[0].ValidTo, id1[1].ValidFrom);
         Assert.Equal(id1[1].ValidTo, id1[2].ValidFrom);
-        Assert.NotEqual(id1[0].ValidTo, id1[1].ValidTo);
+        Assert.True(id1[0].ValidTo != id1[1].ValidTo,
+            $"each update landed at its own mapped time; got {id1[0].ValidTo:O} and {id1[1].ValidTo:O}");
         // The actual collision fix: OrderingColumn|naturalKey, not the pass-wide prefix — the two
         // versions this pass opened for Id 1 could never have shared this format's value.
         Assert.Matches("^[0-9A-Fa-f]{40}\\|1$", id1[1].VersionKey);
@@ -391,7 +392,8 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         Assert.True(id4[1].IsCurrent);
         Assert.NotNull(id4[0].ValidTo);
         Assert.Null(id4[1].ValidTo);
-        Assert.True(id4[0].ValidTo < id4[1].ValidFrom, "the delete closed 'd0' before the re-insert opened 'd1'");
+        Assert.True(id4[0].ValidTo < id4[1].ValidFrom,
+            $"the delete closed 'd0' before the re-insert opened 'd1'; d0 closed at {id4[0].ValidTo:O}, d1 opened at {id4[1].ValidFrom:O}");
         Assert.Matches("^[0-9A-Fa-f]{40}\\|4$", id4[1].VersionKey);
 
         // Id 5: two versions, neither current — the update's own version is opened already closed, by
@@ -403,7 +405,8 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         // The update is one transition: it ends 'e0' and begins 'e1' at the same moment.
         Assert.Equal(id5[0].ValidTo, id5[1].ValidFrom);
         // ... and the delete ends 'e1' later, at its own moment rather than the update's.
-        Assert.NotEqual(id5[1].ValidTo, id5[1].ValidFrom);
+        Assert.True(id5[1].ValidTo != id5[1].ValidFrom,
+            $"the delete ended 'e1' at its own moment; e1 opened at {id5[1].ValidFrom:O} and closed at {id5[1].ValidTo:O}");
         Assert.Matches("^[0-9A-Fa-f]{40}\\|5$", id5[1].VersionKey);
 
         // Two versions opened this pass — Id 4's re-insert and Id 5's update. The two deletes open

@@ -334,12 +334,9 @@ public class ProcessToolCommandRunnerTests
         Assert.DoesNotContain("evil.example", result.Output);
     }
 
-    [Fact]
+    [NonWindowsFact]
     public async Task ASymbolicLinkPlantedAsTheNuGetConfig_IsReplaced_NotWrittenThrough()
     {
-        if (OperatingSystem.IsWindows())
-            return;
-
         using var data = new TempDirectory();
         using var privileged = new TempDirectory();
         var precious = Path.Combine(data.Path, "precious.txt");

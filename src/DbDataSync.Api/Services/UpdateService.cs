@@ -121,7 +121,7 @@ public sealed class UpdateService(
     /// <summary>Where the privileged step logs what it did — in root's directory on Linux, which the service cannot
     /// write, so this is only ever a path to tell an admin about.</summary>
     public string LogPath => facts.IsLinux
-        ? Path.Combine(UpdateWorkspace.DefaultPrivilegedDirectory, "update.log")
+        ? UpdateWorkspace.DefaultPrivilegedDirectory + "/update.log" // a Linux path shown as text, whatever host builds it
         : Path.Combine(_store.Workspace.Directory, "update.log");
 
     public bool IsChannelEnabled(ReleaseChannel channel) => options.SelfUpdateChannels.Contains(channel);
