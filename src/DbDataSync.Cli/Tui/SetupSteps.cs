@@ -148,6 +148,17 @@ internal static class SetupSteps
         DbDataSyncConfigFile.SetValue(root, "DbDataSync", "Url", url);
 
     /// <summary>
+    /// Ticked writes <c>true</c>. Unticked writes <c>false</c> only if the file already says something about the key — so
+    /// turning it off works, but a save on a install that never touched it does not add a line for a default it already has.
+    /// </summary>
+    internal static void ApplyNotesRichMarkdown(string root, bool enabled)
+    {
+        const string key = "DbDataSync:NotesRichMarkdown";
+        if (enabled || DbDataSyncConfigFile.Read(root).ContainsKey(key))
+            DbDataSyncConfigFile.SetValue(root, "DbDataSync", "NotesRichMarkdown", enabled ? "true" : "false");
+    }
+
+    /// <summary>
     /// The one driver with a starter template to drive end to end (phase 109d); the three built-ins
     /// need nothing, and "another engine" has no template to fill in, so Drivers tab points at the
     /// manual command instead of calling this.

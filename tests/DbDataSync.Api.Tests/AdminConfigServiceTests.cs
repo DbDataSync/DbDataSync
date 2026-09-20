@@ -83,6 +83,56 @@ public sealed class AdminConfigServiceTests : IDisposable
         Assert.Equal("Sqlite", entry.Value);
     }
 
+    private const string NotesKey = "DbDataSync:NotesRichMarkdown";
+
+    [Fact]
+    public void NotesRichMarkdown_IsOffByDefault_EditableOnceInTheFile_AndCarriesItsWarning()
+    {
+        var service = Build(ConfigurationWithFile());
+
+        var entry = service.Get(NotesKey)!;
+
+        Assert.Equal("false", entry.Value);
+        Assert.Equal("false", entry.RunningValue);
+        Assert.Equal("false", entry.DefaultValue);
+        // Beside the control in both states, and for this key only — nothing else on the screen carries one.
+        Assert.False(string.IsNullOrWhiteSpace(entry.Caution));
+        Assert.Contains("other people's sessions", entry.Caution);
+        Assert.All(service.List().Where(e => e.Key != NotesKey), e => Assert.Null(e.Caution));
+    }
+
+    [Fact]
+    public void NotesRichMarkdown_IsAFlatKey_SoTheWriterCanAddressIt()
+    {
+        // The catalog's own rule: only top-level DbDataSync:<Key> keys are file-writable, which is why this is not
+        // DbDataSync:Notes:RichMarkdown — a nested key would have been shown but never editable.
+        var service = Build(ConfigurationWithFile());
+
+        var written = service.Set(NotesKey, "true", CurrentUser.SystemAuthor)!;
+
+        Assert.Equal("file", written.Source);
+        Assert.Equal("true", written.Value);
+        Assert.Equal("false", written.RunningValue); // running process unchanged until a restart
+        Assert.Equal("true", DbDataSyncConfigFile.Read(_repoRoot)[NotesKey]);
+        Assert.True(ApiOptions.FromConfiguration(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot))).NotesRichMarkdown);
+    }
+
+    [Fact]
+    public void Writable_IsTheOneCatalogTheCliAndSetupReadToo()
+    {
+        var key = AdminConfigService.Writable("NotesRichMarkdown");
+
+        Assert.Equal(NotesKey, key!.Key);
+        Assert.Equal("false", key.DefaultValue);
+        Assert.NotNull(key.Caution);
+        Assert.Equal(key.Key, AdminConfigService.Writable("dbdatasync:notesrichmarkdown")!.Key);
+        // Unknown, nested (not file-writable) and unrelated names are refused.
+        Assert.Null(AdminConfigService.Writable("Nope"));
+        Assert.Null(AdminConfigService.Writable("Auth:AdminGroup"));
+        Assert.Contains("NotesRichMarkdown", AdminConfigService.WritableKeyNames());
+        Assert.DoesNotContain("Auth:AdminGroup", AdminConfigService.WritableKeyNames());
+    }
+
     [Fact]
     public void ADurationOrCountKey_ReportsItsUnit_AndAPathOrEngineKeyReportsNone()
     {

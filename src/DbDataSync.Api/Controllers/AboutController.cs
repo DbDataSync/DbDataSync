@@ -1,4 +1,5 @@
 using DbDataSync.Api.Auth;
+using DbDataSync.Api.Configuration;
 using DbDataSync.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -8,7 +9,9 @@ namespace DbDataSync.Api.Controllers;
 /// <summary>What the running instance is, for any signed-in user (phase 160).</summary>
 /// <param name="Version">This build's informational version — what <c>dbdatasync version</c> prints. Null only
 /// when the assembly carries none, which a packed build never does.</param>
-public sealed record AboutResponse(string? Version);
+/// <param name="NotesRichMarkdown">Whether Notes render with the full Markdown renderer here (phase 161). The value this
+/// process is running with, not what the config file says now — a change waits for a restart, like every other setting.</param>
+public sealed record AboutResponse(string? Version, bool NotesRichMarkdown);
 
 /// <summary>
 /// Readable by a Viewer, unlike <c>api/admin/update/status</c>, which reports the same version but is Admin-only:
@@ -18,9 +21,9 @@ public sealed record AboutResponse(string? Version);
 /// </summary>
 [ApiController]
 [Route("api/about")]
-public sealed class AboutController(UpdateHostFacts facts) : ControllerBase
+public sealed class AboutController(UpdateHostFacts facts, ApiOptions options) : ControllerBase
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
-    public ActionResult<AboutResponse> Get() => Ok(new AboutResponse(facts.RunningVersion));
+    public ActionResult<AboutResponse> Get() => Ok(new AboutResponse(facts.RunningVersion, options.NotesRichMarkdown));
 }

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using DbDataSync.Cli.Tui;
 using DbDataSync.Cli.Tui.Tabs;
 using DbDataSync.Core.Config;
@@ -57,6 +58,45 @@ public sealed class TabWiringTests : IDisposable
         var (url, host) = tab.GetValues();
         Assert.Equal("https://example.com:5443", url);
         Assert.Equal("example.com", host);
+    }
+
+    /// <summary>Phase 161: the Notes renderer choice is a checkbox on General, off unless the configuration says otherwise, and
+    /// a real Space keystroke ticks it.</summary>
+    [Fact]
+    public void GeneralTab_NotesRichMarkdown_IsOffByDefault_TickedFromTheKeyboard_AndPopulatedFromTheConfiguration()
+    {
+        using var app = Application.Create(new VirtualTimeProvider());
+        app.Init("ansi");
+        var injector = app.GetInputInjector();
+
+        var tab = new GeneralTab();
+        var window = new Window();
+        window.Add(tab);
+        Assert.False(tab.NotesRichMarkdown);
+
+        RunOneIteration(app, window, () =>
+        {
+            tab._notesRich.SetFocus();
+            injector.InjectKey(Key.Space);
+            injector.ProcessQueue();
+        });
+        Assert.True(tab.NotesRichMarkdown);
+
+        var populated = new GeneralTab();
+        populated.Populate(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["DbDataSync:NotesRichMarkdown"] = "true" }).Build());
+        Assert.True(populated.NotesRichMarkdown);
+    }
+
+    [Fact]
+    public void GeneralTab_Wrap_KeepsEveryLineWithinTheWidth_AndLosesNoWords()
+    {
+        var text = DbDataSync.Api.Services.AdminConfigService.Writable("NotesRichMarkdown")!.Caution!;
+
+        var lines = GeneralTab.Wrap(text, 46).ToList();
+
+        Assert.All(lines, line => Assert.True(line.Length <= 46, line));
+        Assert.Equal(text.Split(' ', StringSplitOptions.RemoveEmptyEntries), string.Join(' ', lines).Split(' '));
     }
 
     /// <summary>Phase 109h: <see cref="StateDatabaseTab.SaveAsync"/> installs

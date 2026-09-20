@@ -1,3 +1,4 @@
+using DbDataSync.Api.Services;
 using DbDataSync.Core.Config;
 using Microsoft.Extensions.Configuration;
 using Terminal.Gui.ViewBase;
@@ -20,14 +21,47 @@ internal sealed class GeneralTab : View
     private readonly Label _urlLabel = new() { X = 1, Y = 2, Text = "Console URL:" };
     private readonly TextField _url = new() { X = 14, Y = 2, Width = 40, Text = "http://localhost:5080" };
 
+    /// <summary>Phase 161: whether Notes render with the full Markdown renderer. The warning under it is the catalog's own text
+    /// (the Admin screen shows the same words), shown whether the box is ticked or not — it is what someone deciding needs to
+    /// read, not a confirmation after the fact.</summary>
+    internal readonly CheckBox _notesRich = new() { X = 1, Y = 5, Text = "Render Notes with the full Markdown renderer" };
+    private readonly Label _notesWarning = new() { X = 4, Y = 6, Text = NotesWarningText() };
+
     public GeneralTab()
     {
         Title = "General";
         CanFocus = true; // container Views default to non-focusable; without this the focus chain never reaches these fields
-        Add(_reachable, _hostLabel, _host, _portLabel, _port, _urlLabel, _url);
+        Add(_reachable, _hostLabel, _host, _portLabel, _port, _urlLabel, _url, _notesRich, _notesWarning);
         _reachable.ValueChanged += (_, _) => UpdateVisibility();
         UpdateVisibility();
     }
+
+    private static string NotesWarningText()
+    {
+        var caution = AdminConfigService.Writable("NotesRichMarkdown")?.Caution ?? "";
+        return string.Join('\n', Wrap(caution, 46));
+    }
+
+    /// <summary>Greedy word wrap — Label does not wrap, and a warning cut off at the tab's edge is worse than none.</summary>
+    internal static IEnumerable<string> Wrap(string text, int width)
+    {
+        var line = "";
+        foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.Length > 0 && line.Length + 1 + word.Length > width)
+            {
+                yield return line;
+                line = word;
+            }
+            else
+                line = line.Length == 0 ? word : $"{line} {word}";
+        }
+        if (line.Length > 0)
+            yield return line;
+    }
+
+    /// <summary>Whether the box is ticked, for <see cref="SetupSteps.ApplyNotesRichMarkdown"/>.</summary>
+    public bool NotesRichMarkdown => _notesRich.Value == CheckState.Checked;
 
     private void UpdateVisibility()
     {
@@ -56,5 +90,9 @@ internal sealed class GeneralTab : View
         var url = configuration["DbDataSync:Url"];
         if (!string.IsNullOrEmpty(url))
             _url.Text = url;
+
+        _notesRich.Value = bool.TryParse(configuration["DbDataSync:NotesRichMarkdown"], out var rich) && rich
+            ? CheckState.Checked
+            : CheckState.UnChecked;
     }
 }

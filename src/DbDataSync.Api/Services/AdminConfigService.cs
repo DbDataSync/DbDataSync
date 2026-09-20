@@ -35,7 +35,7 @@ public sealed class AdminConfigService(
     RestartRequiredState restartRequired)
 {
     private sealed record KeyDefinition(
-        string Key, string Description, bool SupportsWrite, bool IsSecret = false, string? Unit = null);
+        string Key, string Description, bool SupportsWrite, bool IsSecret = false, string? Unit = null, string? Caution = null);
 
     private static readonly IReadOnlyList<KeyDefinition> Keys =
     [
@@ -81,6 +81,16 @@ public sealed class AdminConfigService(
             "Whether the Libraries screen's search box may call the public NuGet index. Disable in an " +
             "air-gapped or locked-down deployment.",
             SupportsWrite: true),
+        new("DbDataSync:NotesRichMarkdown",
+            "Whether Notes render tables, task lists and strikethrough with the full Markdown renderer instead of the " +
+            "small one they use by default. Off by default.",
+            SupportsWrite: true,
+            Caution:
+                "Notes are written by one operator and shown in other people's sessions. With this on they go through a " +
+                "richer renderer. It is defended the way the Docs viewer is — raw HTML is never interpreted, only " +
+                "http(s) and mailto links are followed, and images show as links rather than loading — but a richer " +
+                "renderer is a wider surface: a convincingly crafted link, or a flaw in the library later. Leave it off " +
+                "unless your team needs tables in notes."),
         new("DbDataSync:SelfUpdateEnabled",
             "Whether an admin may update this installation from the Updates screen. Off by default: it replaces " +
             "the code the service runs, as the service's own account. Needs a systemd unit written by this " +
@@ -120,6 +130,25 @@ public sealed class AdminConfigService(
             "ever writes one scalar per key, so this can never be file-writable.",
             SupportsWrite: false),
     ];
+
+    /// <summary>
+    /// What the CLI's <c>config set</c> and <c>setup</c> need to know about a key this screen could write, read from the
+    /// same catalog — so the three surfaces agree on which keys exist, what they default to and what to warn about, and a
+    /// key added here appears on all of them. Null for an unknown key or one that is not file-writable.
+    /// <paramref name="key"/> may omit the <c>DbDataSync:</c> prefix, as the file's own layout does.
+    /// </summary>
+    public static WritableConfigKey? Writable(string key)
+    {
+        var full = key.StartsWith("DbDataSync:", StringComparison.OrdinalIgnoreCase) ? key : $"DbDataSync:{key}";
+        var definition = Keys.FirstOrDefault(k => string.Equals(k.Key, full, StringComparison.OrdinalIgnoreCase));
+        return definition is { SupportsWrite: true }
+            ? new WritableConfigKey(definition.Key, definition.Description, DefaultValueFor(definition.Key), definition.Caution)
+            : null;
+    }
+
+    /// <summary>Every key <see cref="Writable"/> would return, for a usage message that lists them.</summary>
+    public static IReadOnlyList<string> WritableKeyNames() =>
+        Keys.Where(k => k.SupportsWrite).Select(k => k.Key["DbDataSync:".Length..]).ToList();
 
     public IReadOnlyList<AdminConfigEntry> List() => Keys.Select(ToEntry).ToList();
 
@@ -234,7 +263,7 @@ public sealed class AdminConfigService(
 
         return new AdminConfigEntry(
             definition.Key, value, runningValue, source, editable, canAdopt, canReset, defaultValue, masked,
-            definition.Description, definition.Unit);
+            definition.Description, definition.Unit, definition.Caution);
     }
 
     /// <summary>
@@ -288,6 +317,7 @@ public sealed class AdminConfigService(
         "DbDataSync:RunPruningIntervalMinutes" => ((int)apiOptions.RunPruningInterval.TotalMinutes).ToString(),
         "DbDataSync:ChangeCheckRetentionDays" => apiOptions.ChangeCheckRetentionDays?.ToString() ?? "0",
         "DbDataSync:NuGetSearchEnabled" => apiOptions.NuGetSearchEnabled ? "true" : "false",
+        "DbDataSync:NotesRichMarkdown" => apiOptions.NotesRichMarkdown ? "true" : "false",
         "DbDataSync:SelfUpdateEnabled" => apiOptions.SelfUpdateEnabled ? "true" : "false",
         "DbDataSync:SelfUpdateChannels" => string.Join(",", apiOptions.SelfUpdateChannels.Select(c => c.ToString().ToLowerInvariant())),
         "DbDataSync:SelfUpdateDrainTimeoutSeconds" => ((int)apiOptions.SelfUpdateDrainTimeout.TotalSeconds).ToString(),
@@ -324,6 +354,7 @@ public sealed class AdminConfigService(
         "DbDataSync:RunPruningIntervalMinutes" => ApiOptions.DefaultRunPruningIntervalMinutes.ToString(),
         "DbDataSync:ChangeCheckRetentionDays" => ApiOptions.DefaultChangeCheckRetentionDays.ToString(),
         "DbDataSync:NuGetSearchEnabled" => ApiOptions.DefaultNuGetSearchEnabled ? "true" : "false",
+        "DbDataSync:NotesRichMarkdown" => ApiOptions.DefaultNotesRichMarkdown ? "true" : "false",
         "DbDataSync:SelfUpdateEnabled" => ApiOptions.DefaultSelfUpdateEnabled ? "true" : "false",
         "DbDataSync:SelfUpdateChannels" => ApiOptions.DefaultSelfUpdateChannels,
         "DbDataSync:SelfUpdateDrainTimeoutSeconds" => ApiOptions.DefaultSelfUpdateDrainTimeoutSeconds.ToString(),
@@ -367,6 +398,12 @@ public sealed class AdminConfigService(
 /// ("days", "minutes", "runs") — null for a key that isn't a plain magnitude (a path, an engine name,
 /// a boolean). The screen only renders it beside a value that's actually numeric, so a key with a unit
 /// but an unset/non-numeric value shows no pill either.</param>
+/// <param name="Caution">A plain-language warning the screen shows beside this key, always, in both states — for a setting
+/// whose "on" widens what an attacker or a mistake can reach (phase 161: rich Markdown in Notes). Null for every other key.</param>
 public sealed record AdminConfigEntry(
     string Key, string? Value, string? RunningValue, string Source, bool Editable, bool CanAdopt, bool CanReset,
-    string? DefaultValue, bool Masked, string Description, string? Unit);
+    string? DefaultValue, bool Masked, string Description, string? Unit, string? Caution = null);
+
+/// <summary>A key <see cref="AdminConfigService.Writable"/> found: its full name, what it is for, the literal it falls back to
+/// (null when contextual), and the warning to show wherever it is changed (null for most).</summary>
+public sealed record WritableConfigKey(string Key, string Description, string? DefaultValue, string? Caution);

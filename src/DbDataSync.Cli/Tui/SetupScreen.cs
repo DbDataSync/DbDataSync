@@ -104,6 +104,7 @@ internal static class SetupScreen
             var (url, host) = general.GetValues();
             savedUrl = url;
             SetupSteps.ApplyConsoleUrl(root, url);
+            SetupSteps.ApplyNotesRichMarkdown(root, general.NotesRichMarkdown);
 
             var messages = new List<string> { (await stateDatabase.SaveAsync(root, installLibrary)).Message };
 

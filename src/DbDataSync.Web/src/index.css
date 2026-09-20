@@ -864,3 +864,17 @@ select.select {
   .docs-layout { flex-direction: column; }
   .docs-nav { flex: none; position: static; flex-direction: row; flex-wrap: wrap; }
 }
+
+/* Phase 161: Notes are being read with the rich renderer, and the caution beside the setting that turned that on. */
+.badge-rich-markdown {
+  padding: 1px 7px; border-radius: 9px; cursor: help;
+  font: 500 11px var(--ui); color: #7a5200;
+  background: var(--warn-bg, #fff4d6); border: 1px solid var(--warn-edge, #e6cf94);
+}
+.config-caution {
+  display: flex; gap: 8px; align-items: flex-start; margin: 0 0 10px; padding: 8px 10px; max-width: 90ch;
+  white-space: normal; overflow: visible; text-overflow: clip;
+  font: 400 12px/1.5 var(--ui); color: var(--ink-2);
+  background: var(--warn-bg, #fff4d6); border: 1px solid var(--warn-edge, #e6cf94); border-radius: 4px;
+}
+.config-caution .mark { flex: none; font-weight: 700; color: #7a5200; }

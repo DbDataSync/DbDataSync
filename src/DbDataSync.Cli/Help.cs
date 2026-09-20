@@ -50,7 +50,7 @@ public static class Help
                   Exits 0 if a running DbDataSync answers, 1 if it does not. What the container's
                   health check runs.
 
-              dbdatasync config check|cert|secret|library|driver
+              dbdatasync config check|get|set|cert|secret|library|driver
                   Every configuration-related command, grouped under one root:
 
                     check     [--repo <path>] [--json]

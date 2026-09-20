@@ -25,6 +25,33 @@ public sealed class SetupStepsTests : IDisposable
         throw new InvalidOperationException("This test's engine choice should never reach an install call.");
 
     [Fact]
+    public void ApplyNotesRichMarkdown_Ticked_WritesTrue()
+    {
+        SetupSteps.ApplyNotesRichMarkdown(_root, enabled: true);
+
+        Assert.Equal("true", DbDataSyncConfigFile.Read(_root)["DbDataSync:NotesRichMarkdown"]);
+    }
+
+    [Fact]
+    public void ApplyNotesRichMarkdown_Unticked_AddsNothingWhenTheKeyWasNeverSet()
+    {
+        // A save on an install that never touched the setting must not add a line for a default it already has.
+        SetupSteps.ApplyNotesRichMarkdown(_root, enabled: false);
+
+        Assert.False(DbDataSyncConfigFile.Read(_root).ContainsKey("DbDataSync:NotesRichMarkdown"));
+    }
+
+    [Fact]
+    public void ApplyNotesRichMarkdown_Unticked_TurnsItOffWhenTheFileHadItOn()
+    {
+        SetupSteps.ApplyNotesRichMarkdown(_root, enabled: true);
+
+        SetupSteps.ApplyNotesRichMarkdown(_root, enabled: false);
+
+        Assert.Equal("false", DbDataSyncConfigFile.Read(_root)["DbDataSync:NotesRichMarkdown"]);
+    }
+
+    [Fact]
     public async Task ApplyStateDatabase_Sqlite_WritesNothingAndReportsPlainly()
     {
         var result = await SetupSteps.ApplyStateDatabaseAsync(

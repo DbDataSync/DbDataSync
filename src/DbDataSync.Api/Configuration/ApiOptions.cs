@@ -21,6 +21,7 @@ public sealed class ApiOptions
     public const int DefaultChangeCheckRetentionDays = 7;
     public const int DefaultRunPruningIntervalMinutes = 60;
     public const bool DefaultNuGetSearchEnabled = true;
+    public const bool DefaultNotesRichMarkdown = false;
 
     // Phase 159: applying an update from the console replaces the code the service runs, as the service's
     // own account, so every default here is the closed one.
@@ -143,6 +144,15 @@ public sealed class ApiOptions
     public bool NuGetSearchEnabled { get; init; } = DefaultNuGetSearchEnabled;
 
     /// <summary>
+    /// Whether Notes render with the full Markdown renderer (tables, task lists, strikethrough) instead of the deliberately
+    /// small one they use by default (phase 161). Off: a note is stored input, written by one operator and rendered in other
+    /// people's sessions, and the small renderer is safe by having almost nothing in it. A flat key, not
+    /// <c>Notes:RichMarkdown</c>, because <c>dbdatasync.config.yaml</c>'s writer only addresses top-level keys — a nested one
+    /// could never be edited from the Admin screen.
+    /// </summary>
+    public bool NotesRichMarkdown { get; init; } = DefaultNotesRichMarkdown;
+
+    /// <summary>
     /// Phase 159: whether an admin may update this installation from the web console. Off by default — a page
     /// that can replace the code a service runs is a capability an operator turns on deliberately.
     /// </summary>
@@ -197,6 +207,9 @@ public sealed class ApiOptions
             NuGetSearchEnabled = bool.TryParse(section["NuGetSearchEnabled"], out var nuGetSearchEnabled)
                 ? nuGetSearchEnabled
                 : DefaultNuGetSearchEnabled,
+            NotesRichMarkdown = bool.TryParse(section["NotesRichMarkdown"], out var notesRichMarkdown)
+                ? notesRichMarkdown
+                : DefaultNotesRichMarkdown,
             SelfUpdateEnabled = bool.TryParse(section["SelfUpdateEnabled"], out var selfUpdateEnabled)
                 ? selfUpdateEnabled
                 : DefaultSelfUpdateEnabled,

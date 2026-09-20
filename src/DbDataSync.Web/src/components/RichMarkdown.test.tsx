@@ -3,8 +3,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { RichMarkdown } from './RichMarkdown'
 
-function render(text: string, docLinks = false): string {
-  return renderToStaticMarkup(<MemoryRouter><RichMarkdown text={text} docLinks={docLinks} /></MemoryRouter>)
+function render(text: string, docLinks = false, inlineImages = true): string {
+  return renderToStaticMarkup(<MemoryRouter><RichMarkdown text={text} docLinks={docLinks} inlineImages={inlineImages} /></MemoryRouter>)
 }
 
 describe('RichMarkdown', () => {
@@ -115,5 +115,45 @@ describe('RichMarkdown', () => {
       expect(html).not.toMatch(/<a\b/i)
       expect(html).toContain('install')
     })
+  })
+})
+
+// How Notes use it (phase 161): the same renderer, no docs-relative links, and images offered as links rather than fetched.
+describe('RichMarkdown as Notes use it', () => {
+  it('shows an image as a link to it, and loads nothing', () => {
+    const html = render('![the diagram](https://example.invalid/d.png)', false, false)
+
+    expect(html).not.toMatch(/<img\b/i)
+    expect(html).toContain('href="https://example.invalid/d.png"')
+    expect(html).toContain('>the diagram</a>')
+    expect(html).toContain('rel="noreferrer noopener"')
+  })
+
+  it('falls back to the address when an image has no alt text', () => {
+    expect(render('![](https://example.invalid/d.png)', false, false)).toContain('>https://example.invalid/d.png</a>')
+  })
+
+  it('still turns an unsafe image into its alt text, not a link', () => {
+    for (const src of ['javascript:alert(1)', 'data:image/svg+xml,<svg onload=alert(1)>', 'images/x.png']) {
+      const html = render(`![alt text](${src})`, false, false)
+      expect(html, src).not.toMatch(/<a\b/i)
+      expect(html, src).not.toMatch(/<img\b/i)
+      expect(html, src).toContain('alt text')
+    }
+  })
+
+  it('does not resolve a link into the docs or to an anchor — a note is not one of the app\'s pages', () => {
+    const html = render('[install](install.md) and [top](#top)', false, false)
+
+    expect(html).not.toMatch(/<a\b/i)
+    expect(html).toContain('install')
+  })
+
+  it('renders everything a note may hold that the small renderer cannot, and nothing that acts', () => {
+    const html = render('| a | b |\n| - | - |\n| 1 | 2 |\n\n- [x] done\n\n<script>alert(1)</script>', false, false)
+
+    expect(html).toContain('<table>')
+    expect(html).toContain('type="checkbox"')
+    expect(html).not.toMatch(/<script\b/i)
   })
 })

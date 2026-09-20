@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useAbout } from '../api/hooks'
 import { Markdown } from './Markdown'
+import { RichMarkdown } from './RichMarkdown'
 
 /**
  * A Markdown notes field — read by default, edited on request.
@@ -21,12 +23,27 @@ export function NotesPanel({ value, onChange, subject, testId = 'notes' }: {
 }) {
   const [editing, setEditing] = useState(false)
   const text = value ?? ''
+  // The deployment's choice, off unless an operator turned it on. Until it is known — and if it cannot be read — the small
+  // renderer is used: the safe one is the default, not whatever happens to load first.
+  const { data: about } = useAbout()
+  const rich = about?.notesRichMarkdown === true
 
   return (
     <div className="card" data-testid={`${testId}-card`}>
       <div className="card-head">
         <span className="card-title">Notes</span>
         <span className="card-note">Markdown · saved to config history like every other setting</span>
+        {rich && (
+          // Ambient and persistent, for as long as the setting is on — not a confirmation seen once at toggle time. Notes are
+          // stored input rendered in other people's sessions; this is the reminder that they are being read with a richer renderer.
+          <span
+            className="badge-rich-markdown"
+            title="An administrator turned on rich Markdown for Notes on this server (DbDataSync:NotesRichMarkdown). Tables and task lists render; raw HTML is never interpreted, and images show as links."
+            data-testid={`${testId}-rich-badge`}
+          >
+            Rich Markdown on
+          </span>
+        )}
         <button
           type="button"
           className="btn btn-sm spacer"
@@ -51,7 +68,9 @@ export function NotesPanel({ value, onChange, subject, testId = 'notes' }: {
             data-testid={`${testId}-editor`}
           />
         ) : text ? (
-          <Markdown text={text} testId={`${testId}-rendered`} />
+          rich
+            ? <RichMarkdown text={text} inlineImages={false} testId={`${testId}-rendered`} />
+            : <Markdown text={text} testId={`${testId}-rendered`} />
         ) : (
           <span className="hint" data-testid={`${testId}-empty`}>
             Nothing written yet. Notes are for what the next person needs to know about {subject} —

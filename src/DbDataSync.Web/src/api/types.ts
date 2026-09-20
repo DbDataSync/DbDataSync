@@ -1514,6 +1514,9 @@ export interface AdminConfigEntry {
   /** What a numeric value is counted in ("days", "minutes", "runs") — null for a key that isn't a
    * plain magnitude. Shown as a pill only beside a value that's actually numeric. */
   unit: string | null
+  /** A plain-language warning to show beside the key in both states — for a setting whose "on" widens what a mistake or an
+   * attacker can reach (phase 161). Null for every other key. */
+  caution: string | null
 }
 
 // The Certificates section of the Admin screen (phase 83) — a second door onto the operations
@@ -1698,4 +1701,7 @@ export interface UpdateReleases {
 export interface AboutInfo {
   /** This build's informational version — what `dbdatasync version` prints. */
   version: string | null
+  /** Whether Notes render with the full Markdown renderer on this deployment (phase 161). Off unless the operator turned
+   * `DbDataSync:NotesRichMarkdown` on; the value the process is running with, so a change waits for a restart. */
+  notesRichMarkdown: boolean
 }

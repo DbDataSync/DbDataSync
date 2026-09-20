@@ -17,8 +17,8 @@ never per-note.
 
 ### The setting
 
-`DbDataSync:Notes:RichMarkdown` (bool, default `false`) — an app-level key, the same shape as every other
-`DbDataSync:*` setting. Per `cli-setup-and-api-parity.md`, it has to be reachable the same way from **Admin
+**`DbDataSync:NotesRichMarkdown`** (bool, default `false`) — an app-level key, the same shape as every other
+`DbDataSync:*` setting. *(Renamed from the planned `DbDataSync:NotesRichMarkdown` — see "Key name" under Progress: a nested key could never be edited from Admin Configuration.)* Per `cli-setup-and-api-parity.md`, it has to be reachable the same way from **Admin
 Config (web), `setup`, and the CLI**, not added to one surface as an afterthought — so this phase includes
 all three, and `docs/configuration.md` documents it (the Admin Config screen lists every key that page
 documents, so a key missing from either would be visible as drift).
@@ -71,11 +71,47 @@ Viewers see Notes too, so it cannot come from an Admin endpoint. Add `notesRichM
 
 ## Open questions
 
-- **Restart or live?** If `DbDataSync:Notes:RichMarkdown` is applied live (as some Admin Config keys are),
-  the badge tracks it immediately; if it needs a restart, use `RestartRequiredBanner` like the other
-  restart-only keys. Decide from how the config layer classifies it.
-- **Images in Notes.** A note that embeds a remote image makes every viewer's browser fetch it — a tracking
-  and privacy question, not just an XSS one. Leaning: render images in notes as links, not inline, even when
-  rich rendering is on, and say so in the warning. Needs a decision before checkpoint 3.
-- **Badge shape and exact placement** — the requirement is "persistent and ambient"; the design is not
-  fixed.
+*(All three settled while building — see Progress.)*
+
+- **Restart or live? — restart.** The setting is read into `ApiOptions` at startup like every other `DbDataSync:*` key, and
+  `/api/about` reports the value the process is *running with*, so the badge follows the running process and the Admin screen's
+  restart banner covers the gap. No live re-read was added.
+- **Images in Notes? — links, not inline**, even with rich rendering on: every reader's browser would otherwise fetch an
+  address the author chose the moment the note rendered (tracking and privacy, not only XSS). Said in the warning.
+- **Badge shape and placement — a small "Rich Markdown on" pill in the Notes card header**, with a tooltip saying who turned
+  it on and what it does; present iff the running setting is on.
+
+## Progress
+
+- [x] **Key name: `DbDataSync:NotesRichMarkdown`, flat.** The plan said `DbDataSync:Notes:RichMarkdown`, but Admin
+  Configuration's catalog states that only top-level `DbDataSync:<Key>` keys are file-writable — `DbDataSyncConfigFile`'s
+  writer does not address nesting (which is why every `Auth:*` row is read-only). A nested name would have shown on the
+  screen and never been editable, defeating "reachable from all three surfaces". Flat matches `NuGetSearchEnabled` and
+  `SelfUpdateEnabled`.
+- [x] **The setting, one catalog, three doors.** `ApiOptions.NotesRichMarkdown` (default off);
+  `AdminConfigService`'s catalog entry carries a new `Caution` (also on the `AdminConfigEntry` DTO, `null` for every other
+  key); `AdminConfigService.Writable(key)` exposes the catalog's writable keys, defaults and cautions statically so the
+  other two surfaces read the same source instead of a copy:
+  - **Admin Configuration (web):** the row, with the caution on its own full-width line — first placed in the narrow key
+    column, where a screenshot showed it cut off mid-sentence, which is worse than no warning.
+  - **CLI:** `dbdatasync config get|set <key> [value] [--repo]` (new). Knows no keys of its own; refuses what the screen
+    refuses (unknown, nested); validates on/off values; prints the caution before enabling; commits with the same message
+    the screen uses. This is deliberately a *general* `get`/`set` over the catalog, not a Notes-only verb — the parity
+    doc's complaint was that settings existed on one surface only, and every catalog key now has the CLI door.
+  - **`setup`:** a checkbox on the General tab with the caution under it (always visible), `Populate`d from the
+    configuration and written by `SetupSteps.ApplyNotesRichMarkdown` — ticked writes `true`; unticked writes `false` only
+    if the file already mentions the key, so a save on an install that never touched it adds no line.
+- [x] **`/api/about`** carries `notesRichMarkdown` (the running value), readable by a Viewer — tested with a Viewer against
+  a deployment that turned it on.
+- [x] **`NotesPanel`** picks `RichMarkdown` when the flag is on and `Markdown.tsx` otherwise; with the flag off, or unknown
+  (still loading, or the call failed), it is the small renderer — the safe one is the default, not whichever loads first.
+  `RichMarkdown` gained `inlineImages` (off for Notes: an image shows as a link). No relative-link resolution for Notes.
+- [x] **Both warnings.** At the toggle: the caution in Admin Configuration, under the `setup` checkbox, and before the write
+  in the CLI — all the catalog's own text. Ambient: the "Rich Markdown on" pill in every Notes card while it is on.
+- [x] **Tests.** API: catalog entry (default, caution on this key only, flat/writable, `Writable` lookup), `/api/about` flag
+  for a Viewer on and off. CLI: `config get|set` (writes and commits, warns on enable but not disable, normalises `TRUE`,
+  rejects non-boolean / unknown / nested keys, refuses a folder with no configuration, `get`), `SetupSteps` (three cases),
+  `GeneralTab` (real Space keystroke, `Populate`, warning wrapping). Web: 5 more vitest cases for Notes' use of the renderer
+  (57 total); a stubbed Playwright spec (`notes-rich-markdown.spec.ts`, 5 tests): off → text and no badge; on → table and
+  badge; on with a hostile note → inert, image is a link and is never requested, no dialog; `/api/about` failing → safe
+  renderer; Admin row with its caution. Screenshots under `screenshots/notes-rich-markdown/`.

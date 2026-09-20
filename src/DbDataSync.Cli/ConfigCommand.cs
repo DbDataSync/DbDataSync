@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace DbDataSync.Cli;
 
 /// <summary>
-/// <c>dbdatasync config check|cert|secret|library|driver</c> — every configuration-related command
+/// <c>dbdatasync config check|get|set|cert|secret|library|driver</c> — every configuration-related command
 /// grouped under one root, phase 115's answer to the CLI having grown one verb per feature
 /// (<c>doctor</c>, <c>cert</c>, <c>secret</c>, <c>library</c>, <c>driver</c> were all separately
 /// top-level before this). <c>cert</c>/<c>secret</c>/<c>library</c>/<c>driver</c> keep their own
@@ -30,6 +30,8 @@ public static class ConfigCommand
         return args[0].ToLowerInvariant() switch
         {
             "check" => await CheckAsync(rest),
+            "get" => ConfigValueCommand.Get(rest),
+            "set" => ConfigValueCommand.Set(rest),
             "cert" => CertCommand.Run(rest),
             "secret" => SecretCommand.Run(rest),
             "library" => await LibraryCommand.RunAsync(rest),
@@ -79,6 +81,8 @@ public static class ConfigCommand
             """
             Usage:
               dbdatasync config check [--repo <path>] [--json]
+              dbdatasync config get <key> [--repo <path>]
+              dbdatasync config set <key> <value> [--repo <path>]
               dbdatasync config cert status|list|new-self-signed|enroll|renew|retrieve|templates|bind
               dbdatasync config secret set <ref> <value>|list [<ref> ...]|remove <ref>
               dbdatasync config library install|sync|list|uninstall

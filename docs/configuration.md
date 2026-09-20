@@ -162,6 +162,22 @@ grant, since `LocalMachine\My`'s default ACL already covers it).
 **Nothing takes effect until the process restarts** — `bind` only writes config; Kestrel's certificate
 is resolved once at startup, the same as every other `DbDataSync:*`/`Kestrel:*` setting.
 
+### `dbdatasync config get|set`
+
+```
+dbdatasync config get <key> [--repo <path>]
+dbdatasync config set <key> <value> [--repo <path>]
+```
+
+Reads or writes one `DbDataSync:*` setting in `dbdatasync.config.yaml` — the same settings, and the same commit, as
+**Admin → Configuration** in the web console; `dbdatasync setup` edits some of the same ones. `<key>` is the name from the
+table under "`DbDataSync:*`" below, with or without the `DbDataSync:` prefix (`config set NotesRichMarkdown true`). It changes
+only keys the console could change: nested keys such as `Auth:AdminGroup` are shown there but never writable, and are refused
+here for the same reason. An on/off setting takes `true` or `false`. A setting with a caution — today only `NotesRichMarkdown`
+— prints it before it is turned on, as the console and `setup` show it beside the control. The change waits for a restart of
+the service; `config get` reports what the file says, not what a running process is using (the console's **Running** column
+compares the two).
+
 ### `dbdatasync invite`
 
 Prints a fresh single-use invitation URL — for when the first-run one has scrolled off-screen, or the
@@ -242,6 +258,7 @@ sets; see "`dbdatasync.config.yaml`," above, for the file itself.
 | `RunPruningIntervalMinutes` | `DbDataSync__RunPruningIntervalMinutes` | `60` | how often the retention sweep runs |
 | `ChangeCheckRetentionDays` | `DbDataSync__ChangeCheckRetentionDays` | `7` | how long the scheduler's change-check history (phase 75) is kept; `0` = keep forever |
 | `NuGetSearchEnabled` | `DbDataSync__NuGetSearchEnabled` | `true` | whether the Libraries screen's search box (phase 119) may call the public NuGet index; `false` for an air-gapped or locked-down deployment |
+| `NotesRichMarkdown` | `DbDataSync__NotesRichMarkdown` | `false` | whether Notes render tables, task lists and strikethrough with the full Markdown renderer instead of the small one they use by default (phase 161). Off by default: a note is written by one operator and shown in other people's sessions, and a richer renderer is a wider surface — raw HTML is never interpreted and only `http(s)`/`mailto` links are followed, but the risk is not zero. Images in a note show as links, not inline. Change it in Admin → Configuration, on `dbdatasync setup`'s General tab, or with [`dbdatasync config set NotesRichMarkdown true`](#dbdatasync-config-getset); takes effect on restart |
 | `SelfUpdateEnabled` | `DbDataSync__SelfUpdateEnabled` | `false` | whether an admin may update this installation from the Updates screen (phase 159). Off by default — it replaces the code the service runs. Linux with a systemd unit from this version or later only, for now; see [Installing → Updating](install.md#updating) |
 | `SelfUpdateChannels` | `DbDataSync__SelfUpdateChannels` | `stable` | which channels the Updates screen may offer, comma-separated: `stable`, `beta`, `snapshot`. A snapshot is a development build, checked only against a checksum published beside it |
 | `SelfUpdateDrainTimeoutSeconds` | `DbDataSync__SelfUpdateDrainTimeoutSeconds` | `120` | how long an update waits for running work to finish before restarting the service anyway; anything interrupted is reconciled at the next start |

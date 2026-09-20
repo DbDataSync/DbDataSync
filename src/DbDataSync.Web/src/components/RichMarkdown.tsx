@@ -19,8 +19,16 @@ import { isSafeImageUrl, resolveLink } from './markdownLinks'
  *
  * @param docLinks resolve `other-page.md#section` to the in-app docs route and `#section` to the heading on this page.
  * Off unless the caller is showing the shipped docs, so a document that is not one of them cannot link into the app.
+ * @param inlineImages load an image where it is written. Off for Notes (phase 161): every reader's browser would fetch
+ * whatever address the author chose the moment the note rendered — a tracking and privacy question as well as a safety
+ * one — so there an image shows as a link the reader may choose to follow.
  */
-export function RichMarkdown({ text, docLinks = false, testId }: { text: string; docLinks?: boolean; testId?: string }) {
+export function RichMarkdown({ text, docLinks = false, inlineImages = true, testId }: {
+  text: string
+  docLinks?: boolean
+  inlineImages?: boolean
+  testId?: string
+}) {
   const slugs = docLinks ? DOC_SLUGS : undefined
 
   const components: Components = {
@@ -44,6 +52,7 @@ export function RichMarkdown({ text, docLinks = false, testId }: { text: string;
       // An image is fetched by the reader's browser the moment it renders, so it gets the strictest reading of the
       // policy: a network address only, never a relative path, and no referrer sent with the request.
       if (typeof src !== 'string' || !isSafeImageUrl(src)) return <span>{alt}</span>
+      if (!inlineImages) return <a href={src} target="_blank" rel="noreferrer noopener">{alt || src}</a>
       return <img src={src} alt={alt ?? ''} loading="lazy" referrerPolicy="no-referrer" />
     },
     // A table wider than the column scrolls inside itself instead of stretching the page.

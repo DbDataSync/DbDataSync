@@ -233,6 +233,17 @@ function Row({ entry, onSave, onSaveSecret, busy }: {
           </button>
         )}
       </span>
+
+      {entry.caution && (
+        // In both states, in the row of the setting it is about: what somebody deciding needs to read, not a confirmation
+        // after they have already chosen. Its own full-width line — the key column is too narrow to hold a warning without
+        // cutting it off, and a warning that is cut off is worse than none. The CLI prints the same text before it writes,
+        // and `setup` shows it under its checkbox.
+        <div className="config-caution" style={{ gridColumn: '1 / -1' }} data-testid={`admin-config-caution-${shortKey}`}>
+          <span className="mark">!</span>
+          <span>{entry.caution}</span>
+        </div>
+      )}
     </div>
   )
 }
