@@ -23,6 +23,10 @@ RUN dotnet publish src/DbDataSync.Cli/DbDataSync.Cli.csproj \
 
 COPY --from=web /src/DbDataSync.Web/dist/ /app/wwwroot/
 
+# Phase 160: the docs, beside the SPA — the publish above ran in a stage that never had docs/ (only src, tests
+# and tools are copied in), so the csproj's CopyDocs target had nothing to copy and this line is what ships them.
+COPY docs/ /app/wwwroot/docs/
+
 # Phase 121: every KnownLibraries entry, restored once at its pinned version, while this stage still
 # has both the SDK and the just-published CLI (the "internal" command exists only for this — see
 # InternalCommand.cs). Shipped into *both* final images below: it's a few megabytes for all seven

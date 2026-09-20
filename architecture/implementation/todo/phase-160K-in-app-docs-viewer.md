@@ -113,3 +113,16 @@ operator-authored Notes. A new shared `RichMarkdown` component is used for docs.
 
 - [x] **1. `GET /api/about`** — `AboutController` (`Policies.Viewer`, so Viewer and Admin), returning
   `{ version }` from `UpdateHostFacts.RunningVersion`. Tests: both roles read the version; anonymous gets 401.
+- [x] **2. Packaging.** `CopyDocs` target in `DbDataSync.Cli.csproj` (unconditional on `dist/`; conditional on
+  `docs/` existing), a `COPY docs/ /app/wwwroot/docs/` line in the `Dockerfile`, and two `ci.yml` assertions:
+  the packed nupkg contains every `docs/*.md` (compared to `docs/` itself, not a count), and the running default
+  container serves each one. **Verified by a real `dotnet pack`** — all seven pages are under
+  `tools/net10.0/any/wwwroot/docs/`. **Not verified locally:** the Dockerfile line and the container assertion
+  (no docker here) — first exercised by CI.
+  - *Corrected assumption:* the plan expected `.md` to need a content-type mapping; .NET 10's default table
+    already has `.md` → `text/markdown` (probed before shipping code for it), so no host change was made.
+    `EmbeddedDocsServingTests` pins what the viewer depends on instead: a page is served as Markdown, `/docs` and
+    `/docs/<page>` are the SPA's routes, and a missing `.md` is a real 404 (`MapFallback` skips file-shaped
+    paths, so the viewer never gets the app's HTML to render as a document).
+  - Note: static files are served before authentication, like the SPA's own assets, so the docs are readable
+    without signing in. They are the same text that is public on GitHub.

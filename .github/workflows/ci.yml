@@ -291,6 +291,21 @@ jobs:
             echo "packed nupkg has no non-empty tools/<tfm>/any/wwwroot/ — the web console did not get packed"
             exit 1
           fi
+      # Phase 160: the docs ship in the package. Compared against docs/ itself rather than a hard-coded count, so
+      # adding a page does not need this edited — and a page that fails to pack does not pass unnoticed.
+      - name: Assert the packed nupkg contains every page of docs/
+        run: |
+          packed=$(find /tmp/nupkg-contents/tools -type d -path '*/wwwroot/docs' | head -n1)
+          if [ -z "$packed" ]; then
+            echo "packed nupkg has no wwwroot/docs/ — the docs did not get packed"
+            exit 1
+          fi
+          for page in docs/*.md; do
+            if [ ! -s "$packed/$(basename "$page")" ]; then
+              echo "packed nupkg is missing or has an empty $(basename "$page")"
+              exit 1
+            fi
+          done
       - name: Install it into a clean tool root and run it
         run: |
           dotnet tool install --tool-path /tmp/dbdatasync-tool --add-source artifacts DbDataSync
@@ -320,6 +335,13 @@ jobs:
             echo "the default image's / answered with the no-web-assets fallback, not the SPA"
             exit 1
           fi
+      # Phase 160: same for the image — its docs come from a separate COPY line, not the csproj target.
+      - name: Assert the running container serves the docs
+        run: |
+          for page in docs/*.md; do
+            curl -sf "http://127.0.0.1:18080/docs/$(basename "$page")" -o /dev/null \
+              || { echo "the default image does not serve /docs/$(basename "$page")"; exit 1; }
+          done
       # Phase 121: the slim alternative to the default (SDK-based) image above. Built with the same
       # single `docker build` this repo's own Dockerfile already defines — --target just picks a
       # different one of its stages, so there is no second Dockerfile to keep in sync.

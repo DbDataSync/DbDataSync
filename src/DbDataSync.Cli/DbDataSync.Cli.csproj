@@ -116,4 +116,23 @@
           DestinationFiles="@(_SpaDist->'$(PublishDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
+  <!--
+    Phase 160: the docs ship with the app so an operator — an offline one especially — can read the version they
+    are actually running instead of whatever GitHub's main says today. Same shape and same hook as CopyPrebuiltSpa
+    (and for the same reason: pack runs Publish, so this lands in the packed tool's wwwroot, which a build-time
+    copy elsewhere would not). Unconditional on dist/, because docs/ is source, not a build product; conditional
+    only on docs/ existing, which it does not in the Dockerfile's build stage — that stage copies docs/ itself.
+    All of docs/*.md ships, including development.md: other pages link to it.
+  -->
+  <PropertyGroup>
+    <DocsDir>$(MSBuildProjectDirectory)/../../docs</DocsDir>
+  </PropertyGroup>
+
+  <Target Name="CopyDocs" BeforeTargets="Publish" Condition="Exists('$(DocsDir)')">
+    <ItemGroup>
+      <_Doc Include="$(DocsDir)/*.md" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_Doc)" DestinationFolder="$(PublishDir)wwwroot/docs" />
+  </Target>
+
 </Project>
