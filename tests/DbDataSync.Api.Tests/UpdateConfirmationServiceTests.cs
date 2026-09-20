@@ -91,7 +91,9 @@ public sealed class UpdateConfirmationServiceTests : IDisposable
         public HttpClient CreateClient(string name) => throw new InvalidOperationException("nothing here should reach the network");
     }
 
-    private static async Task<bool> UntilAsync(Func<bool> condition, int milliseconds = 3000)
+    // Patience is only spent when a test is about to fail. 3 s was enough on a developer machine and not on a Windows CI
+    // runner, where this project's tests took over ten minutes (run 35497490691: WithNothingApplied_… gave up first).
+    private static async Task<bool> UntilAsync(Func<bool> condition, int milliseconds = 15_000)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(milliseconds);
         while (DateTime.UtcNow < deadline)

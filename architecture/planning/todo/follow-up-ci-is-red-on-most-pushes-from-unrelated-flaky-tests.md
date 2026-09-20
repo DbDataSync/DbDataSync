@@ -45,3 +45,13 @@ recurred.
 ## What "done" looks like
 
 Several consecutive `dev` pushes go green with no re-runs, and `promote-test` shows `success` for each.
+
+## Later the same day (2026-09-20), two more runs
+
+| run | commit | failed job → test | note |
+| --- | --- | --- | --- |
+| `35497291033` | `37e59bd` (docs only) | `dotnet-integration` → `Scd2CdcGuaranteedDeliveryIntegrationTests.ADuplicateKeyStartingOrEndingInADelete…` — again identical mapped times (`d0 closed at 2026-09-20T07:38:52.2300000, d1 opened at 2026-09-20T07:38:52.2300000`) | recurs; same `.2300000` fraction as the earlier failure at `…07:18:47.2300000` — worth knowing when picking the fix |
+| `35497291033` | same | `dotnet-integration` → `MsSqlCdcReaderTests.ChangesFromEarliest_ReturnsTheChangeAtTheFloor_InclusiveOfMinLsn`: `Assert.Single() Failure: The collection contained 2 items` | **new** — another CDC test; probably the same "a scan produced more than one mapping point / change" family, not investigated |
+| `35497490691` | `5f7dfc6` | `dotnet-windows` → `UpdateConfirmationServiceTests.WithNothingApplied_ItStillClearsWhatEarlierStartsLeftBehind` — `UntilAsync` gave up after 3 s; that project's tests took 10 m 8 s on the runner | a phase-159 test's own patience; **fixed** by raising the deadline to 15 s (only spent when failing) |
+
+Runs `35497164033` (`d312d01`) and `35497253627` (`ffbb295`) were green.
