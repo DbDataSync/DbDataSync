@@ -148,6 +148,9 @@ jobs:
           cache-dependency-path: src/DbDataSync.Web/package-lock.json
       - name: Install
         run: npm ci
+      # Phase 160: the renderer's tests — what markup a document may and may not produce. Plain Node, no browser.
+      - name: Test
+        run: npm test
       - name: Build
         run: npm run build
 

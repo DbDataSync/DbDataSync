@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { isSafeExternalUrl } from './markdownLinks'
 
 /**
  * Renders Markdown as React elements.
@@ -118,7 +119,7 @@ function inline(text: string): ReactNode[] {
       // Anything but http, https and mailto renders as the text it was written as. `javascript:` in an
       // href is the one thing in a note that could act rather than inform, and a note is written by
       // one operator and opened by another.
-      out.push(/^(https?:|mailto:)/i.test(href)
+      out.push(isSafeExternalUrl(href)
         ? <a key={key++} href={href} target="_blank" rel="noreferrer noopener">{label || href}</a>
         : <span key={key++}>{token}</span>)
     }

@@ -126,3 +126,17 @@ operator-authored Notes. A new shared `RichMarkdown` component is used for docs.
     paths, so the viewer never gets the app's HTML to render as a document).
   - Note: static files are served before authentication, like the SPA's own assets, so the docs are readable
     without signing in. They are the same text that is public on GitHub.
+- [x] **3. `RichMarkdown`, its link policy and its tests.** `components/RichMarkdown.tsx` (`react-markdown` +
+  `remark-gfm` + `rehype-slug`, no `rehype-raw`, `urlTransform` the identity so one policy decides), and
+  `components/markdownLinks.ts`, which `Markdown.tsx` now shares for its own allowlist rather than keeping a second.
+  The SPA had no unit-test runner, so this adds **vitest** (`npm test`, a CI step in the `web` job): components are
+  rendered with `react-dom/server` in plain Node — enough to assert what markup a document may and may not produce.
+  52 tests: tables, task lists, GitHub-compatible heading ids; raw `<script>`/`<img onerror>`/`<iframe>`/`<svg onload>`
+  inert; `javascript:`/`data:`/`vbscript:`/`//host` links and whitespace/control-character disguises never become an
+  `href`; images from network addresses only, lazy, no referrer; `x.md#a` → `/docs/x#a`. Mutation-checked: making
+  the policy allow everything fails 33 tests.
+  - **`docPages.ts` and its drift test.** The list of shipped pages (with titles, in README order) is checked against
+    `docs/*.md` at test time, and so is every relative `.md` link inside the docs — a renamed or removed page fails a
+    build rather than a reader.
+  - **Found while writing the link check:** every page opens with a nav line whose first link is
+    `[DbDataSync](../README.md)`. That resolves to the docs index (`/docs`) in the app.
