@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AdminTabs } from '../components/AdminTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
@@ -83,8 +84,9 @@ export function AdminDriversPage() {
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <span className="hint">
-              Every entry here is a curated, bundled descriptor — no trust confirmation needed. See
-              architecture/planning/todo/nuget-loaded-drivers.md for what a descriptor can and can't do.
+              Every entry here is a curated, bundled descriptor — no trust confirmation needed. See{' '}
+              <Link to="/docs/drivers-and-libraries#descriptor-drivers" data-testid="drivers-docs-link">descriptor drivers</Link>{' '}
+              for what a descriptor can and can't do.
             </span>
             {(knownDrivers ?? [])
               .filter((entry) => !installedIds.has(entry.id))

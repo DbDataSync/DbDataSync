@@ -11,6 +11,8 @@ import type {
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
+  about: ['about'] as const,
+  docPage: (slug: string) => ['docs', slug] as const,
   drivers: ['drivers'] as const,
   libraries: ['libraries'] as const,
   knownLibraries: ['known-libraries'] as const,
@@ -1236,5 +1238,22 @@ export function useBindCertificate() {
       invalidateAdminCertificate(queryClient)
       queryClient.invalidateQueries({ queryKey: keys.adminCertificateCandidates })
     },
+  })
+}
+
+/** What the running instance is (phase 160). It cannot change while the page is open — a different version means a
+ * restart, and a restart reloads the page's data anyway — so it is fetched once. */
+export function useAbout() {
+  return useQuery({ queryKey: keys.about, queryFn: api.about, staleTime: Infinity, retry: false })
+}
+
+/** One page of the docs the build shipped. Baked into the build, so it never goes stale within a session. */
+export function useDocPage(slug: string | undefined) {
+  return useQuery({
+    queryKey: keys.docPage(slug ?? ''),
+    queryFn: () => api.docs.page(slug!),
+    enabled: !!slug,
+    staleTime: Infinity,
+    retry: false,
   })
 }

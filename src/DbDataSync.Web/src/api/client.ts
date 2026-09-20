@@ -28,6 +28,7 @@ import type {
   LibrarySummary,
   RestartRequiredStatus,
   UpdateReleases,
+  AboutInfo,
   UpdateStatus,
   BulkCreateRequest,
   BulkCreateResult,
@@ -138,7 +139,20 @@ function bulkLoadHistoryQuery(filters: BulkLoadHistoryFilters, limit: number): s
   return params.toString()
 }
 
+/** A page of the docs the build shipped (phase 160), as Markdown text. Not `request`: the answer is a document, not
+ * JSON. A page that is not there is a 404, but the content type is checked as well, so that anything other than
+ * Markdown — an HTML error page from a proxy in front of the app — is refused rather than rendered as a document. */
+async function docPage(slug: string): Promise<string> {
+  const response = await fetch(`/docs/${encodeURIComponent(slug)}.md`, { credentials: 'same-origin' })
+  if (!response.ok) throw new ApiError(response.status, response.status === 404 ? 'That page is not part of this build.' : response.statusText)
+  if (!response.headers.get('content-type')?.toLowerCase().startsWith('text/markdown'))
+    throw new ApiError(response.status, 'The server did not answer with a document.')
+  return response.text()
+}
+
 export const api = {
+  about: () => request<AboutInfo>('/api/about'),
+  docs: { page: docPage },
   connections: {
     list: () => request<ConnectionConfig[]>('/api/connections'),
     get: (name: string) => request<ConnectionConfig>(`/api/connections/${encodeURIComponent(name)}`),

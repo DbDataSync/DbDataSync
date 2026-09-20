@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AdminTabs } from '../components/AdminTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
@@ -92,7 +93,8 @@ export function AdminConfigPage() {
           <h1 className="page-title">Configuration</h1>
           <span className="page-note">
             Every DbDataSync:* setting this build reads, where its current value comes from, and what can
-            be changed here. See docs/configuration.md for the full reference.
+            be changed here. See the <Link to="/docs/configuration" data-testid="config-docs-link">configuration reference</Link> for
+            the full reference.
           </span>
         </div>
 

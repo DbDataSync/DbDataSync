@@ -112,6 +112,16 @@ export function CodeIcon() {
   )
 }
 
+/** Docs — an open book. */
+export function BookIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" {...stroke} strokeLinejoin="round">
+      <path d="M8 4.2C6.9 3.3 5 3 2.5 3v8.5c2.5 0 4.4.3 5.5 1.2 1.1-.9 3-1.2 5.5-1.2V3C11 3 9.1 3.3 8 4.2Z" />
+      <path d="M8 4.2v8.5" />
+    </svg>
+  )
+}
+
 /** Admin — a gear, the universal mark for "settings" and nothing this app already uses elsewhere. */
 export function GearIcon() {
   return (

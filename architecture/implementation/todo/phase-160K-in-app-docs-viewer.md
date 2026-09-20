@@ -140,3 +140,12 @@ operator-authored Notes. A new shared `RichMarkdown` component is used for docs.
     build rather than a reader.
   - **Found while writing the link check:** every page opens with a nav line whose first link is
     `[DbDataSync](../README.md)`. That resolves to the docs index (`/docs`) in the app.
+- [x] **4. Viewer route, rail item, and the three reference fixes.** `DocsPage` at `/docs` (index) and
+  `/docs/:page` (a list of pages beside the page, the running version from `/api/about`, a message for a page that is
+  not one of the seven); a **Docs** rail item for every role (`BookIcon`); `api.about` / `api.docs.page` /
+  `useAbout` / `useDocPage`. The fetch refuses a response that is not `text/markdown`, so an HTML error page from a
+  proxy is never rendered as a document. A `/docs/x#section` link scrolls to its heading once the text arrives (the
+  router does not do that by itself). The Vite dev server serves the repo's `docs/` at `/docs/*.md` through a small
+  plugin, so the viewer works unchanged in dev. The three dangling references are fixed: `AdminConfigPage` and
+  `AdminCertificatePage` link to `/docs/configuration`, and `AdminDriversPage` now links to
+  `/docs/drivers-and-libraries#descriptor-drivers` instead of naming an internal planning doc.

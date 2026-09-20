@@ -1,3 +1,4 @@
+import { DocsPage } from './pages/DocsPage'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStatus } from './api/hooks'
 import { SignInScreen } from './components/SignIn'
@@ -78,6 +79,10 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/replications" replace />} />
+
+      {/* The docs the build shipped (phase 160): an index, and one route per page. */}
+      <Route path="/docs" element={<DocsPage />} />
+      <Route path="/docs/:page" element={<DocsPage />} />
 
       <Route path="/replications" element={<ReplicationsPage />} />
       <Route path="/replications/:name" element={<ReplicationDetailPage />}>

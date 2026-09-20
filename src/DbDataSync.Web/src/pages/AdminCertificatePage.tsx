@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AdminTabs } from '../components/AdminTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
@@ -122,7 +123,7 @@ export function AdminCertificatePage() {
           <span className="page-note">
             The TLS certificate DbDataSync serves, how long it has left, and whether this host can actually
             read its private key. Every action here is a second door onto <code className="mono">dbdatasync
-            cert …</code> — see docs/configuration.md.
+            cert …</code> — see the <Link to="/docs/configuration" data-testid="certificate-docs-link">configuration reference</Link>.
           </span>
         </div>
 

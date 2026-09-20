@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { NotificationBell } from './NotificationBell'
 import { SignedInAs } from './SignIn'
 import { useIsAdmin } from './useIsAdmin'
-import { CodeIcon, DatabaseIcon, FlowIcon, GearIcon, GridIcon, LogoIcon } from './icons'
+import { BookIcon, CodeIcon, DatabaseIcon, FlowIcon, GearIcon, GridIcon, LogoIcon } from './icons'
 
 /**
  * The chrome every screen sits in: a 46px icon rail, a 42px breadcrumb bar and a 46px tab bar.
@@ -63,6 +63,16 @@ export function AppShell({ crumbs, tabs, actions, children }: {
         <span className="rail-item" style={{ color: 'var(--ink-faint)', cursor: 'default' }} title="Overview">
           <GridIcon />
         </span>
+        {/* Every role: these are the docs for the version that is running, and a Viewer is who most needs them.
+            Unlike Admin below, there is nothing here to hide from anyone. */}
+        <NavLink
+          to="/docs"
+          className={({ isActive }) => `rail-item ${isActive ? 'active' : ''}`}
+          title="Docs"
+          data-testid="rail-docs"
+        >
+          <BookIcon />
+        </NavLink>
         {isAdmin && (
           // /admin itself, not /admin/config directly — Admin now has two sections (Configuration,
           // phase 81; Certificate, phase 83), and linking to the bare section root is what lets this

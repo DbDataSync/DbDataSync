@@ -1693,3 +1693,9 @@ export interface UpdateReleases {
   /** A channel that could not be read while another could — never fatal. */
   warnings: string[]
 }
+
+/** What every signed-in user may know about the running instance (phase 160). */
+export interface AboutInfo {
+  /** This build's informational version — what `dbdatasync version` prints. */
+  version: string | null
+}
