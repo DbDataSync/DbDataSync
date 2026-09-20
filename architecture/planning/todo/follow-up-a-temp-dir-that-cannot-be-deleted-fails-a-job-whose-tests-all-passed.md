@@ -88,3 +88,12 @@ that (1) alone would have made both CI runs above green, honestly.
 - The "Still open:" diagnostic survives — whatever replaces the throw keeps naming the holder, since
   that line is the only reason this was diagnosable at all.
 - `dotnet-windows` is green on `main` across several consecutive runs with no re-runs.
+
+## A Linux occurrence: Playwright's teardown (CI run `35496282777`, job `106039719476`, 2026-09-20)
+
+Not `dotnet-windows` — the `playwright` job on ubuntu. All **116 tests passed**, then the job failed with
+`Error: ENOTEMPTY, Directory not empty: /tmp/dbdatasync-web-e2e-scratch-repo` from the suite's own teardown
+(`global-teardown.ts`) removing the scratch repo the API was still writing into. The same shape as this doc's
+subject — a cleanup that cannot finish turning a green run red — on a different platform and a different cleanup, so
+whatever replaces the throw here probably belongs there too (retry the removal, and report rather than fail when it
+still cannot). The commit under test (`305af60`) changed the SPA's renderer, not the teardown or the API.

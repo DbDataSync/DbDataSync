@@ -82,3 +82,32 @@ calls give two distinct, ordered mapping points" assumption that failed at line 
   occurrence is diagnosable from the log alone.
 - Separately, two earlier integration failures (jobs `105730239424` and `105489949065`) were in
   `BulkLoadIntegrationTests`, a different flake — not this one.
+
+## Third and fourth occurrences — and now the values (CI runs `35495888790` and `35496389094`, 2026-09-20)
+
+The assertion messages added in `fb21188` did what they were for. From job `106040014595`, the failing test
+`ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid`:
+
+```
+the delete closed 'd0' before the re-insert opened 'd1'; d0 closed at 2026-09-20T07:18:47.2300000, d1 opened at 2026-09-20T07:18:47.2300000
+```
+
+**The two mapped times are identical** — not out of order. So the question left open above is answered for this
+test: a `ScanAsync` between the delete and the re-insert did **not** give them distinct `cdc.lsn_time_mapping` times,
+because the two transactions committed within one clock tick (SQL Server's `datetime` resolves to 3.33 ms; a fast
+runner does a delete, a scan and an insert well inside that). The same run (`35495888790`, job `106038621029`)
+also failed `APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation` — the test that failed
+originally, on `Assert.NotEqual(id1[0].ValidTo, id1[1].ValidTo)` — so that is four failures across two tests in
+five days, and the mechanism is the same one.
+
+What this does and doesn't say:
+
+- It is a **test** assumption failing, not evidence of a product bug: a row deleted and re-inserted within one tick
+  legitimately gets `ValidTo == ValidFrom`. The same test file already asserts exactly that equality for an *update*
+  (`Assert.Equal(id5[0].ValidTo, id5[1].ValidFrom)` — "ends 'e0' and begins 'e1' at the same moment").
+- Two ways to make the test deterministic, neither applied yet because they differ in what they claim: **(a)**
+  separate the two operations by more than a tick (a delay of ≥ 10 ms between the delete's scan and the re-insert, and
+  between the two updates at line ~308) so strict `<` / `!=` hold — keeps the assertion's meaning; **(b)** relax `<`
+  to `<=` for the delete/re-insert, and drop the `!=` — but then the test no longer proves the delete closed *before*
+  the re-insert opened, only that it did not close after. (a) is the smaller claim change.
+- Not checked: whether `ScanAsync`'s stop/wait/restart sequence could itself be made to force distinct mapping points.

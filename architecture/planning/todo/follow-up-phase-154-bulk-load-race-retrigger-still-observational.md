@@ -76,3 +76,17 @@ one.
   still passes, since it is what actually proves the behaviour.
 - Nothing else in the test is relaxed: the `MappingStillLoading` failure kind and its message stay
   asserted on the branch where the run does fail.
+
+## Two more occurrences, one on each side of the fix's own claim (2026-09-20)
+
+`ARaceBetweenAConcurrentReloadAndAMappingsOwnFirstPass_TheLoserFailsCleanly_AndSelfHeals` failed twice more, and the
+two failures are *opposite*:
+
+- CI run `35495888790`, job `106038621029`, `BulkLoadIntegrationTests.cs:241`: `Expected: "Failed"`, `Actual: "Succeeded"`
+  — the racing run that is supposed to lose won.
+- CI run `35496100986`, job `106039212879`, `AssertAllSucceeded` at line 490 (called from line 258): the run
+  that was supposed to succeed reported `Failed — Mapping 'map-1' … is still loading … This pass will retry automatically`.
+
+Both commits were unrelated to this code (`5c7094a` changed docs only; `099230a` changed packaging and CI files).
+Two outcomes in opposite directions from the same test is what "asserted as if it were closed while still
+observational" predicts: the assertion picks one winner where the race can produce either.
