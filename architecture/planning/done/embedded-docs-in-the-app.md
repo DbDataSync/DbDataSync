@@ -1,5 +1,18 @@
 # Embedded docs in the app
 
+> **Resolved 2026-09-19 — split into three phases.** The design below was agreed and is now carried by:
+> - `architecture/implementation/todo/phase-160K-in-app-docs-viewer.md` — packaging, `GET /api/about`,
+>   the shared renderer, the viewer and the dangling-reference fixes;
+> - `architecture/implementation/todo/phase-161K-notes-rich-markdown-opt-in.md` — the Notes opt-in
+>   (`DbDataSync:Notes:RichMarkdown`);
+> - `architecture/implementation/todo/phase-162K-doc-images-doc-audit-and-nuget-readme-preprocessing.md` —
+>   embedded images, a docs audit, and relative-link authoring with pack-time rewriting for the NuGet README.
+>
+> Stale in the text below: "no version endpoint exists" (phase 159 added `RunningVersion`, Admin-only;
+> 160K adds a non-admin `/api/about`), and `AdminTabs` now has five destinations. Decided since: all seven
+> pages ship (including `development.md`); Notes' rich rendering is its own phase; images and NuGet link
+> preprocessing are their own phase. Not in the original: relative-link rewriting between doc pages.
+
 ## The problem
 
 `docs/*.md` (`install.md`, `configuration.md`, `getting-started.md`, `replication-concepts.md`,
