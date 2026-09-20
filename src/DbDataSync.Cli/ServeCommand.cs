@@ -1,5 +1,7 @@
 using DbDataSync.Api;
 using DbDataSync.Api.Auth;
+using DbDataSync.Api.Services;
+using Microsoft.Extensions.DependencyInjection;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Libraries;
@@ -98,7 +100,10 @@ public static class ServeCommand
             Console.WriteLine($"  console            {url}");
 
             await app.RunAsync();
-            return 0;
+
+            // Phase 159: 75 when the service stopped itself so that an update can be applied — the unit
+            // restarts it on that code (SuccessExitStatus/RestartForceExitStatus) and applies the update first.
+            return app.Services.GetRequiredService<UpdateService>().RequestedExitCode ?? 0;
         }
         catch (Exception ex)
         {

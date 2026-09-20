@@ -43,6 +43,7 @@
     <ProjectReference Include="..\DbDataSync.Drivers.Oracle\DbDataSync.Drivers.Oracle.csproj" />
     <ProjectReference Include="..\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
     <ProjectReference Include="..\DbDataSync.State\DbDataSync.State.csproj" />
+    <ProjectReference Include="..\DbDataSync.Updates\DbDataSync.Updates.csproj" />
     <ProjectReference Include="..\DbDataSync.Verification\DbDataSync.Verification.csproj" />
   </ItemGroup>
 

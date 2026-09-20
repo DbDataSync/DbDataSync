@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
+using DbDataSync.Core.Config;
 using DbDataSync.Updates;
 
 namespace DbDataSync.Cli;
@@ -23,7 +24,11 @@ internal sealed record UpdateEnvironment(
     string DefaultStageDirectory,
     Func<string, ServiceSituation> ServiceLookup,
     bool InputRedirected,
-    string? GitHubToken)
+    string? GitHubToken,
+    IServiceControl ServiceControl,
+    IHealthProbe Health,
+    Func<UpdateWorkspace, IToolCommandRunner> RunnerFor,
+    string UserName)
 {
     public static UpdateEnvironment Current() => new(
         typeof(Help).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
@@ -36,7 +41,11 @@ internal sealed record UpdateEnvironment(
             "DbDataSync", "updates"),
         RegisteredService,
         Console.IsInputRedirected,
-        Environment.GetEnvironmentVariable("GITHUB_TOKEN") ?? Environment.GetEnvironmentVariable("GH_TOKEN"));
+        Environment.GetEnvironmentVariable("GITHUB_TOKEN") ?? Environment.GetEnvironmentVariable("GH_TOKEN"),
+        new SystemctlServiceControl(new RealSystemdEnvironment()),
+        new HttpHealthProbe(),
+        workspace => new ProcessToolCommandRunner(workspace),
+        Environment.UserName);
 
     /// <summary>The phase 135 marker says whether <c>service install</c> ever registered a service against this
     /// data directory, and on which platform — which is what decides the stop/start steps of a plan.</summary>
@@ -61,6 +70,7 @@ internal sealed record UpdateEnvironment(
 public static class UpdateCommand
 {
     private const int DefaultLimit = 5;
+    private const int DefaultHealthTimeoutSeconds = 90;
     private static readonly ReleaseChannel[] AllChannels = [ReleaseChannel.Stable, ReleaseChannel.Beta, ReleaseChannel.Snapshot];
 
     public static async Task<int> RunAsync(string[] args)
@@ -77,6 +87,12 @@ public static class UpdateCommand
         if (!TryReadOptions(args, error, out var options))
             return 1;
 
+        if (options.Status)
+        {
+            WriteStatus(new UpdateStateStore(new UpdateWorkspace(DbDataSyncRoot.Resolve(args))), output);
+            return 0;
+        }
+
         var installed = ReleaseVersion.TryParse(env.InstalledVersion, out var parsed) ? parsed : null;
         var userAgent = $"DbDataSync-update/{installed?.Text ?? "unknown"}";
         var catalog = new ReleaseCatalog(http, env.GitHubToken, userAgent);
@@ -84,7 +100,7 @@ public static class UpdateCommand
         try
         {
             return options.To is not null
-                ? await ChooseByVersionAsync(options, installed, env, http, catalog, args, output, error, userAgent, cancellationToken)
+                ? await ChooseByVersionAsync(options, installed, env, http, catalog, args, input, output, error, userAgent, cancellationToken)
                 : await ListAndChooseAsync(options, installed, env, http, catalog, args, input, output, error, userAgent, cancellationToken);
         }
         catch (ReleaseSourceException ex)
@@ -138,12 +154,12 @@ public static class UpdateCommand
             return 1;
         }
 
-        return await PlanAsync(chosen, options, installed, env, http, args, output, userAgent, cancellationToken);
+        return await PlanAsync(chosen, options, installed, env, http, args, input, output, error, userAgent, cancellationToken);
     }
 
     private static async Task<int> ChooseByVersionAsync(
         Options options, ReleaseVersion? installed, UpdateEnvironment env, HttpClient http, ReleaseCatalog catalog,
-        string[] args, TextWriter output, TextWriter error, string userAgent, CancellationToken cancellationToken)
+        string[] args, TextReader input, TextWriter output, TextWriter error, string userAgent, CancellationToken cancellationToken)
     {
         var wanted = options.To!;
         if (wanted.Channel is not { } channel)
@@ -166,12 +182,12 @@ public static class UpdateCommand
             return 1;
         }
 
-        return await PlanAsync(chosen, options, installed, env, http, args, output, userAgent, cancellationToken);
+        return await PlanAsync(chosen, options, installed, env, http, args, input, output, error, userAgent, cancellationToken);
     }
 
     private static async Task<int> PlanAsync(
         ReleaseInfo chosen, Options options, ReleaseVersion? installed, UpdateEnvironment env, HttpClient http,
-        string[] args, TextWriter output, string userAgent, CancellationToken cancellationToken)
+        string[] args, TextReader input, TextWriter output, TextWriter error, string userAgent, CancellationToken cancellationToken)
     {
         var location = InstallLocator.Locate(env.BaseDirectory, env.GlobalToolsDirectory, env.InContainer);
         var operation = UpdatePlanner.OperationFor(installed, chosen.Version);
@@ -179,7 +195,8 @@ public static class UpdateCommand
         string? stagedDirectory = null;
         if (UpdatePlanner.NeedsStagedPackage(chosen, location, operation))
         {
-            var stageRoot = options.StageDirectory ?? env.DefaultStageDirectory;
+            // Absolute: it ends up on a `dotnet` command line, which is run from a working directory of its own.
+            var stageRoot = Path.GetFullPath(options.StageDirectory ?? env.DefaultStageDirectory);
             output.WriteLine($"Downloading {ReleaseSources.SnapshotNupkgName(chosen.Version)} …");
             var staged = await new SnapshotStager(http, userAgent).StageAsync(chosen, stageRoot, cancellationToken);
             output.WriteLine(staged.Reused
@@ -195,9 +212,119 @@ public static class UpdateCommand
             env.ServiceLookup(root),
             needsElevation: location.Kind == InstallKind.ToolPath && !CliOptions.IsUnderUserProfile(location.ToolRoot));
 
-        output.Write(UpdatePlanRenderer.Render(plan, env.IsWindows));
-        return 0;
+        if (!options.Apply)
+        {
+            output.Write(UpdatePlanRenderer.Render(plan, env.IsWindows));
+            return 0;
+        }
+
+        return await ApplyAsync(plan, options, env, args, root, input, output, error, cancellationToken);
     }
+
+    /// <summary><c>--apply</c>: carry the plan out rather than print it.</summary>
+    private static async Task<int> ApplyAsync(
+        UpdatePlan plan, Options options, UpdateEnvironment env, string[] args, string root,
+        TextReader input, TextWriter output, TextWriter error, CancellationToken cancellationToken)
+    {
+        output.Write(UpdatePlanRenderer.RenderHeader(plan));
+        output.WriteLine();
+
+        if (plan.Operation == PlanOperation.AlreadyInstalled)
+        {
+            output.WriteLine($"{plan.Target.Version} is already installed — nothing to do.");
+            return 0;
+        }
+
+        if (!plan.IsUpdatable)
+        {
+            // The same explanation the printed plan gives: a development build or a container has no tool
+            // install to update in place.
+            output.Write(UpdatePlanRenderer.Render(plan, env.IsWindows).Split("\n\n", 2)[^1]);
+            return 1;
+        }
+
+        if (env.IsWindows)
+        {
+            // Not "not implemented" — deliberately off until it has been watched working on a real Windows
+            // host. A running dbdatasync.exe (and the service) hold their own files open, so the swap needs a
+            // helper that outlives them, and that has not been verified. The printed plan is the way.
+            error.WriteLine("Applying an update automatically is not available on Windows yet. Run the commands below instead.");
+            error.WriteLine();
+            output.Write(UpdatePlanRenderer.Render(plan, env.IsWindows).Split("\n\n", 2)[^1]);
+            return 1;
+        }
+
+        if (!options.Yes)
+        {
+            if (env.InputRedirected)
+            {
+                error.WriteLine("Applying an update stops and restarts the service. Pass --yes to do that without a prompt.");
+                return 1;
+            }
+
+            output.Write(plan.Service.Manager == ServiceManager.None
+                ? "Apply this update now? [y/N] "
+                : "Apply this update now? The service will be stopped and started again. [y/N] ");
+            var answer = (await input.ReadLineAsync(cancellationToken))?.Trim();
+            if (!string.Equals(answer, "y", StringComparison.OrdinalIgnoreCase) && !string.Equals(answer, "yes", StringComparison.OrdinalIgnoreCase))
+            {
+                output.WriteLine("Cancelled.");
+                return 0;
+            }
+        }
+
+        // The operator is the one running this, so there is no boundary to keep — but the rollback package and the
+        // log still go in a directory of their own, not the service's (`updates/`, which it can write), so a
+        // compromised service cannot plant a package for a rollback to install. Kept if anything failed, so there
+        // is a log to read.
+        var privateDirectory = Directory.CreateTempSubdirectory("dbdatasync-update-cli-");
+        var workspace = new UpdateWorkspace(root, privateDirectory.FullName);
+        var applier = new UpdateApplier(new UpdateStateStore(workspace), env.RunnerFor(workspace));
+        var request = new UpdateRequest(
+            plan.Target.Version.Text, plan.Installed?.Text, plan.Target.Channel,
+            plan.Location.Kind, plan.Location.ToolRoot!, plan.SourceDirectory, DateTimeOffset.UtcNow, env.UserName);
+        var url = options.Url
+            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:Url")
+            ?? "http://localhost:5080";
+
+        var exit = await UpdateApplyFlow.RunAsync(
+            request, plan.Service, applier, env.ServiceControl, env.Health, url, options.HealthTimeout, output, error, cancellationToken);
+        if (exit == 0)
+            privateDirectory.Delete(recursive: true);
+        return exit;
+    }
+
+    private static void WriteStatus(UpdateStateStore store, TextWriter output)
+    {
+        output.WriteLine($"Update state ({store.Workspace.Directory})");
+
+        var pending = store.ReadPending();
+        if (pending is not null)
+            output.WriteLine($"  requested, not yet applied: {pending.TargetVersion} (by {pending.RequestedBy ?? "?"}, {pending.RequestedUtc:yyyy-MM-dd HH:mm} UTC) — applied at the next start of the service");
+
+        var state = store.ReadState();
+        if (state.Current is null)
+        {
+            output.WriteLine("  no update has been attempted here.");
+            return;
+        }
+
+        if (state.Current.Phase == UpdatePhase.Restarting)
+            output.WriteLine("  on trial: installed, and rolls back at the next start unless the new version proves itself");
+
+        output.WriteLine($"  now: {Describe(state.Current)}");
+        if (state.History.Count > 0)
+        {
+            output.WriteLine("  history, newest first:");
+            foreach (var entry in state.History)
+                output.WriteLine($"    {Describe(entry)}");
+        }
+    }
+
+    private static string Describe(UpdateProgress progress) =>
+        $"{progress.AtUtc:yyyy-MM-dd HH:mm} UTC  {progress.Phase.ToString().ToLowerInvariant(),-10}  " +
+        $"{progress.FromVersion ?? "?"} -> {progress.ToVersion ?? "?"}" +
+        (string.IsNullOrEmpty(progress.Message) ? "" : $"  {progress.Message}");
 
     private static async Task<List<Section>> FetchAsync(
         ReleaseCatalog catalog, IReadOnlyList<ReleaseChannel> channels, int limit, TextWriter error, CancellationToken cancellationToken)
@@ -291,6 +418,15 @@ public static class UpdateCommand
             return false;
         }
 
+        var healthSeconds = DefaultHealthTimeoutSeconds;
+        var healthText = CliOptions.Read(args, "--health-timeout");
+        if (healthText is not null
+            && (!int.TryParse(healthText, NumberStyles.None, CultureInfo.InvariantCulture, out healthSeconds) || healthSeconds < 1))
+        {
+            error.WriteLine($"--health-timeout must be a whole number of seconds, at least 1, not '{healthText}'.");
+            return false;
+        }
+
         ReleaseVersion? to = null;
         var toText = CliOptions.Read(args, "--to");
         if (toText is not null && !ReleaseVersion.TryParse(toText, out to))
@@ -307,6 +443,11 @@ public static class UpdateCommand
             List = CliOptions.Has(args, "--list"),
             Json = CliOptions.Has(args, "--json"),
             StageDirectory = CliOptions.Read(args, "--stage-dir"),
+            Apply = CliOptions.Has(args, "--apply"),
+            Yes = CliOptions.Has(args, "--yes"),
+            Status = CliOptions.Has(args, "--status"),
+            Url = CliOptions.Read(args, "--url"),
+            HealthTimeout = TimeSpan.FromSeconds(healthSeconds),
         };
         return true;
     }
@@ -321,5 +462,10 @@ public static class UpdateCommand
         public bool List { get; init; }
         public bool Json { get; init; }
         public string? StageDirectory { get; init; }
+        public bool Apply { get; init; }
+        public bool Yes { get; init; }
+        public bool Status { get; init; }
+        public string? Url { get; init; }
+        public TimeSpan HealthTimeout { get; init; } = TimeSpan.FromSeconds(DefaultHealthTimeoutSeconds);
     }
 }

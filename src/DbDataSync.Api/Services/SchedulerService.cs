@@ -32,6 +32,7 @@ public sealed class SchedulerService(
     ChangeWatermarkStore watermarks,
     DriverRegistry driverRegistry,
     ReconcileService reconcileService,
+    UpdateDrainState drain,
     ILogger<SchedulerService> logger) : BackgroundService
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(5);
@@ -45,6 +46,10 @@ public sealed class SchedulerService(
 
     private async Task TickAsync(CancellationToken cancellationToken)
     {
+        // Phase 159: winding down for an update — start nothing new, so what is running can be the last of it.
+        if (drain.IsDraining)
+            return;
+
         foreach (var name in configRepository.ListReplications())
         {
             ReplicationTaskConfig task;

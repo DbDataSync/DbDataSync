@@ -66,6 +66,21 @@ internal sealed class RealSystemdEnvironment : ISystemdEnvironment
 internal static class SystemdService
 {
     internal const string UnitName = "dbdatasync";
+
+    /// <summary>Set in the unit's environment by <see cref="RenderUnit"/> when it is asked for self-update
+    /// (<c>service install --self-update</c>). The service reads it to know it is running under a unit that
+    /// applies updates before starting, and <c>config check</c> looks for the same text in an installed unit file.
+    /// <para>
+    /// **A root-level opt-in, not a default.** The unit step it enables runs as root, so it is only ever written
+    /// by someone running <c>service install</c> as root and asking for it — a configuration setting the service
+    /// itself can write would not be a decision root made.
+    /// </para></summary>
+    internal const string SelfUpdateMarker = "DBDATASYNC_SELF_UPDATE=1";
+
+    internal const string SelfUpdateEnvironmentVariable = "DBDATASYNC_SELF_UPDATE";
+
+    /// <summary>The exit code a service uses to ask systemd to restart it so an update can be applied.</summary>
+    internal const int SelfUpdateExitCode = 75;
     internal const string UnitPath = "/etc/systemd/system/dbdatasync.service";
 
     /// <summary>
@@ -94,6 +109,7 @@ internal static class SystemdService
         var root = Path.GetFullPath(CliOptions.Read(args, "--repo") ?? CliOptions.DefaultRoot);
         var url = CliOptions.Read(args, "--url") ?? "http://localhost:5080";
         var user = CliOptions.Read(args, "--user") ?? "dbdatasync";
+        var selfUpdate = CliOptions.Has(args, "--self-update");
         var isManagedRoot = string.Equals(root, ManagedStateDirectoryRoot, StringComparison.Ordinal);
 
         // A hardened unit's own ProtectHome=yes (below) hides a user-profile ExecStart from the
@@ -136,7 +152,7 @@ internal static class SystemdService
         try
         {
             Directory.CreateDirectory(root);
-            env.WriteUnitFile(UnitPath, RenderUnit(executable, root, url, user, ResolveDotnetRoot()));
+            env.WriteUnitFile(UnitPath, RenderUnit(executable, root, url, user, ResolveDotnetRoot(), selfUpdate));
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
@@ -146,6 +162,15 @@ internal static class SystemdService
         }
 
         env.ChownRecursive(root, user, user);
+
+        if (selfUpdate)
+        {
+            Console.WriteLine(
+                "Self-update is on for this unit: before every start it runs a privileged step that applies an update the " +
+                "service asked for, and rolls one back that never became healthy. Updating from the web console also needs " +
+                "DbDataSync:SelfUpdateEnabled.");
+            Console.WriteLine();
+        }
 
         Console.WriteLine($"Registering the '{UnitName}' systemd service:");
         Console.WriteLine($"  executable         {executable}");
@@ -210,7 +235,7 @@ internal static class SystemdService
     /// unit; no machine-global side effect. Null omits the line entirely rather than emitting a wrong
     /// one — see <see cref="ResolveDotnetRoot"/>.
     /// </param>
-    internal static string RenderUnit(string executable, string root, string url, string user, string? dotnetRoot = null)
+    internal static string RenderUnit(string executable, string root, string url, string user, string? dotnetRoot = null, bool selfUpdate = false)
     {
         var execStart = $"{QuoteForSystemd(executable)} serve --repo {QuoteForSystemd(root)} --url {url}";
         var isManagedRoot = string.Equals(root, ManagedStateDirectoryRoot, StringComparison.Ordinal);
@@ -231,6 +256,13 @@ internal static class SystemdService
                """;
 
         var dotnetRootLine = dotnetRoot is null ? "" : $"Environment=DOTNET_ROOT={dotnetRoot}\n";
+        var selfUpdateEnvironment = selfUpdate ? $"Environment={SelfUpdateMarker}\n" : "";
+        var selfUpdateStep = selfUpdate
+            ? $"# `-` so that a step which fails, or does not exist (an update can go back to a version older than this feature),\n# never stops the service starting on whatever is installed; `+` so it runs outside this unit's own sandbox and\n# User=, which is what lets it write the tool directory. Both checked on systemd 255.\nExecStartPre=-+{QuoteForSystemd(executable)} internal apply-update --repo {QuoteForSystemd(root)}\n"
+            : "";
+        var selfUpdateExit = selfUpdate
+            ? $"SuccessExitStatus={SelfUpdateExitCode}\nRestartForceExitStatus={SelfUpdateExitCode}\n"
+            : "";
 
         return $"""
             [Unit]
@@ -240,13 +272,13 @@ internal static class SystemdService
 
             [Service]
             Type=notify
-            {dotnetRootLine}ExecStart={execStart}
+            {dotnetRootLine}{selfUpdateEnvironment}{selfUpdateStep}ExecStart={execStart}
             User={user}
             Group={user}
             WorkingDirectory={root}
             Restart=on-failure
             RestartSec=5
-            {serviceExtras}
+            {selfUpdateExit}{serviceExtras}
 
             [Install]
             WantedBy=multi-user.target

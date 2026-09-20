@@ -165,9 +165,11 @@ success, 1 on any failure (network, checksum, unknown version) — the CLI's exi
 - Be honest in the output about what the check covers: the sidecar is served from the same place as the
   file, so it catches truncation and corruption, **not** a tampered release. Authenticity of a snapshot
   rests on TLS to `github.com` and this repo's own release permissions.
-- Stable and beta are **not** staged: `dotnet` fetches them from nuget.org itself, and where the SDK verifies
-  package signatures (always on Windows; on Linux/macOS depends on the SDK version — confirm on the one in
-  use) nuget.org's repository signature is checked in the bargain.
+- Stable and beta are **not** staged: `dotnet` fetches them from nuget.org itself. **That gives no signature
+  check.** (This bullet first said nuget.org's repository signature was "checked in the bargain"; tested
+  2026-09-19 on SDK 10.0.112 / Linux, `dotnet tool install` installs an unsigned package under
+  `signatureValidationMode=require`, and installs a real package under a deliberately wrong trusted certificate —
+  it does not enforce NuGet's trust policy, though `dotnet restore` does. See phase 159's "Package signing".)
 
 ### The plan, and what is printed
 
@@ -305,5 +307,5 @@ Found while building it:
 - **Windows.** The printed Windows sequence (`sc.exe stop` → tool commands → `sc.exe start`) is unit-tested as
   text and follows the locked-file behaviour it exists for, but has not been run on a Windows host, as phases
   135/136/140 also needed.
-- Whether nuget.org's repository signature is checked on install depends on the SDK (always on Windows; on
-  Linux/macOS by SDK version) — noted in `docs/install.md`'s trust wording, not tested.
+- ~~Whether nuget.org's repository signature is checked on install.~~ **It is not, by `dotnet tool install`** —
+  tested; see phase 159's "Package signing".

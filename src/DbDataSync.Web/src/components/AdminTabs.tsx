@@ -3,7 +3,7 @@ import { tabClass } from './tabClass'
 
 /**
  * The Admin area's own tab strip — Configuration (phase 81), Certificate (phase 83), and (phase 118)
- * Drivers and Libraries, side by side. A shared component rather than each page inlining its own
+ * Drivers and Libraries, and (phase 159) Updates, side by side. A shared component rather than each page inlining its own
  * `NavLink`s, so adding a destination later means one edit, not every page staying in sync by hand.
  */
 export function AdminTabs() {
@@ -20,6 +20,9 @@ export function AdminTabs() {
       </NavLink>
       <NavLink to="/admin/libraries" className={tabClass} data-testid="admin-tab-libraries">
         Libraries
+      </NavLink>
+      <NavLink to="/admin/updates" className={tabClass} data-testid="admin-tab-updates">
+        Updates
       </NavLink>
     </>
   )

@@ -143,6 +143,66 @@ newer image tag.
 The release list is read from public APIs, anonymously; GitHub limits that to 60 requests an hour per
 address. Set `GITHUB_TOKEN` (or `GH_TOKEN`) to raise it — it is never required.
 
+### Applying it for you
+
+Add `--apply` and `dbdatasync update` carries the plan out instead of printing it — stop the service, install,
+start it, and check it answers, putting the previous version back if it does not:
+
+```sh
+sudo dbdatasync update --to 2026.9.18.1918 --apply
+```
+
+It asks first (`--yes` to skip the prompt, which is required when there is no terminal). It needs the same rights
+the printed commands would, which is why the example uses `sudo`. `--url` says where to check the service answers
+(default: the configured `DbDataSync:Url`), and `--health-timeout` how many seconds to wait for it (default 90).
+`dbdatasync update --status` shows what the last update did, and whether one is waiting or on trial. If an apply fails, its log is kept in a temporary directory whose path is printed.
+
+**Windows** does not have `--apply` yet: a running `dbdatasync.exe` and its service hold their own files open, so it
+needs a helper that outlives them, and that has not been verified on a real host. There, `update` prints the
+commands and you run them.
+
+### From the web console
+
+Admin → **Updates** lists the releases and has an **Update** button on each. It is **off by default**, and it needs
+three things — the first is a decision only root can make:
+
+1. **A systemd unit that applies updates.** Linux, installed as a dotnet tool, running as a systemd service that was
+   registered with `--self-update`:
+
+   ```sh
+   sudo dbdatasync service install --self-update
+   sudo systemctl restart dbdatasync
+   ```
+
+   That adds a step which runs **as root, outside the service's own sandbox**, before every start, to apply an update
+   the service asked for. It is opt-in, and is only ever added by running that command as root: the service runs with
+   fewer rights on purpose, and a setting the service itself could write must not be what switches a
+   root-privileged step on. Without it, an ordinary unit is unchanged and the console will say why it cannot update.
+2. `DbDataSync:SelfUpdateEnabled` set to `true` (Admin → Configuration, or `dbdatasync.config.yaml`).
+   `dbdatasync config check` warns when this is on and the unit was not registered with `--self-update`.
+3. Only `stable` is offered unless you allow more: `DbDataSync:SelfUpdateChannels` (`stable`, `beta`, `snapshot`,
+   comma-separated). A snapshot is a development build — its download is checked only against a checksum published
+   beside it, which catches corruption, not tampering.
+
+What pressing it does: the service stops starting new work (the scheduler pauses and changes over the API answer
+`409`), waits for running work to finish — up to `SelfUpdateDrainTimeoutSeconds`, default 120; anything left is picked
+up again after the restart — then exits with code 75, which its unit treats as a clean restart. Before the service
+starts again, systemd runs `dbdatasync internal apply-update` to install the new version. The new version counts as
+having worked once it has been serving for `SelfUpdateConfirmAfterSeconds` (default 60). **If it crashes or hangs
+before then, the next start puts the previous version back** — from a copy of its package kept aside for the purpose —
+with nothing watching it but the restart systemd does anyway.
+
+**What the service can and cannot ask for.** The request the service leaves behind is a version and who asked, nothing
+more. The privileged step looks that version up in the pinned release sources itself, works out which installation it
+is from its own location, and downloads any package itself — so a compromised service cannot point an update at other
+code, only ask for a genuine release. Its own records (what is on trial, the spare package, the log) are in
+`/var/lib/dbdatasync-update/`, which the service cannot write; what the service writes, and the console shows, is under
+`<data directory>/updates/`. A failed or rolled-back update says so on the page and names `update.log` in the root-only
+directory.
+
+The service is unreachable for a few seconds while it restarts, and the page keeps asking rather than reporting an
+error. Signing in again is not needed: sessions live in the state database.
+
 ## Running in a container
 
 Use this for a self-contained deployment with no `PATH` or service to manage.

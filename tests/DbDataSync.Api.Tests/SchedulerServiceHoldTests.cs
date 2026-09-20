@@ -115,6 +115,7 @@ public sealed class SchedulerServiceHoldTests(TestApiFactory factory) : IClassFi
         factory.Services.GetRequiredService<ChangeWatermarkStore>(),
         factory.Services.GetRequiredService<DriverRegistry>(),
         factory.Services.GetRequiredService<ReconcileService>(),
+        factory.Services.GetRequiredService<UpdateDrainState>(),
         NullLogger<SchedulerService>.Instance);
 
     private static readonly MethodInfo TickMethod = typeof(SchedulerService)
@@ -129,6 +130,34 @@ public sealed class SchedulerServiceHoldTests(TestApiFactory factory) : IClassFi
     /// <see cref="SchedulerService"/>'s constructor needs actually resolves from the real DI container,
     /// independent of whether a tick can be driven end-to-end here.
     /// </summary>
+    /// <summary>
+    /// Phase 159: while an update drains, the scheduler starts nothing new. The contrast is the point — the same
+    /// due mapping is dispatched by the very next tick once the drain is over, so it is the gate and nothing else
+    /// that held it back.
+    /// </summary>
+    [Fact]
+    public async Task NothingIsDispatched_WhileAnUpdateDrains_ButTheNextTickAfterwardsDoesDispatch()
+    {
+        var (task, mapping) = await SetUpHeldMappingAsync();
+        var taskRuns = factory.Services.GetRequiredService<TaskRunStore>();
+        var drain = factory.Services.GetRequiredService<UpdateDrainState>();
+
+        drain.Begin();
+        try
+        {
+            await TickAsync(BuildScheduler());
+            Assert.Empty(taskRuns.GetRunHistory(task.Name, RunKind.Primary));
+        }
+        finally
+        {
+            drain.End();
+        }
+
+        await TickAsync(BuildScheduler());
+        Assert.NotEmpty(taskRuns.GetRunHistory(task.Name, RunKind.Primary));
+        Assert.False(string.IsNullOrEmpty(mapping.Name));
+    }
+
     [Fact]
     public void BuildScheduler_ResolvesEveryDependency() => Assert.NotNull(BuildScheduler());
 

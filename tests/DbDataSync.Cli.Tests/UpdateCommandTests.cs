@@ -80,16 +80,55 @@ public class UpdateCommandTests : IDisposable
     private static HttpResponseMessage Json(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
+    private readonly List<string> _events = [];
+
     private UpdateEnvironment Env(
         string? installed = "2026.9.16.1005", string baseDirectory = ToolPathBase, bool container = false,
-        bool windows = false, bool inputRedirected = true, ServiceSituation? service = null, Action<string>? onLookup = null) =>
+        bool windows = false, bool inputRedirected = true, ServiceSituation? service = null, Action<string>? onLookup = null,
+        int stopExit = 0, int startExit = 0, bool healthy = true, Func<IReadOnlyList<string>, int>? dotnetExit = null) =>
         new(installed, baseDirectory, "/home/dan/.dotnet/tools", container, windows, Path.Combine(_temp, "stage"),
             root =>
             {
                 onLookup?.Invoke(root);
                 return service ?? ServiceSituation.None;
             },
-            inputRedirected, GitHubToken: null);
+            inputRedirected, GitHubToken: null,
+            new FakeServiceControl(_events, stopExit, startExit), new FakeHealth(_events, healthy),
+            _ => new RecordingRunner(_events, dotnetExit), "dan");
+
+    private sealed class FakeServiceControl(List<string> events, int stopExit, int startExit) : IServiceControl
+    {
+        public int Stop(ServiceSituation service)
+        {
+            events.Add("service stop");
+            return stopExit;
+        }
+
+        public int Start(ServiceSituation service)
+        {
+            events.Add("service start");
+            return startExit;
+        }
+    }
+
+    private sealed class FakeHealth(List<string> events, bool healthy) : IHealthProbe
+    {
+        public Task<bool> WaitUntilHealthyAsync(string baseUrl, TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            events.Add($"health {baseUrl} {(int)timeout.TotalSeconds}s");
+            return Task.FromResult(healthy);
+        }
+    }
+
+    private sealed class RecordingRunner(List<string> events, Func<IReadOnlyList<string>, int>? exit) : IToolCommandRunner
+    {
+        public Task<ToolCommandResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+        {
+            events.Add("dotnet " + string.Join(' ', arguments));
+            var code = exit?.Invoke(arguments) ?? 0;
+            return Task.FromResult(new ToolCommandResult(code, code == 0 ? "ok" : "it broke"));
+        }
+    }
 
     private async Task<(int Exit, string Out, string Err)> RunAsync(
         string[] args, UpdateEnvironment env, FakeNetwork network, string input = "")
@@ -238,6 +277,19 @@ public class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.True(File.Exists(Path.Combine(elsewhere, SnapshotA, $"DbDataSync.{SnapshotA}.nupkg")));
+    }
+
+    [Fact]
+    public async Task To_ASnapshot_WithARelativeStageDirectory_IsStagedAndInstalledFromAnAbsolutePath()
+    {
+        // `dotnet` is run from a working directory of its own, so a relative --add-source would mean something else.
+        var (exit, output, _) = await RunAsync(["--to", SnapshotA, "--stage-dir", "relative-stage"], Env(), Network());
+
+        Assert.Equal(0, exit);
+        var absolute = Path.Combine(Path.GetFullPath("relative-stage"), SnapshotA);
+        Assert.Contains(absolute, output);
+        Assert.True(Directory.Exists(absolute));
+        Directory.Delete(Path.GetFullPath("relative-stage"), recursive: true);
     }
 
     [Fact]
@@ -442,5 +494,221 @@ public class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, exit);
         Assert.Contains("Cancelled.", output);
+    }
+
+    // --- --apply -------------------------------------------------------------------------------------------
+
+    private static readonly ServiceSituation Systemd = new(ServiceManager.Systemd, "dbdatasync");
+
+    private string DataRoot => Path.Combine(_temp, "data");
+
+    private string[] Apply(params string[] extra) => ["--to", "2026.9.18.1918", "--apply", "--repo", DataRoot, .. extra];
+
+    private UpdateStateStore Store() => new(new UpdateWorkspace(DataRoot));
+
+    [Fact]
+    public async Task Apply_UnderAService_StopsInstallsStartsAndChecksHealth_ThenRecordsSuccess()
+    {
+        var (exit, output, error) = await RunAsync(Apply("--yes"), Env(service: Systemd), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Equal(
+            [
+                "service stop",
+                "dotnet tool update --tool-path /opt/dbdatasync DbDataSync --version 2026.9.18.1918",
+                "service start",
+                "health http://localhost:5080 90s",
+            ],
+            _events);
+        Assert.Contains("Updated to 2026.9.18.1918; the service is answering.", output);
+        Assert.DoesNotContain("Nothing has been changed", output);
+        Assert.Equal(UpdatePhase.Succeeded, Store().ReadState().Current!.Phase);
+        Assert.Null(Store().ReadApplied());
+    }
+
+    [Fact]
+    public async Task Apply_TheServiceNeverAnswers_RollsBack_AndRestartsTheOldVersion()
+    {
+        var (exit, output, error) = await RunAsync(Apply("--yes", "--health-timeout", "5"), Env(service: Systemd, healthy: false), Network());
+
+        Assert.Equal(1, exit);
+        Assert.Contains("did not answer at http://localhost:5080 within 5 seconds", output);
+        Assert.Contains("Rolled back: 2026.9.16.1005 is installed again", error);
+        Assert.Equal(
+            [
+                "service stop",
+                "dotnet tool update --tool-path /opt/dbdatasync DbDataSync --version 2026.9.18.1918",
+                "service start",
+                "health http://localhost:5080 5s",
+                "service stop",
+                "dotnet tool uninstall --tool-path /opt/dbdatasync DbDataSync",
+                "dotnet tool install --tool-path /opt/dbdatasync DbDataSync --version 2026.9.16.1005",
+                "service start",
+            ],
+            _events);
+        Assert.Equal(UpdatePhase.RolledBack, Store().ReadState().Current!.Phase);
+    }
+
+    [Fact]
+    public async Task Apply_AServiceThatCannotBeStopped_ChangesNothing_AndSaysToUseSudo()
+    {
+        var (exit, _, error) = await RunAsync(Apply("--yes"), Env(service: Systemd, stopExit: 1), Network());
+
+        Assert.Equal(1, exit);
+        Assert.Contains("Could not stop the service, so nothing was changed", error);
+        Assert.Contains("sudo", error);
+        Assert.Equal(["service stop"], _events);
+    }
+
+    [Fact]
+    public async Task Apply_AFailedInstall_RestartsTheServiceOnWhatWasAlreadyThere()
+    {
+        var (exit, output, error) = await RunAsync(Apply("--yes"), Env(service: Systemd, dotnetExit: _ => 1), Network());
+
+        Assert.Equal(1, exit);
+        Assert.Contains("failed (exit 1)", error);
+        Assert.Contains("Starting the service again on the version that was already installed", output);
+        Assert.Equal(["service stop", "dotnet tool update --tool-path /opt/dbdatasync DbDataSync --version 2026.9.18.1918", "service start"], _events);
+    }
+
+    [Fact]
+    public async Task Apply_WithNoService_JustInstalls_AndSaysToRestartServe()
+    {
+        var (exit, output, _) = await RunAsync(Apply("--yes"), Env(), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["dotnet tool update --tool-path /opt/dbdatasync DbDataSync --version 2026.9.18.1918"], _events);
+        Assert.Contains("restart `dbdatasync serve`", output);
+        Assert.Equal(UpdatePhase.Succeeded, Store().ReadState().Current!.Phase);
+    }
+
+    [Fact]
+    public async Task Apply_AsksFirst_AndAnythingButYesCancels()
+    {
+        var (exit, output, _) = await RunAsync(Apply(), Env(service: Systemd, inputRedirected: false), Network(), input: "n\n");
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Apply this update now? The service will be stopped and started again. [y/N]", output);
+        Assert.Contains("Cancelled.", output);
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public async Task Apply_AYesAtThePrompt_Proceeds()
+    {
+        var (exit, _, _) = await RunAsync(Apply(), Env(inputRedirected: false), Network(), input: "y\n");
+
+        Assert.Equal(0, exit);
+        Assert.Single(_events);
+    }
+
+    [Fact]
+    public async Task Apply_WithNoTerminal_AndNoYes_RefusesRatherThanGuess()
+    {
+        var (exit, _, error) = await RunAsync(Apply(), Env(service: Systemd, inputRedirected: true), Network());
+
+        Assert.Equal(1, exit);
+        Assert.Contains("Pass --yes", error);
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public async Task Apply_OnWindows_IsNotAvailable_AndPrintsTheCommandsInstead()
+    {
+        var env = Env(
+            baseDirectory: @"C:\Program Files\DbDataSync\.store\dbdatasync\2026.9.16.1005\dbdatasync\2026.9.16.1005\tools\net10.0\any\",
+            windows: true, service: new ServiceSituation(ServiceManager.WindowsService, "DbDataSync"));
+
+        var (exit, output, error) = await RunAsync(Apply("--yes"), env, Network());
+
+        Assert.Equal(1, exit);
+        Assert.Contains("not available on Windows yet", error);
+        Assert.Contains("sc.exe stop DbDataSync", output);
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public async Task Apply_FromADevelopmentBuild_ExplainsWhyThereIsNothingToUpdate()
+    {
+        var env = Env(baseDirectory: "/src/DbDataSync/src/DbDataSync.Cli/bin/Debug/net10.0/");
+
+        var (exit, output, _) = await RunAsync(Apply("--yes"), env, Network());
+
+        Assert.Equal(1, exit);
+        Assert.Contains("was not installed as a dotnet tool", output);
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public async Task Apply_TheVersionAlreadyInstalled_IsNothingToDo()
+    {
+        var (exit, output, _) = await RunAsync(["--to", "2026.9.16.1005", "--apply", "--yes", "--repo", DataRoot], Env(), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Contains("is already installed", output);
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public async Task Apply_ASnapshot_IsStagedThenInstalledFromThere()
+    {
+        var (exit, _, _) = await RunAsync(["--to", SnapshotA, "--apply", "--yes", "--repo", DataRoot], Env(), Network());
+
+        Assert.Equal(0, exit);
+        var staged = Path.Combine(_temp, "stage", SnapshotA);
+        Assert.Equal(
+            [$"dotnet tool update --tool-path /opt/dbdatasync DbDataSync --add-source {staged} --version {SnapshotA}"],
+            _events);
+    }
+
+    [Fact]
+    public async Task Apply_UsesTheConfiguredUrl_OrTheOneGiven()
+    {
+        await RunAsync(Apply("--yes", "--url", "https://example.test:5443"), Env(service: Systemd), Network());
+
+        Assert.Contains("health https://example.test:5443 90s", _events);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("soon")]
+    public async Task BadHealthTimeout_IsRefused(string value)
+    {
+        var (exit, _, error) = await RunAsync(["--health-timeout", value], Env(), Network());
+
+        Assert.Equal(1, exit);
+        Assert.Contains("--health-timeout must be a whole number of seconds", error);
+    }
+
+    // --- --status ------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Status_BeforeAnyUpdate_SaysSo_WithoutTouchingTheNetwork()
+    {
+        var network = Network();
+
+        var (exit, output, _) = await RunAsync(["--status", "--repo", DataRoot], Env(), network);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("no update has been attempted here", output);
+        Assert.Empty(network.Requested);
+    }
+
+    [Fact]
+    public async Task Status_AfterAnUpdate_ShowsTheOutcome_AndAnythingWaitingOrOnTrial()
+    {
+        await RunAsync(Apply("--yes"), Env(), Network());
+        var store = Store();
+        store.WritePending(new PendingUpdate("2026.9.20.100", DateTimeOffset.UtcNow, "dan"));
+        store.Record(UpdatePhase.Restarting, "waiting", "2026.9.18.1918", "2026.9.19.100", "dan");
+
+        var (_, output, _) = await RunAsync(["--status", "--repo", DataRoot], Env(), Network());
+
+        Assert.Contains("requested, not yet applied: 2026.9.20.100 (by dan", output);
+        Assert.Contains("on trial: installed", output);
+        Assert.Contains("now: ", output);
+        Assert.Contains("succeeded", output);
+        Assert.Contains("history, newest first:", output);
     }
 }

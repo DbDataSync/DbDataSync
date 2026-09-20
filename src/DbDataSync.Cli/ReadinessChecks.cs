@@ -187,17 +187,32 @@ internal sealed class RepoCheck : IReadinessCheck
 /// account against the process's own *current* identity would false-positive constantly, since
 /// <c>config check</c> is normally run interactively by an admin, not by the service account itself.
 /// </summary>
-internal sealed class ServiceRegistrationCheck : IReadinessCheck
+internal sealed class ServiceRegistrationCheck(string unitPath = SystemdService.UnitPath) : IReadinessCheck
 {
     public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
         var registration = ServiceRegistration.Read(context.Root);
-        return Task.FromResult(registration is null
-            ? new CheckResult("Service registration", CheckStatus.Ok, "Not registered as a service.")
-            : new CheckResult(
-                "Service registration", CheckStatus.Ok,
-                $"Registered for the '{registration.Account}' {registration.Platform} service account " +
-                $"on {registration.RegisteredAtUtc:u}."));
+        if (registration is null)
+            return Task.FromResult(new CheckResult("Service registration", CheckStatus.Ok, "Not registered as a service."));
+
+        var detail =
+            $"Registered for the '{registration.Account}' {registration.Platform} service account " +
+            $"on {registration.RegisteredAtUtc:u}.";
+
+        // Phase 159: self-update is enabled but the installed unit has no step that applies an update before a start,
+        // so the console's update button would restart the service on the same version, forever. Judged only when
+        // it is enabled — a unit without the step is the default and correct otherwise — and only when the unit file
+        // is there: this runs in a terminal, not under the unit, and a missing file is not this check's business.
+        if (context.ApiOptions.SelfUpdateEnabled && registration.Platform == "linux" && File.Exists(unitPath)
+            && !File.ReadAllText(unitPath).Contains(SystemdService.SelfUpdateMarker, StringComparison.Ordinal))
+        {
+            return Task.FromResult(new CheckResult(
+                "Service registration", CheckStatus.Warn,
+                detail + " DbDataSync:SelfUpdateEnabled is on, but its systemd unit does not apply updates, so the console's update button cannot work.",
+                Fix: $"sudo dbdatasync service install --self-update, then sudo systemctl restart {SystemdService.UnitName}"));
+        }
+
+        return Task.FromResult(new CheckResult("Service registration", CheckStatus.Ok, detail));
     }
 }
 

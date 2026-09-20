@@ -29,6 +29,91 @@ public sealed class SystemdServiceTests : IDisposable
         Assert.Contains("WantedBy=multi-user.target", unit);
     }
 
+    /// <summary>
+    /// Phase 159. The pre-start step runs as root, so a unit only gets it when root asked for it
+    /// (<c>service install --self-update</c>) — an ordinary install must not expose a privileged step that reads a
+    /// file the service can write.
+    /// </summary>
+    [Fact]
+    public void RenderUnit_ByDefault_HasNoPrivilegedStepAndNoSelfUpdate()
+    {
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync");
+
+        Assert.DoesNotContain("ExecStartPre", unit);
+        Assert.DoesNotContain("apply-update", unit);
+        Assert.DoesNotContain("DBDATASYNC_SELF_UPDATE", unit);
+        Assert.DoesNotContain("SuccessExitStatus", unit);
+        Assert.DoesNotContain("RestartForceExitStatus", unit);
+    }
+
+    /// <summary>The step runs before every start, outside the unit's sandbox (`+`), and never blocks a start
+    /// (`-`) — checked against systemd 255: a plain `+` step that fails stops the service starting at all, `-+`
+    /// does not, and a `+`-prefixed, quoted command with spaces in the path runs.</summary>
+    [Fact]
+    public void RenderUnit_WithSelfUpdate_AppliesAPendingUpdateBeforeEveryStart_OutsideTheSandbox_WithoutBlockingAStart()
+    {
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+
+        const string pre = "ExecStartPre=-+\"/usr/bin/dbdatasync\" internal apply-update --repo \"/var/lib/dbdatasync\"";
+        Assert.Contains(pre, unit);
+        Assert.True(unit.IndexOf(pre, StringComparison.Ordinal) < unit.IndexOf("ExecStart=\"", StringComparison.Ordinal),
+            "the apply step has to come before ExecStart");
+    }
+
+    [Fact]
+    public void RenderUnit_WithSelfUpdate_QuotesTheApplyStepsPathsToo()
+    {
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync tool", "/var/lib/db data sync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+
+        Assert.Contains("ExecStartPre=-+\"/usr/bin/dbdatasync tool\" internal apply-update --repo \"/var/lib/db data sync\"", unit);
+    }
+
+    /// <summary>Exit 75 is the service asking to be restarted so an update can be applied. Without both
+    /// directives it either is not restarted (Restart=on-failure ignores a "success") or is logged as a failed
+    /// unit on every update — measured in phase 159's spike.</summary>
+    [Fact]
+    public void RenderUnit_WithSelfUpdate_TreatsExit75AsACleanRestart()
+    {
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+
+        Assert.Contains("SuccessExitStatus=75", unit);
+        Assert.Contains("RestartForceExitStatus=75", unit);
+        Assert.Contains("Restart=on-failure", unit);
+    }
+
+    [Fact]
+    public void RenderUnit_WithSelfUpdate_MarksItselfAsSelfUpdateCapable()
+    {
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+
+        Assert.Contains("Environment=DBDATASYNC_SELF_UPDATE=1", unit);
+        Assert.Equal("DBDATASYNC_SELF_UPDATE=1", SystemdService.SelfUpdateMarker);
+        Assert.Equal(75, SystemdService.SelfUpdateExitCode);
+    }
+
+    [Fact]
+    public void RenderUnit_WithSelfUpdate_ANonDefaultRoot_GetsTheStepToo_AndKeepsItsOwnExtras()
+    {
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/srv/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+
+        Assert.Contains("ExecStartPre=-+\"/usr/bin/dbdatasync\" internal apply-update --repo \"/srv/dbdatasync\"", unit);
+        Assert.Contains("ReadWritePaths=/srv/dbdatasync", unit);
+    }
+
+    [Fact]
+    public void RenderUnit_WithSelfUpdate_StaysAWellFormedUnit_EveryLineInTheServiceSection()
+    {
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", "/usr/lib/dotnet", selfUpdate: true);
+
+        // No line is glued onto another and none has picked up stray indentation.
+        foreach (var line in unit.Split('\n'))
+            Assert.False(line.StartsWith(' ') || line.StartsWith('\t'), $"indented line: '{line}'");
+        Assert.Contains("\nEnvironment=DOTNET_ROOT=/usr/lib/dotnet\n", unit);
+        Assert.Contains("\nUser=dbdatasync\n", unit);
+        Assert.Contains("\nStateDirectory=dbdatasync\n", unit);
+        Assert.EndsWith("WantedBy=multi-user.target\n", unit);
+    }
+
     [Fact]
     public void RenderUnit_NonDefaultRoot_SkipsHardeningButStillGrantsReadWriteAccess()
     {
@@ -136,6 +221,34 @@ public sealed class SystemdServiceTests : IDisposable
         Assert.Contains(env.SystemctlCalls, call => call is ["enable", SystemdService.UnitName]);
         // Enabled, not started — the operator runs `systemctl start` themselves and sees its output.
         Assert.DoesNotContain(env.SystemctlCalls, call => call.Contains("start"));
+    }
+
+    [Fact]
+    public void Install_WithoutSelfUpdate_WritesAnOrdinaryUnit()
+    {
+        var env = new FakeSystemdEnvironment();
+
+        SystemdService.Install(["--repo", _root, "--user", "testsvc"], env);
+
+        Assert.DoesNotContain("ExecStartPre", env.WrittenUnit!.Value.Content);
+        Assert.DoesNotContain("DBDATASYNC_SELF_UPDATE", env.WrittenUnit.Value.Content);
+    }
+
+    /// <summary>Root's decision, made by running `service install` with the flag — never by a setting the service
+    /// itself could write.</summary>
+    [Fact]
+    public void Install_WithSelfUpdate_WritesTheUnitThatAppliesUpdates()
+    {
+        var env = new FakeSystemdEnvironment();
+
+        var exitCode = SystemdService.Install(["--repo", _root, "--user", "testsvc", "--self-update"], env);
+
+        Assert.Equal(0, exitCode);
+        var unit = env.WrittenUnit!.Value.Content;
+        Assert.Contains("ExecStartPre=-+", unit);
+        Assert.Contains("internal apply-update", unit);
+        Assert.Contains("Environment=DBDATASYNC_SELF_UPDATE=1", unit);
+        Assert.Contains("SuccessExitStatus=75", unit);
     }
 
     [Fact]

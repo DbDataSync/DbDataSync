@@ -226,6 +226,15 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<PreviewService>();
         builder.Services.AddSingleton<ScriptTestService>();
         builder.Services.AddSingleton<ProcessSupervisor>();
+
+        // Phase 159: updating this installation from the console. The drain state is read by the scheduler
+        // and the request middleware; the facts describe how this process was installed and started.
+        builder.Services.AddSingleton<UpdateDrainState>();
+        builder.Services.AddSingleton(_ => UpdateHostFacts.Current());
+        builder.Services.AddSingleton<IUpdateWorkProbe, SupervisorWorkProbe>();
+        builder.Services.AddSingleton<IUpdateRestart, HostUpdateRestart>();
+        builder.Services.AddSingleton<UpdateService>();
+        builder.Services.AddHostedService<UpdateConfirmationService>();
         builder.Services.AddSingleton<LibraryValidationLauncher>();
         builder.Services.AddSingleton<SegmentingStrategyRunner>();
         builder.Services.AddSingleton<CustomSegmentExpansion>();
@@ -345,6 +354,10 @@ public static class DbDataSyncHost
         {
             app.UseHttpsRedirection();
         }
+
+        // While an update drains, anything that would change something answers 409. Before authentication: it
+        // costs nothing and does not depend on who is asking.
+        app.UseMiddleware<UpdateDrainMiddleware>();
 
         app.UseAuthentication();
         app.UseAuthorization();

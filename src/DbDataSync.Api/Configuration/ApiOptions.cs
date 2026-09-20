@@ -1,4 +1,5 @@
 using DbDataSync.State;
+using DbDataSync.Updates;
 namespace DbDataSync.Api.Configuration;
 
 /// <summary>
@@ -20,6 +21,13 @@ public sealed class ApiOptions
     public const int DefaultChangeCheckRetentionDays = 7;
     public const int DefaultRunPruningIntervalMinutes = 60;
     public const bool DefaultNuGetSearchEnabled = true;
+
+    // Phase 159: applying an update from the console replaces the code the service runs, as the service's
+    // own account, so every default here is the closed one.
+    public const bool DefaultSelfUpdateEnabled = false;
+    public const string DefaultSelfUpdateChannels = "stable";
+    public const int DefaultSelfUpdateDrainTimeoutSeconds = 120;
+    public const int DefaultSelfUpdateConfirmAfterSeconds = 60;
 
     public required string RepoRoot { get; init; }
     public required string StateDbPath { get; init; }
@@ -134,6 +142,25 @@ public sealed class ApiOptions
     /// </summary>
     public bool NuGetSearchEnabled { get; init; } = DefaultNuGetSearchEnabled;
 
+    /// <summary>
+    /// Phase 159: whether an admin may update this installation from the web console. Off by default — a page
+    /// that can replace the code a service runs is a capability an operator turns on deliberately.
+    /// </summary>
+    public bool SelfUpdateEnabled { get; init; } = DefaultSelfUpdateEnabled;
+
+    /// <summary>Which release channels the console may offer: any of <c>stable</c>, <c>beta</c>,
+    /// <c>snapshot</c>. Only <c>stable</c> by default — a beta is a prerelease, and a snapshot is a development
+    /// build whose only integrity check is a same-origin checksum.</summary>
+    public IReadOnlyList<ReleaseChannel> SelfUpdateChannels { get; init; } = [ReleaseChannel.Stable];
+
+    /// <summary>How long an update waits for running work to finish before it restarts the service anyway.
+    /// What is interrupted is reconciled at the next start; this only bounds how polite the wait is.</summary>
+    public TimeSpan SelfUpdateDrainTimeout { get; init; } = TimeSpan.FromSeconds(DefaultSelfUpdateDrainTimeoutSeconds);
+
+    /// <summary>How long a freshly updated version must have been serving before it counts as having worked.
+    /// Not merely "ready": a version that starts and then dies ten seconds later must still be rolled back.</summary>
+    public TimeSpan SelfUpdateConfirmAfter { get; init; } = TimeSpan.FromSeconds(DefaultSelfUpdateConfirmAfterSeconds);
+
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection("DbDataSync");
@@ -170,7 +197,35 @@ public sealed class ApiOptions
             NuGetSearchEnabled = bool.TryParse(section["NuGetSearchEnabled"], out var nuGetSearchEnabled)
                 ? nuGetSearchEnabled
                 : DefaultNuGetSearchEnabled,
+            SelfUpdateEnabled = bool.TryParse(section["SelfUpdateEnabled"], out var selfUpdateEnabled)
+                ? selfUpdateEnabled
+                : DefaultSelfUpdateEnabled,
+            SelfUpdateChannels = ReadChannels(section["SelfUpdateChannels"]),
+            SelfUpdateDrainTimeout = TimeSpan.FromSeconds(
+                int.TryParse(section["SelfUpdateDrainTimeoutSeconds"], out var drain) && drain >= 0
+                    ? drain
+                    : DefaultSelfUpdateDrainTimeoutSeconds),
+            SelfUpdateConfirmAfter = TimeSpan.FromSeconds(
+                int.TryParse(section["SelfUpdateConfirmAfterSeconds"], out var confirm) && confirm >= 0
+                    ? confirm
+                    : DefaultSelfUpdateConfirmAfterSeconds),
         };
+    }
+
+    /// <summary>
+    /// A comma- or semicolon-separated list of channel names. Anything that is not a channel is ignored rather
+    /// than refused, and an empty result falls back to stable only — a typo must never widen what an update may
+    /// install, so the failure mode is the narrowest setting.
+    /// </summary>
+    internal static IReadOnlyList<ReleaseChannel> ReadChannels(string? configured)
+    {
+        var channels = (configured ?? DefaultSelfUpdateChannels)
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(name => name.All(char.IsAsciiLetter) && Enum.TryParse<ReleaseChannel>(name, ignoreCase: true, out _))
+            .Select(name => Enum.Parse<ReleaseChannel>(name, ignoreCase: true))
+            .Distinct()
+            .ToList();
+        return channels.Count == 0 ? [ReleaseChannel.Stable] : channels;
     }
 
     /// <summary>

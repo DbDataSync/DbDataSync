@@ -67,6 +67,79 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Contains("windows", check.Detail);
     }
 
+    private ReadinessContext SelfUpdateContext(bool enabled) =>
+        ReadinessChecks.BuildContext(["--repo", _root, $"--DbDataSync:SelfUpdateEnabled={(enabled ? "true" : "false")}"]);
+
+    /// <summary>Phase 159: with self-update enabled, an installed unit without the marker is one the console's
+    /// update button cannot work with.</summary>
+    [Fact]
+    public async Task ServiceRegistrationCheck_SelfUpdateOn_AnOldSystemdUnit_Warns()
+    {
+        ServeCommand.Prepare(_root);
+        ServiceRegistration.Write(_root, "dbdatasync", "linux");
+        var unit = Path.Combine(_root, "old.service");
+        File.WriteAllText(unit, "[Service]\nExecStart=/usr/bin/dbdatasync serve\nRestart=on-failure\n");
+
+        var result = await new ServiceRegistrationCheck(unit).RunAsync(SelfUpdateContext(enabled: true), CancellationToken.None);
+
+        Assert.Equal(CheckStatus.Warn, result.Status);
+        Assert.Contains("does not apply updates", result.Detail);
+        Assert.Contains("service install --self-update", result.Fix);
+    }
+
+    /// <summary>A unit without the step is the default, and correct when self-update is off.</summary>
+    [Fact]
+    public async Task ServiceRegistrationCheck_SelfUpdateOff_AnOrdinaryUnit_IsOk()
+    {
+        ServeCommand.Prepare(_root);
+        ServiceRegistration.Write(_root, "dbdatasync", "linux");
+        var unit = Path.Combine(_root, "ordinary.service");
+        File.WriteAllText(unit, SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync"));
+
+        var result = await new ServiceRegistrationCheck(unit).RunAsync(SelfUpdateContext(enabled: false), CancellationToken.None);
+
+        Assert.Equal(CheckStatus.Ok, result.Status);
+        Assert.DoesNotContain("does not apply", result.Detail);
+    }
+
+    [Fact]
+    public async Task ServiceRegistrationCheck_SelfUpdateOn_ACurrentUnit_IsOk()
+    {
+        ServeCommand.Prepare(_root);
+        ServiceRegistration.Write(_root, "dbdatasync", "linux");
+        var unit = Path.Combine(_root, "current.service");
+        File.WriteAllText(unit, SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true));
+
+        var result = await new ServiceRegistrationCheck(unit).RunAsync(SelfUpdateContext(enabled: true), CancellationToken.None);
+
+        Assert.Equal(CheckStatus.Ok, result.Status);
+    }
+
+    [Fact]
+    public async Task ServiceRegistrationCheck_AMissingUnitFile_IsNotJudged()
+    {
+        ServeCommand.Prepare(_root);
+        ServiceRegistration.Write(_root, "dbdatasync", "linux");
+
+        var result = await new ServiceRegistrationCheck(Path.Combine(_root, "not-there.service"))
+            .RunAsync(SelfUpdateContext(enabled: true), CancellationToken.None);
+
+        Assert.Equal(CheckStatus.Ok, result.Status);
+    }
+
+    [Fact]
+    public async Task ServiceRegistrationCheck_AWindowsServiceIsNeverJudgedByAUnitFile()
+    {
+        ServeCommand.Prepare(_root);
+        ServiceRegistration.Write(_root, "LocalSystem", "windows");
+        var unit = Path.Combine(_root, "old.service");
+        File.WriteAllText(unit, "[Service]\n");
+
+        var result = await new ServiceRegistrationCheck(unit).RunAsync(SelfUpdateContext(enabled: true), CancellationToken.None);
+
+        Assert.Equal(CheckStatus.Ok, result.Status);
+    }
+
     /// <summary>Phase 123's own "passes on the dev/CI box" requirement, against the real environment
     /// (no faking) — this Linux sandbox has a real <c>/etc/dotnet/install_location</c>, which is
     /// exactly the common case this check exists to recognize.</summary>

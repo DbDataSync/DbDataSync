@@ -27,6 +27,8 @@ import type {
   LibrarySearchResponse,
   LibrarySummary,
   RestartRequiredStatus,
+  UpdateReleases,
+  UpdateStatus,
   BulkCreateRequest,
   BulkCreateResult,
   MappingLag,
@@ -108,6 +110,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 const put = <T>(path: string, body: unknown) =>
   request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
+
+const post = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
 /**
  * The query string `runs` and `runs/watermark-times` both build from — one function rather than two
@@ -385,6 +390,16 @@ export const api = {
      * admin's tab (or this one after a reload) still learns about a change another request made. */
     restartRequired: {
       get: () => request<RestartRequiredStatus>('/api/admin/restart-required'),
+    },
+    /** Updating this installation (phase 159). Every call is admin-only. */
+    update: {
+      status: () => request<UpdateStatus>('/api/admin/update/status'),
+      /** Read from the pinned release sources on each call — nothing polls them in the background. */
+      releases: (channel: string) =>
+        request<UpdateReleases>(`/api/admin/update/releases?channel=${encodeURIComponent(channel)}&limit=15`),
+      /** Names only a version: the server looks it up in its own sources and refuses anything else. `202`
+       * means the service is winding down to restart. */
+      apply: (version: string) => post<{ message: string }>('/api/admin/update/apply', { version }),
     },
   },
   users: {

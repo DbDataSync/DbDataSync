@@ -242,6 +242,10 @@ sets; see "`dbdatasync.config.yaml`," above, for the file itself.
 | `RunPruningIntervalMinutes` | `DbDataSync__RunPruningIntervalMinutes` | `60` | how often the retention sweep runs |
 | `ChangeCheckRetentionDays` | `DbDataSync__ChangeCheckRetentionDays` | `7` | how long the scheduler's change-check history (phase 75) is kept; `0` = keep forever |
 | `NuGetSearchEnabled` | `DbDataSync__NuGetSearchEnabled` | `true` | whether the Libraries screen's search box (phase 119) may call the public NuGet index; `false` for an air-gapped or locked-down deployment |
+| `SelfUpdateEnabled` | `DbDataSync__SelfUpdateEnabled` | `false` | whether an admin may update this installation from the Updates screen (phase 159). Off by default — it replaces the code the service runs. Linux with a systemd unit from this version or later only, for now; see [Installing → Updating](install.md#updating) |
+| `SelfUpdateChannels` | `DbDataSync__SelfUpdateChannels` | `stable` | which channels the Updates screen may offer, comma-separated: `stable`, `beta`, `snapshot`. A snapshot is a development build, checked only against a checksum published beside it |
+| `SelfUpdateDrainTimeoutSeconds` | `DbDataSync__SelfUpdateDrainTimeoutSeconds` | `120` | how long an update waits for running work to finish before restarting the service anyway; anything interrupted is reconciled at the next start |
+| `SelfUpdateConfirmAfterSeconds` | `DbDataSync__SelfUpdateConfirmAfterSeconds` | `60` | how long an updated version must have been serving before the update counts as having worked; until then a restart rolls it back |
 
 `TaskRunnerDllPath` resolves in this order: (1) beside the running assembly — true for the tool, the
 container, and any plain `dotnet publish`; (2) a dev-repo-layout guess (swaps `DbDataSync.Api/bin` for

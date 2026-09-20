@@ -119,6 +119,7 @@ public sealed class SchedulerServiceReconcileTests(TestApiFactory factory) : ICl
         factory.Services.GetRequiredService<ChangeWatermarkStore>(),
         factory.Services.GetRequiredService<DriverRegistry>(),
         factory.Services.GetRequiredService<ReconcileService>(),
+        factory.Services.GetRequiredService<UpdateDrainState>(),
         NullLogger<SchedulerService>.Instance);
 
     [Fact]

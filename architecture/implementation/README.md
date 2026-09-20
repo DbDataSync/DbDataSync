@@ -70,9 +70,37 @@ So the order lives here, and is the one to work through:
 | 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
 | 4 | **155** — `pgoutput`: logical decoding with nothing installed on the source | **gated on a product decision, not on engineering** — last deliberately, because if the answer is "managed Postgres" it should never be built at all. See the phase doc's own "Why this might not be worth building" |
 | 5 | **158K** — snapshot releases for every promoted `test` build, and `dbdatasync update` to list, stage and print the install commands | placed after the queue above rather than jumping it — reorder freely, only this table changes. Also the first phase to verify the release pipeline's own rollout: its workflow only goes live once a release has put it on `main` |
-| 6 | **159K** — apply an update automatically, from the CLI and the web console | **must follow 158K** (it executes 158K's `UpdatePlan` and reuses its `DbDataSync.Updates` library). Opens with a spike that needs a real Windows host and a real systemd host |
+| 6 | **159K** — apply an update automatically, from the CLI and the web console | **must follow 158K** (it executes 158K's `UpdatePlan` and reuses its `DbDataSync.Updates` library). **Built for Linux and the CLI; not yet verified on real hosts, and Windows is deliberately off** — see its Progress section for exactly what is and is not proven |
 
-Updated 2026-09-19 (latest of all): **158K and 159K join `todo/`, as an ordered pair.** From two planning
+Updated 2026-09-19 (later): **159K is built** for Linux and the CLI, with Windows deliberately switched off. **Read its
+"trust boundary" section first:** the first build had the root-privileged pre-start step act on a request file that
+the unprivileged service can write — a compromised service could have had root install a package of its choosing,
+for every default Linux install. It was found by rereading the design from the attacker's side, before anything was
+committed, and redesigned: the request is now a version and nothing else, root re-derives everything from the pinned
+release sources and its own location, its records live in a directory the service cannot write, and the step only
+exists in a unit that root registered with `service install --self-update`. Running the real thing then found a
+second bug (a relative path made a rollback uninstall the new version and fail to install the old), also fixed. Checking
+the docs' claims about signatures found a third problem, a documentation one: `dotnet tool install` does **not**
+enforce NuGet's signature trust policy (tested), so nothing in 158/159 verifies a package signature, and neither
+release nor snapshot packages are author-signed — written up as
+`architecture/planning/todo/follow-up-phase-158-159-release-and-snapshot-packages-are-unsigned-and-tool-install-does-not-verify-them.md`. A
+`DbDataSync.Updates` applier that installs, keeps the outgoing package aside and rolls back; `dbdatasync update
+--apply` (a synchronous stop → install → start → health check path) and `--status`; a privileged
+`internal apply-update` step the systemd unit runs before every start; `api/admin/update/*` behind a setting that is
+off by default; and Admin → Updates in the console, driven in a real browser. The mechanism is *start-counting*: the
+service asks to be restarted with exit code 75, the unit applies the update before the next start and records it
+"on trial", and only a new version that has then served for a while confirms it — otherwise the next start rolls it
+back, with nothing watching but the restart systemd does anyway. What was checked for real: the applier against a
+real tool root (apply, then rollback from the copy kept out of the real `.store`, run from the installed tool
+itself), a real `--apply` downgrade through nuget.org, the rendered unit against `systemd-analyze`, and the page in
+Chromium. What was **not**, because it needs a host this was not built on: `ExecStartPre=+` escaping the hardened
+unit's sandbox (systemd's documented behaviour; the user manager here cannot create a mount namespace), ownership
+handling as root, a whole service updating itself under a system unit, and everything on Windows. The Linux spike's
+findings changed the design in two ways worth knowing: exit 75 needs `SuccessExitStatus`/`RestartForceExitStatus` or
+it logs a failed unit on every update, and confirmation has to wait out a grace period rather than happen at "ready".
+See `architecture/implementation/todo/phase-159K-automated-update-from-cli-and-web-console.md`.
+
+Updated 2026-09-19 (earlier): **158K and 159K join `todo/`, as an ordered pair.** From two planning
 docs (`planning/done/snapshot-packages-on-github-packages.md`, `planning/done/self-update-and-release-channels.md`).
 158K publishes a snapshot GitHub *prerelease* for every promoted `test` build (newest 20 kept) and adds
 `dbdatasync update` — list, choose, stage a snapshot's nupkg, print the commands. 159K makes the swap

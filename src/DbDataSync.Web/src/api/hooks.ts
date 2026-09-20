@@ -7,7 +7,7 @@ import type {
   DriverType,
   ScriptDefinition, ScriptTestRequest, MetricsWindow, BulkLoadRequest, ReconcileDeletesRequest, ConnectionInput, ReplicationTaskConfig,
   RunHistoryFilters,
-  SegmentingStrategyConfig, SetMappingReadStateRequest, TableMappingConfig } from './types'
+  SegmentingStrategyConfig, SetMappingReadStateRequest, TableMappingConfig, UpdatePhase } from './types'
 
 // Query keys are centralized here so mutations know exactly what to invalidate.
 const keys = {
@@ -16,6 +16,8 @@ const keys = {
   knownLibraries: ['known-libraries'] as const,
   knownDrivers: ['known-drivers'] as const,
   restartRequired: ['admin', 'restart-required'] as const,
+  updateStatus: ['admin', 'update', 'status'] as const,
+  updateReleases: (channel: string) => ['admin', 'update', 'releases', channel] as const,
   connections: ['connections'] as const,
   connection: (name: string) => ['connections', name] as const,
   capabilities: (name: string) => ['connections', name, 'capabilities'] as const,
@@ -202,6 +204,49 @@ export function useInstallDriverFromCatalog() {
  * other host-state query here already takes. */
 export function useRestartRequired() {
   return useQuery({ queryKey: keys.restartRequired, queryFn: api.admin.restartRequired.get })
+}
+
+/** The phases in which an update is in flight — the service is staging, winding down, restarting, or the new
+ * version has not yet proved itself. */
+export const ACTIVE_UPDATE_PHASES: readonly UpdatePhase[] = ['staging', 'draining', 'applying', 'restarting']
+
+/**
+ * Where the update stands (phase 159). Polls while one is in flight — and **keeps polling through the failures a
+ * restart causes**: `applying` is the last thing the old process reports before it exits, so when the requests
+ * start failing the last known phase is still an active one and this carries on until the service is back.
+ * `retry: false` so a request that fails during that gap is a data point to try again in two seconds, not
+ * something for react-query to back off from.
+ */
+export function useUpdateStatus() {
+  return useQuery({
+    queryKey: keys.updateStatus,
+    queryFn: api.admin.update.status,
+    retry: false,
+    refetchInterval: (query) => {
+      const phase = query.state.data?.phase
+      return phase && ACTIVE_UPDATE_PHASES.includes(phase) ? 2_000 : false
+    },
+  })
+}
+
+/** Releases on one channel, read from the pinned sources when asked (`enabled`) — never polled: an air-gapped
+ * install must not start making outbound calls because a page is open. */
+export function useUpdateReleases(channel: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.updateReleases(channel ?? ''),
+    queryFn: () => api.admin.update.releases(channel!),
+    enabled: enabled && !!channel,
+    retry: false,
+    staleTime: 60_000,
+  })
+}
+
+export function useApplyUpdate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (version: string) => api.admin.update.apply(version),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.updateStatus }),
+  })
 }
 
 export function useConnections() {

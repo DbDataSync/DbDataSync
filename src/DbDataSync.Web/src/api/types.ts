@@ -1633,3 +1633,63 @@ export interface QueryPreviewResult {
   /** What the engine said about a query that would not run. Not a failed request — an answer. */
   error: string | null
 }
+
+// Updating this installation from the console — phase 159. Phases are the server's, lower-cased: an update is
+// idle, or moves through staging (a snapshot downloading), draining (waiting for running work), applying (the
+// service is about to restart), and restarting (the new version is installed and proving itself), and ends
+// succeeded, rolledback or failed.
+export type UpdatePhase =
+  | 'idle' | 'staging' | 'draining' | 'applying' | 'restarting' | 'succeeded' | 'rolledback' | 'failed'
+
+export type UpdateChannel = 'stable' | 'beta' | 'snapshot'
+
+export interface UpdateHistoryEntry {
+  phase: UpdatePhase
+  message: string | null
+  fromVersion: string | null
+  toVersion: string | null
+  atUtc: string
+  requestedBy: string | null
+}
+
+export interface UpdateStatus {
+  /** `DbDataSync:SelfUpdateEnabled`. Off by default. */
+  enabled: boolean
+  runningVersion: string | null
+  /** `ToolPath`, `Global`, `Container` or `NotAToolInstall`. */
+  installKind: string
+  /** The channels the operator has allowed the console to offer. */
+  channels: UpdateChannel[]
+  /** Whether this installation can apply an update right now; when it cannot, `cannotApplyReason` says why
+   * in a sentence an admin can act on. */
+  canApply: boolean
+  cannotApplyReason: string | null
+  phase: UpdatePhase
+  message: string | null
+  atUtc: string | null
+  fromVersion: string | null
+  toVersion: string | null
+  requestedBy: string | null
+  /** An update has been requested and not yet applied. */
+  pending: boolean
+  /** An update has been applied and its new version has not yet proved itself. */
+  onTrial: boolean
+  /** Where the privileged step logs what it did — a path to tell an admin about; on Linux it is in a directory the
+   * service itself cannot write. */
+  logPath: string
+  history: UpdateHistoryEntry[]
+}
+
+export interface UpdateRelease {
+  version: string
+  channel: UpdateChannel
+  builtUtc: string | null
+  installed: boolean
+  newer: boolean
+}
+
+export interface UpdateReleases {
+  releases: UpdateRelease[]
+  /** A channel that could not be read while another could — never fatal. */
+  warnings: string[]
+}

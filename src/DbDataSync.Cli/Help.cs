@@ -17,9 +17,11 @@ public static class Help
 
               dbdatasync service install|uninstall|status [--repo <path>] [--url <url>] [--account <account>]
                   On Windows: registers this tool as a Windows service. Needs an elevated prompt.
-              dbdatasync service install|uninstall|status [--repo <path>] [--url <url>] [--user <user>]
+              dbdatasync service install|uninstall|status [--repo <path>] [--url <url>] [--user <user>] [--self-update]
                   On Linux: registers a systemd unit (default user: dbdatasync). Needs root
                   (`sudo`); enables but does not start it — run `systemctl start dbdatasync` next.
+                  --self-update adds a privileged pre-start step that applies updates the web console
+                  asks for (see docs/install.md, "From the web console"). Off unless you ask for it.
 
               dbdatasync tool install|uninstall [--dir <path>]
                   Puts a `dotnet tool install --tool-path <dir>` copy of this CLI on the machine's
@@ -32,8 +34,13 @@ public static class Help
                   Lists the versions available on each release channel (stable and beta from
                   nuget.org, snapshots of every promoted test build from GitHub), lets you choose
                   one, downloads it if it is a snapshot, and prints the commands that install it.
-                  It never changes the installation itself — you run the printed commands.
                   Set GITHUB_TOKEN to raise GitHub's anonymous rate limit; it is never required.
+              dbdatasync update --to <version> --apply [--yes] [--url <url>] [--health-timeout <seconds>]
+                  Carries the update out instead of printing it: stops the service, installs, starts it
+                  and checks it answers, rolling back if it does not. Needs the rights to do those
+                  (sudo). Not available on Windows yet — there it prints the commands to run.
+              dbdatasync update --status
+                  Shows what the last update did, and whether one is waiting or on trial.
 
               dbdatasync invite [--role Admin|Viewer] [--repo <path>] [--url <url>]
                   Prints a fresh single-use invitation URL. For when the first-run one has scrolled

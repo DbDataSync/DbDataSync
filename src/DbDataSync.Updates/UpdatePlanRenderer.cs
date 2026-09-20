@@ -48,6 +48,15 @@ public static class UpdatePlanRenderer
         return text.ToString();
     }
 
+    /// <summary>Just the "Installed / Selected / Staged" lines, for a caller that goes on to carry the plan out
+    /// itself rather than print the commands.</summary>
+    public static string RenderHeader(UpdatePlan plan)
+    {
+        var text = new StringBuilder();
+        RenderHeader(plan, text);
+        return text.ToString();
+    }
+
     private static void RenderHeader(UpdatePlan plan, StringBuilder text)
     {
         text.Append($"Installed   {plan.Installed?.ToString() ?? "(unknown)"}\n");
@@ -75,23 +84,17 @@ public static class UpdatePlanRenderer
                 break;
         }
 
-        var target = plan.Location.Kind == InstallKind.Global
-            ? "--global"
-            : $"--tool-path {Quote(plan.Location.ToolRoot!)}";
-        var installArguments = $"{target} {ReleaseSources.PackageId}"
-            + (plan.SourceDirectory is null ? "" : $" --add-source {Quote(plan.SourceDirectory)}")
-            + $" --version {plan.Target.Version}";
-
-        if (plan.Operation == PlanOperation.Reinstall)
+        // The commands themselves come from UpdateCommands — the same ones phase 159 runs — so what is
+        // printed here and what is executed cannot disagree; only the wording around them lives here.
+        foreach (var invocation in UpdateCommands.Install(plan))
         {
-            steps.Add((
-                $"Remove the installed version — `dotnet tool update` will not go down to an older one{elevated}",
-                [$"{sudo}dotnet tool uninstall {target} {ReleaseSources.PackageId}"]));
-            steps.Add(($"Install{elevated}", [$"{sudo}dotnet tool install {installArguments}"]));
-        }
-        else
-        {
-            steps.Add(($"Update{elevated}", [$"{sudo}dotnet tool update {installArguments}"]));
+            var title = invocation.Purpose switch
+            {
+                "remove" => $"Remove the installed version — `dotnet tool update` will not go down to an older one{elevated}",
+                "install" => $"Install{elevated}",
+                _ => $"Update{elevated}",
+            };
+            steps.Add((title, [$"{sudo}dotnet {string.Join(' ', invocation.Arguments.Select(Quote))}"]));
         }
 
         switch (plan.Service)

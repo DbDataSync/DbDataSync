@@ -81,6 +81,24 @@ public sealed class AdminConfigService(
             "Whether the Libraries screen's search box may call the public NuGet index. Disable in an " +
             "air-gapped or locked-down deployment.",
             SupportsWrite: true),
+        new("DbDataSync:SelfUpdateEnabled",
+            "Whether an admin may update this installation from the Updates screen. Off by default: it replaces " +
+            "the code the service runs, as the service's own account. Needs a systemd unit written by this " +
+            "version or later (`dbdatasync service install`); Linux only for now.",
+            SupportsWrite: true),
+        new("DbDataSync:SelfUpdateChannels",
+            "Which release channels the Updates screen may offer, comma-separated: stable, beta, snapshot. " +
+            "A snapshot is a development build; its download is only checked against a checksum published " +
+            "beside it.",
+            SupportsWrite: true),
+        new("DbDataSync:SelfUpdateDrainTimeoutSeconds",
+            "How long an update waits for running work to finish before restarting the service anyway. " +
+            "Anything interrupted is reconciled at the next start.",
+            SupportsWrite: true, Unit: "seconds"),
+        new("DbDataSync:SelfUpdateConfirmAfterSeconds",
+            "How long an updated version must have been serving before the update counts as having worked. " +
+            "Until then, a restart rolls the update back.",
+            SupportsWrite: true, Unit: "seconds"),
         new("DbDataSync:Auth:Disabled",
             "Runs with no authentication at all. Nested under Auth, one level past what " +
             "dbdatasync.config.yaml's writer can address — set via environment variable or CLI flag.",
@@ -270,6 +288,10 @@ public sealed class AdminConfigService(
         "DbDataSync:RunPruningIntervalMinutes" => ((int)apiOptions.RunPruningInterval.TotalMinutes).ToString(),
         "DbDataSync:ChangeCheckRetentionDays" => apiOptions.ChangeCheckRetentionDays?.ToString() ?? "0",
         "DbDataSync:NuGetSearchEnabled" => apiOptions.NuGetSearchEnabled ? "true" : "false",
+        "DbDataSync:SelfUpdateEnabled" => apiOptions.SelfUpdateEnabled ? "true" : "false",
+        "DbDataSync:SelfUpdateChannels" => string.Join(",", apiOptions.SelfUpdateChannels.Select(c => c.ToString().ToLowerInvariant())),
+        "DbDataSync:SelfUpdateDrainTimeoutSeconds" => ((int)apiOptions.SelfUpdateDrainTimeout.TotalSeconds).ToString(),
+        "DbDataSync:SelfUpdateConfirmAfterSeconds" => ((int)apiOptions.SelfUpdateConfirmAfter.TotalSeconds).ToString(),
         "DbDataSync:Auth:Disabled" => authOptions.Disabled ? "true" : "false",
         "DbDataSync:Auth:AdminGroup" => authOptions.AdminGroup,
         "DbDataSync:Auth:ViewerGroup" => authOptions.ViewerGroup,
@@ -302,6 +324,10 @@ public sealed class AdminConfigService(
         "DbDataSync:RunPruningIntervalMinutes" => ApiOptions.DefaultRunPruningIntervalMinutes.ToString(),
         "DbDataSync:ChangeCheckRetentionDays" => ApiOptions.DefaultChangeCheckRetentionDays.ToString(),
         "DbDataSync:NuGetSearchEnabled" => ApiOptions.DefaultNuGetSearchEnabled ? "true" : "false",
+        "DbDataSync:SelfUpdateEnabled" => ApiOptions.DefaultSelfUpdateEnabled ? "true" : "false",
+        "DbDataSync:SelfUpdateChannels" => ApiOptions.DefaultSelfUpdateChannels,
+        "DbDataSync:SelfUpdateDrainTimeoutSeconds" => ApiOptions.DefaultSelfUpdateDrainTimeoutSeconds.ToString(),
+        "DbDataSync:SelfUpdateConfirmAfterSeconds" => ApiOptions.DefaultSelfUpdateConfirmAfterSeconds.ToString(),
         _ => null,
     };
 }
