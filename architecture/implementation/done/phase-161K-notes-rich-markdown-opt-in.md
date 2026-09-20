@@ -1,4 +1,4 @@
-# Phase 161 — Notes can opt in to the rich Markdown renderer (planned)
+# Phase 161 — Notes can opt in to the rich Markdown renderer (done)
 
 Second of three phases split from `architecture/planning/done/embedded-docs-in-the-app.md`. **Must follow
 160K**: it reuses 160K's `RichMarkdown` component and 160K's `GET /api/about`.
@@ -115,3 +115,26 @@ Viewers see Notes too, so it cannot come from an Admin endpoint. Add `notesRichM
   (57 total); a stubbed Playwright spec (`notes-rich-markdown.spec.ts`, 5 tests): off → text and no badge; on → table and
   badge; on with a hostile note → inert, image is a link and is never requested, no dialog; `/api/about` failing → safe
   renderer; Admin row with its caution. Screenshots under `screenshots/notes-rich-markdown/`.
+- [x] **Run for real:** the built CLI against a scratch config folder — `config get` (unset, shows the default), `set … yes`
+  refused, `set … true` prints the warning and writes and commits, `get` reads it back, `set Auth:AdminGroup` is refused with
+  the list of what is settable. The full Playwright suite (129 tests) passes apart from one ten-second-polling timing test in
+  `runs-watermarks-refresh.spec.ts` that passes when re-run alone and does not touch Notes or Admin.
+
+## Outcome
+
+Built as designed, with these differences from the plan:
+
+- **The key is flat** — `DbDataSync:NotesRichMarkdown`, not `DbDataSync:Notes:RichMarkdown` (see Progress: the config writer
+  cannot address a nested key, so the planned name could never have been editable from the console).
+- **The CLI door is a general `config get|set`, not a Notes-only verb.** It reads the Admin screen's catalog, so every
+  writable setting now has a CLI door and a new catalog key reaches the CLI and `setup`'s defaults for free.
+- **No separate "parity test" was extended** (the plan mentioned one): none exists. What keeps the surfaces in step instead
+  is that they read one catalog — `AdminConfigService.Writable` — so agreement is structural rather than asserted. A test
+  that fails when a catalog key has no `setup` control would be a different, larger piece of work and is not claimed here.
+- **`setup` has a control for this key only.** The other catalog keys are reachable on `setup` no better than before.
+
+**Not verified:** the `setup` TUI in a real terminal — the checkbox is driven by a real keystroke and `Populate`/`Apply` are
+tested headless, but nobody looked at the rendered tab. Windows was not run.
+
+**For 162K:** `RichMarkdown`'s `img` renderer now has two modes; the docs use inline. Embedded images (relative `images/…`)
+will need a third case — admitted for the docs only, never for Notes.

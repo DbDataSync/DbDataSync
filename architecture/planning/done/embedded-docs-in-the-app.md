@@ -3,7 +3,7 @@
 > **Resolved 2026-09-19 — split into three phases.** The design below was agreed and is now carried by:
 > - `architecture/implementation/done/phase-160K-in-app-docs-viewer.md` — packaging, `GET /api/about`,
 >   the shared renderer, the viewer and the dangling-reference fixes;
-> - `architecture/implementation/todo/phase-161K-notes-rich-markdown-opt-in.md` — the Notes opt-in
+> - `architecture/implementation/done/phase-161K-notes-rich-markdown-opt-in.md` — the Notes opt-in
 >   (`DbDataSync:Notes:RichMarkdown`);
 > - `architecture/implementation/todo/phase-162K-doc-images-doc-audit-and-nuget-readme-preprocessing.md` —
 >   embedded images, a docs audit, and relative-link authoring with pack-time rewriting for the NuGet README.
