@@ -1,7 +1,7 @@
 # Embedded docs in the app
 
 > **Resolved 2026-09-19 — split into three phases.** The design below was agreed and is now carried by:
-> - `architecture/implementation/todo/phase-160K-in-app-docs-viewer.md` — packaging, `GET /api/about`,
+> - `architecture/implementation/done/phase-160K-in-app-docs-viewer.md` — packaging, `GET /api/about`,
 >   the shared renderer, the viewer and the dangling-reference fixes;
 > - `architecture/implementation/todo/phase-161K-notes-rich-markdown-opt-in.md` — the Notes opt-in
 >   (`DbDataSync:Notes:RichMarkdown`);

@@ -1,4 +1,4 @@
-# Phase 160 — the docs ship with the app, and the web console can read them (planned)
+# Phase 160 — the docs ship with the app, and the web console can read them (done)
 
 First of three phases split from `architecture/planning/done/embedded-docs-in-the-app.md` (now resolved into
 these). **160K** ships the docs and a viewer. **161K** lets Notes opt in to the same renderer. **162K**
@@ -177,3 +177,38 @@ operator-authored Notes. A new shared `RichMarkdown` component is used for docs.
     doesn't run. See `architecture/planning/todo/follow-up-phase-160-ci-never-builds-the-dockerfile-and-its-package-job-never-runs.md`.
     The docs-in-the-nupkg assertion therefore also went into `release.yml` (before it publishes) and
     `publish-snapshot.yml`, where it does run — the shell logic was run against the real nupkg.
+- [x] **7. A second pre-existing bug, found by installing the packed tool instead of inspecting it.** Run from any
+  directory but its own — a terminal `dbdatasync serve`, or the systemd unit (`WorkingDirectory` is the data root) — an
+  **installed tool answered `404 "No web assets are published"` to `/`**, while its own directory held the whole console.
+  `WebApplication.CreateBuilder(args)` looks for `wwwroot` under the *current directory*. The Windows service escapes this
+  (`UseWindowsService` moves the content root to the app directory) and so does the container (`WORKDIR /app`), which is
+  why it went unseen — phase 137 verified the console was *packed* and the container *served*, not that an installed tool
+  serves it from where it is actually launched. **Fixed:** `WebRootLocator.Resolve` points only the *web root* (not the
+  content root, which would also move `appsettings.json`) at the app's own `wwwroot` when the working directory has none;
+  a `wwwroot` in the working directory still wins, so a source checkout and the container are unchanged. Four unit tests.
+  **Verified end to end:** a real `dotnet pack`, `dotnet tool install` into a clean tool root, `dbdatasync serve` started
+  from an unrelated directory — `/`, `/invite`, `/replications/x`, `/docs`, and all seven `/docs/*.md` answer 200 (the
+  docs byte-identical to `docs/`) to someone who has not signed in; `/api/connections` and `/api/about` stay 401;
+  `/api/nothing` is 404.
+
+## Outcome
+
+Built as designed, with three deviations and two fixes to things that were already broken:
+
+- **`.md` needed no content-type mapping.** The plan assumed it did; .NET 10's default table has it. Nothing was added
+  for it; `EmbeddedDocsServingTests` pins the behaviour instead.
+- **Vitest was added** (the SPA had no unit-test runner) — `npm test`, run by the CI `web` job.
+- **The docs-in-the-package assertion lives in `release.yml` and `publish-snapshot.yml`**, not only `ci.yml`, because
+  `ci.yml`'s `package` job cannot run (it needs a `release/v*` tag nothing pushes). See the follow-up
+  `planning/todo/follow-up-phase-160-ci-never-builds-the-dockerfile-and-its-package-job-never-runs.md`.
+- **Fixed, pre-existing:** with authentication on (the default) the SPA itself answered 401 (`UseStaticFiles` and the SPA
+  fallback were behind the fallback authorization policy); and an installed tool did not find its own `wwwroot` unless
+  run from its directory. Both meant the web console was unreachable from a fresh install, and both were invisible
+  because every automated check runs with authentication off or from a directory that happens to work. The viewer
+  would have been unreachable without them.
+
+**What to carry to 161K and 162K:** `RichMarkdown` has the `docLinks` switch 161K needs (off by default, which is the
+Notes case) and `/api/about` is where 161K adds `notesRichMarkdown`. 162K's image work meets `RichMarkdown`'s `img`
+renderer, which today accepts network addresses only (`https:`), so relative `images/…` paths will need to be admitted
+there — for the docs and only the docs. Not verified: Windows (the new code has no platform branches, but nothing was run
+there), and the Docker path in CI (no workflow builds the image; verified locally, once, by hand).

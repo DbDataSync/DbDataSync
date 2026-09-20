@@ -38,7 +38,13 @@ public static class DbDataSyncHost
 {
     public static WebApplication Build(string[] args)
     {
-        var builder = WebApplication.CreateBuilder(args);
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            Args = args,
+            // Only the web root, not the content root: moving the content root would also change where appsettings.json is
+            // read from, which is a much larger change than "find the console".
+            WebRootPath = WebRootLocator.Resolve(Directory.GetCurrentDirectory(), AppContext.BaseDirectory),
+        });
         InsertConfigFile(builder);
 
         // Applied only when this process really is a service, so `dbdatasync serve` in a terminal is
