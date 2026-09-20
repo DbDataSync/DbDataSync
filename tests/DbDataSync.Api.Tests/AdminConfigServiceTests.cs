@@ -58,6 +58,42 @@ public sealed class AdminConfigServiceTests : IDisposable
         return builder.Build();
     }
 
+    /// <summary>
+    /// The Admin screen lists "every <c>DbDataSync:*</c> key docs/configuration.md documents" — and nothing checked that the
+    /// document and the catalog agree, so a key could ship undocumented (or the reverse) and only a reader would find out
+    /// (phase 162). Each key's environment-variable form is what the document's tables list beside it, and the form is
+    /// unambiguous: <c>DbDataSync:Auth:AdminGroup</c> is <c>DbDataSync__Auth__AdminGroup</c>.
+    /// </summary>
+    [Fact]
+    public void EveryKeyTheAdminScreenListsIsDocumentedInConfigurationMd()
+    {
+        var docs = File.ReadAllText(Path.Combine(RepoDocsDirectory(), "configuration.md"));
+        var service = Build(ConfigurationWithFile());
+
+        var undocumented = service.List()
+            .Select(entry => entry.Key.Replace(":", "__"))
+            // Prefix match: the one array key is documented as `..._Origins__0`, `__1`, ...
+            .Where(env => !docs.Contains($"`{env}", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.True(undocumented.Count == 0,
+            $"docs/configuration.md does not mention: {string.Join(", ", undocumented)}. Add a row for each (the env-var form in backticks).");
+    }
+
+    /// <summary>The docs folder of the checkout these tests run from — found by walking up, since the test assembly is
+    /// deep under bin/.</summary>
+    internal static string RepoDocsDirectory()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "docs");
+            if (File.Exists(Path.Combine(candidate, "configuration.md")))
+                return candidate;
+        }
+
+        throw new DirectoryNotFoundException("docs/configuration.md was not found above " + AppContext.BaseDirectory);
+    }
+
     [Fact]
     public void NothingConfigures_TheKey_SourceIsDefault()
     {

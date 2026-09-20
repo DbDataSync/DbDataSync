@@ -139,3 +139,23 @@ the code agree).
   every doc link at `blob/<HEAD>/…`.
   - The commit is HEAD of the checkout, not `GITHUB_SHA`: on `publish-snapshot.yml`'s `workflow_run` trigger `GITHUB_SHA` is the
     default branch's commit, not the `test` commit that was checked out and packed.
+- [x] **4. The audit, and the checks it leaves behind.** Done mechanically first, because that finds real drift cheaply:
+  - **Found and fixed: `docs/configuration.md` told operators to run `dbdatasync secret …` and `dbdatasync cert …`** in five
+    places — commands phase 115 moved under `config`; the top-level forms answer "Unknown command". Now
+    `dbdatasync config secret` / `config cert` throughout.
+  - **Found and fixed: the docs never mentioned the Docs viewer** — added to `getting-started.md` ("Reading these docs in the
+    console"), the container section, and the dev-server section (Vite serves `docs/` and the pictures at the packaged
+    addresses).
+  - **Checked and fine:** every catalog key's env-var form is documented (`Origins` by prefix); every `dbdatasync update` flag
+    the install page documents exists in `UpdateCommand`; every `--flag` in the docs is a literal somewhere in the source
+    (`--flag` in one sentence is a placeholder; the `--rate`/`--rows`/… flags are the dev harness's, in `tools/`).
+  - **Left behind as tests:** `EveryKeyTheAdminScreenListsIsDocumentedInConfigurationMd` (Api.Tests) — the catalog against
+    `configuration.md`; `DocsCommandDriftTests` (Cli.Tests) — every `dbdatasync <command>` shown in code in any doc is a command
+    the CLI's own help lists (`internal` allowed: install.md names it as something systemd runs). Mutation-checked: the previous
+    `configuration.md` fails it, naming `dbdatasync cert` and `dbdatasync secret`. Earlier in this phase: the vitest tests for
+    every relative page link, every picture and `docs/images.txt`.
+  - **Not audited:** the prose. Whether each page's *explanations* are still true (as opposed to its commands, flags, keys and
+    links) needs someone who knows the behaviour to read them; a mechanical pass cannot say. `replication-concepts.md` and
+    `state-database.md` in particular were written before phases 145–159 and have not been re-read against them.
+  - **Small thing noticed, not changed:** `dbdatasync`'s own help says "see docs/install.md", a path that does not exist on a
+    machine with only the tool installed. It could point at the console's Docs or the repository.

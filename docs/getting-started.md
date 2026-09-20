@@ -5,6 +5,12 @@
 This walks through setting up your first replication. If you haven't installed DbDataSync yet, see
 [Install](install.md) first. Everything below happens in the web UI, once DbDataSync is running.
 
+## Reading these docs in the console
+
+Everything in this documentation is also in the web console: the book icon on the left rail (**Docs**) opens the same pages,
+for the version of DbDataSync that is running — no network needed, so it works on a machine that cannot reach GitHub, and it
+cannot describe a different release than the one you have. It is there for every signed-in user, not only administrators.
+
 ## Your first replication
 
 1. **Connections.** Add a `SQL Auth` connection for each of your two SQL Server instances.

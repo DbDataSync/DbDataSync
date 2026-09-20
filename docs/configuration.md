@@ -13,7 +13,7 @@ distinction matters more than any individual setting below, so it's worth readin
 - **`dbdatasync`** — a dotnet global tool (`src/DbDataSync.Cli`, `PackAsTool=true`,
   `ToolCommandName=dbdatasync`, [on NuGet](https://www.nuget.org/packages/DbDataSync)). This is the
   actual product distribution: `dbdatasync setup`, `dbdatasync serve`,
-  `dbdatasync service install|uninstall|status`, `dbdatasync cert ...`, `dbdatasync invite`,
+  `dbdatasync service install|uninstall|status`, `dbdatasync config cert ...`, `dbdatasync invite`,
   `dbdatasync health`, `dbdatasync version`. It's also what the Docker image runs. See
   [Install](install.md) for every way to install and run it.
 
@@ -210,21 +210,21 @@ Hits `{url}/api/health`; exits `0` on success, `1` otherwise. This is what the c
 `HEALTHCHECK` runs — inside the image there's no config file to find, so it always falls through to
 the hardcoded default unless `--url` is passed (which the image's own `HEALTHCHECK` does).
 
-### `dbdatasync secret set|list|remove`
+### `dbdatasync config secret set|list|remove`
 
 Thin wrappers over the same secret store connections use (see "Secrets," below) — reachable without
 going through a connection's own save flow. Never prints a stored value back.
 
 | command | does |
 | --- | --- |
-| `dbdatasync secret set <ref> <value>` | stores `value` under `ref` |
-| `dbdatasync secret list [<ref> ...]` | reports whether each given ref is currently set (given none, checks the one fixed ref this build defines: `dbdatasync:config:stateConnectionString`) |
-| `dbdatasync secret remove <ref>` | deletes a stored value |
+| `dbdatasync config secret set <ref> <value>` | stores `value` under `ref` |
+| `dbdatasync config secret list [<ref> ...]` | reports whether each given ref is currently set (given none, checks the one fixed ref this build defines: `dbdatasync:config:stateConnectionString`) |
+| `dbdatasync config secret remove <ref>` | deletes a stored value |
 
 Example — setting the state store's password for a `dbdatasync.config.yaml`-configured deployment:
 
 ```
-dbdatasync secret set dbdatasync:config:stateConnectionString "Password=..."
+dbdatasync config secret set dbdatasync:config:stateConnectionString "Password=..."
 ```
 
 ### `dbdatasync version`
@@ -332,17 +332,17 @@ to enroll a key.
 | key | env var | default | meaning |
 | --- | --- | --- | --- |
 | `DbDataSync:Certificates:ExpiryWarningDays` | `DbDataSync__Certificates__ExpiryWarningDays` | `30` | how many days before the bound certificate's `NotAfter` the daily expiry check (phase 82) starts raising a `CertificateExpiring` notification; raised at most once a day, and `CertificateExpired` once past `NotAfter` |
-| `DbDataSync:Certificates:CaConfig` | `DbDataSync__Certificates__CaConfig` | none | the enterprise CA's `CASERVER\CA Name` string — read by `dbdatasync cert enroll`/`renew`/`templates` (a CLI-process concern; the running API never needs to know which CA a certificate came from, only which one is bound) |
-| `DbDataSync:Certificates:Template` | `DbDataSync__Certificates__Template` | none | the certificate template name for `dbdatasync cert enroll`/`renew` |
+| `DbDataSync:Certificates:CaConfig` | `DbDataSync__Certificates__CaConfig` | none | the enterprise CA's `CASERVER\CA Name` string — read by `dbdatasync config cert enroll`/`renew`/`templates` (a CLI-process concern; the running API never needs to know which CA a certificate came from, only which one is bound) |
+| `DbDataSync:Certificates:Template` | `DbDataSync__Certificates__Template` | none | the certificate template name for `dbdatasync config cert enroll`/`renew` |
 
-Windows-only end to end (phase 82) — see `dbdatasync cert`, above, for issuance/installation/binding.
+Windows-only end to end (phase 82) — see `dbdatasync config cert`, above, for issuance/installation/binding.
 The daily expiry check is a hosted service in the API process, registered only when
 `OperatingSystem.IsWindows()`, on the same pattern `SchedulerService`/`RunPruningService` already use.
 
 ### `Kestrel:Certificates:Default:*`
 
 Not a `DbDataSync:*` key — ASP.NET Core's own Kestrel configuration, read the same way (config file,
-environment variable, CLI flag), and what `dbdatasync cert bind` writes into `dbdatasync.config.yaml`:
+environment variable, CLI flag), and what `dbdatasync config cert bind` writes into `dbdatasync.config.yaml`:
 
 | key | meaning |
 | --- | --- |
@@ -458,6 +458,10 @@ different things that happen to share a name.
 
 No `.env` files ship with the project — this is the only variable Vite itself reads.
 
+The dev server also serves this repository's `docs/` at `/docs/*.md`, and the pictures they show from `screenshots/` at
+`/screenshots/…` — the addresses a packaged build serves them at — so the console's **Docs** pages work under `npm run dev`
+and edits to a page appear on the next load.
+
 ## Container image
 
 ```sh
@@ -466,6 +470,8 @@ docker run -p 8080:8080 -v dbdatasync-data:/var/lib/dbdatasync <image>
 
 - `EXPOSE 8080`; entrypoint is `dbdatasync serve --url http://0.0.0.0:8080` — no trailing `--repo` argument; override at `docker run` time (`docker run ... <image> --repo /some/other/path`) to pass different `dbdatasync serve` flags.
 - `HEALTHCHECK` runs `dbdatasync health --url http://127.0.0.1:8080`.
+- The image carries these docs (`/app/wwwroot/docs`) and the pictures they show, so **Docs** in the console works with no
+  network — see [Getting started](getting-started.md#reading-these-docs-in-the-console).
 - `VOLUME ["/var/lib/dbdatasync"]` — one mount is a complete deployment: the config repository and the state database live together, so a backup of this directory is a backup of everything that isn't the image itself.
 - `ENV DbDataSync__RepoRoot=/var/lib/dbdatasync` (phase 112) — the environment-variable form of the `DbDataSync:RepoRoot` config key, honoured by the same repo-root resolver every command uses (below). `CliOptions.DefaultRoot` already resolves to the same path on Linux, so this is set explicitly rather than relied on as a coincidence.
 
