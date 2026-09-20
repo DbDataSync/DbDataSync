@@ -151,6 +151,11 @@ jobs:
       # Phase 160: the renderer's tests — what markup a document may and may not produce. Plain Node, no browser.
       - name: Test
         run: npm test
+      # Phase 162: the script that makes the package README's links absolute (tools/docs/nuget-readme.mjs), tested with
+      # node's own runner — plain Node, nothing to install. Run from the repo root, not this job's working directory.
+      - name: Test the NuGet README rewriter
+        working-directory: .
+        run: node --test tools/docs/*.test.mjs
       - name: Build
         run: npm run build
 
@@ -309,6 +314,13 @@ jobs:
               exit 1
             fi
           done
+          while IFS= read -r image; do
+            [ -z "$image" ] && continue
+            if [ ! -s "$packed/../$image" ]; then
+              echo "packed nupkg is missing or has an empty $image, which the docs show"
+              exit 1
+            fi
+          done < <(tr -d '\r' < docs/images.txt)
       - name: Install it into a clean tool root and run it
         run: |
           dotnet tool install --tool-path /tmp/dbdatasync-tool --add-source artifacts DbDataSync
@@ -348,6 +360,11 @@ jobs:
             curl -sf "http://127.0.0.1:18080/docs/$(basename "$page")" -o /dev/null \
               || { echo "the default image does not serve /docs/$(basename "$page")"; exit 1; }
           done
+          while IFS= read -r image; do
+            [ -z "$image" ] && continue
+            curl -sf "http://127.0.0.1:18080/$image" -o /dev/null \
+              || { echo "the default image does not serve /$image, which the docs show"; exit 1; }
+          done < <(tr -d '\r' < docs/images.txt)
       # Phase 121: the slim alternative to the default (SDK-based) image above. Built with the same
       # single `docker build` this repo's own Dockerfile already defines — --target just picks a
       # different one of its stages, so there is no second Dockerfile to keep in sync.

@@ -112,3 +112,30 @@ the code agree).
 - **`development.md` in the NuGet README's link list** — the README links to it today; nothing here changes
   that, but the listing still sends a package reader to a build-from-source page. Leave, or drop from the
   README's list?
+
+## Progress
+
+- [x] **1. One authored form: relative.** README's 16 doc links are `docs/x.md` and `getting-started.md`'s 7 pictures are
+  `../screenshots/golden-path/x.png`. Nothing absolute remains in the README or the docs except external sites.
+- [x] **A simpler design than the one above for the embedded docs — no rewriting at all.** The plan had a build-time transform
+  producing two outputs. Instead the package keeps the repository's layout: `wwwroot/docs/*.md` and
+  `wwwroot/screenshots/golden-path/*.png`, so `../screenshots/golden-path/x.png` written in `docs/getting-started.md` resolves
+  in the browser to `/screenshots/golden-path/x.png` unchanged. The renderer maps that exact shape (`resolveDocImage`: one
+  folder deep, raster formats, no path separators in the name) and only for the docs — a note gets no relative image
+  resolution. Only NuGet needs a transform. `docs/images.txt` lists what ships (one repo-relative path a line); a vitest
+  test fails if it and the docs disagree in either direction, or a listed file is missing.
+- [x] **2. Images shipped.** `CopyDocs` (csproj) reads the manifest; the Dockerfile copies the same list (strips a CR in case
+  of CRLF). The seven total 0.65 MB, so no optimisation pass (the open question). Verified: a real `dotnet pack` holds the
+  seven at `tools/net10.0/any/wwwroot/screenshots/golden-path/`; a real `docker build` serves each byte-identical and serves
+  no other screenshot. `release.yml`/`publish-snapshot.yml`/`ci.yml` assert every manifest entry is in the artifact.
+  Playwright: the docs' 7 pictures are same-origin, decoded (`naturalWidth > 0`), and the page makes no external request.
+- [x] **3. The NuGet README.** `tools/docs/nuget-readme.mjs` (Node, `node:test` tests — no new dependency, run in the CI `web`
+  job) rewrites every relative link to `https://github.com/DbDataSync/DbDataSync/blob/<commit>/…` and every image to
+  `raw.githubusercontent.com`, pinned to the commit packed (`git rev-parse HEAD`, or `-p:ReadmeRef=`); it skips fences, code
+  spans, schemes and anchors, and **fails the pack on a link to a file that is not there**. `PrepareNuGetReadme` (csproj)
+  packs that copy instead of the repository README; without node it warns and packs the original, so a plain local
+  `dotnet pack` still works — and `release.yml`/`publish-snapshot.yml` assert the shipped README has no relative link left and
+  its doc links carry the packed commit, so that fallback cannot reach nuget.org. Verified on a real pack: 0 relative links,
+  every doc link at `blob/<HEAD>/…`.
+  - The commit is HEAD of the checkout, not `GITHUB_SHA`: on `publish-snapshot.yml`'s `workflow_run` trigger `GITHUB_SHA` is the
+    default branch's commit, not the `test` commit that was checked out and packed.

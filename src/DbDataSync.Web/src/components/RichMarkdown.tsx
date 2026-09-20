@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import rehypeSlug from 'rehype-slug'
 import remarkGfm from 'remark-gfm'
 import { DOC_SLUGS } from './docPages'
-import { isSafeImageUrl, resolveLink } from './markdownLinks'
+import { isSafeImageUrl, resolveDocImage, resolveLink } from './markdownLinks'
 
 /**
  * The full GitHub-flavoured subset — tables, task lists, strikethrough, images — for documents the build ships (phase 160).
@@ -51,6 +51,10 @@ export function RichMarkdown({ text, docLinks = false, inlineImages = true, test
     img({ src, alt }) {
       // An image is fetched by the reader's browser the moment it renders, so it gets the strictest reading of the
       // policy: a network address only, never a relative path, and no referrer sent with the request.
+      // The docs' own pictures, shipped beside them: same-origin, so the strictest reading of the policy still holds — and
+      // only for the docs, never for a note, which is not one of the app's own pages.
+      const local = docLinks && typeof src === 'string' ? resolveDocImage(src) : null
+      if (local) return <img src={local} alt={alt ?? ''} loading="lazy" />
       if (typeof src !== 'string' || !isSafeImageUrl(src)) return <span>{alt}</span>
       if (!inlineImages) return <a href={src} target="_blank" rel="noreferrer noopener">{alt || src}</a>
       return <img src={src} alt={alt ?? ''} loading="lazy" referrerPolicy="no-referrer" />

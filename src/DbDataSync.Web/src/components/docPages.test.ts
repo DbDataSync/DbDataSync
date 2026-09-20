@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DOC_PAGES, DOC_SLUGS } from './docPages'
-import { resolveLink } from './markdownLinks'
+import { resolveDocImage, resolveLink } from './markdownLinks'
 
 // The repo's docs/, read at test time — the same files the build copies into the package.
 const sources = import.meta.glob('../../../../docs/*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
@@ -26,5 +26,48 @@ describe('the links between the docs', () => {
 
     for (const href of links)
       expect(resolveLink(href, DOC_SLUGS).kind, `${href}`).toBe('doc')
+  })
+})
+
+// Every picture the docs show must exist, or a reader gets a broken image and nobody finds out until they do.
+const screenshots = Object.keys(import.meta.glob('../../../../screenshots/**/*.png'))
+  .map(path => path.replace(/^.*\/screenshots\//, ''))
+
+describe('the pictures in the docs', () => {
+  const referenced = docs.flatMap(d => [...d.text.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)].map(m => ({ slug: d.slug, src: m[1] })))
+
+  it('are written relative to the docs folder, never as an address that goes stale', () => {
+    for (const { slug, src } of referenced)
+      expect(src, `${slug}.md`).not.toMatch(/^[a-z][a-z0-9+.-]*:|^\/\//i)
+  })
+
+  it('all resolve to a file in screenshots/', () => {
+    expect(referenced.length).toBeGreaterThan(0)
+    for (const { slug, src } of referenced) {
+      const served = resolveDocImage(src)
+      expect(served, `${slug}.md: ${src}`).not.toBeNull()
+      expect(screenshots, `${slug}.md: ${src}`).toContain(served!.replace(/^\/screenshots\//, ''))
+    }
+  })
+})
+
+// docs/images.txt is what the build ships (csproj, Dockerfile, and the release checks all read it). It has to be exactly
+// the pictures the docs show: a missing line is a broken image in the embedded docs, an extra one is dead weight in every package.
+const manifests = import.meta.glob('../../../../docs/images.txt', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+
+describe('docs/images.txt', () => {
+  const listed = Object.values(manifests)[0]?.split(/\r?\n/).filter(line => line.trim()) ?? []
+  const shown = [...new Set(docs.flatMap(d => [...d.text.matchAll(/!\[[^\]]*\]\(\.\.\/(screenshots\/[^)\s]+)\)/g)].map(m => m[1])))]
+
+  it('exists', () => {
+    expect(Object.keys(manifests)).toHaveLength(1)
+  })
+
+  it('lists exactly the pictures the docs show', () => {
+    expect([...listed].sort()).toEqual([...shown].sort())
+  })
+
+  it('lists files that exist', () => {
+    for (const image of listed) expect(screenshots, image).toContain(image.replace(/^screenshots\//, ''))
   })
 })

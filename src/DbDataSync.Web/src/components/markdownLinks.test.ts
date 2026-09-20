@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isSafeExternalUrl, isSafeImageUrl, resolveLink } from './markdownLinks'
+import { isSafeExternalUrl, isSafeImageUrl, resolveDocImage, resolveLink } from './markdownLinks'
 
 const SLUGS = ['install', 'configuration', 'drivers-and-libraries']
 
@@ -74,5 +74,28 @@ describe('the shared predicates', () => {
     expect(isSafeImageUrl('mailto:a@b.c')).toBe(false)
     expect(isSafeImageUrl('data:image/svg+xml,<svg onload=alert(1)>')).toBe(false)
     expect(isSafeImageUrl('images/x.png')).toBe(false)
+  })
+})
+
+describe('resolveDocImage', () => {
+  it('maps a picture the docs shipped to where the app serves it', () => {
+    expect(resolveDocImage('../screenshots/golden-path/02-connection-form.png')).toBe('/screenshots/golden-path/02-connection-form.png')
+    expect(resolveDocImage('../screenshots/admin-updates/159-updates-done.PNG')).toBe('/screenshots/admin-updates/159-updates-done.PNG')
+  })
+
+  it.each([
+    '../screenshots/golden-path/../../secret.png',
+    '../screenshots/golden-path/sub/x.png',
+    '../screenshots/x.png',
+    '../other/golden-path/x.png',
+    '../screenshots/golden-path/x.svg',
+    '../screenshots/golden-path/x.png?y=1',
+    '/screenshots/golden-path/x.png',
+    'screenshots/golden-path/x.png',
+    'https://example.com/screenshots/golden-path/x.png',
+    '..\\screenshots\\golden-path\\x.png',
+    'javascript:alert(1)',
+  ])('does not treat %s as one', src => {
+    expect(resolveDocImage(src)).toBeNull()
   })
 })

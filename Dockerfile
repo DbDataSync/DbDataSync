@@ -24,8 +24,16 @@ RUN dotnet publish src/DbDataSync.Cli/DbDataSync.Cli.csproj \
 COPY --from=web /src/DbDataSync.Web/dist/ /app/wwwroot/
 
 # Phase 160: the docs, beside the SPA — the publish above ran in a stage that never had docs/ (only src, tests
-# and tools are copied in), so the csproj's CopyDocs target had nothing to copy and this line is what ships them.
-COPY docs/ /app/wwwroot/docs/
+# and tools are copied in), so the csproj's CopyDocs target had nothing to copy and this is what ships them.
+# Phase 162: and the pictures they show — only those listed in docs/images.txt, at the same repo-relative path, so the
+# docs' own `../screenshots/...` references resolve unchanged. (tr strips a CR: a Windows checkout may have CRLF endings.)
+COPY docs/ /src/docs/
+COPY screenshots/ /src/screenshots/
+RUN mkdir -p /app/wwwroot/docs \
+    && cp /src/docs/*.md /app/wwwroot/docs/ \
+    && tr -d '\r' < /src/docs/images.txt | while IFS= read -r image; do \
+         [ -z "$image" ] || install -D "/src/$image" "/app/wwwroot/$image"; \
+       done
 
 # Phase 121: every KnownLibraries entry, restored once at its pinned version, while this stage still
 # has both the SDK and the just-published CLI (the "internal" command exists only for this — see

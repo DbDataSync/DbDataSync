@@ -128,11 +128,51 @@
     <DocsDir>$(MSBuildProjectDirectory)/../../docs</DocsDir>
   </PropertyGroup>
 
+  <!--
+    Phase 162: the pictures the docs show. They are written `../screenshots/<folder>/<file>.png` — a path that works on GitHub
+    — and shipped at the same place relative to wwwroot/docs, so an embedded page needs no rewriting: `docs/images.txt` lists
+    them (one repo-relative path a line), a vitest test fails if it and the docs ever disagree, and only these ship rather than
+    the whole screenshots/ tree (test evidence, ~12 MB).
+  -->
+  <!--
+    Phase 162: the README that ships in the package is a rewritten copy, not the repository's file. The repository's README
+    (and every doc) is written with relative links, which GitHub renders and an offline checkout follows; nuget.org shows the
+    README away from the repository, where those go nowhere. tools/docs/nuget-readme.mjs makes each one absolute and pins it to
+    the commit being packed (see its header for why not `main`, and why not the release tag). It fails the pack on a link to a
+    file that is not there. Without node — a plain local `dotnet pack` — the repository's own README is packed with a warning;
+    the release and snapshot workflows assert that a shipped README has no relative link left, so that fallback cannot ship.
+    Pass -p:ReadmeRef=<commit> to pin something other than the checked-out HEAD.
+  -->
+  <PropertyGroup>
+    <ReadmeSource>$(MSBuildProjectDirectory)/../../README.md</ReadmeSource>
+    <ReadmeForNuGet>$(MSBuildProjectDirectory)/obj/nuget-readme/README.md</ReadmeForNuGet>
+    <ReadmeScript>$(MSBuildProjectDirectory)/../../tools/docs/nuget-readme.mjs</ReadmeScript>
+  </PropertyGroup>
+
+  <Target Name="PrepareNuGetReadme" BeforeTargets="_GetPackageFiles" Condition="Exists('$(ReadmeScript)')">
+    <Delete Files="$(ReadmeForNuGet)" />
+    <Exec Command="node &quot;$(ReadmeScript)&quot; --in &quot;$(ReadmeSource)&quot; --out &quot;$(ReadmeForNuGet)&quot;" Condition="'$(ReadmeRef)' == ''" ContinueOnError="true" />
+    <Exec Command="node &quot;$(ReadmeScript)&quot; --in &quot;$(ReadmeSource)&quot; --out &quot;$(ReadmeForNuGet)&quot; --ref $(ReadmeRef)" Condition="'$(ReadmeRef)' != ''" ContinueOnError="true" />
+    <Warning Condition="!Exists('$(ReadmeForNuGet)')"
+             Text="The package README was not rewritten (is node installed?): it will carry the repository's relative links. Fine for a local pack; a release checks for this." />
+    <ItemGroup Condition="Exists('$(ReadmeForNuGet)')">
+      <None Remove="..\..\README.md" />
+      <None Include="$(ReadmeForNuGet)" Pack="true" PackagePath="\" />
+    </ItemGroup>
+  </Target>
+
   <Target Name="CopyDocs" BeforeTargets="Publish" Condition="Exists('$(DocsDir)')">
+    <ReadLinesFromFile File="$(DocsDir)/images.txt" Condition="Exists('$(DocsDir)/images.txt')">
+      <Output TaskParameter="Lines" ItemName="_DocImageLine" />
+    </ReadLinesFromFile>
     <ItemGroup>
       <_Doc Include="$(DocsDir)/*.md" />
+      <_DocImage Include="$(DocsDir)/../%(_DocImageLine.Identity)" Condition="'%(_DocImageLine.Identity)' != ''">
+        <Dest>%(_DocImageLine.Identity)</Dest>
+      </_DocImage>
     </ItemGroup>
     <Copy SourceFiles="@(_Doc)" DestinationFolder="$(PublishDir)wwwroot/docs" />
+    <Copy SourceFiles="@(_DocImage)" DestinationFiles="@(_DocImage->'$(PublishDir)wwwroot/%(Dest)')" />
   </Target>
 
 </Project>

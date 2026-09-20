@@ -180,6 +180,28 @@ jobs:
               exit 1
             fi
           done
+          # Phase 162: and the pictures those pages show, listed in docs/images.txt.
+          while IFS= read -r image; do
+            [ -z "$image" ] && continue
+            if [ ! -s "$wwwroot/$image" ]; then
+              echo "::error::the packed nupkg is missing or has an empty wwwroot/$image, which the docs show"
+              exit 1
+            fi
+          done < <(tr -d '\r' < docs/images.txt)
+
+          # Phase 162: the README that shipped is the rewritten copy — no relative link left, and every doc link pinned to the
+          # commit that was packed (HEAD of this checkout: GITHUB_SHA is not that on a workflow_run).
+          unzip -p "$NUPKG" README.md > /tmp/packed-readme.md
+          relative=$(grep -oE '\]\([^)]+\)' /tmp/packed-readme.md | grep -vE '^\]\((https?:|mailto:|#)' || true)
+          if [ -n "$relative" ]; then
+            echo "::error::the packed README still has relative links, which nuget.org cannot follow:"
+            echo "$relative"
+            exit 1
+          fi
+          if ! grep -q "blob/$(git rev-parse HEAD)/docs/" /tmp/packed-readme.md; then
+            echo "::error::the packed README's doc links are not pinned to this commit ($(git rev-parse HEAD))"
+            exit 1
+          fi
 
           cat > /tmp/only-artifacts.config <<EOF
           <configuration>

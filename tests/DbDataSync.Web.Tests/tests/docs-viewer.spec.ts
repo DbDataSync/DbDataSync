@@ -36,6 +36,27 @@ test('a page of the docs renders as a document — tables included', async ({ pa
   await page.screenshot({ path: path.join(screenshotsDir, '02-docs-page-with-table.png') })
 })
 
+test("a page's pictures load from the app, not from the network", async ({ page }) => {
+  const external: string[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (!['127.0.0.1', 'localhost'].includes(url.hostname)) external.push(request.url())
+  })
+
+  await page.goto('/docs/getting-started')
+
+  const pictures = page.getByTestId('docs-content').locator('img')
+  await expect(pictures).toHaveCount(7)
+  for (const src of await pictures.evaluateAll((imgs) => imgs.map((img) => (img as HTMLImageElement).getAttribute('src')))) {
+    expect(src).toMatch(/^\/screenshots\/golden-path\/[A-Za-z0-9._-]+\.png$/)
+  }
+  // Every one decoded — a broken image has a naturalWidth of 0.
+  await expect.poll(() => pictures.evaluateAll((imgs) => imgs.every((img) => (img as HTMLImageElement).naturalWidth > 0)))
+    .toBe(true)
+  expect(external).toEqual([])
+  await page.screenshot({ path: path.join(screenshotsDir, '03-docs-page-with-pictures.png') })
+})
+
 test('a link to another page — anchor and all — stays inside the app and lands on the heading', async ({ page }) => {
   await page.goto('/docs/replication-concepts')
 

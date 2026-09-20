@@ -17,6 +17,17 @@ export function isSafeImageUrl(src: string): boolean {
   return /^https?:/i.test(src)
 }
 
+/** A picture in the shipped docs is written `../screenshots/<folder>/<file>.png` — a path that works on GitHub — and the build
+ *  puts the same files at `/screenshots/<folder>/<file>`, so the docs are read without rewriting a word of them. Raster
+ *  formats only, one folder deep, and no path separators in the name: nothing here can point outside that folder. */
+const DOC_IMAGE = /^\.\.\/screenshots\/([a-z0-9-]+)\/([A-Za-z0-9._-]+\.(?:png|jpe?g|gif|webp))$/i
+
+/** Where the app serves a docs page's own picture, or null for anything that is not one. */
+export function resolveDocImage(src: string): string | null {
+  const match = DOC_IMAGE.exec(src)
+  return match ? `/screenshots/${match[1]}/${match[2]}` : null
+}
+
 export type LinkTarget =
   /** An address outside the app: opens in a new tab. */
   | { kind: 'external'; href: string }

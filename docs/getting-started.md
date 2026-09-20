@@ -9,27 +9,27 @@ This walks through setting up your first replication. If you haven't installed D
 
 1. **Connections.** Add a `SQL Auth` connection for each of your two SQL Server instances.
 
-   ![New connection form](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/02-connection-form.png)
+   ![New connection form](../screenshots/golden-path/02-connection-form.png)
 
 2. **Replications → New Replication.** Name the replication and pick its source and target connection
    and database. Leave the schedule set to `Continuous` for now.
 
-   ![Replication overview: source, target, and schedule](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/04-replication-endpoints.png)
+   ![Replication overview: source, target, and schedule](../screenshots/golden-path/04-replication-endpoints.png)
 
 3. Open the replication, then go to **Table Mappings → New Table Mapping**. Pick the source and
    target table using the pickers. DbDataSync suggests column mappings automatically for columns with
    matching names.
 
-   ![Table mapping with auto-mapped columns](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/05-table-mapping-form.png)
+   ![Table mapping with auto-mapped columns](../screenshots/golden-path/05-table-mapping-form.png)
 
 4. **Runs → Run Now.** Watch the log and status update in real time.
 
-   ![A live run in progress](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/07-live-run-in-progress.png)
+   ![A live run in progress](../screenshots/golden-path/07-live-run-in-progress.png)
 
 5. Open the **Version Control** tab to see the git log of every config change. DbDataSync commits
    automatically every time you save, so this log also works as an audit trail.
 
-   ![Config history — every save is an auto-commit](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/10-config-history.png)
+   ![Config history — every save is an auto-commit](../screenshots/golden-path/10-config-history.png)
 
 ## Backfilling a table
 
@@ -37,7 +37,7 @@ Incremental sync only applies changes made at the source. If the target drifts f
 reason — a bad deploy, a manual edit, a mapping that was wrong for a while — use a backfill instead.
 Go to **Runs → Backfill…**. It re-reads the source and makes the target match it.
 
-![Queuing a backfill](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/11-backfill-form.png)
+![Queuing a backfill](../screenshots/golden-path/11-backfill-form.png)
 
 A backfill applies to one table mapping, and optionally to just one segment of it: a list of values, a
 range, an even split of a column's range into buckets, or a custom segmenting strategy (below). Each
@@ -45,7 +45,7 @@ segment runs as its own independently queued run. A backfill never advances the 
 so it can run against a live, scheduled replication without disturbing the ongoing sync. It shows up
 in the same run history as the regular sync, tagged `BACKFILL`.
 
-![A backfill run alongside the regular sync in run history](https://raw.githubusercontent.com/DbDataSync/DbDataSync/main/screenshots/golden-path/13-run-history-with-backfill.png)
+![A backfill run alongside the regular sync in run history](../screenshots/golden-path/13-run-history-with-backfill.png)
 
 Each mapping has a *Default reload segmenting* setting, in its own editor, that states how it divides
 for a reload. The Backfill form opens pre-filled with that default, and a scheduled `BatchReload` pass

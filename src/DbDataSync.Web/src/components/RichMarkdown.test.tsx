@@ -69,6 +69,20 @@ describe('RichMarkdown', () => {
         expect(render(`![alt text](${src})`), src).not.toMatch(/<img\b/i)
     })
 
+    it("serves a docs page's own picture from where the build put it — for the docs, and only for the docs", () => {
+      const md = '![the form](../screenshots/golden-path/02-connection-form.png)'
+
+      expect(render(md, true)).toContain('src="/screenshots/golden-path/02-connection-form.png"')
+      // A note is not one of the app's pages: the same text there is not a picture.
+      expect(render(md, false)).not.toMatch(/<img\b/i)
+      expect(render(md, false, false)).not.toMatch(/<img\b|<a\b/i)
+    })
+
+    it('does not let a docs page reach outside the screenshots folder', () => {
+      for (const src of ['../screenshots/../secret.png', '../screenshots/a/b/c.png', '../README.md', '/etc/passwd'])
+        expect(render(`![x](${src})`, true), src).not.toMatch(/<img\b/i)
+    })
+
     it('turns an unsafe image into its alt text', () => {
       expect(render('![the alt](javascript:alert(1))')).toContain('the alt')
     })

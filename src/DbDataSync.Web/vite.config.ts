@@ -9,17 +9,20 @@ import { defineConfig } from 'vitest/config'
 const apiTarget = process.env.DBDATASYNC_API_URL ?? 'http://localhost:5183'
 
 // In a published build the docs are files in wwwroot/docs, put there by the build (phase 160). Vite's dev server has
-// no such folder, so serve the repository's own docs/ at the same address — the viewer then works unchanged in dev,
+// no such folder, so serve the repository's own docs/ (and the pictures they show, from screenshots/) at the same address — the viewer then works unchanged in dev,
 // and edits to a page show up on the next load.
 const docsDir = path.resolve(import.meta.dirname, '../../docs')
+const screenshotsDir = path.resolve(import.meta.dirname, '../../screenshots')
 const serveRepoDocs: Plugin = {
   name: 'serve-repo-docs',
   configureServer(server) {
     server.middlewares.use((req, res, next) => {
-      const match = /^\/docs\/([a-z0-9-]+)\.md$/i.exec((req.url ?? '').split('?')[0])
-      const file = match && path.join(docsDir, `${match[1]}.md`)
+      const url = (req.url ?? '').split('?')[0]
+      const page = /^\/docs\/([a-z0-9-]+)\.md$/i.exec(url)
+      const picture = /^\/screenshots\/([a-z0-9-]+)\/([A-Za-z0-9._-]+\.png)$/i.exec(url)
+      const file = page ? path.join(docsDir, `${page[1]}.md`) : picture ? path.join(screenshotsDir, picture[1], picture[2]) : null
       if (!file || !fs.existsSync(file)) return next()
-      res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+      res.setHeader('Content-Type', page ? 'text/markdown; charset=utf-8' : 'image/png')
       res.end(fs.readFileSync(file))
     })
   },
