@@ -108,3 +108,8 @@ operator-authored Notes. A new shared `RichMarkdown` component is used for docs.
 - The docs are packaged **as authored**. If 162K's preprocessing changes their link style, the embedded copy
   and the GitHub copy could diverge; 162K keeps one authored form and transforms at build time, so this
   phase's renderer must not depend on any particular link style beyond "relative `.md`".
+
+## Progress
+
+- [x] **1. `GET /api/about`** — `AboutController` (`Policies.Viewer`, so Viewer and Admin), returning
+  `{ version }` from `UpdateHostFacts.RunningVersion`. Tests: both roles read the version; anonymous gets 401.
