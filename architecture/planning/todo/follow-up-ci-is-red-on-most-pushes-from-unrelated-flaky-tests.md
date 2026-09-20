@@ -1,4 +1,4 @@
-# CI is red on most pushes, from five different flaky tests — and a red run blocks promotion
+# CI is red on most pushes, from several unrelated flaky tests — and a red run blocks promotion
 
 **Observed** 2026-09-20 while working phase 160. Not a defect in any one change: every failure below happened on a
 commit that could not have caused it (one was docs-only).
@@ -6,9 +6,10 @@ commit that could not have caused it (one was docs-only).
 ## Why it matters beyond noise
 
 `promote-test.yml` fast-forwards `test` **only on a green CI run**, and `publish-snapshot.yml` (phase 158) publishes
-from `test`. So each red run is a missed promotion and a missed snapshot. `promote-test` already shows the effect:
-runs on 2026-09-19 alone were `success`, `skipped` (CI red), `success`, and it will keep skipping until a full green run
-lands. A flaky suite quietly turns "every green commit is releasable" into "some commits get through".
+from `test`. So each red run is a missed promotion and a missed snapshot. `promote-test` shows the effect: over
+2026-09-19/20 its runs read `success`, `skipped` (CI red), `success` — and on 2026-09-20 after `b512cc5` went green
+(`success` at 07:27) the next four were all `skipped`, because every later commit's CI run was red. A flaky suite quietly
+turns "every green commit is releasable" into "some commits get through".
 
 ## What failed in the six runs pushed 2026-09-20 (`5c7094a` … `8b3e5b6`)
 
@@ -20,9 +21,10 @@ lands. A flaky suite quietly turns "every green commit is releasable" into "some
 | `35496100986` | same | `dotnet-windows` → `RunWatermarkTimeTests.EveryRunOnThePageIsDatedFromOneReadOfTheGroupsHistory`: `Assert.Equal` on a run id in the test's own `CompleteRun` helper (`RunWatermarkTimeTests.cs:404`) | **no** — new |
 | `35496282777` | `305af60` (SPA renderer) | `playwright` → 116 passed, then `ENOTEMPTY` in teardown | yes — [temp dir](follow-up-a-temp-dir-that-cannot-be-deleted-fails-a-job-whose-tests-all-passed.md), a Linux occurrence |
 | `35496389094` | `51920fe` (SPA viewer) | `dotnet-integration` → SCD2 CDC | yes |
-| `35495928319` | `b512cc5` | — green | |
+| `35496467194` | `8b3e5b6` (Playwright spec) | `dotnet-integration` → `BulkLoadIntegrationTests.ARaceBetween…` (racer *won*, as in the first) | yes |
+| `35495928319` | `b512cc5` | — green (the only one; `promote-test` moved `test` to it) | |
 
-Of the six runs pushed that day, five failed, each on a different combination of the above. Two failures are new to the
+Of the six runs that finished, five failed, on different combinations of the above. Two failures are new to the
 follow-ups (the Event Log *write* denial, `RunWatermarkTimeTests`); the rest were already documented and have now
 recurred.
 
