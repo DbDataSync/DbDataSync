@@ -245,6 +245,20 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
     /// key in the very same pass (Id 2) — proving the bulk path still carries every key the duplicate
     /// machinery does not have to touch, unaffected.
     /// </summary>
+    /// <summary>
+    /// Waits long enough that the next change is committed in a different clock tick from the last one.
+    /// <para>
+    /// These tests assert that two changes to one key were mapped to two distinct times (a delete before its re-insert, an
+    /// update before the next). <c>ScanAsync</c> between them guarantees two distinct mapping <em>points</em>, not two distinct
+    /// <em>times</em>: <c>cdc.lsn_time_mapping</c> takes each transaction's commit time, SQL Server's <c>datetime</c> resolves to
+    /// 3.33 ms, and a fast CI runner does an operation, a scan and the next operation well inside that. CI runs showed exactly
+    /// that — <c>d0 closed at …07:18:47.2300000, d1 opened at …07:18:47.2300000</c> — four times in five days (see
+    /// architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md). A row deleted and re-inserted inside
+    /// one tick legitimately gets ValidTo == ValidFrom; the tests want the case where it does not, so they make sure it does not.
+    /// </para>
+    /// </summary>
+    private static Task NextClockTickAsync() => Task.Delay(TimeSpan.FromMilliseconds(30));
+
     [Fact]
     public async Task APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation()
     {
@@ -267,6 +281,7 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'b' WHERE Id = 1;");
         await CdcCaptureJob.ScanAsync(_sourceConnection);
 
+        await NextClockTickAsync();
         await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'c' WHERE Id = 1;");
         await CdcCaptureJob.ScanAsync(_sourceConnection);
 
@@ -369,6 +384,7 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         // two updates.
         await ExecuteAsync(_sourceConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 4;");
         await CdcCaptureJob.ScanAsync(_sourceConnection);
+        await NextClockTickAsync();
         await ExecuteAsync(_sourceConnection, $"""
             INSERT INTO dbo.[{_sourceTable}] (Id, Name, Note) VALUES (4, 'd1', 'n0');
             """);
@@ -377,6 +393,7 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         // Id 5: changed, then gone.
         await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'e1' WHERE Id = 5;");
         await CdcCaptureJob.ScanAsync(_sourceConnection);
+        await NextClockTickAsync();
         await ExecuteAsync(_sourceConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 5;");
         await CdcCaptureJob.ScanAsync(_sourceConnection);
 

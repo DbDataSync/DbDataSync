@@ -111,3 +111,13 @@ What this does and doesn't say:
   to `<=` for the delete/re-insert, and drop the `!=` — but then the test no longer proves the delete closed *before*
   the re-insert opened, only that it did not close after. (a) is the smaller claim change.
 - Not checked: whether `ScanAsync`'s stop/wait/restart sequence could itself be made to force distinct mapping points.
+
+## Applied (2026-09-20): option (a) — separate the operations by a clock tick
+
+`Scd2CdcGuaranteedDeliveryIntegrationTests` now waits 30 ms (`NextClockTickAsync`) before each operation whose mapped time
+must differ from the previous one: the second update of Id 1, the re-insert of Id 4 after its delete, and the delete of Id 5
+after its update. 30 ms is ten times the 3.33 ms `datetime` tick, so the two commits cannot share one. The assertions keep their
+meaning (strict `<` / `!=`); nothing in the product was touched, and the class passes locally (2 of 2, three runs). **Not proven:**
+that this ends the failures — it can only be shown by CI staying green on this class over several runs, which is the thing to
+watch. The other CDC failure seen the same day (`MsSqlCdcReaderTests.ChangesFromEarliest_…`, `Assert.Single() … 2 items`) is a
+different test and is not addressed here.
