@@ -18,8 +18,14 @@ COPY tools/ ./tools/
 
 # The SPA is built in its own stage above, so this one needs no node. SkipWebBuild is what stops the
 # publish target shelling out to npm inside an image that does not have it.
+#
+# VERSION is the release this image is built for (phase 163). Left empty — a local `docker build .` — the csproj's own
+# development default applies, which is what an image built by hand should say. Set, it is the version `dbdatasync version`
+# prints and the one `dbdatasync update` compares against, so a published image must always be given it: without it an image
+# reports a build timestamp with `-alpha` on it, whatever release it really is.
+ARG VERSION=""
 RUN dotnet publish src/DbDataSync.Cli/DbDataSync.Cli.csproj \
-    -c Release -o /app -p:SkipWebBuild=true
+    -c Release -o /app -p:SkipWebBuild=true ${VERSION:+-p:Version=$VERSION}
 
 COPY --from=web /src/DbDataSync.Web/dist/ /app/wwwroot/
 

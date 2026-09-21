@@ -208,10 +208,25 @@ error. Signing in again is not needed: sessions live in the state database.
 Use this for a self-contained deployment with no `PATH` or service to manage.
 
 ```sh
-docker compose -f docker-compose.app.yml up
+docker run -p 8080:8080 -v dbdatasync-data:/var/lib/dbdatasync ghcr.io/dbdatasync/dbdatasync:latest
 ```
 
-One volume, at `/var/lib/dbdatasync`, holds both the config repository and the state database.
+One volume, at `/var/lib/dbdatasync`, holds both the config repository and the state database. Images are published for
+**linux/amd64 and linux/arm64** (an Arm server, a Raspberry Pi 4 or 5, AWS Graviton); Docker picks the one that matches the
+machine.
+
+| tag | what it is |
+| --- | --- |
+| `latest`, `2026.9.20.2152` | the default image. It includes the .NET SDK, which the console needs to install a library that is not in the bundled catalog |
+| `runtime`, `2026.9.20.2152-runtime` | the smaller image, with no SDK: catalog drivers only, and a library outside the catalog is written down and left "pending restore" until `config library sync` runs somewhere that has an SDK |
+
+`latest` and `runtime` follow the newest **stable** release. A beta gets only its exact version tags (`…-beta`,
+`…-beta-runtime`), so pulling `latest` never gives you a prerelease. To stay put on a version, use its tag.
+
+There is nothing to update in place: `dbdatasync update` inside a container says so. Pull a newer tag and start the container
+again — the volume keeps your data. The image reports the version it was built for: `docker run --rm --entrypoint dotnet <image> /app/DbDataSync.Cli.dll version`.
+
+To build it yourself from a checkout instead, `docker compose -f docker-compose.app.yml up` builds the same Dockerfile.
 
 ## Next: Configuration
 

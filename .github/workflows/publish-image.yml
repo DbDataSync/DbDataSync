@@ -1,0 +1,186 @@
+name: Publish image
+
+# Phase 163: the container image, on GitHub Container Registry (ghcr.io), for linux/amd64 and linux/arm64.
+#
+# Called by release.yml once a release is out (so an image only ever exists for a version nuget.org has), and dispatchable by
+# hand to publish or re-publish one — a failure here comes after the NuGet publish, which cannot be repeated, so this has to be
+# retryable on its own.
+#
+# **Each architecture builds on that architecture**, on a native runner, rather than cross-building one from the other. The
+# Dockerfile bakes native libraries into the image (`libduckdb.so`, `libe_sqlite3.so` in the catalog cache) by running the app
+# it just built, so an arm64 image built from an amd64 build stage would carry amd64 natives and only fail when someone ran it.
+# GitHub's arm64 runners are free for a public repository.
+#
+# **What is published is what was tested.** Each build is pushed by digest, with no tag; that exact digest is then pulled and put
+# through tools/docker/smoke-test.sh; and only a digest that passed is handed to the merge job, which is the only place a tag
+# is created. A failed smoke test leaves an untagged image nobody can name.
+#
+# Tags, per variant (`default` is the SDK image `docker build .` makes; `runtime` is the smaller one with no SDK):
+#   default   X            and, for a stable release only, latest
+#   runtime   X-runtime    and, for a stable release only, runtime
+# A prerelease (-beta) gets only its exact tags, so `latest` never moves to something a plain install would not pick either.
+#
+# The first push of a new package is private until someone makes it public in the package's settings (once); see
+# docs/install.md and architecture/implementation/todo/phase-163K-container-image-on-ghcr.md.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The release version to publish, exactly as tagged (e.g. 2026.9.20.2152 or 2026.9.20.517-beta).
+        type: string
+        required: true
+      overwrite:
+        description: Replace tags that already exist for this version. Off, an existing version tag is an error.
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release version to publish, exactly as tagged (e.g. 2026.9.20.2152 or 2026.9.20.517-beta).
+        type: string
+        required: true
+      overwrite:
+        description: Replace tags that already exist for this version. Off, an existing version tag is an error.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.plan.outputs.image }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - name: Validate the version and name the image
+        id: plan
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # Through the environment, never interpolated into the script: a dispatch input is text somebody typed.
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$VERSION' is not a release version (expected e.g. 2026.9.20.2152 or 2026.9.20.517-beta)"
+            exit 1
+          fi
+          prerelease=false
+          [[ "$VERSION" == *-* ]] && prerelease=true
+          # ghcr.io wants the owner lowercased; the package is named for the product, not for the repository.
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/dbdatasync" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    name: build ${{ matrix.variant }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [default, runtime]
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.plan.outputs.image }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      # The tag release.yml created for this version, not whatever a branch points at now.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.version }}
+
+      - id: source
+        run: echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          # Empty selects the Dockerfile's last stage, which is the default (SDK) image on purpose — see the Dockerfile.
+          target: ${{ matrix.variant == 'runtime' && 'runtime' || '' }}
+          build-args: VERSION=${{ inputs.version }}
+          labels: |
+            org.opencontainers.image.title=DbDataSync
+            org.opencontainers.image.description=Cross-database replication — a git-tracked config repo, a scheduler, and a web console.
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
+            org.opencontainers.image.licenses=MIT
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}-${{ matrix.arch }}
+
+      # The published bytes, by digest, on the architecture they are for — not a local rebuild standing in for them.
+      - name: Smoke test what was just pushed
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          docker pull "$IMAGE@$DIGEST"
+          tools/docker/smoke-test.sh "$IMAGE@$DIGEST" "$VERSION"
+
+      - name: Hand the digest to the merge job
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          echo "$DIGEST" > "/tmp/digests/${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.variant }}-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [plan, build]
+    name: tag ${{ matrix.variant }}
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [default, runtime]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.plan.outputs.image }}
+      VERSION: ${{ inputs.version }}
+      PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+      OVERWRITE: ${{ inputs.overwrite }}
+      VARIANT: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.version }}
+
+      # Both architectures, or nothing — create-tags.sh refuses to tag a variant that lacks either digest.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: digest-${{ matrix.variant }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the tags
+        run: tools/docker/create-tags.sh /tmp/digests

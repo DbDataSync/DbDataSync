@@ -465,8 +465,11 @@ and edits to a page appear on the next load.
 ## Container image
 
 ```sh
-docker run -p 8080:8080 -v dbdatasync-data:/var/lib/dbdatasync <image>
+docker run -p 8080:8080 -v dbdatasync-data:/var/lib/dbdatasync ghcr.io/dbdatasync/dbdatasync:latest
 ```
+
+`ghcr.io/dbdatasync/dbdatasync` is published for `linux/amd64` and `linux/arm64`, in a default and a smaller `runtime` variant —
+see [Installing → Running in a container](install.md#running-in-a-container) for the tags.
 
 - `EXPOSE 8080`; entrypoint is `dbdatasync serve --url http://0.0.0.0:8080` — no trailing `--repo` argument; override at `docker run` time (`docker run ... <image> --repo /some/other/path`) to pass different `dbdatasync serve` flags.
 - `HEALTHCHECK` runs `dbdatasync health --url http://127.0.0.1:8080`.

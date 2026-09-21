@@ -70,6 +70,7 @@ So the order lives here, and is the one to work through:
 | 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
 | 4 | **155** — `pgoutput`: logical decoding with nothing installed on the source | **gated on a product decision, not on engineering** — last deliberately, because if the answer is "managed Postgres" it should never be built at all. See the phase doc's own "Why this might not be worth building" |
 | 5 | **159K** — apply an update automatically, from the CLI and the web console | **follows 158K, which is done** (it executes 158K's `UpdatePlan` and reuses its `DbDataSync.Updates` library). **Built for Linux and the CLI; not yet verified on real hosts, and Windows is deliberately off** — see its Progress section for exactly what is and is not proven |
+| 6 | **163K** — the container image on GHCR, amd64 and arm64 | **implemented, not yet run in CI**: stays in `todo/` until `publish-image.yml` runs on a real release (it cannot before it reaches `main`), and until the arm64 image has been built on real arm hardware. Its own "First release checklist" has a manual step (make the package public) |
 
 Updated 2026-09-19 (later): **159K is built** for Linux and the CLI, with Windows deliberately switched off. **Read its
 "trust boundary" section first:** the first build had the root-privileged pre-start step act on a request file that

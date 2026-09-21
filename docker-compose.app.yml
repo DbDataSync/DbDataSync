@@ -5,6 +5,10 @@
 # application.
 #
 #   docker compose -f docker-compose.app.yml up
+#
+# This builds the image from this checkout. To run a published release instead, replace `build:` with
+#   image: ghcr.io/dbdatasync/dbdatasync:latest
+# (docs/install.md, "Running in a container", lists the tags; the image is published for amd64 and arm64).
 services:
   dbdatasync:
     build:

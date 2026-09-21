@@ -42,3 +42,12 @@ authorization; the SPA fallback `.AllowAnonymous()`), with auth-on tests in `Emb
   so, C alone may be enough.
 - Should the anonymous-web-assets behaviour also be probed against the packed *tool* (not just the image)? The API
   tests cover the host either way; the packed tool differs only in where `wwwroot` comes from.
+
+## Update (2026-09-20, phase 163)
+
+Option **C** is now taken in part: `publish-image.yml` (called by `release.yml` after a release) builds the image on native
+amd64 and arm64 runners and runs `tools/docker/smoke-test.sh` on the pushed digest before anything is tagged — the checks this
+doc describes as missing, including the anonymous `/` 200 that the vacuous `curl -sf | grep -q` step never asserted. It still
+runs **only at release time**. Nothing builds the Dockerfile on an ordinary push, so a change that breaks it is still first
+found by a release's image job (which fails after the NuGet publish, and can be re-run). Options A and B (per-promotion or
+path-filtered builds) remain open, and `ci.yml`'s dead `package` job is still dead.
