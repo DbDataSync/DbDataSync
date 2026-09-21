@@ -87,6 +87,7 @@ internal static class SetupScreen
         var actionBar = new View
         {
             X = 0, Y = Pos.AnchorEnd(4), Width = Dim.Fill(), Height = 4,
+            CanFocus = true, // container Views default to non-focusable; without this the focus chain never reaches these buttons — same fix every tab already needed (see GeneralTab's own copy of this comment)
         };
         actionBar.Add(saveButton, startButton, printButton, reissueButton, exitButton);
 
@@ -104,7 +105,7 @@ internal static class SetupScreen
             var (url, host) = general.GetValues();
             savedUrl = url;
             SetupSteps.ApplyConsoleUrl(root, url);
-            SetupSteps.ApplyNotesRichMarkdown(root, general.NotesRichMarkdown);
+            SetupSteps.ApplyNotesRenderer(root, general.NotesRichMarkdown);
 
             var messages = new List<string> { (await stateDatabase.SaveAsync(root, installLibrary)).Message };
 
