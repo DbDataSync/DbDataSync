@@ -24,7 +24,8 @@ public sealed record AuthStatus(
 [ApiController]
 [Route("api/auth")]
 public sealed class AuthController(
-    AuthOptions options, UserStore users, SessionStore sessions, CurrentUser currentUser) : ControllerBase
+    AuthOptions options, PasskeyOptions passkeys, UserStore users, SessionStore sessions, CurrentUser currentUser)
+    : ControllerBase
 {
     /// <summary>
     /// Who the caller is, and how they could sign in. The one endpoint the SPA can always call — the
@@ -37,9 +38,13 @@ public sealed class AuthController(
         var methods = new List<string>();
         if (options.WindowsEnabled)
             methods.Add("windows");
+        if (passkeys.Enabled)
+            methods.Add("passkeys");
 
         return Ok(new AuthStatus(
-            currentUser.Id is not null || options.Disabled,
+            // A real signed-in user has an id; a network-trust fallback grant (phase 164's
+            // Auth:Network:*, replacing the old Auth:Disabled) has a role but no id — either counts.
+            currentUser.Id is not null || currentUser.Role is not null,
             currentUser.Id,
             currentUser.Name,
             currentUser.Role?.ToString(),

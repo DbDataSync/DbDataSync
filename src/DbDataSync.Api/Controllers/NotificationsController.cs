@@ -56,7 +56,7 @@ public sealed class NotificationsController(
     /// </summary>
     /// <remarks>
     /// **Authentication-disabled deployments get a 200 that says nothing was stored.** With
-    /// <c>DbDataSync:Auth:Disabled=true</c> there is no <c>CurrentUser.Id</c> to key a cursor to, so the
+    /// <c>DbDataSync:Auth:Network:Admin=loopback</c> there is no <c>CurrentUser.Id</c> to key a cursor to, so the
     /// feed permanently reads as unread for everybody, and the response says so through
     /// <c>Personalized: false</c> rather than through a 500, a 401, or a silent success that a client
     /// would reasonably read as "cleared". A badge that cannot be dismissed is a defensible mode; a

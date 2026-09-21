@@ -13,7 +13,7 @@ public sealed class RunRetentionOptionsTests
     private static ApiOptions Read(params (string Key, string Value)[] settings) =>
         ApiOptions.FromConfiguration(new ConfigurationBuilder()
             .AddInMemoryCollection(settings.Select(s =>
-                new KeyValuePair<string, string?>($"DbDataSync:{s.Key}", s.Value)))
+                new KeyValuePair<string, string?>($"DbDataSync:State:Retention:{s.Key}", s.Value)))
             .Build());
 
     [Fact]
@@ -44,19 +44,19 @@ public sealed class RunRetentionOptionsTests
     [Fact]
     public void ChangeCheckRetention_ReadsItsOwnKey_AndZeroMeansKeepEverything()
     {
-        Assert.Equal(30, Read(("ChangeCheckRetentionDays", "30")).ChangeCheckRetentionDays);
-        Assert.Null(Read(("ChangeCheckRetentionDays", "0")).ChangeCheckRetentionDays);
+        Assert.Equal(30, Read(("ChangeCheckDays", "30")).ChangeCheckRetentionDays);
+        Assert.Null(Read(("ChangeCheckDays", "0")).ChangeCheckRetentionDays);
 
         // And it does not follow RunRetentionDays: an operator who shortens run history has said
         // nothing about how long they want to be able to ask whether a source went quiet.
-        Assert.Equal(7, Read(("RunRetentionDays", "5")).ChangeCheckRetentionDays);
+        Assert.Equal(7, Read(("RunDays", "5")).ChangeCheckRetentionDays);
     }
 
     [Theory]
     [InlineData("30", 30)]
     [InlineData("1", 1)]
     public void AConfiguredValueIsUsed(string configured, int expected) =>
-        Assert.Equal(expected, Read(("RunRetentionDays", configured)).RunRetentionDays);
+        Assert.Equal(expected, Read(("RunDays", configured)).RunRetentionDays);
 
     /// <summary>
     /// Zero is the operator turning a cap off, not asking for everything to be deleted. Between two
@@ -68,14 +68,14 @@ public sealed class RunRetentionOptionsTests
     [InlineData("not a number")]
     public void ZeroOrNonsenseMeansNoCap(string configured)
     {
-        Assert.Null(Read(("RunRetentionDays", configured)).RunRetentionDays);
-        Assert.Null(Read(("RunRetentionMaxPerMapping", configured)).RunRetentionMaxPerMapping);
+        Assert.Null(Read(("RunDays", configured)).RunRetentionDays);
+        Assert.Null(Read(("RunMaxPerMapping", configured)).RunRetentionMaxPerMapping);
     }
 
     [Fact]
     public void TheCapsAreIndependent()
     {
-        var options = Read(("RunRetentionDays", "0"), ("RunRetentionMaxPerMapping", "50"));
+        var options = Read(("RunDays", "0"), ("RunMaxPerMapping", "50"));
 
         Assert.Null(options.RunRetentionDays);
         Assert.Equal(50, options.RunRetentionMaxPerMapping);
@@ -85,8 +85,8 @@ public sealed class RunRetentionOptionsTests
     public void ThePruningIntervalDefaultsToHourly_AndIsConfigurable()
     {
         Assert.Equal(TimeSpan.FromHours(1), Read().RunPruningInterval);
-        Assert.Equal(TimeSpan.FromMinutes(15), Read(("RunPruningIntervalMinutes", "15")).RunPruningInterval);
+        Assert.Equal(TimeSpan.FromMinutes(15), Read(("PruningIntervalMinutes", "15")).RunPruningInterval);
         // Nonsense falls back rather than producing a zero-length timer, which PeriodicTimer rejects.
-        Assert.Equal(TimeSpan.FromHours(1), Read(("RunPruningIntervalMinutes", "0")).RunPruningInterval);
+        Assert.Equal(TimeSpan.FromHours(1), Read(("PruningIntervalMinutes", "0")).RunPruningInterval);
     }
 }

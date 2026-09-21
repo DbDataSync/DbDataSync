@@ -32,11 +32,11 @@ public sealed class UpdateApiFactory : AuthenticatedApiFactory
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DbDataSync:SelfUpdateEnabled"] = Enabled ? "true" : "false",
-                ["DbDataSync:SelfUpdateChannels"] = Channels,
-                ["DbDataSync:SelfUpdateDrainTimeoutSeconds"] = "5",
+                ["DbDataSync:Updates:Mode"] = Enabled ? "manual" : "disabled",
+                ["DbDataSync:Updates:Channels"] = Channels,
+                ["DbDataSync:Updates:DrainTimeoutSeconds"] = "5",
                 // Long enough that the confirmation service never fires inside a test.
-                ["DbDataSync:SelfUpdateConfirmAfterSeconds"] = "3600",
+                ["DbDataSync:Updates:ConfirmAfterSeconds"] = "3600",
             });
         });
 

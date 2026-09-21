@@ -33,12 +33,9 @@ public sealed class SessionAuthenticationHandler(
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (authOptions.Disabled)
-            return Task.FromResult(AuthenticateResult.Success(Anonymous()));
-
         var sessionId = Request.Cookies[AuthOptions.SessionCookie];
         if (string.IsNullOrEmpty(sessionId))
-            return Task.FromResult(AuthenticateResult.NoResult());
+            return Task.FromResult(NetworkFallback());
 
         // SignalR cannot set headers on a WebSocket handshake, but it does send cookies — which is
         // the other reason this is a cookie scheme rather than a bearer one.
@@ -47,6 +44,35 @@ public sealed class SessionAuthenticationHandler(
             return Task.FromResult(AuthenticateResult.Fail("The session is not valid."));
 
         return Task.FromResult(AuthenticateResult.Success(Ticket(user)));
+    }
+
+    /// <summary>
+    /// No session cookie at all — phase 164's replacement for the old blanket <c>Auth:Disabled</c>: a
+    /// role-scoped, network-trust fallback rather than one switch that granted Admin to every request
+    /// from anywhere. Admin is checked first (the same "both checked, admin wins" precedent
+    /// <see cref="WindowsSignIn.Resolve"/> already uses), then Viewer; neither configured means this
+    /// falls through to <see cref="AuthenticateResult.NoResult"/>, same as today, requiring a real
+    /// sign-in.
+    /// </summary>
+    private AuthenticateResult NetworkFallback()
+    {
+        var remote = Context.Connection.RemoteIpAddress;
+        // A null remote address is a connection this process cannot attribute — an in-memory test
+        // server, or a transport that does not report one — treated as loopback, the same convention
+        // RunnerStateGuard's own loopback check already uses and for the same reason: the alternative
+        // is that nothing reaches it at all.
+        var isLoopback = remote is null || System.Net.IPAddress.IsLoopback(remote);
+
+        if (isLoopback && authOptions.NetworkAdmin == AdminNetworkTrust.Loopback)
+            return AuthenticateResult.Success(Anonymous(UserRole.Admin));
+
+        if (authOptions.NetworkViewer == ViewerNetworkTrust.Remote
+            || (isLoopback && authOptions.NetworkViewer == ViewerNetworkTrust.Loopback))
+        {
+            return AuthenticateResult.Success(Anonymous(UserRole.Viewer));
+        }
+
+        return AuthenticateResult.NoResult();
     }
 
     private AuthenticationTicket Ticket(UserRecord user)
@@ -67,14 +93,13 @@ public sealed class SessionAuthenticationHandler(
     }
 
     /// <summary>
-    /// The authentication-disabled deployment: everybody is an admin and nobody has a name, which is
-    /// exactly what "we chose not to authenticate" means. Config commits fall back to the system
-    /// identity, because attributing them to a person nobody identified would be a lie.
+    /// A network-trust fallback grant: nobody has a name, which is exactly what "trusted by network,
+    /// not by sign-in" means. Config commits fall back to the system identity, because attributing them
+    /// to a person nobody identified would be a lie.
     /// </summary>
-    private static AuthenticationTicket Anonymous()
+    private static AuthenticationTicket Anonymous(UserRole role)
     {
-        var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.Role, nameof(UserRole.Admin))], SchemeName);
+        var identity = new ClaimsIdentity([new Claim(ClaimTypes.Role, role.ToString())], SchemeName);
         return new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
     }
 }

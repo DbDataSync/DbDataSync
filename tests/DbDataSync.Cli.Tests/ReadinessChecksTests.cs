@@ -68,7 +68,7 @@ public sealed class ReadinessChecksTests : IDisposable
     }
 
     private ReadinessContext SelfUpdateContext(bool enabled) =>
-        ReadinessChecks.BuildContext(["--repo", _root, $"--DbDataSync:SelfUpdateEnabled={(enabled ? "true" : "false")}"]);
+        ReadinessChecks.BuildContext(["--repo", _root, $"--DbDataSync:Updates:Mode={(enabled ? "manual" : "disabled")}"]);
 
     /// <summary>Phase 159: with self-update enabled, an installed unit without the marker is one the console's
     /// update button cannot work with.</summary>
@@ -224,7 +224,7 @@ public sealed class ReadinessChecksTests : IDisposable
     {
         ServeCommand.Prepare(_root);
         var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", "https://console.local:5080");
         DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", certPath);
         DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "KeyPath", keyPath);
 
@@ -240,7 +240,7 @@ public sealed class ReadinessChecksTests : IDisposable
     {
         ServeCommand.Prepare(_root);
         var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://a-different-host.example:5080");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", "https://a-different-host.example:5080");
         DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", certPath);
         DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "KeyPath", keyPath);
 
@@ -258,7 +258,7 @@ public sealed class ReadinessChecksTests : IDisposable
     public async Task ManagedSelfSignedCertificate_Current_CertificateCheckReportsTheManagedMarker()
     {
         ServeCommand.Prepare(_root);
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", "https://console.local:5080");
         BindAManagedSelfSignedCertificate("console.local", DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(90));
 
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
@@ -275,7 +275,7 @@ public sealed class ReadinessChecksTests : IDisposable
     public async Task ManagedSelfSignedCertificate_Expired_CertificateCheckFailsWithTheManagedMarker()
     {
         ServeCommand.Prepare(_root);
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", "https://console.local:5080");
         BindAManagedSelfSignedCertificate("console.local", DateTimeOffset.UtcNow.AddDays(-10), DateTimeOffset.UtcNow.AddDays(-1));
 
         var context = ReadinessChecks.BuildContext(["--repo", _root]);
@@ -317,7 +317,7 @@ public sealed class ReadinessChecksTests : IDisposable
     {
         ServeCommand.Prepare(_root);
         var (certPath, keyPath) = WriteSelfSignedPem(_root, "console.local");
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", "https://console.local:5080");
         DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "Path", certPath);
         DbDataSyncConfigFile.SetValue(_root, CertificateBinding.Section, "KeyPath", keyPath);
 

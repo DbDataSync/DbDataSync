@@ -48,7 +48,7 @@ These commands resolve their repo root the same way, via a shared resolver
 1. An explicit `--repo <path>` wins outright.
 2. Otherwise, walk upward from the current directory — the same shape `git` itself uses to find
    `.git` — looking for `dbdatasync.config.yaml` at each parent in turn.
-3. Otherwise, `DbDataSync__RepoRoot` — the environment-variable form of the `DbDataSync:RepoRoot`
+3. Otherwise, `DbDataSync__App__RepoRoot` — the environment-variable form of the `DbDataSync:App:RepoRoot`
    config key, not a name invented for this resolver.
 4. Otherwise, fall back to one documented, **machine-wide** directory per platform
    (`CliOptions.DefaultRoot`, phase 112):
@@ -68,10 +68,14 @@ These commands resolve their repo root the same way, via a shared resolver
    sees a one-time message naming both paths (`LegacyRootMigration`) rather than silently finding
    nothing at the new default.
 
-`dbdatasync service install` does **not** use this resolver — its `--repo` (and `--url`) keep working
-exactly as before, baked into the registered service's `binPath` at install time; a service that
-should read from a `dbdatasync.config.yaml` gets there because `serve` itself resolves one at each
-start, not because `install` searched for one.
+`dbdatasync service install` does **not** use this resolver for `--repo` — it's passed straight through
+to the registered service's `binPath` at install time. `--url` is different (phase 164): it is **not**
+baked into `binPath` — only `--repo` is — so the registered service always resolves `App:Url` the same
+way `serve` does at every start (flag, absent here; then env var; then the config file). An explicit
+`--url` given to `service install` instead seeds `App:Url` into `dbdatasync.config.yaml` once (if the
+file doesn't already have one), the same value `setup`'s General tab would write. This is what makes
+editing `App:Url` through the Admin screen actually take effect on the next restart — baking it into
+`binPath` would have made the install-time value win forever.
 
 ### `dbdatasync.config.yaml`
 
@@ -81,9 +85,11 @@ written as YAML:
 
 ```yaml
 DbDataSync:
-  Url: http://localhost:5080
-  StateEngine: MsSql
-  StateConnectionString: "Server=sql01;Database=DbDataSyncState;"
+  App:
+    Url: http://localhost:5080
+  State:
+    Engine: MsSql
+    ConnectionString: "Server=sql01;Database=DbDataSyncState;"
 ```
 
 It sits in the *same* precedence slot `appsettings.json` occupies — behind environment variables and
@@ -107,10 +113,10 @@ Starts the API, the scheduler and the web console in one process.
 | --- | --- |
 | `--repo <path>` | see "Repo root resolution," above |
 | `--state-db <path>` | `<repo>/state.db` |
-| `--url <url>` | `--url` flag, else `DbDataSync__Url` env var, else the resolved config's `DbDataSync:Url`, else `http://localhost:5080` |
+| `--url <url>` | `--url` flag, else `DbDataSync__App__Url` env var, else the resolved config's `DbDataSync:App:Url`, else `http://localhost:5080` |
 
 `--repo` git-inits the config repository if it isn't one already. Internally the resolved values
-become `--DbDataSync:RepoRoot`, `--DbDataSync:StateDbPath` and `--urls`, so it's the exact same
+become `--DbDataSync:App:RepoRoot`, `--DbDataSync:State:DbPath` and `--urls`, so it's the exact same
 configuration surface as running the API directly (see below) — just with CLI-flavored names and
 defaults.
 
@@ -171,12 +177,12 @@ dbdatasync config set <key> <value> [--repo <path>]
 
 Reads or writes one `DbDataSync:*` setting in `dbdatasync.config.yaml` — the same settings, and the same commit, as
 **Admin → Configuration** in the web console; `dbdatasync setup` edits some of the same ones. `<key>` is the name from the
-table under "`DbDataSync:*`" below, with or without the `DbDataSync:` prefix (`config set NotesRichMarkdown true`). It changes
-only keys the console could change: nested keys such as `Auth:AdminGroup` are shown there but never writable, and are refused
-here for the same reason. An on/off setting takes `true` or `false`. A setting with a caution — today only `NotesRichMarkdown`
-— prints it before it is turned on, as the console and `setup` show it beside the control. The change waits for a restart of
-the service; `config get` reports what the file says, not what a running process is using (the console's **Running** column
-compares the two).
+tables below, with or without the `DbDataSync:` prefix (`config set Notes:MarkdownRenderer rich`), and can be nested
+(`config set Auth:Windows:AdminGroup "DbDataSync Admins"`) — phase 164 confirmed the writer already handles any depth; only
+`App:RepoRoot` (how the file itself is found) is refused. A setting with a caution — a mode that widens what an
+unauthenticated or unverified caller can reach — prints it before it is turned on, as the console and `setup` show it beside
+the control. The change waits for a restart of the service; `config get` reports what the file says, not what a running
+process is using (the console's **Running** column compares the two).
 
 ### `dbdatasync invite`
 
@@ -192,19 +198,19 @@ process is a service with no console to print to in the first place.
 
 Opens the state database directly rather than calling a running API — the situation it exists for is
 "nobody can sign in," and an endpoint that needs a session is no help there. Resolves
-`DbDataSync:StateEngine`/`DbDataSync:StateConnectionString` the same way `serve` does (the resolved
+`DbDataSync:State:Engine`/`DbDataSync:State:ConnectionString` the same way `serve` does (the resolved
 config file, then `DbDataSync__*` environment variables), so it works against a `MsSql`- or
 `Postgres`-backed deployment, not only the SQLite default — before phase 79 it opened SQLite
 unconditionally and had no way to reach the other two. For SQLite, requires the state database file
 to already exist (i.e., DbDataSync has been started at least once); for the other two engines, it
-connects to whatever `StateEngine`/`StateConnectionString` (plus the secret store, if needed) name.
+connects to whatever `State:Engine`/`State:ConnectionString` (plus the secret store, if needed) name.
 
 ### `dbdatasync health`
 
 | flag | default |
 | --- | --- |
-| `--repo <path>` | see "Repo root resolution," above — used only to find a config file's `DbDataSync:Url`, nothing else |
-| `--url <url>` | `--url` flag, else the resolved config's `DbDataSync:Url`, else `http://127.0.0.1:8080` (the *container's* port, not `serve`'s 5080) |
+| `--repo <path>` | see "Repo root resolution," above — used only to find a config file's `DbDataSync:App:Url`, nothing else |
+| `--url <url>` | `--url` flag, else the resolved config's `DbDataSync:App:Url`, else `http://127.0.0.1:8080` (the *container's* port, not `serve`'s 5080) |
 
 Hits `{url}/api/health`; exits `0` on success, `1` otherwise. This is what the container's
 `HEALTHCHECK` runs — inside the image there's no config file to find, so it always falls through to
@@ -244,35 +250,46 @@ sets; see "`dbdatasync.config.yaml`," above, for the file itself.
 
 ### `DbDataSync:*`
 
+Phase 164 regrouped the whole key surface and replaced every bare boolean with a named mode string
+(`enabled`/`disabled`, or something richer where a setting genuinely has more than two states) — a mode
+self-documents in `config get`/the Admin screen the way `true`/`false` never did, and leaves room for a
+setting to grow a third state without another schema change. An existing `dbdatasync.config.yaml` using
+the old flat names is migrated automatically the first time `serve`/`setup` runs against it (see
+"Migrating an existing `dbdatasync.config.yaml`," below).
+
+#### `DbDataSync:App:*`
+
 | key | env var | default | notes |
 | --- | --- | --- | --- |
-| `RepoRoot` | `DbDataSync__RepoRoot` | `<cwd>/dbdatasync-repo` under raw `dotnet run`; the CLI's `--repo` default under `dbdatasync serve` | git-tracked config store root |
-| `Url` | `DbDataSync__Url` | none | **CLI-consumed, not an `ApiOptions` field** — `dbdatasync serve`/`dbdatasync health` read this themselves (see above) and translate it to `--urls`/Kestrel's bind address; running the raw API project doesn't read it at all (use `ASPNETCORE_URLS`/`--urls` directly there instead) |
-| `StateDbPath` | `DbDataSync__StateDbPath` | `<RepoRoot>/state.db` | the SQLite file; ignored when `StateEngine` is `MsSql` or `Postgres` |
-| `StateEngine` | `DbDataSync__StateEngine` | `Sqlite` | which database backs the state store — `Sqlite`, `MsSql` or `Postgres`; see below |
-| `StateConnectionString` | `DbDataSync__StateConnectionString` | none | how to reach that engine; required unless `StateEngine` is `Sqlite`; never put a password in it — see "Secrets," below |
-| `TaskRunnerDllPath` | `DbDataSync__TaskRunnerDllPath` | resolved automatically | see below |
-| `StatePort` | `DbDataSync__StatePort` | `0` (ephemeral) | loopback-only runner-state listener; set to a fixed port if you'd rather firewall a known one than trust the loopback binding |
-| `RunRetentionDays` | `DbDataSync__RunRetentionDays` | `90` | finished runs older than this are pruned hourly; `0` = keep forever |
-| `RunRetentionMaxPerMapping` | `DbDataSync__RunRetentionMaxPerMapping` | `1000` | most recent N finished runs kept, *per table mapping* (not global); `0` = no cap |
-| `RunPruningIntervalMinutes` | `DbDataSync__RunPruningIntervalMinutes` | `60` | how often the retention sweep runs |
-| `ChangeCheckRetentionDays` | `DbDataSync__ChangeCheckRetentionDays` | `7` | how long the scheduler's change-check history (phase 75) is kept; `0` = keep forever |
-| `NuGetSearchEnabled` | `DbDataSync__NuGetSearchEnabled` | `true` | whether the Libraries screen's search box (phase 119) may call the public NuGet index; `false` for an air-gapped or locked-down deployment |
-| `NotesRichMarkdown` | `DbDataSync__NotesRichMarkdown` | `false` | whether Notes render tables, task lists and strikethrough with the full Markdown renderer instead of the small one they use by default (phase 161). Off by default: a note is written by one operator and shown in other people's sessions, and a richer renderer is a wider surface — raw HTML is never interpreted and only `http(s)`/`mailto` links are followed, but the risk is not zero. Images in a note show as links, not inline. Change it in Admin → Configuration, on `dbdatasync setup`'s General tab, or with [`dbdatasync config set NotesRichMarkdown true`](#dbdatasync-config-getset); takes effect on restart |
-| `SelfUpdateEnabled` | `DbDataSync__SelfUpdateEnabled` | `false` | whether an admin may update this installation from the Updates screen (phase 159). Off by default — it replaces the code the service runs. Linux with a systemd unit from this version or later only, for now; see [Installing → Updating](install.md#updating) |
-| `SelfUpdateChannels` | `DbDataSync__SelfUpdateChannels` | `stable` | which channels the Updates screen may offer, comma-separated: `stable`, `beta`, `snapshot`. A snapshot is a development build, checked only against a checksum published beside it |
-| `SelfUpdateDrainTimeoutSeconds` | `DbDataSync__SelfUpdateDrainTimeoutSeconds` | `120` | how long an update waits for running work to finish before restarting the service anyway; anything interrupted is reconciled at the next start |
-| `SelfUpdateConfirmAfterSeconds` | `DbDataSync__SelfUpdateConfirmAfterSeconds` | `60` | how long an updated version must have been serving before the update counts as having worked; until then a restart rolls it back |
+| `App:RepoRoot` | `DbDataSync__App__RepoRoot` | `<cwd>/dbdatasync-repo` under raw `dotnet run`; the CLI's `--repo` default under `dbdatasync serve` | git-tracked config store root |
+| `App:Url` | `DbDataSync__App__Url` | `http://localhost:5080` | `dbdatasync serve`/`dbdatasync health` read this themselves (see above) and translate it to `--urls`/Kestrel's bind address; also this deployment's own always-trusted passkey origin (see `Auth:Passkeys:*`, below) |
+| `App:AlternateUrls` | `DbDataSync__App__AlternateUrls` | none | every other origin this deployment is also reached at, beyond `App:Url` — comma- or semicolon-separated. Purely additive: `App:Url`'s own origin is always trusted for passkeys without needing to be listed here too |
+| `App:TaskRunnerDllPath` | `DbDataSync__App__TaskRunnerDllPath` | resolved automatically | see below |
+| `App:CliDllPath` | `DbDataSync__App__CliDllPath` | resolved automatically | where `DbDataSync.Cli.dll` is, for the deep connection-scoped library-validation check to spawn itself in its own process |
 
-`TaskRunnerDllPath` resolves in this order: (1) beside the running assembly — true for the tool, the
-container, and any plain `dotnet publish`; (2) a dev-repo-layout guess (swaps `DbDataSync.Api/bin` for
-`DbDataSync.TaskRunner/bin`) — true only for this repository's own working tree.
+`App:TaskRunnerDllPath`/`App:CliDllPath` resolve in this order: (1) beside the running assembly — true
+for the tool, the container, and any plain `dotnet publish`; (2) a dev-repo-layout guess (swaps
+`DbDataSync.Api/bin` for `DbDataSync.TaskRunner/bin`/`DbDataSync.Cli/bin`) — true only for this
+repository's own working tree.
 
-### State store engine (`StateEngine`/`StateConnectionString`)
+#### `DbDataSync:State:*`
 
-SQLite by default — a file at `StateDbPath`, nothing to configure. `StateEngine` can instead be set to
+| key | env var | default | notes |
+| --- | --- | --- | --- |
+| `State:DbPath` | `DbDataSync__State__DbPath` | `<App:RepoRoot>/state.db` | the SQLite file; ignored when `State:Engine` is `MsSql` or `Postgres` |
+| `State:Engine` | `DbDataSync__State__Engine` | `Sqlite` | which database backs the state store — `Sqlite`, `MsSql` or `Postgres`; see below |
+| `State:ConnectionString` | `DbDataSync__State__ConnectionString` | none | how to reach that engine; required unless `State:Engine` is `Sqlite`; never put a password in it — see "Secrets," below |
+| `State:Port` | `DbDataSync__State__Port` | `0` (ephemeral) | loopback-only runner-state listener; set to a fixed port if you'd rather firewall a known one than trust the loopback binding |
+| `State:Retention:RunDays` | `DbDataSync__State__Retention__RunDays` | `90` | finished runs older than this are pruned hourly; `0` = keep forever |
+| `State:Retention:RunMaxPerMapping` | `DbDataSync__State__Retention__RunMaxPerMapping` | `1000` | most recent N finished runs kept, *per table mapping* (not global); `0` = no cap |
+| `State:Retention:PruningIntervalMinutes` | `DbDataSync__State__Retention__PruningIntervalMinutes` | `60` | how often the retention sweep runs |
+| `State:Retention:ChangeCheckDays` | `DbDataSync__State__Retention__ChangeCheckDays` | `7` | how long the scheduler's change-check history (phase 75) is kept; `0` = keep forever |
+
+### State store engine (`State:Engine`/`State:ConnectionString`)
+
+SQLite by default — a file at `State:DbPath`, nothing to configure. `State:Engine` can instead be set to
 `MsSql` or `Postgres` to run the state store (run history, the work queue, watermarks, users and
-sessions) on infrastructure a deployment already operates and backs up, with `StateConnectionString`
+sessions) on infrastructure a deployment already operates and backs up, with `State:ConnectionString`
 saying how to reach it. Two separate keys rather than one connection string carrying a provider hint,
 so a typo in the engine name fails as "you named an engine that doesn't exist" rather than as a
 driver-level parse error.
@@ -282,14 +299,14 @@ identically — this is API-process-only config; `DbDataSync.TaskRunner` never r
 always reaches state over the phase 39 loopback endpoint rather than opening the store directly.
 
 Two things worth being explicit about:
-- **No cross-engine migration.** Pointing an existing deployment at a different `StateEngine` starts an
+- **No cross-engine migration.** Pointing an existing deployment at a different `State:Engine` starts an
   empty store — it does not move anything. Choose once, at stand-up.
-- **An unrecognized `StateEngine` value refuses to start**, naming the three built-in engines in the
+- **An unrecognized `State:Engine` value refuses to start**, naming the three built-in engines in the
   error — a typo here is worth surfacing loudly rather than silently landing on `Sqlite`.
 - **`MsSql`/`Postgres` need their library installed.** Neither ships as a package this build carries by
   default — each resolves its connection through the same restorable-library mechanism
   `config driver install` uses. Run `dbdatasync config library install microsoft-data-sqlclient` (for
-  `MsSql`) or `dbdatasync config library install npgsql` (for `Postgres`) once; a `StateEngine` set to
+  `MsSql`) or `dbdatasync config library install npgsql` (for `Postgres`) once; a `State:Engine` set to
   either without its library installed fails at startup naming that exact command. See
   [Drivers and libraries](drivers-and-libraries.md) for the general mechanism — the same one a
   replication's own `MsSql`/`Postgres` connections use, and the one a descriptor driver's own `library:`
@@ -299,33 +316,90 @@ A run failing *either* retention cap is pruned along with its log lines; a run t
 never pruned regardless of age. Verification results are **not** covered by this pruning — a
 verification run's `TaskRuns` row is pruned, but its result file and index entry are not (a known gap).
 
-### `DbDataSync:Auth:*`
+#### `DbDataSync:Nuget:Search:*`
+
+| key | env var | default | notes |
+| --- | --- | --- | --- |
+| `Nuget:Search:Mode` | `DbDataSync__Nuget__Search__Mode` | `enabled` | whether the Libraries screen's search box (phase 119) may call the public NuGet index; `disabled` for an air-gapped or locked-down deployment |
+
+#### `DbDataSync:Notes:*`
+
+| key | env var | default | notes |
+| --- | --- | --- | --- |
+| `Notes:MarkdownRenderer` | `DbDataSync__Notes__MarkdownRenderer` | `basic` | `basic` or `rich` — whether Notes render tables, task lists and strikethrough with the full Markdown renderer instead of the small one they use by default (phase 161). Basic by default: a note is written by one operator and shown in other people's sessions, and a richer renderer is a wider surface — raw HTML is never interpreted and only `http(s)`/`mailto` links are followed, but the risk is not zero. Images in a note show as links, not inline. Change it in Admin → Configuration, on `dbdatasync setup`'s General tab, or with [`dbdatasync config set Notes:MarkdownRenderer rich`](#dbdatasync-config-getset); takes effect on restart |
+
+#### `DbDataSync:Updates:*`
+
+| key | env var | default | notes |
+| --- | --- | --- | --- |
+| `Updates:Mode` | `DbDataSync__Updates__Mode` | `disabled` | `manual` or `disabled` — whether an admin may update this installation from the Updates screen (phase 159/164). Disabled by default — it replaces the code the service runs. `manual` means an admin triggers it themselves; room for a future `auto`. Linux with a systemd unit from this version or later only, for now; see [Installing → Updating](install.md#updating) |
+| `Updates:Channels` | `DbDataSync__Updates__Channels` | `stable` | which channels the Updates screen may offer, comma-separated: `stable`, `beta`, `snapshot`. A snapshot is a development build, checked only against a checksum published beside it |
+| `Updates:DrainTimeoutSeconds` | `DbDataSync__Updates__DrainTimeoutSeconds` | `120` | how long an update waits for running work to finish before restarting the service anyway; anything interrupted is reconciled at the next start |
+| `Updates:ConfirmAfterSeconds` | `DbDataSync__Updates__ConfirmAfterSeconds` | `60` | how long an updated version must have been serving before the update counts as having worked; until then a restart rolls it back |
+
+### `DbDataSync:Auth:Network:*`
 
 | key | env var | default | meaning |
 | --- | --- | --- | --- |
-| `DbDataSync:Auth:Disabled` | `DbDataSync__Auth__Disabled` | `false` | runs with **no authentication at all** — an explicit opt-in for a trusted-network deployment, never the silent default |
-| `DbDataSync:Auth:AdminGroup` | `DbDataSync__Auth__AdminGroup` | none | Windows group whose members are admins |
-| `DbDataSync:Auth:ViewerGroup` | `DbDataSync__Auth__ViewerGroup` | none | Windows group whose members are viewers |
+| `Auth:Network:Admin` | `DbDataSync__Auth__Network__Admin` | `disabled` | `loopback` or `disabled` — trusts an unauthenticated request from loopback as Admin, no sign-in at all. There is no "from anywhere" option: unlike `Auth:Network:Viewer`, Admin trust never widens past loopback |
+| `Auth:Network:Viewer` | `DbDataSync__Auth__Network__Viewer` | `disabled` | `remote`, `loopback`, or `disabled` — trusts an unauthenticated request as Viewer; `remote` trusts any origin, `loopback` restricts that to loopback only |
+
+Phase 164 replaced the old blanket `Auth:Disabled` (which trusted *every* request, from anywhere, as
+Admin) with these two role-scoped, network-trust settings — deliberately narrower for Admin, and able to
+act as a fallback *alongside* Windows/Passkeys auth being configured, not only as a replacement for it:
+a real session cookie always wins first if present.
+
+**A real security consideration, not a formality**: on a shared host, loopback does not distinguish the
+operator from any other local account — anyone who can reach `127.0.0.1` gets whatever `Auth:Network:*`
+grants, with no sign-in. Leave both `disabled` unless the deployment is a single-operator box, or the
+loopback caller is genuinely trusted (a local health check, a CI runner talking to its own scratch
+instance).
+
+### `DbDataSync:Auth:Windows:*`
+
+| key | env var | default | meaning |
+| --- | --- | --- | --- |
+| `Auth:Windows:Mode` | `DbDataSync__Auth__Windows__Mode` | `enabled` | `enabled` or `disabled` — lets an operator configure a group name and still turn Windows auth off without clearing it |
+| `Auth:Windows:AdminGroup` | `DbDataSync__Auth__Windows__AdminGroup` | none | Windows group whose members are admins |
+| `Auth:Windows:ViewerGroup` | `DbDataSync__Auth__Windows__ViewerGroup` | none | Windows group whose members are viewers |
 
 Windows authentication (`Negotiate`) is registered automatically when the process is running on
-Windows — it's additive to session-cookie auth, not a mode switch, and works independently of whether
-either group is configured. If neither `Disabled` nor a group is set, the only way in on a fresh
-install is the bootstrap invite: printed as a startup warning whenever no users exist yet, and always
-reprintable with `dbdatasync invite`.
+Windows *and* at least one group is configured — it's additive to session-cookie auth, not a mode
+switch. If nothing here or under `Auth:Network:*`/`Auth:Passkeys:*` is configured, the only way in on a
+fresh install is the bootstrap invite: printed as a startup warning whenever no users exist yet, and
+always reprintable with `dbdatasync invite`.
 
 ### `DbDataSync:Auth:Passkeys:*`
 
 | key | env var | default |
 | --- | --- | --- |
-| `DbDataSync:Auth:Passkeys:RelyingPartyId` | `DbDataSync__Auth__Passkeys__RelyingPartyId` | `localhost` |
-| `DbDataSync:Auth:Passkeys:RelyingPartyName` | `DbDataSync__Auth__Passkeys__RelyingPartyName` | `DbDataSync` |
-| `DbDataSync:Auth:Passkeys:Origins` (array) | `DbDataSync__Auth__Passkeys__Origins__0`, `__1`, ... | `http://localhost:5080`, `https://localhost:5080`, `http://localhost:5173` |
+| `Auth:Passkeys:Mode` | `DbDataSync__Auth__Passkeys__Mode` | `enabled` |
+| `Auth:Passkeys:RelyingPartyId` | `DbDataSync__Auth__Passkeys__RelyingPartyId` | `localhost` |
+| `Auth:Passkeys:RelyingPartyName` | `DbDataSync__Auth__Passkeys__RelyingPartyName` | `DbDataSync` |
 
 `RelyingPartyId` is a **bare domain** — no scheme, no port, and it cannot be an IP address (WebAuthn
-requires a real domain name). `Origins` are full URLs, and each one's host must match
-`RelyingPartyId` or a subdomain of it. Checked at startup — a misconfiguration logs a warning naming
-exactly what's wrong, rather than failing silently inside a browser API the first time someone tries
-to enroll a key.
+requires a real domain name). Deliberately independent of `App:Url`, not derived from it: a
+relying-party id is cryptographically bound into every passkey at the moment it's created, so silently
+tracking `App:Url`'s hostname would invalidate every already-registered passkey the moment that URL
+changed. See `architecture/planning/todo/passkey-relying-party-migration.md` in the repository for the
+fuller reasoning, and for what a real relying-party migration would need.
+
+The set of origins a ceremony may come from (this server's own allow-list, separate from the browser's
+own relying-party check) is **not** a setting of its own any more — `App:Url`'s origin is always
+implicitly trusted, and `App:AlternateUrls` adds any others. Each one's host must match
+`RelyingPartyId` or a subdomain of it, checked at startup — a misconfiguration logs a warning naming
+exactly what's wrong, rather than failing silently inside a browser API the first time someone tries to
+enroll a key.
+
+### Migrating an existing `dbdatasync.config.yaml`
+
+An operator upgrading from before phase 164 does not need to hand-edit anything: the first time
+`serve`/`setup` runs against a `dbdatasync.config.yaml` still using the old flat key names, it rewrites
+each one to its new grouped location (and, for what used to be a bare boolean, to the closest mode
+string — `Auth:Disabled: true` becomes `Auth:Network:Admin: loopback`, deliberately narrower than the
+old flag's "admin from anywhere") and commits the result, the same one-line-per-change history every
+other config edit already produces. Environment variables and CLI flags using the old names are **not**
+migrated — update those by hand if you set configuration that way.
 
 ### `DbDataSync:Certificates:*`
 
@@ -476,7 +550,7 @@ see [Installing → Running in a container](install.md#running-in-a-container) f
 - The image carries these docs (`/app/wwwroot/docs`) and the pictures they show, so **Docs** in the console works with no
   network — see [Getting started](getting-started.md#reading-these-docs-in-the-console).
 - `VOLUME ["/var/lib/dbdatasync"]` — one mount is a complete deployment: the config repository and the state database live together, so a backup of this directory is a backup of everything that isn't the image itself.
-- `ENV DbDataSync__RepoRoot=/var/lib/dbdatasync` (phase 112) — the environment-variable form of the `DbDataSync:RepoRoot` config key, honoured by the same repo-root resolver every command uses (below). `CliOptions.DefaultRoot` already resolves to the same path on Linux, so this is set explicitly rather than relied on as a coincidence.
+- `ENV DbDataSync__App__RepoRoot=/var/lib/dbdatasync` (phase 112) — the environment-variable form of the `DbDataSync:App:RepoRoot` config key, honoured by the same repo-root resolver every command uses (below). `CliOptions.DefaultRoot` already resolves to the same path on Linux, so this is set explicitly rather than relied on as a coincidence.
 
 ## `tools/dev-harness` — development and testing only
 

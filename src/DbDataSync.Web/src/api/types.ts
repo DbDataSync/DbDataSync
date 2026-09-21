@@ -859,7 +859,7 @@ export interface LibrarySearchResult {
   verified: boolean
 }
 
-/** `"ok"` (`results` may still be empty), `"disabled"` (`DbDataSync:NuGetSearchEnabled` is false — the
+/** `"ok"` (`results` may still be empty), `"disabled"` (`DbDataSync:Nuget:Search:Mode` is disabled — the
  * server never called out), or `"unavailable"` (the call was made but failed or timed out). The SPA
  * falls back to manual package-id/version entry for anything other than `"ok"`. */
 export type LibrarySearchStatus = 'ok' | 'disabled' | 'unavailable'
@@ -1656,7 +1656,7 @@ export interface UpdateHistoryEntry {
 }
 
 export interface UpdateStatus {
-  /** `DbDataSync:SelfUpdateEnabled`. Off by default. */
+  /** `DbDataSync:Updates:Mode`. Disabled by default. */
   enabled: boolean
   runningVersion: string | null
   /** `ToolPath`, `Global`, `Container` or `NotAToolInstall`. */
@@ -1702,6 +1702,6 @@ export interface AboutInfo {
   /** This build's informational version — what `dbdatasync version` prints. */
   version: string | null
   /** Whether Notes render with the full Markdown renderer on this deployment (phase 161). Off unless the operator turned
-   * `DbDataSync:NotesRichMarkdown` on; the value the process is running with, so a change waits for a restart. */
+   * `DbDataSync:Notes:MarkdownRenderer` set to rich; the value the process is running with, so a change waits for a restart. */
   notesRichMarkdown: boolean
 }

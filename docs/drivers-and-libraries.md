@@ -92,7 +92,7 @@ an SDK.
 ### From the web console
 
 The Admin → **Libraries** tab does the same thing as `config library install`/`list`/`uninstall` —
-including a NuGet search box, gated by the same `DbDataSync:NuGetSearchEnabled` setting documented in
+including a NuGet search box, gated by the same `DbDataSync:Nuget:Search:Mode` setting documented in
 [Configuration](configuration.md). Both paths write the identical `<RepoRoot>/libraries/*` files, so
 either one is visible to the other.
 

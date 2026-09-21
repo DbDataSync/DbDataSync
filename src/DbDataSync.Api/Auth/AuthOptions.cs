@@ -1,5 +1,20 @@
 namespace DbDataSync.Api.Auth;
 
+/// <summary>A recurring two-state config value — never a bare boolean in the file (phase 164): a mode
+/// name self-documents in <c>config get</c>/the Admin screen the way <c>true</c>/<c>false</c> never did,
+/// and leaves room for a feature to grow a third state without another schema change.</summary>
+public enum FeatureMode { Disabled, Enabled }
+
+/// <summary>Who an unauthenticated request from loopback is trusted as, if anyone — phase 164's
+/// replacement for the old blanket <c>Auth:Disabled</c>. Deliberately has no "trust from anywhere" value:
+/// unlike <see cref="ViewerNetworkTrust"/>, granting Admin for free is never offered wider than
+/// loopback.</summary>
+public enum AdminNetworkTrust { Disabled, Loopback }
+
+/// <summary>Who an unauthenticated request is trusted as for read-only access — wider than
+/// <see cref="AdminNetworkTrust"/> on purpose, since a Viewer can only look.</summary>
+public enum ViewerNetworkTrust { Disabled, Loopback, Remote }
+
 /// <summary>
 /// How this deployment decides who may use it, read from the <c>DbDataSync:Auth</c> configuration
 /// section.
@@ -21,30 +36,49 @@ public sealed class AuthOptions
 
     public string? ViewerGroup { get; init; }
 
-    /// <summary>Whether Windows authentication is configured at all. Two groups or one; neither means
-    /// this deployment does not use it.</summary>
-    public bool WindowsEnabled => !string.IsNullOrWhiteSpace(AdminGroup) || !string.IsNullOrWhiteSpace(ViewerGroup);
+    /// <summary>Explicit — lets an operator configure a group name and still turn Windows auth off
+    /// without clearing it. Defaults to <see cref="FeatureMode.Enabled"/>, so an existing deployment
+    /// that only ever configured group names keeps working exactly as before.</summary>
+    public FeatureMode WindowsMode { get; init; } = FeatureMode.Enabled;
+
+    /// <summary>Whether Windows authentication is actually live: the mode allows it, and at least one
+    /// group is configured. Neither means this deployment does not use it.</summary>
+    public bool WindowsEnabled =>
+        WindowsMode == FeatureMode.Enabled && (!string.IsNullOrWhiteSpace(AdminGroup) || !string.IsNullOrWhiteSpace(ViewerGroup));
 
     /// <summary>
-    /// Runs with **no authentication at all**, for a trusted-network deployment that has deliberately
-    /// chosen that.
-    /// <para>
-    /// It has to be said out loud in configuration. The alternative — starting open when nothing is
-    /// configured — is how products get breached, and refusing to start when nothing is configured
-    /// would make a freshly installed tool unusable. Phase 53's first-run invite is what removes the
-    /// need for this; until then it is the escape hatch, and it names itself.
-    /// </para>
+    /// Trusts an unauthenticated request from loopback as Admin — phase 164's narrower replacement for
+    /// the old <c>Auth:Disabled</c>, which trusted every request, from anywhere, as Admin. There is no
+    /// "from anywhere" option for Admin at all; only <see cref="NetworkViewer"/> ever widens past
+    /// loopback.
     /// </summary>
-    public bool Disabled { get; init; }
+    public AdminNetworkTrust NetworkAdmin { get; init; } = AdminNetworkTrust.Disabled;
+
+    /// <summary>Trusts an unauthenticated request as Viewer — from loopback, or (widest) from
+    /// anywhere.</summary>
+    public ViewerNetworkTrust NetworkViewer { get; init; } = ViewerNetworkTrust.Disabled;
 
     public static AuthOptions FromConfiguration(IConfiguration configuration)
     {
-        var section = configuration.GetSection("DbDataSync:Auth");
+        var windows = configuration.GetSection("DbDataSync:Auth:Windows");
+        var network = configuration.GetSection("DbDataSync:Auth:Network");
+
         return new AuthOptions
         {
-            AdminGroup = section["AdminGroup"],
-            ViewerGroup = section["ViewerGroup"],
-            Disabled = bool.TryParse(section["Disabled"], out var disabled) && disabled,
+            AdminGroup = windows["AdminGroup"],
+            ViewerGroup = windows["ViewerGroup"],
+            WindowsMode = ConfigEnum.Parse(windows["Mode"], FeatureMode.Enabled),
+            NetworkAdmin = ConfigEnum.Parse(network["Admin"], AdminNetworkTrust.Disabled),
+            NetworkViewer = ConfigEnum.Parse(network["Viewer"], ViewerNetworkTrust.Disabled),
         };
     }
+}
+
+/// <summary>Shared by every mode-string-backed setting (phase 164 replaced every bare boolean with one
+/// of these), so <c>enabled</c>/<c>disabled</c>/etc. parse identically everywhere rather than each
+/// options class rolling its own.</summary>
+internal static class ConfigEnum
+{
+    public static TEnum Parse<TEnum>(string? value, TEnum fallback) where TEnum : struct, Enum =>
+        Enum.TryParse<TEnum>(value, ignoreCase: true, out var parsed) ? parsed : fallback;
 }

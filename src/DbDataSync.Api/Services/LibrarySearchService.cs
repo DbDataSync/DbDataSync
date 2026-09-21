@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DbDataSync.Api.Auth;
 using DbDataSync.Api.Configuration;
 
 namespace DbDataSync.Api.Services;
@@ -34,7 +35,7 @@ public sealed class LibrarySearchService(IHttpClientFactory httpClientFactory, A
 
     public async Task<LibrarySearchResponse> SearchAsync(string query, CancellationToken cancellationToken)
     {
-        if (!apiOptions.NuGetSearchEnabled)
+        if (apiOptions.NugetSearchMode != FeatureMode.Enabled)
             return new LibrarySearchResponse("disabled", null);
 
         var client = httpClientFactory.CreateClient(HttpClientName);

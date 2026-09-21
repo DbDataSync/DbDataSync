@@ -38,7 +38,7 @@ internal sealed class GeneralTab : View
 
     private static string NotesWarningText()
     {
-        var caution = AdminConfigService.Writable("NotesRichMarkdown")?.Caution ?? "";
+        var caution = AdminConfigService.Writable("Notes:MarkdownRenderer")?.Caution ?? "";
         return string.Join('\n', Wrap(caution, 46));
     }
 
@@ -60,7 +60,7 @@ internal sealed class GeneralTab : View
             yield return line;
     }
 
-    /// <summary>Whether the box is ticked, for <see cref="SetupSteps.ApplyNotesRichMarkdown"/>.</summary>
+    /// <summary>Whether the box is ticked, for <see cref="SetupSteps.ApplyNotesRenderer"/>.</summary>
     public bool NotesRichMarkdown => _notesRich.Value == CheckState.Checked;
 
     private void UpdateVisibility()
@@ -87,11 +87,11 @@ internal sealed class GeneralTab : View
     /// for a value the operator can just retype.</summary>
     public void Populate(IConfiguration configuration)
     {
-        var url = configuration["DbDataSync:Url"];
+        var url = configuration["DbDataSync:App:Url"];
         if (!string.IsNullOrEmpty(url))
             _url.Text = url;
 
-        _notesRich.Value = bool.TryParse(configuration["DbDataSync:NotesRichMarkdown"], out var rich) && rich
+        _notesRich.Value = string.Equals(configuration["DbDataSync:Notes:MarkdownRenderer"], "rich", StringComparison.OrdinalIgnoreCase)
             ? CheckState.Checked
             : CheckState.UnChecked;
     }

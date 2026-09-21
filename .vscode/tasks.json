@@ -13,7 +13,7 @@
       "options": {
         "cwd": "${workspaceFolder}",
         "env":{
-          "DbDataSync__Auth__Disabled":"true"
+          "DbDataSync__Auth__Network__Admin":"loopback"
         }
       },
       "dependsOn": "Build solution",

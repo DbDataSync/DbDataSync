@@ -15,9 +15,13 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
 {
     private StateDatabase Database => factory.Services.GetRequiredService<StateDatabase>();
 
-    private static BootstrapInvite Bootstrap(UserStore users, InviteStore invites, string root, bool disabled = false) =>
+    private static BootstrapInvite Bootstrap(UserStore users, InviteStore invites, string root, bool networkAdminLoopback = false) =>
         new(users, invites,
-            new AuthOptions { AdminGroup = "g", Disabled = disabled },
+            new AuthOptions
+            {
+                AdminGroup = "g",
+                NetworkAdmin = networkAdminLoopback ? AdminNetworkTrust.Loopback : AdminNetworkTrust.Disabled,
+            },
             new ApiOptions { RepoRoot = root, StateDbPath = Path.Combine(root, "state.db"), TaskRunnerDllPath = "unused", CliDllPath = "unused" },
             NullLogger<BootstrapInvite>.Instance);
 
@@ -113,14 +117,14 @@ public sealed class BootstrapInviteTests(AuthenticatedApiFactory factory) : ICla
         }
     }
 
-    /// <summary>A deployment that turned authentication off has nobody to invite.</summary>
+    /// <summary>A deployment where loopback already grants Admin for free has nobody to invite.</summary>
     [Fact]
-    public async Task WithAuthenticationDisabled_NothingIsMinted()
+    public async Task WithNetworkAdminLoopback_NothingIsMinted()
     {
         var (users, invites, root) = Fresh();
         try
         {
-            await Bootstrap(users, invites, root, disabled: true).StartAsync(CancellationToken.None);
+            await Bootstrap(users, invites, root, networkAdminLoopback: true).StartAsync(CancellationToken.None);
 
             Assert.Empty(invites.ListOutstanding());
         }

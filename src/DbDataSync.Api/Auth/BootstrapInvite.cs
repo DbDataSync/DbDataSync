@@ -27,7 +27,9 @@ public sealed class BootstrapInvite(
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (authOptions.Disabled)
+        // Anyone from loopback already has Admin without redeeming anything — a bootstrap invite would
+        // be a way in nobody needs.
+        if (authOptions.NetworkAdmin == AdminNetworkTrust.Loopback)
             return Task.CompletedTask;
 
         var filePath = Path.Combine(apiOptions.RepoRoot, FileName);

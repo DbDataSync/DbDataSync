@@ -11,7 +11,7 @@ import { useAdminConfig, useRestartRequired, useSetAdminConfig, useSetAdminConfi
 import type { AdminConfigEntry } from '../api/types'
 
 const COLUMNS = '1.3fr 1.6fr 1.3fr 1.3fr'
-const STATE_CONNECTION_STRING_KEY = 'DbDataSync:StateConnectionString'
+const STATE_CONNECTION_STRING_KEY = 'DbDataSync:State:ConnectionString'
 const NUMERIC = /^-?\d+(\.\d+)?$/
 
 /** The first sentence, as a quick-read summary — the full description is one hover away on the

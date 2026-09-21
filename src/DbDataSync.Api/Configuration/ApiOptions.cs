@@ -1,6 +1,17 @@
+using DbDataSync.Api.Auth;
 using DbDataSync.State;
 using DbDataSync.Updates;
 namespace DbDataSync.Api.Configuration;
+
+/// <summary>Phase 164: <c>Updates:Mode</c> — replaces the old bare <c>SelfUpdateEnabled</c> boolean.
+/// Room for a future <c>Auto</c> without another schema change; <c>Manual</c> is today's "on" (an admin
+/// triggers it from the console).</summary>
+public enum UpdatesMode { Disabled, Manual }
+
+/// <summary>Phase 164: <c>Notes:MarkdownRenderer</c> — replaces the old bare <c>NotesRichMarkdown</c>
+/// boolean. <see cref="Basic"/> is the deliberately small, safe-by-having-almost-nothing-in-it renderer;
+/// <see cref="Rich"/> is the full one (tables, task lists, strikethrough).</summary>
+public enum NotesRenderer { Basic, Rich }
 
 /// <summary>
 /// Deployment-specific paths, read from the "DbDataSync" configuration section (appsettings.json,
@@ -14,24 +25,41 @@ public sealed class ApiOptions
     // Named so the admin config screen's "Reset" action (phase 81 follow-up) can offer exactly the
     // literal FromConfiguration falls back to, rather than a second copy of these numbers that could
     // drift from the one actually applied.
+    public const string DefaultUrl = "http://localhost:5080";
     public const string DefaultStateEngine = StateEngineIds.Sqlite;
     public const int DefaultStatePort = 0;
     public const int DefaultRunRetentionDays = 90;
     public const int DefaultRunRetentionMaxPerMapping = 1_000;
     public const int DefaultChangeCheckRetentionDays = 7;
     public const int DefaultRunPruningIntervalMinutes = 60;
-    public const bool DefaultNuGetSearchEnabled = true;
-    public const bool DefaultNotesRichMarkdown = false;
+    public const FeatureMode DefaultNugetSearchMode = FeatureMode.Enabled;
+    public const NotesRenderer DefaultNotesRenderer = NotesRenderer.Basic;
 
     // Phase 159: applying an update from the console replaces the code the service runs, as the service's
     // own account, so every default here is the closed one.
-    public const bool DefaultSelfUpdateEnabled = false;
+    public const UpdatesMode DefaultSelfUpdateMode = UpdatesMode.Disabled;
     public const string DefaultSelfUpdateChannels = "stable";
     public const int DefaultSelfUpdateDrainTimeoutSeconds = 120;
     public const int DefaultSelfUpdateConfirmAfterSeconds = 60;
 
     public required string RepoRoot { get; init; }
     public required string StateDbPath { get; init; }
+
+    /// <summary>
+    /// The console/API bind address — see <c>ServeCommand</c> for how this actually becomes Kestrel's
+    /// <c>--urls</c>; this is a record of what that resolution already decided, not a second resolution
+    /// of its own, since <c>DbDataSyncHost.InsertConfigFile</c> wires the same config file/environment/
+    /// command-line sources in ahead of this being constructed.
+    /// </summary>
+    public string Url { get; init; } = DefaultUrl;
+
+    /// <summary>
+    /// Every other origin this deployment is also legitimately reached at, beyond <see cref="Url"/> —
+    /// purely additive, never a replacement (see <see cref="Auth.PasskeyOptions.Origins"/>, its one
+    /// consumer today). Comma- or semicolon-separated in configuration, matching
+    /// <see cref="SelfUpdateChannels"/>'s own list shape.
+    /// </summary>
+    public IReadOnlyList<string> AlternateUrls { get; init; } = [];
 
     /// <summary>
     /// Which database backs the state store — see phase 63.
@@ -137,26 +165,27 @@ public sealed class ApiOptions
     public TimeSpan RunPruningInterval { get; init; } = TimeSpan.FromHours(1);
 
     /// <summary>
-    /// Whether the Libraries screen's search box (phase 119) may call the public NuGet index. True by
-    /// default; an air-gapped or locked-down deployment sets this false so the endpoint refuses the
+    /// Whether the Libraries screen's search box (phase 119) may call the public NuGet index. Enabled by
+    /// default; an air-gapped or locked-down deployment sets this to disabled so the endpoint refuses the
     /// call outright rather than timing out against a network it was never going to reach.
     /// </summary>
-    public bool NuGetSearchEnabled { get; init; } = DefaultNuGetSearchEnabled;
+    public FeatureMode NugetSearchMode { get; init; } = DefaultNugetSearchMode;
 
     /// <summary>
-    /// Whether Notes render with the full Markdown renderer (tables, task lists, strikethrough) instead of the deliberately
-    /// small one they use by default (phase 161). Off: a note is stored input, written by one operator and rendered in other
-    /// people's sessions, and the small renderer is safe by having almost nothing in it. A flat key, not
-    /// <c>Notes:RichMarkdown</c>, because <c>dbdatasync.config.yaml</c>'s writer only addresses top-level keys — a nested one
-    /// could never be edited from the Admin screen.
+    /// Which renderer Notes use. <see cref="NotesRenderer.Basic"/> (the default) is deliberately small — a note is
+    /// stored input, written by one operator and rendered in other people's sessions, and the small renderer is safe by
+    /// having almost nothing in it. <see cref="NotesRenderer.Rich"/> adds tables, task lists and strikethrough (phase
+    /// 161).
     /// </summary>
-    public bool NotesRichMarkdown { get; init; } = DefaultNotesRichMarkdown;
+    public NotesRenderer NotesRenderer { get; init; } = DefaultNotesRenderer;
 
     /// <summary>
-    /// Phase 159: whether an admin may update this installation from the web console. Off by default — a page
-    /// that can replace the code a service runs is a capability an operator turns on deliberately.
+    /// Phase 159/164: whether, and how, an admin may update this installation from the web console.
+    /// <see cref="UpdatesMode.Disabled"/> by default — a page that can replace the code a service runs is
+    /// a capability an operator turns on deliberately. <see cref="UpdatesMode.Manual"/> is today's "on":
+    /// an admin triggers it themselves from the Updates screen.
     /// </summary>
-    public bool SelfUpdateEnabled { get; init; } = DefaultSelfUpdateEnabled;
+    public UpdatesMode SelfUpdateMode { get; init; } = DefaultSelfUpdateMode;
 
     /// <summary>Which release channels the console may offer: any of <c>stable</c>, <c>beta</c>,
     /// <c>snapshot</c>. Only <c>stable</c> by default — a beta is a prerelease, and a snapshot is a development
@@ -173,16 +202,23 @@ public sealed class ApiOptions
 
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
-        var section = configuration.GetSection("DbDataSync");
+        var app = configuration.GetSection("DbDataSync:App");
+        var state = configuration.GetSection("DbDataSync:State");
+        var retention = configuration.GetSection("DbDataSync:State:Retention");
+        var updates = configuration.GetSection("DbDataSync:Updates");
+        var nuget = configuration.GetSection("DbDataSync:Nuget:Search");
+        var notes = configuration.GetSection("DbDataSync:Notes");
 
-        var repoRoot = section["RepoRoot"] ?? Path.Combine(Directory.GetCurrentDirectory(), "dbdatasync-repo");
-        var stateDbPath = section["StateDbPath"] ?? Path.Combine(repoRoot, "state.db");
-        var taskRunnerDllPath = section["TaskRunnerDllPath"] ?? ResolveDefaultTaskRunnerDllPath();
-        var cliDllPath = section["CliDllPath"] ?? ResolveDefaultCliDllPath();
+        var repoRoot = app["RepoRoot"] ?? Path.Combine(Directory.GetCurrentDirectory(), "dbdatasync-repo");
+        var stateDbPath = state["DbPath"] ?? Path.Combine(repoRoot, "state.db");
+        var taskRunnerDllPath = app["TaskRunnerDllPath"] ?? ResolveDefaultTaskRunnerDllPath();
+        var cliDllPath = app["CliDllPath"] ?? ResolveDefaultCliDllPath();
 
         return new ApiOptions
         {
             RepoRoot = repoRoot,
+            Url = string.IsNullOrWhiteSpace(app["Url"]) ? DefaultUrl : app["Url"]!,
+            AlternateUrls = ReadList(app["AlternateUrls"]),
             StateDbPath = stateDbPath,
             CliDllPath = cliDllPath,
             // Not validated here — phase 109f moved that to StateDialect.For, the one place that
@@ -191,39 +227,41 @@ public sealed class ApiOptions
             // an open id space (a custom StateDialect can be registered), a typo and "I meant a real
             // custom engine that just isn't registered yet" look identical from here, and silently
             // falling back to SQLite would start an empty store instead of surfacing either mistake.
-            StateEngine = section["StateEngine"] ?? DefaultStateEngine,
-            StateConnectionString = section["StateConnectionString"],
+            StateEngine = state["Engine"] ?? DefaultStateEngine,
+            StateConnectionString = state["ConnectionString"],
             TaskRunnerDllPath = taskRunnerDllPath,
-            StatePort = int.TryParse(section["StatePort"], out var statePort) ? statePort : DefaultStatePort,
+            StatePort = int.TryParse(state["Port"], out var statePort) ? statePort : DefaultStatePort,
             // Defaults applied when unset, rather than "unset means no limit". An operator who wants
             // no limit says so with 0, which is a decision; silence is not.
-            RunRetentionDays = ReadCap(section["RunRetentionDays"], DefaultRunRetentionDays),
-            RunRetentionMaxPerMapping = ReadCap(section["RunRetentionMaxPerMapping"], DefaultRunRetentionMaxPerMapping),
-            ChangeCheckRetentionDays = ReadCap(section["ChangeCheckRetentionDays"], DefaultChangeCheckRetentionDays),
+            RunRetentionDays = ReadCap(retention["RunDays"], DefaultRunRetentionDays),
+            RunRetentionMaxPerMapping = ReadCap(retention["RunMaxPerMapping"], DefaultRunRetentionMaxPerMapping),
+            ChangeCheckRetentionDays = ReadCap(retention["ChangeCheckDays"], DefaultChangeCheckRetentionDays),
             RunPruningInterval = TimeSpan.FromMinutes(
-                int.TryParse(section["RunPruningIntervalMinutes"], out var minutes) && minutes > 0
+                int.TryParse(retention["PruningIntervalMinutes"], out var minutes) && minutes > 0
                     ? minutes
                     : DefaultRunPruningIntervalMinutes),
-            NuGetSearchEnabled = bool.TryParse(section["NuGetSearchEnabled"], out var nuGetSearchEnabled)
-                ? nuGetSearchEnabled
-                : DefaultNuGetSearchEnabled,
-            NotesRichMarkdown = bool.TryParse(section["NotesRichMarkdown"], out var notesRichMarkdown)
-                ? notesRichMarkdown
-                : DefaultNotesRichMarkdown,
-            SelfUpdateEnabled = bool.TryParse(section["SelfUpdateEnabled"], out var selfUpdateEnabled)
-                ? selfUpdateEnabled
-                : DefaultSelfUpdateEnabled,
-            SelfUpdateChannels = ReadChannels(section["SelfUpdateChannels"]),
+            NugetSearchMode = ConfigEnum.Parse(nuget["Mode"], DefaultNugetSearchMode),
+            NotesRenderer = ConfigEnum.Parse(notes["MarkdownRenderer"], DefaultNotesRenderer),
+            SelfUpdateMode = ConfigEnum.Parse(updates["Mode"], DefaultSelfUpdateMode),
+            SelfUpdateChannels = ReadChannels(updates["Channels"]),
             SelfUpdateDrainTimeout = TimeSpan.FromSeconds(
-                int.TryParse(section["SelfUpdateDrainTimeoutSeconds"], out var drain) && drain >= 0
+                int.TryParse(updates["DrainTimeoutSeconds"], out var drain) && drain >= 0
                     ? drain
                     : DefaultSelfUpdateDrainTimeoutSeconds),
             SelfUpdateConfirmAfter = TimeSpan.FromSeconds(
-                int.TryParse(section["SelfUpdateConfirmAfterSeconds"], out var confirm) && confirm >= 0
+                int.TryParse(updates["ConfirmAfterSeconds"], out var confirm) && confirm >= 0
                     ? confirm
                     : DefaultSelfUpdateConfirmAfterSeconds),
         };
     }
+
+    /// <summary>Comma- or semicolon-separated, one scalar value rather than a YAML block sequence — the
+    /// shape every list-shaped <c>DbDataSync:*</c> setting uses, so it's writable through the same
+    /// text-editing config-file writer every scalar setting already is.</summary>
+    internal static IReadOnlyList<string> ReadList(string? configured) =>
+        (configured ?? "")
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
 
     /// <summary>
     /// A comma- or semicolon-separated list of channel names. Anything that is not a channel is ignored rather

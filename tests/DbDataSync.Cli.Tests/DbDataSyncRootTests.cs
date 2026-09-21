@@ -70,7 +70,7 @@ public sealed class DbDataSyncRootTests : IDisposable
         Assert.Equal(CliOptions.DefaultRoot, resolved);
     }
 
-    /// <summary>Phase 112's new step: <c>DbDataSync__RepoRoot</c> beats <see cref="CliOptions.DefaultRoot"/>
+    /// <summary>Phase 112's new step: <c>DbDataSync__App__RepoRoot</c> beats <see cref="CliOptions.DefaultRoot"/>
     /// but loses to an explicit <c>--repo</c> and to a real walk-up hit.</summary>
     [Fact]
     public void RepoRootEnvVar_BeatsDefaultRoot_ButLosesToExplicitRepoAndToAWalkUpHit()
@@ -79,7 +79,7 @@ public sealed class DbDataSyncRootTests : IDisposable
         Directory.CreateDirectory(deep);
         var envRoot = Path.Combine(_root, "env-root");
 
-        Environment.SetEnvironmentVariable("DbDataSync__RepoRoot", envRoot);
+        Environment.SetEnvironmentVariable("DbDataSync__App__RepoRoot", envRoot);
         try
         {
             Assert.Equal(envRoot, DbDataSyncRoot.Resolve([], deep));
@@ -92,7 +92,7 @@ public sealed class DbDataSyncRootTests : IDisposable
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DbDataSync__RepoRoot", null);
+            Environment.SetEnvironmentVariable("DbDataSync__App__RepoRoot", null);
         }
     }
 
@@ -100,7 +100,7 @@ public sealed class DbDataSyncRootTests : IDisposable
     [Fact]
     public void RepoRootEnvVar_Unset_FallsBackToDefaultRootAsBefore()
     {
-        Environment.SetEnvironmentVariable("DbDataSync__RepoRoot", null);
+        Environment.SetEnvironmentVariable("DbDataSync__App__RepoRoot", null);
         var deep = Path.Combine(_root, "a", "b");
         Directory.CreateDirectory(deep);
 

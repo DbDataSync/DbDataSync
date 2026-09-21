@@ -27,7 +27,7 @@ public static class InviteCommand
         var url = CliOptions.Read(args, "--url") ?? "http://localhost:5080";
 
         // Before phase 79 this constructed a SQLite-backed store unconditionally — no branch for a
-        // non-SQLite DbDataSync:StateEngine at all, which meant an admin locked out of an MsSql- or
+        // non-SQLite DbDataSync:State:Engine at all, which meant an admin locked out of an MsSql- or
         // Postgres-backed deployment had no way to recover with this command. Resolved the same way
         // DbDataSyncHost.cs resolves ApiOptions (dbdatasync.config.yaml, then DbDataSync__* environment
         // variables — there is no dedicated --state-engine/--state-connection-string flag; this
@@ -40,12 +40,12 @@ public static class InviteCommand
         // the one place that actually needs to answer "is this a real engine" and can say so with a
         // useful error rather than this command silently guessing SQLite for a typo.
         var engine =
-            Environment.GetEnvironmentVariable("DbDataSync__StateEngine")
-            ?? config.GetValueOrDefault("DbDataSync:StateEngine")
+            Environment.GetEnvironmentVariable("DbDataSync__State__Engine")
+            ?? config.GetValueOrDefault("DbDataSync:State:Engine")
             ?? StateEngineIds.Sqlite;
         var stateConnectionString =
-            Environment.GetEnvironmentVariable("DbDataSync__StateConnectionString")
-            ?? config.GetValueOrDefault("DbDataSync:StateConnectionString");
+            Environment.GetEnvironmentVariable("DbDataSync__State__ConnectionString")
+            ?? config.GetValueOrDefault("DbDataSync:State:ConnectionString");
 
         if (engine == StateEngineIds.Sqlite && !File.Exists(stateDb))
         {

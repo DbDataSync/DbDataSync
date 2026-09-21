@@ -59,7 +59,7 @@ execFileSync(
 // Linux container, which is not a thing, and a test-only sign-in backdoor, which would have to be
 // impossible to enable in a real deployment and is therefore the wrong thing to add for a test.
 const authEnv = {
-  DbDataSync__Auth__Disabled: 'true',
+  DbDataSync__Auth__Network__Admin: 'loopback',
 }
 
 // Phase 93: DBDATASYNC_SECRET_* now, not the package's unconfigured "ClrKernel" default — the API's
@@ -115,8 +115,8 @@ export default defineConfig({
       env: {
         ...authEnv,
         ...secretEnv,
-        DbDataSync__RepoRoot: scratchRepoRoot,
-        DbDataSync__StateDbPath: path.join(scratchRepoRoot, 'state.db'),
+        DbDataSync__App__RepoRoot: scratchRepoRoot,
+        DbDataSync__State__DbPath: path.join(scratchRepoRoot, 'state.db'),
         ASPNETCORE_URLS: 'http://127.0.0.1:5183',
         ASPNETCORE_ENVIRONMENT: 'Development',
       },

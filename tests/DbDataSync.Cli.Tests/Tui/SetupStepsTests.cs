@@ -25,30 +25,30 @@ public sealed class SetupStepsTests : IDisposable
         throw new InvalidOperationException("This test's engine choice should never reach an install call.");
 
     [Fact]
-    public void ApplyNotesRichMarkdown_Ticked_WritesTrue()
+    public void ApplyNotesRenderer_Ticked_WritesRich()
     {
-        SetupSteps.ApplyNotesRichMarkdown(_root, enabled: true);
+        SetupSteps.ApplyNotesRenderer(_root, rich: true);
 
-        Assert.Equal("true", DbDataSyncConfigFile.Read(_root)["DbDataSync:NotesRichMarkdown"]);
+        Assert.Equal("rich", DbDataSyncConfigFile.Read(_root)["DbDataSync:Notes:MarkdownRenderer"]);
     }
 
     [Fact]
-    public void ApplyNotesRichMarkdown_Unticked_AddsNothingWhenTheKeyWasNeverSet()
+    public void ApplyNotesRenderer_Unticked_AddsNothingWhenTheKeyWasNeverSet()
     {
         // A save on an install that never touched the setting must not add a line for a default it already has.
-        SetupSteps.ApplyNotesRichMarkdown(_root, enabled: false);
+        SetupSteps.ApplyNotesRenderer(_root, rich: false);
 
-        Assert.False(DbDataSyncConfigFile.Read(_root).ContainsKey("DbDataSync:NotesRichMarkdown"));
+        Assert.False(DbDataSyncConfigFile.Read(_root).ContainsKey("DbDataSync:Notes:MarkdownRenderer"));
     }
 
     [Fact]
-    public void ApplyNotesRichMarkdown_Unticked_TurnsItOffWhenTheFileHadItOn()
+    public void ApplyNotesRenderer_Unticked_TurnsItOffWhenTheFileHadItOn()
     {
-        SetupSteps.ApplyNotesRichMarkdown(_root, enabled: true);
+        SetupSteps.ApplyNotesRenderer(_root, rich: true);
 
-        SetupSteps.ApplyNotesRichMarkdown(_root, enabled: false);
+        SetupSteps.ApplyNotesRenderer(_root, rich: false);
 
-        Assert.Equal("false", DbDataSyncConfigFile.Read(_root)["DbDataSync:NotesRichMarkdown"]);
+        Assert.Equal("basic", DbDataSyncConfigFile.Read(_root)["DbDataSync:Notes:MarkdownRenderer"]);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class SetupStepsTests : IDisposable
         Assert.Equal("Using SQLite — nothing else to configure.", result.Message);
 
         var config = DbDataSyncConfigFile.Read(_root);
-        Assert.False(config.ContainsKey("DbDataSync:StateEngine"));
+        Assert.False(config.ContainsKey("DbDataSync:State:Engine"));
     }
 
     /// <summary>
@@ -88,8 +88,8 @@ public sealed class SetupStepsTests : IDisposable
         Assert.Contains("Could not connect yet", result.Message);
 
         var config = DbDataSyncConfigFile.Read(_root);
-        Assert.Equal(StateEngineIds.MsSql, config["DbDataSync:StateEngine"]);
-        Assert.Equal(connectionString, config["DbDataSync:StateConnectionString"]);
+        Assert.Equal(StateEngineIds.MsSql, config["DbDataSync:State:Engine"]);
+        Assert.Equal(connectionString, config["DbDataSync:State:ConnectionString"]);
 
         var secrets = new SecretStore("DbDataSync", true);
         Assert.True(secrets.TryResolve(SecretRefs.ForAppSetting("stateConnectionString"), out var password));
@@ -121,7 +121,7 @@ public sealed class SetupStepsTests : IDisposable
     }
 
     [Fact]
-    public void ApplyAuthentication_PasskeysWithDefaults_WritesRelyingPartyAndOriginWithNoWarning()
+    public void ApplyAuthentication_PasskeysWithDefaults_WritesRelyingPartyWithNoWarning()
     {
         var result = SetupSteps.ApplyAuthentication(
             _root, "passkeys", relyingPartyId: null, url: "http://localhost:5080",
@@ -131,7 +131,8 @@ public sealed class SetupStepsTests : IDisposable
 
         var config = DbDataSyncConfigFile.Read(_root);
         Assert.Equal("localhost", config["DbDataSync:Auth:Passkeys:RelyingPartyId"]);
-        Assert.Equal("http://localhost:5080", config["DbDataSync:Auth:Passkeys:Origins:0"]);
+        // Origins is no longer stored — App:Url's own origin is always implicitly trusted at runtime.
+        Assert.False(config.ContainsKey("DbDataSync:Auth:Passkeys:Origins:0"));
     }
 
     [Fact]
@@ -155,8 +156,8 @@ public sealed class SetupStepsTests : IDisposable
         Assert.False(result.Warning);
 
         var config = DbDataSyncConfigFile.Read(_root);
-        Assert.Equal("DbDataSync Admins", config["DbDataSync:Auth:AdminGroup"]);
-        Assert.False(config.ContainsKey("DbDataSync:Auth:ViewerGroup"));
+        Assert.Equal("DbDataSync Admins", config["DbDataSync:Auth:Windows:AdminGroup"]);
+        Assert.False(config.ContainsKey("DbDataSync:Auth:Windows:ViewerGroup"));
     }
 
     [Fact]
@@ -168,7 +169,8 @@ public sealed class SetupStepsTests : IDisposable
 
         Assert.True(result.Warning);
         var config = DbDataSyncConfigFile.Read(_root);
-        Assert.Equal("true", config["DbDataSync:Auth:Disabled"]);
+        Assert.Equal("loopback", config["DbDataSync:Auth:Network:Admin"]);
+        Assert.Equal("remote", config["DbDataSync:Auth:Network:Viewer"]);
     }
 
     [Fact]
@@ -183,7 +185,7 @@ public sealed class SetupStepsTests : IDisposable
 
         var config = DbDataSyncConfigFile.Read(_root);
         Assert.Equal("localhost", config["DbDataSync:Auth:Passkeys:RelyingPartyId"]);
-        Assert.False(config.ContainsKey("DbDataSync:Auth:Disabled"));
+        Assert.False(config.ContainsKey("DbDataSync:Auth:Network:Admin"));
     }
 
     /// <summary>Phase 130 — printed, not invoked, matching every other certificate step in this

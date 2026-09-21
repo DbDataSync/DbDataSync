@@ -29,15 +29,6 @@ public static class ConfigValueCommand
             return UnknownKey(positional[0]);
 
         var value = positional[1];
-        if (key.DefaultValue is "true" or "false")
-        {
-            if (!bool.TryParse(value, out var flag))
-            {
-                Console.Error.WriteLine($"{key.Key} is on or off — give true or false, not '{value}'.");
-                return 1;
-            }
-            value = flag ? "true" : "false";
-        }
 
         var root = DbDataSyncRoot.Resolve(args);
         // A git repository at the root, which `serve` and `setup` create along with the starter file — not ExistingSetup, which

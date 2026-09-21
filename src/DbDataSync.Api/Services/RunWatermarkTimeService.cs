@@ -33,7 +33,7 @@ public sealed record RunWatermarkTimes(
 /// </para>
 /// <para>
 /// **Bounded by retention, and honest about it.** The history is age-purged (<c>RunPruningService</c>,
-/// <c>DbDataSync:ChangeCheckRetentionDays</c>, seven days by default). A run older than that window has
+/// <c>DbDataSync:State:Retention:ChangeCheckDays</c>, seven days by default). A run older than that window has
 /// no crossing row left to find, and gets no timestamp — the same "no data yet" discipline the rest
 /// of this feature area uses, rather than an error or a value reconstructed from something else.
 /// </para>

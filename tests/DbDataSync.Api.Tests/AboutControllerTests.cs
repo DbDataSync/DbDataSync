@@ -56,7 +56,7 @@ public sealed class AboutControllerTests : IDisposable
         {
             base.ConfigureWebHost(builder);
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["DbDataSync:NotesRichMarkdown"] = "true" }));
+                config.AddInMemoryCollection(new Dictionary<string, string?> { ["DbDataSync:Notes:MarkdownRenderer"] = "rich" }));
         }
     }
 

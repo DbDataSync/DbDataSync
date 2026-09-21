@@ -48,8 +48,8 @@ internal static class SetupSteps
         if (engine == StateEngineIds.Sqlite)
             return new StepResult(false, "Using SQLite — nothing else to configure.");
 
-        DbDataSyncConfigFile.SetValue(root, "DbDataSync", "StateEngine", engine);
-        DbDataSyncConfigFile.SetValue(root, "DbDataSync", "StateConnectionString", connectionString ?? "");
+        DbDataSyncConfigFile.SetValue(root, "DbDataSync:State", "Engine", engine);
+        DbDataSyncConfigFile.SetValue(root, "DbDataSync:State", "ConnectionString", connectionString ?? "");
         if (password is not null)
             new SecretStore("DbDataSync", true).Store(SecretRefs.ForAppSetting("stateConnectionString"), password);
 
@@ -107,15 +107,16 @@ internal static class SetupSteps
         if (choice == "passkeys")
         {
             var rp = string.IsNullOrEmpty(relyingPartyId) ? "localhost" : relyingPartyId;
-            var origins = new List<string> { url ?? "" };
             DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth:Passkeys", "RelyingPartyId", rp);
-            DbDataSyncConfigFile.SetListValue(root, "DbDataSync:Auth:Passkeys", "Origins", origins);
 
+            // Origins is no longer stored — App:Url's own origin is always implicitly trusted at
+            // runtime (see PasskeyOptions.Origins). This is only an in-memory check before writing,
+            // using exactly the origin App:Url will resolve to.
             var problem = new PasskeyOptions
             {
                 RelyingPartyId = rp,
                 RelyingPartyName = "DbDataSync",
-                Origins = origins.ToHashSet(StringComparer.OrdinalIgnoreCase),
+                Origins = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { url ?? "" },
             }.Problem();
             return problem is not null
                 ? new StepResult(true, $"Warning: {problem}")
@@ -124,17 +125,23 @@ internal static class SetupSteps
 
         if (choice == "windows")
         {
-            DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth", "AdminGroup", adminGroup ?? "");
+            DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth:Windows", "AdminGroup", adminGroup ?? "");
             if (!string.IsNullOrEmpty(viewerGroup))
-                DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth", "ViewerGroup", viewerGroup);
+                DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth:Windows", "ViewerGroup", viewerGroup);
             return new StepResult(false, "Windows group authentication configured.");
         }
 
-        // choice == "none"
+        // choice == "none" — phase 164 narrowed this: Admin trust from the network can only ever be
+        // loopback, never "from anywhere" the way the old Auth:Disabled flag was. Viewer stays as wide
+        // as "trusted network only" actually means.
         if (noAuthConfirmed)
         {
-            DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth", "Disabled", "true");
-            return new StepResult(true, "Authentication disabled — every request is accepted with no sign-in.");
+            DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth:Network", "Admin", "loopback");
+            DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth:Network", "Viewer", "remote");
+            return new StepResult(
+                true,
+                "Authentication disabled — anyone on the network can view with no sign-in, and this host " +
+                "itself is Admin with no sign-in.");
         }
 
         DbDataSyncConfigFile.SetValue(root, "DbDataSync:Auth:Passkeys", "RelyingPartyId", "localhost");
@@ -145,17 +152,17 @@ internal static class SetupSteps
     /// tab builds the final URL string (plain, or scheme-and-host composed for a non-localhost
     /// hostname) and this just writes it.</summary>
     internal static void ApplyConsoleUrl(string root, string url) =>
-        DbDataSyncConfigFile.SetValue(root, "DbDataSync", "Url", url);
+        DbDataSyncConfigFile.SetValue(root, "DbDataSync:App", "Url", url);
 
     /// <summary>
-    /// Ticked writes <c>true</c>. Unticked writes <c>false</c> only if the file already says something about the key — so
+    /// Ticked writes <c>rich</c>. Unticked writes <c>basic</c> only if the file already says something about the key — so
     /// turning it off works, but a save on a install that never touched it does not add a line for a default it already has.
     /// </summary>
-    internal static void ApplyNotesRichMarkdown(string root, bool enabled)
+    internal static void ApplyNotesRenderer(string root, bool rich)
     {
-        const string key = "DbDataSync:NotesRichMarkdown";
-        if (enabled || DbDataSyncConfigFile.Read(root).ContainsKey(key))
-            DbDataSyncConfigFile.SetValue(root, "DbDataSync", "NotesRichMarkdown", enabled ? "true" : "false");
+        const string key = "DbDataSync:Notes:MarkdownRenderer";
+        if (rich || DbDataSyncConfigFile.Read(root).ContainsKey(key))
+            DbDataSyncConfigFile.SetValue(root, "DbDataSync:Notes", "MarkdownRenderer", rich ? "rich" : "basic");
     }
 
     /// <summary>

@@ -23,7 +23,7 @@ public static class DbDataSyncConfigFile
 
     /// <summary>
     /// The file's contents, flattened into the <c>Section:Key</c> shape ASP.NET Core's own
-    /// configuration providers use — the same keys <c>--DbDataSync:Url</c> or <c>DbDataSync__Url</c>
+    /// configuration providers use — the same keys <c>--DbDataSync:App:Url</c> or <c>DbDataSync__App__Url</c>
     /// would set, so a caller reading either the file or the environment does it identically.
     /// <para>
     /// Empty (not missing) when the file doesn't exist or is entirely comments — every caller here
@@ -261,6 +261,59 @@ public static class DbDataSyncConfigFile
         }
 
         File.WriteAllLines(path, lines, Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// <see cref="RemoveValue"/>'s counterpart for a <see cref="SetListValue"/>-shaped key — removing
+    /// only the key's own header line (what <see cref="RemoveValue"/> does) would leave its
+    /// <c>    - value</c> lines behind as an orphaned, malformed block. Finds the same key-line-plus-
+    /// deeper-indented-lines extent <see cref="SetListValue"/> already computes and deletes the whole
+    /// thing. A no-op when the section or key does not exist.
+    /// </summary>
+    public static void RemoveListValue(string repoRoot, string section, string key)
+    {
+        var path = PathIn(repoRoot);
+        if (!File.Exists(path))
+            return;
+
+        var lines = File.ReadAllLines(path).ToList();
+        var sectionHeaderIndex = lines.FindIndex(l => l.TrimEnd() == $"{section}:");
+        if (sectionHeaderIndex < 0)
+            return;
+
+        var keyLinePrefix = $"  {key}:";
+        for (var i = sectionHeaderIndex + 1; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && !line.TrimStart().StartsWith('#'))
+                break; // the next top-level section
+
+            if (!line.TrimStart().StartsWith(keyLinePrefix.TrimStart(), StringComparison.Ordinal)
+                || line.TrimStart().StartsWith('#'))
+                continue;
+
+            var keyIndent = line.Length - line.TrimStart().Length;
+            var j = i + 1;
+            while (j < lines.Count)
+            {
+                var candidate = lines[j];
+                if (candidate.Length == 0)
+                {
+                    j++;
+                    continue;
+                }
+
+                var candidateIndent = candidate.Length - candidate.TrimStart().Length;
+                if (candidateIndent <= keyIndent)
+                    break;
+
+                j++;
+            }
+
+            lines.RemoveRange(i, j - i);
+            File.WriteAllLines(path, lines, Encoding.UTF8);
+            return;
+        }
     }
 
     /// <summary>

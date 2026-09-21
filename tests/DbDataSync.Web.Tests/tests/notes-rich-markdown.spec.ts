@@ -7,7 +7,7 @@ const screenshotsDir = screenshotDir('notes-rich-markdown')
 const REPLICATION_NAME = 'notes-rich-demo'
 
 /**
- * Phase 161: Notes render with the small renderer unless the deployment turned `DbDataSync:NotesRichMarkdown` on, and while
+ * Phase 161: Notes render with the small renderer unless the deployment turned `DbDataSync:Notes:MarkdownRenderer` to `rich`, and while
  * it is on every Notes panel says so.
  *
  * **Stubbed at the network boundary** (following `monitoring-restructure.spec.ts`): what is under test is which renderer the
@@ -133,15 +133,16 @@ test.describe('Notes: the rich Markdown opt-in (phase 161)', () => {
   test('05 - Admin Configuration lists the setting with its warning beside it, off by default', async ({ page }) => {
     await page.goto('/admin/config')
 
-    const row = page.getByTestId('admin-config-row-NotesRichMarkdown')
+    const row = page.getByTestId('admin-config-row-Notes:MarkdownRenderer')
     await expect(row).toBeVisible()
     // Beside the control, always — not a confirmation after the fact.
-    await expect(page.getByTestId('admin-config-caution-NotesRichMarkdown')).toContainText("other people's sessions")
-    await expect(page.getByTestId('admin-config-running-NotesRichMarkdown')).toBeVisible()
+    await expect(page.getByTestId('admin-config-caution-Notes:MarkdownRenderer')).toContainText("other people's sessions")
+    await expect(page.getByTestId('admin-config-running-Notes:MarkdownRenderer')).toBeVisible()
     await row.scrollIntoViewIfNeeded()
     await page.screenshot({ path: path.join(screenshotsDir, '03-admin-config-caution.png') })
 
-    // No other setting carries one.
-    await expect(page.locator('[data-testid^="admin-config-caution-"]')).toHaveCount(1)
+    // Phase 164 added two more: Auth:Network:Admin and Auth:Network:Viewer, both security-sensitive
+    // network-trust fallbacks — this setting is no longer the only one that carries a caution.
+    await expect(page.locator('[data-testid^="admin-config-caution-"]')).toHaveCount(3)
   })
 })

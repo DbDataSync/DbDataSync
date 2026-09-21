@@ -58,19 +58,19 @@ public sealed class AppProcesses : IAsyncDisposable
 
         startInfo.Environment["ASPNETCORE_URLS"] = $"http://127.0.0.1:{port}";
         startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
-        startInfo.Environment["DbDataSync__RepoRoot"] = ScratchRepoRoot;
-        startInfo.Environment["DbDataSync__StateDbPath"] = StateDbPath;
+        startInfo.Environment["DbDataSync__App__RepoRoot"] = ScratchRepoRoot;
+        startInfo.Environment["DbDataSync__State__DbPath"] = StateDbPath;
         // Logging__LogLevel__Default: the API's request logging is far too chatty to tail alongside a
         // workload; warnings and above still surface anything that actually matters.
         startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
 
-        // The API this harness starts runs open, using the escape hatch AuthOptions already names.
-        // Without it `up` cannot configure its own scenario: every /api PUT below comes back 401,
-        // because there is no user yet and the first-run invite is a browser flow. A harness that
-        // needed a human to click through an invite before it could stand anything up would not be a
-        // harness. Only ever set on the process started *here*, on a loopback port, against a scratch
+        // The API this harness starts runs open, using the loopback network-trust fallback AuthOptions
+        // already names. Without it `up` cannot configure its own scenario: every /api PUT below comes
+        // back 401, because there is no user yet and the first-run invite is a browser flow. A harness
+        // that needed a human to click through an invite before it could stand anything up would not be
+        // a harness. Only ever set on the process started *here*, on a loopback port, against a scratch
         // repo — `--no-app` points at somebody else's API and does not touch its configuration.
-        startInfo.Environment["DbDataSync__Auth__Disabled"] = "true";
+        startInfo.Environment["DbDataSync__Auth__Network__Admin"] = "loopback";
 
         // The spawned TaskRunner inherits these. In an environment with no OS keychain, SecretStore
         // falls back to DBDATASYNC_SECRET_* variables (phase 93: prefixed "DbDataSync", not the

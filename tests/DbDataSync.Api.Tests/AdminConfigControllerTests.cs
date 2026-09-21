@@ -22,16 +22,16 @@ namespace DbDataSync.Api.Tests;
 /// </summary>
 public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) : IClassFixture<AuthenticatedApiFactory>
 {
-    private const string UrlKey = "DbDataSync:Url";
-    private const string StateConnectionStringKey = "DbDataSync:StateConnectionString";
+    private const string UrlKey = "DbDataSync:App:Url";
+    private const string StateConnectionStringKey = "DbDataSync:State:ConnectionString";
 
     private sealed record EntryDto(
         string Key, string? Value, string Source, bool Editable, bool CanAdopt, bool Masked, string Description);
 
     [Theory]
     [InlineData("GET", "/api/admin/config", false)]
-    [InlineData("PUT", "/api/admin/config/DbDataSync%3AUrl", true)]
-    [InlineData("PUT", "/api/admin/config/DbDataSync%3AStateConnectionString/secret", true)]
+    [InlineData("PUT", "/api/admin/config/DbDataSync%3AApp%3AUrl", true)]
+    [InlineData("PUT", "/api/admin/config/DbDataSync%3AState%3AConnectionString/secret", true)]
     public async Task AViewer_IsRefusedByAllThreeEndpoints(string method, string path, bool hasBody)
     {
         var client = await factory.SignedInAsAsync(UserRole.Viewer);
@@ -55,27 +55,42 @@ public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) 
         Assert.NotNull(entries);
         Assert.Contains(entries!, e => e.Key == UrlKey);
         Assert.Contains(entries!, e => e.Key == StateConnectionStringKey);
-        Assert.Contains(entries!, e => e.Key == "DbDataSync:Auth:Disabled");
-        Assert.Contains(entries!, e => e.Key == "DbDataSync:Auth:Passkeys:Origins");
+        Assert.Contains(entries!, e => e.Key == "DbDataSync:Auth:Network:Admin");
+        Assert.Contains(entries!, e => e.Key == "DbDataSync:Auth:Passkeys:RelyingPartyId");
 
-        // The nested Auth:*/Passkeys:* keys are shown but this screen cannot write them — see
-        // AdminConfigService's class doc comment for why.
-        var disabled = entries!.Single(e => e.Key == "DbDataSync:Auth:Disabled");
-        Assert.False(disabled.Editable);
-        Assert.False(disabled.CanAdopt);
+        // App:RepoRoot is the one key this screen never writes — it's how dbdatasync.config.yaml itself
+        // is found, so a value inside that same file could never relocate it.
+        var repoRoot = entries!.Single(e => e.Key == "DbDataSync:App:RepoRoot");
+        Assert.False(repoRoot.Editable);
+        Assert.False(repoRoot.CanAdopt);
     }
 
     /// <summary>
-    /// dbdatasync.config.yaml only ever addresses the top-level DbDataSync:&lt;Key&gt; shape — an Auth:*
-    /// key is shown (real value, real source) but PUT refuses it rather than writing something
-    /// SetValue cannot actually express.
+    /// Phase 164: unlike the old blanket Auth:Disabled, a nested Auth key genuinely is writable now —
+    /// see AdminConfigService's class doc comment for why that claim was never actually true of the
+    /// writer, only of what the catalog chose to expose before this phase.
     /// </summary>
     [Fact]
-    public async Task ANestedKey_CannotBeWritten()
+    public async Task ANestedAuthKey_CanBeWritten()
+    {
+        using var scoped = new AuthenticatedApiFactory();
+        var client = await scoped.SignedInAsAsync(UserRole.Admin);
+
+        var response = await client.PutAsJsonAsync(
+            "/api/admin/config/DbDataSync%3AAuth%3ANetwork%3AAdmin", new { value = "loopback" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("loopback", DbDataSyncConfigFile.Read(scoped.RepoRoot)["DbDataSync:Auth:Network:Admin"]);
+    }
+
+    /// <summary>App:RepoRoot is how dbdatasync.config.yaml itself is found, so a PUT refuses it rather
+    /// than writing something that could never take effect from inside that same file.</summary>
+    [Fact]
+    public async Task ANonWritableKey_CannotBeWritten()
     {
         var client = await factory.SignedInAsAsync(UserRole.Admin);
 
-        var response = await client.PutAsJsonAsync("/api/admin/config/DbDataSync%3AAuth%3ADisabled", new { value = "true" });
+        var response = await client.PutAsJsonAsync("/api/admin/config/DbDataSync%3AApp%3ARepoRoot", new { value = "/tmp/x" });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -124,7 +139,7 @@ public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) 
     public async Task AFileSourcedValue_RoundTrips()
     {
         using var scoped = new AuthenticatedApiFactory();
-        DbDataSyncConfigFile.SetValue(scoped.RepoRoot, "DbDataSync", "Url", "http://initial/");
+        DbDataSyncConfigFile.SetValue(scoped.RepoRoot, "DbDataSync:App", "Url", "http://initial/");
         var client = await scoped.SignedInAsAsync(UserRole.Admin);
 
         var before = await client.GetFromJsonAsync<List<EntryDto>>("/api/admin/config");
@@ -145,14 +160,14 @@ public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) 
         Assert.Equal("http://changed/", afterEntry.Value);
     }
 
-    /// <summary>The other half of masking: a file-sourced StateConnectionString has no credential to
+    /// <summary>The other half of masking: a file-sourced State:ConnectionString has no credential to
     /// begin with (phase 79 rejects one at write time), so it is shown as-is, never masked.</summary>
     [Fact]
     public async Task AFileSourcedStateConnectionString_IsShownAsIs()
     {
         using var scoped = new AuthenticatedApiFactory();
         DbDataSyncConfigFile.SetValue(
-            scoped.RepoRoot, "DbDataSync", "StateConnectionString", "Server=sql01;Database=DbDataSyncState;");
+            scoped.RepoRoot, "DbDataSync:State", "ConnectionString", "Server=sql01;Database=DbDataSyncState;");
         var client = await scoped.SignedInAsAsync(UserRole.Admin);
 
         var entries = await client.GetFromJsonAsync<List<EntryDto>>("/api/admin/config");
@@ -171,7 +186,7 @@ public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) 
     [Fact]
     public async Task AnEnvVarSourcedValue_IsReadOnly_AndAdoptMovesItIntoTheFile()
     {
-        Environment.SetEnvironmentVariable("DbDataSync__Url", "http://from-env/");
+        Environment.SetEnvironmentVariable("DbDataSync__App__Url", "http://from-env/");
         try
         {
             using var scoped = new AuthenticatedApiFactory();
@@ -192,19 +207,19 @@ public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) 
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DbDataSync__Url", null);
+            Environment.SetEnvironmentVariable("DbDataSync__App__Url", null);
         }
     }
 
     /// <summary>
-    /// StateConnectionString's secret is never present in any response body — file-sourced (where phase
+    /// State:ConnectionString's secret is never present in any response body — file-sourced (where phase
     /// 79 guarantees there is none to begin with) or, here, sourced from an environment variable that an
     /// operator seeded with a raw Password= the old way, before adopting dbdatasync.config.yaml.
     /// </summary>
     [Fact]
     public async Task AnEnvVarStateConnectionStringWithAPassword_IsNeverSentToTheBrowser()
     {
-        Environment.SetEnvironmentVariable("DbDataSync__StateConnectionString", "Server=sql01;Password=hunter2;");
+        Environment.SetEnvironmentVariable("DbDataSync__State__ConnectionString", "Server=sql01;Password=hunter2;");
         try
         {
             using var scoped = new AuthenticatedApiFactory();
@@ -223,7 +238,7 @@ public sealed class AdminConfigControllerTests(AuthenticatedApiFactory factory) 
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DbDataSync__StateConnectionString", null);
+            Environment.SetEnvironmentVariable("DbDataSync__State__ConnectionString", null);
         }
     }
 }

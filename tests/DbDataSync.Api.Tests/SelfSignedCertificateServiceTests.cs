@@ -29,7 +29,7 @@ public sealed class SelfSignedCertificateServiceTests : IDisposable
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(url is null
                 ? []
-                : new Dictionary<string, string?> { ["DbDataSync:Url"] = url })
+                : new Dictionary<string, string?> { ["DbDataSync:App:Url"] = url })
             .Build();
 
         var database = new StateDatabase(Path.Combine(_root, "state.db"));

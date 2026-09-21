@@ -25,5 +25,6 @@ public sealed class AboutController(UpdateHostFacts facts, ApiOptions options) :
 {
     [Authorize(Policies.Viewer)]
     [HttpGet]
-    public ActionResult<AboutResponse> Get() => Ok(new AboutResponse(facts.RunningVersion, options.NotesRichMarkdown));
+    public ActionResult<AboutResponse> Get() =>
+        Ok(new AboutResponse(facts.RunningVersion, options.NotesRenderer == NotesRenderer.Rich));
 }

@@ -9,7 +9,7 @@ namespace DbDataSync.Cli;
 /// **Explicit <c>--repo</c> wins outright.** Otherwise this walks upward from the current directory —
 /// the same shape git itself uses to find <c>.git</c> — looking for <c>dbdatasync.config.yaml</c> at
 /// each parent in turn, so a command run from anywhere inside a repo root finds it, not just from the
-/// root itself. Otherwise <c>DbDataSync__RepoRoot</c> (phase 112), and only then
+/// root itself. Otherwise <c>DbDataSync__App__RepoRoot</c> (phase 112), and only then
 /// <see cref="CliOptions.DefaultRoot"/>.
 /// </para>
 /// <para>
@@ -32,13 +32,14 @@ public static class DbDataSyncRoot
         if (explicitRoot is not null)
             return explicitRoot;
 
-        // DbDataSync__RepoRoot is not a new name invented for this resolver — it's the
-        // environment-variable form of the DbDataSync:RepoRoot config key the raw API's own
-        // configuration chain already honours (phase 112). serve/invite/health resolve the root
-        // *before* that chain exists, so it has to be read directly here too, the same way
-        // ServeCommand already reads DbDataSync__Url and InviteCommand reads DbDataSync__StateEngine.
+        // DbDataSync__App__RepoRoot is not a new name invented for this resolver — it's the
+        // environment-variable form of the DbDataSync:App:RepoRoot config key the raw API's own
+        // configuration chain already honours (phase 112, regrouped under App: in phase 164).
+        // serve/invite/health resolve the root *before* that chain exists, so it has to be read
+        // directly here too, the same way ServeCommand already reads DbDataSync__App__Url and
+        // InviteCommand reads DbDataSync__State__Engine.
         return FindUpward(startDirectory)
-            ?? Environment.GetEnvironmentVariable("DbDataSync__RepoRoot")
+            ?? Environment.GetEnvironmentVariable("DbDataSync__App__RepoRoot")
             ?? CliOptions.DefaultRoot;
     }
 

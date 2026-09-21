@@ -121,10 +121,10 @@ public sealed class UpdateServiceTests : IDisposable
     {
         var values = new Dictionary<string, string?>
         {
-            ["DbDataSync:RepoRoot"] = _root,
-            ["DbDataSync:SelfUpdateEnabled"] = "true",
-            ["DbDataSync:SelfUpdateChannels"] = "stable,beta,snapshot",
-            ["DbDataSync:SelfUpdateDrainTimeoutSeconds"] = "5",
+            ["DbDataSync:App:RepoRoot"] = _root,
+            ["DbDataSync:Updates:Mode"] = "manual",
+            ["DbDataSync:Updates:Channels"] = "stable,beta,snapshot",
+            ["DbDataSync:Updates:DrainTimeoutSeconds"] = "5",
         };
         foreach (var (key, value) in extra ?? [])
             values[key] = value;
@@ -155,9 +155,9 @@ public sealed class UpdateServiceTests : IDisposable
     public void EverythingIsOffOrNarrowByDefault()
     {
         var options = ApiOptions.FromConfiguration(new ConfigurationBuilder().AddInMemoryCollection(
-            new Dictionary<string, string?> { ["DbDataSync:RepoRoot"] = _root }).Build());
+            new Dictionary<string, string?> { ["DbDataSync:App:RepoRoot"] = _root }).Build());
 
-        Assert.False(options.SelfUpdateEnabled);
+        Assert.Equal(UpdatesMode.Disabled, options.SelfUpdateMode);
         Assert.Equal([ReleaseChannel.Stable], options.SelfUpdateChannels);
         Assert.Equal(TimeSpan.FromSeconds(120), options.SelfUpdateDrainTimeout);
         Assert.Equal(TimeSpan.FromSeconds(60), options.SelfUpdateConfirmAfter);
@@ -182,13 +182,13 @@ public sealed class UpdateServiceTests : IDisposable
     [Fact]
     public void TurnedOff_ByDefault_SaysHowToTurnItOn()
     {
-        var (service, _, _, _) = Build(options: new() { ["DbDataSync:SelfUpdateEnabled"] = "false" });
+        var (service, _, _, _) = Build(options: new() { ["DbDataSync:Updates:Mode"] = "disabled" });
 
         var capability = service.Capability();
 
         Assert.False(capability.Enabled);
         Assert.False(capability.CanApply);
-        Assert.Contains("DbDataSync:SelfUpdateEnabled", capability.Reason);
+        Assert.Contains("DbDataSync:Updates:Mode", capability.Reason);
     }
 
     [Theory]
@@ -305,7 +305,7 @@ public sealed class UpdateServiceTests : IDisposable
         Assert.Contains(releases, r => r.Channel == "snapshot");
 
         var (allFail, _, _, _) = Build(
-            options: new() { ["DbDataSync:SelfUpdateChannels"] = "stable" }, network: Network(nugetStatus: HttpStatusCode.BadGateway));
+            options: new() { ["DbDataSync:Updates:Channels"] = "stable" }, network: Network(nugetStatus: HttpStatusCode.BadGateway));
         await Assert.ThrowsAsync<ReleaseSourceException>(() => allFail.ListReleasesAsync(null, 10, [], CancellationToken.None));
     }
 
@@ -314,7 +314,7 @@ public sealed class UpdateServiceTests : IDisposable
     [Fact]
     public async Task Disabled_IsRefused_AndWritesNothing()
     {
-        var (service, _, restart, drain) = Build(options: new() { ["DbDataSync:SelfUpdateEnabled"] = "false" });
+        var (service, _, restart, drain) = Build(options: new() { ["DbDataSync:Updates:Mode"] = "disabled" });
 
         var result = await service.RequestAsync("2026.9.18.1918", "dan", CancellationToken.None);
 
@@ -352,12 +352,12 @@ public sealed class UpdateServiceTests : IDisposable
     [Fact]
     public async Task AChannelThatIsNotEnabled_IsRefused()
     {
-        var (service, _, _, _) = Build(options: new() { ["DbDataSync:SelfUpdateChannels"] = "stable" });
+        var (service, _, _, _) = Build(options: new() { ["DbDataSync:Updates:Channels"] = "stable" });
 
         var result = await service.RequestAsync("2026.9.12.721-beta", "dan", CancellationToken.None);
 
         Assert.Equal(UpdateRequestOutcome.ChannelNotEnabled, result.Outcome);
-        Assert.Contains("SelfUpdateChannels", result.Message);
+        Assert.Contains("Updates:Channels", result.Message);
     }
 
     [Fact]
@@ -439,7 +439,7 @@ public sealed class UpdateServiceTests : IDisposable
     [Fact]
     public async Task WorkThatNeverFinishes_DoesNotHoldTheUpdateForever()
     {
-        var (service, probe, restart, _) = Build(options: new() { ["DbDataSync:SelfUpdateDrainTimeoutSeconds"] = "0" });
+        var (service, probe, restart, _) = Build(options: new() { ["DbDataSync:Updates:DrainTimeoutSeconds"] = "0" });
         probe.Constant = 4;
 
         await service.RequestAsync("2026.9.18.1918", "dan", CancellationToken.None);

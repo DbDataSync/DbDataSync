@@ -13,7 +13,7 @@ namespace DbDataSync.Api.Auth;
 /// makes that history true, and is the reason this feature is worth more than access control.
 /// </para>
 /// </summary>
-public sealed class CurrentUser(IHttpContextAccessor accessor, AuthOptions options)
+public sealed class CurrentUser(IHttpContextAccessor accessor, AuthOptions options, PasskeyOptions passkeys)
 {
     public const string UserIdClaim = "dbdatasync:userId";
 
@@ -55,5 +55,5 @@ public sealed class CurrentUser(IHttpContextAccessor accessor, AuthOptions optio
 
     /// <summary>Whether this deployment authenticates at all, for a UI that has to decide whether to
     /// show a sign-in state or nothing.</summary>
-    public bool AuthenticationConfigured => !options.Disabled;
+    public bool AuthenticationConfigured => options.WindowsEnabled || passkeys.Enabled;
 }

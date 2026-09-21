@@ -27,9 +27,9 @@ places, across all three surfaces, not just the CLI/setup pair.
 
 | Capability | Why |
 | --- | --- |
-| Persisting `DbDataSync:Url` into `dbdatasync.config.yaml` | Every CLI command's `--url` (`serve`, `service install`, `health`, `invite`) is a runtime override only — none of them writes it back to the config file. |
-| Setting `DbDataSync:StateEngine` / `DbDataSync:StateConnectionString` | Confirmed absent by `InviteCommand.cs`'s own comment: "there is no dedicated `--state-engine`/`--state-connection-string` flag; this command's own surface is deliberately small." |
-| The entire authentication surface — passkey relying-party id/origins, the Windows admin/viewer group names, disabling auth entirely | There is no `config auth` subcommand anywhere in `Program.cs`'s dispatch tree. Zero CLI reach, not a partial gap. |
+| ~~Persisting `DbDataSync:Url` into `dbdatasync.config.yaml`~~ **Partially closed, phase 164** | `service install --url` now seeds `App:Url` into the file once (if unset) instead of only baking it into the service unit — see phase 164's own doc. `serve`/`health`/`invite` still treat `--url` as a runtime override only. |
+| ~~Setting `DbDataSync:StateEngine` / `DbDataSync:StateConnectionString`~~ **Closed, phase 164** | `config set State:Engine`/`config set State:ConnectionString` now work — phase 164 confirmed `AdminConfigService`'s catalog (which `ConfigValueCommand` already read from) can address any key depth, not just the flat top level this doc assumed. |
+| The entire authentication surface — passkey relying-party id/mode, the Windows admin/viewer group names/mode, network-trust fallback | **Mostly closed, phase 164**: `config set Auth:Windows:AdminGroup`/`Auth:Windows:Mode`/`Auth:Passkeys:RelyingPartyId`/`Auth:Passkeys:Mode`/`Auth:Network:Admin`/`Auth:Network:Viewer` all work now — no dedicated `config auth` subcommand exists, but the general `config set`/`get` reaches the whole surface. What's still missing: an invite role picker equivalent and a guided walkthrough, which is what a real `config auth` subcommand would add beyond raw key/value access. |
 | "Print effective configuration" (merged file + env + command line, secrets redacted) | No `dbdatasync config print`/`dump`/equivalent exists. `config check --json` reports check *results*, not raw configuration. |
 
 ### CLI-only — reachable only by hand-typing the command
@@ -118,6 +118,14 @@ value for a speculative one. Leaning toward closing the gap with today's archite
   the TUI today (the API's own readiness surface, if any, wasn't checked as part of this pass).
 - **Does not claim a complete audit of API-vs-CLI duplication.** One case is confirmed in detail; the rest
   is a real gap in this doc's own research, named rather than glossed over.
+
+## Confirmed by manual testing, 2026-09-21
+
+Manually driving `dbdatasync setup` and `dbdatasync config set` on a real Windows box independently hit
+exactly the setup-only gap above: several settings changeable in the TUI have no `config set` key at all,
+so `AdminConfigService.Writable`'s catalog is the actual boundary, not just a documentation claim. No new
+information beyond what's already written above — recorded here as a real-world confirmation, not a new
+finding.
 
 ## Open questions (UNDECIDED)
 

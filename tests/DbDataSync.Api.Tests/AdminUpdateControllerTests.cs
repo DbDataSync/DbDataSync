@@ -71,7 +71,7 @@ public sealed class AdminUpdateControllerTests : IDisposable
         var status = await client.GetFromJsonAsync<JsonElement>("/api/admin/update/status", Web);
         Assert.False(status.GetProperty("enabled").GetBoolean());
         Assert.False(status.GetProperty("canApply").GetBoolean());
-        Assert.Contains("SelfUpdateEnabled", status.GetProperty("cannotApplyReason").GetString());
+        Assert.Contains("Updates:Mode", status.GetProperty("cannotApplyReason").GetString());
 
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/admin/update/releases")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync("/api/admin/update/apply", Body("2026.9.18.1918"))).StatusCode);

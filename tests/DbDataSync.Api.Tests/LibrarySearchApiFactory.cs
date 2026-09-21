@@ -23,7 +23,7 @@ public sealed class LibrarySearchApiFactory : TestApiFactory
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DbDataSync:NuGetSearchEnabled"] = NuGetSearchEnabled ? "true" : "false",
+                ["DbDataSync:Nuget:Search:Mode"] = NuGetSearchEnabled ? "enabled" : "disabled",
             });
         });
 

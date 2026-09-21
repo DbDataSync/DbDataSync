@@ -39,15 +39,17 @@ public class TestApiFactory : WebApplicationFactory<Program>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DbDataSync:RepoRoot"] = RepoRoot,
-                ["DbDataSync:StateDbPath"] = Path.Combine(RepoRoot, "state.db"),
-                ["DbDataSync:TaskRunnerDllPath"] = ResolveTaskRunnerDllPathForTests(),
-                ["DbDataSync:CliDllPath"] = ResolveSiblingDllPathForTests("DbDataSync.Cli"),
+                ["DbDataSync:App:RepoRoot"] = RepoRoot,
+                ["DbDataSync:State:DbPath"] = Path.Combine(RepoRoot, "state.db"),
+                ["DbDataSync:App:TaskRunnerDllPath"] = ResolveTaskRunnerDllPathForTests(),
+                ["DbDataSync:App:CliDllPath"] = ResolveSiblingDllPathForTests("DbDataSync.Cli"),
                 // Authentication off, deliberately. Every test using this factory is about what an
                 // endpoint *does*; making all of them sign in first would obscure that and test the
                 // same session plumbing a hundred times. Who may call what is
-                // AuthenticatedApiFactory's subject, and it turns authentication on.
-                ["DbDataSync:Auth:Disabled"] = "true",
+                // AuthenticatedApiFactory's subject, and it turns authentication on. TestServer's
+                // requests report loopback (or no) remote address, so Auth:Network:Admin: loopback is
+                // the phase 164 equivalent of the old blanket Auth:Disabled for this factory's purpose.
+                ["DbDataSync:Auth:Network:Admin"] = "loopback",
             });
         });
 

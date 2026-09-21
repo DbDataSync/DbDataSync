@@ -284,7 +284,7 @@ public static class UpdateCommand
             plan.Target.Version.Text, plan.Installed?.Text, plan.Target.Channel,
             plan.Location.Kind, plan.Location.ToolRoot!, plan.SourceDirectory, DateTimeOffset.UtcNow, env.UserName);
         var url = options.Url
-            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:Url")
+            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
             ?? "http://localhost:5080";
 
         var exit = await UpdateApplyFlow.RunAsync(

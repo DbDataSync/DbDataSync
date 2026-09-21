@@ -84,14 +84,14 @@ public sealed class TabWiringTests : IDisposable
 
         var populated = new GeneralTab();
         populated.Populate(new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["DbDataSync:NotesRichMarkdown"] = "true" }).Build());
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["DbDataSync:Notes:MarkdownRenderer"] = "rich" }).Build());
         Assert.True(populated.NotesRichMarkdown);
     }
 
     [Fact]
     public void GeneralTab_Wrap_KeepsEveryLineWithinTheWidth_AndLosesNoWords()
     {
-        var text = DbDataSync.Api.Services.AdminConfigService.Writable("NotesRichMarkdown")!.Caution!;
+        var text = DbDataSync.Api.Services.AdminConfigService.Writable("Notes:MarkdownRenderer")!.Caution!;
 
         var lines = GeneralTab.Wrap(text, 46).ToList();
 
@@ -135,8 +135,8 @@ public sealed class TabWiringTests : IDisposable
         Assert.Contains("Could not connect yet", result.Message);
 
         var config = DbDataSyncConfigFile.Read(_root);
-        Assert.Equal("MsSql", config["DbDataSync:StateEngine"]);
-        Assert.Equal(connectionString, config["DbDataSync:StateConnectionString"]);
+        Assert.Equal("MsSql", config["DbDataSync:State:Engine"]);
+        Assert.Equal(connectionString, config["DbDataSync:State:ConnectionString"]);
 
         var secrets = new SecretStore("DbDataSync", true);
         Assert.True(secrets.TryResolve(SecretRefs.ForAppSetting("stateConnectionString"), out var password));

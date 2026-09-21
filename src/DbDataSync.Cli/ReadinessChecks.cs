@@ -134,13 +134,14 @@ internal static class ReadinessChecks
         builder.AddCommandLine(args.Where(a => a.StartsWith("--DbDataSync:", StringComparison.Ordinal)).ToArray());
 
         var configuration = builder.Build();
+        var apiOptions = ApiOptions.FromConfiguration(configuration);
         return new ReadinessContext
         {
             Root = root,
             Configuration = configuration,
-            ApiOptions = ApiOptions.FromConfiguration(configuration),
+            ApiOptions = apiOptions,
             AuthOptions = AuthOptions.FromConfiguration(configuration),
-            PasskeyOptions = PasskeyOptions.FromConfiguration(configuration),
+            PasskeyOptions = PasskeyOptions.FromConfiguration(configuration, apiOptions),
             CertificateOptions = CertificateOptions.FromConfiguration(configuration),
         };
     }
@@ -203,12 +204,12 @@ internal sealed class ServiceRegistrationCheck(string unitPath = SystemdService.
         // so the console's update button would restart the service on the same version, forever. Judged only when
         // it is enabled — a unit without the step is the default and correct otherwise — and only when the unit file
         // is there: this runs in a terminal, not under the unit, and a missing file is not this check's business.
-        if (context.ApiOptions.SelfUpdateEnabled && registration.Platform == "linux" && File.Exists(unitPath)
+        if (context.ApiOptions.SelfUpdateMode == UpdatesMode.Manual && registration.Platform == "linux" && File.Exists(unitPath)
             && !File.ReadAllText(unitPath).Contains(SystemdService.SelfUpdateMarker, StringComparison.Ordinal))
         {
             return Task.FromResult(new CheckResult(
                 "Service registration", CheckStatus.Warn,
-                detail + " DbDataSync:SelfUpdateEnabled is on, but its systemd unit does not apply updates, so the console's update button cannot work.",
+                detail + " DbDataSync:Updates:Mode is manual, but its systemd unit does not apply updates, so the console's update button cannot work.",
                 Fix: $"sudo dbdatasync service install --self-update, then sudo systemctl restart {SystemdService.UnitName}"));
         }
 
@@ -234,7 +235,7 @@ internal sealed class StateStoreCheck : IReadinessCheck
             "State store", CheckStatus.Fail, error?.Message ?? "Could not open the state database.",
             context.ApiOptions.StateEngine == StateEngineIds.Sqlite
                 ? $"Check that '{Path.GetDirectoryName(context.ApiOptions.StateDbPath)}' is writable."
-                : "Check DbDataSync:StateConnectionString and the stored password " +
+                : "Check DbDataSync:State:ConnectionString and the stored password " +
                   "(`dbdatasync config secret set dbdatasync:config:stateConnectionString ...`)."));
     }
 }
@@ -439,10 +440,18 @@ internal sealed class AuthCheck : IReadinessCheck
 {
     public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
-        if (context.AuthOptions.Disabled)
+        if (context.AuthOptions.NetworkAdmin == AdminNetworkTrust.Loopback)
         {
             return Task.FromResult(new CheckResult(
-                "Auth", CheckStatus.Warn, "DbDataSync:Auth:Disabled is true — every request is accepted."));
+                "Auth", CheckStatus.Warn,
+                "DbDataSync:Auth:Network:Admin is loopback — any request from this host is accepted as Admin with no sign-in."));
+        }
+
+        if (context.AuthOptions.NetworkViewer == ViewerNetworkTrust.Remote)
+        {
+            return Task.FromResult(new CheckResult(
+                "Auth", CheckStatus.Warn,
+                "DbDataSync:Auth:Network:Viewer is remote — any request, from anywhere, is accepted as Viewer with no sign-in."));
         }
 
         var problem = context.PasskeyOptions.Problem();
@@ -495,7 +504,7 @@ internal sealed class CertificateCheck : IReadinessCheck
             return Task.FromResult(new CheckResult("Certificate", CheckStatus.Fail, $"'{path}' does not load: {ex.Message}"));
         }
 
-        var url = context.Configuration["DbDataSync:Url"] ?? "http://localhost:5080";
+        var url = context.Configuration["DbDataSync:App:Url"] ?? ApiOptions.DefaultUrl;
         var host = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : null;
         var dnsNames = CertificateSanReader.GetDnsNames(certificate);
         var sanOk = host is null || dnsNames.Any(name =>
@@ -550,7 +559,7 @@ internal sealed class BindingCheck : IReadinessCheck
 {
     public async Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
-        var url = context.Configuration["DbDataSync:Url"] ?? "http://localhost:5080";
+        var url = context.Configuration["DbDataSync:App:Url"] ?? ApiOptions.DefaultUrl;
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         try
         {
@@ -559,14 +568,14 @@ internal sealed class BindingCheck : IReadinessCheck
             {
                 return new CheckResult(
                     "Binding", CheckStatus.Fail, $"{url} answered {(int)response.StatusCode}.",
-                    "Start DbDataSync (`dbdatasync serve`) and check DbDataSync:Url.");
+                    "Start DbDataSync (`dbdatasync serve`) and check DbDataSync:App:Url.");
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             return new CheckResult(
                 "Binding", CheckStatus.Fail, $"{url} did not answer: {ex.Message}",
-                "Start DbDataSync (`dbdatasync serve`) and check DbDataSync:Url.");
+                "Start DbDataSync (`dbdatasync serve`) and check DbDataSync:App:Url.");
         }
 
         var isLoopback = Uri.TryCreate(url, UriKind.Absolute, out var uri)
@@ -583,8 +592,8 @@ internal sealed class FirstAdminCheck : IReadinessCheck
 {
     public Task<CheckResult> RunAsync(ReadinessContext context, CancellationToken cancellationToken)
     {
-        if (context.AuthOptions.Disabled)
-            return Task.FromResult(new CheckResult("First admin", CheckStatus.Ok, "Authentication is disabled."));
+        if (context.AuthOptions.NetworkAdmin == AdminNetworkTrust.Loopback)
+            return Task.FromResult(new CheckResult("First admin", CheckStatus.Ok, "Auth:Network:Admin grants Admin from loopback."));
 
         var (database, error) = context.TryOpenStateDatabase();
         if (database is null)

@@ -22,10 +22,10 @@ public sealed class SelfSignedCertificateServiceRegistrationTests : IDisposable
 
     private string[] BaseArgs(params string[] extra) =>
     [
-        "--DbDataSync:RepoRoot", _repoRoot,
-        "--DbDataSync:StateDbPath", Path.Combine(_repoRoot, "state.db"),
-        "--DbDataSync:TaskRunnerDllPath", Path.Combine(_repoRoot, "DbDataSync.TaskRunner.dll"),
-        "--DbDataSync:Auth:Disabled", "true",
+        "--DbDataSync:App:RepoRoot", _repoRoot,
+        "--DbDataSync:State:DbPath", Path.Combine(_repoRoot, "state.db"),
+        "--DbDataSync:App:TaskRunnerDllPath", Path.Combine(_repoRoot, "DbDataSync.TaskRunner.dll"),
+        "--DbDataSync:Auth:Network:Admin", "loopback",
         .. extra,
     ];
 

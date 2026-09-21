@@ -78,6 +78,6 @@ public sealed class LegacyRootMigrationTests : IDisposable
     private static void CreateRealConfigAt(string root)
     {
         ServeCommand.Prepare(root);
-        DbDataSyncConfigFile.SetValue(root, "DbDataSync", "Url", "http://localhost:5080");
+        DbDataSyncConfigFile.SetValue(root, "DbDataSync:App", "Url", "http://localhost:5080");
     }
 }

@@ -72,6 +72,21 @@ So the order lives here, and is the one to work through:
 | 5 | **159K** — apply an update automatically, from the CLI and the web console | **follows 158K, which is done** (it executes 158K's `UpdatePlan` and reuses its `DbDataSync.Updates` library). **Built for Linux and the CLI; not yet verified on real hosts, and Windows is deliberately off** — see its Progress section for exactly what is and is not proven |
 | 6 | **163K** — the container image on GHCR, amd64 and arm64 | **implemented, not yet run in CI**: stays in `todo/` until `publish-image.yml` runs on a real release (it cannot before it reaches `main`), and until the arm64 image has been built on real arm hardware. Its own "First release checklist" has a manual step (make the package public) |
 
+Updated 2026-09-21 (latest): **164R is done.** Regrouped the whole `DbDataSync:*` key surface (`Url` → `App:Url`,
+`StateEngine` → `State:Engine`, retention settings under `State:Retention:*`, ...) and replaced every bare boolean
+with a named mode string (`Auth:Disabled` → the narrower, role-scoped `Auth:Network:Admin`/`Auth:Network:Viewer`;
+`SelfUpdateEnabled` → `Updates:Mode`; `NuGetSearchEnabled` → `Nuget:Search:Mode`; `NotesRichMarkdown` →
+`Notes:MarkdownRenderer`). Also closed a real writability gap the phase 79/81 docs believed was a hard limit of
+`DbDataSyncConfigFile.SetValue`'s writer: nested keys under `Auth:Windows:*`/`Auth:Passkeys:*` are now genuinely
+file-writable, not just display-only — the writer already tolerated a colon-containing key, confirmed with a
+round-trip test, nobody had just extended the catalog to use it. An existing `dbdatasync.config.yaml` migrates
+itself automatically the first time `serve`/`setup` runs against it (`LegacyConfigMigration`). Verifying the rename
+found two real bugs unrelated to the reorg itself: `ServeCommand`'s host-arg construction still had the pre-reorg
+key names (nothing in the suite exercised that path at all), and stripping a CLI-only flag without its value token
+could desync .NET's command-line parser for an odd number of leftover orphan tokens — `dbdatasync serve --repo X`
+with no `--url` would have silently dropped every `--DbDataSync:*` argument appended after it. Both fixed and
+covered by new tests. See `architecture/implementation/done/phase-164R-config-key-reorganization.md`.
+
 Updated 2026-09-19 (later): **159K is built** for Linux and the CLI, with Windows deliberately switched off. **Read its
 "trust boundary" section first:** the first build had the root-privileged pre-start step act on a request file that
 the unprivileged service can write — a compromised service could have had root install a package of its choosing,

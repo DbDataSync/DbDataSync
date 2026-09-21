@@ -27,6 +27,11 @@ public sealed class PasskeyService(PasskeyOptions options, UserStore users)
         Origins = options.Origins,
     });
 
+    /// <summary>Whether ceremonies are actually allowed — <see cref="Auth.PasskeyOptions.Mode"/>.
+    /// Checked by the controller before starting one, not here: this class does the ceremony, not the
+    /// policy about whether one may start.</summary>
+    public bool Enabled => options.Enabled;
+
     /// <summary>What a browser needs to create a passkey, and the challenge to check it against.</summary>
     public (CredentialCreateOptions Options, string State) BeginRegistration(string userId, string displayName)
     {

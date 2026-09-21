@@ -43,11 +43,11 @@ public sealed class ServeCommandPrepareTests : IDisposable
     {
         ServeCommand.Prepare(_root);
         var path = DbDataSyncConfigFile.PathIn(_root);
-        File.WriteAllText(path, "DbDataSync:\n  Url: http://operator-edited/\n");
+        File.WriteAllText(path, "DbDataSync:App:\n  Url: http://operator-edited/\n");
 
         ServeCommand.Prepare(_root);
 
-        Assert.Equal("http://operator-edited/", DbDataSyncConfigFile.Read(_root)["DbDataSync:Url"]);
+        Assert.Equal("http://operator-edited/", DbDataSyncConfigFile.Read(_root)["DbDataSync:App:Url"]);
     }
 
     [Fact]

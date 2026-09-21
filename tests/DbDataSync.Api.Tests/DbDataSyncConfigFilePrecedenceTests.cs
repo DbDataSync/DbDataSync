@@ -22,47 +22,47 @@ public sealed class DbDataSyncConfigFilePrecedenceTests : IDisposable
 
     private string[] BaseArgs(params string[] extra) =>
     [
-        "--DbDataSync:RepoRoot", _repoRoot,
-        "--DbDataSync:StateDbPath", Path.Combine(_repoRoot, "state.db"),
-        "--DbDataSync:TaskRunnerDllPath", Path.Combine(_repoRoot, "DbDataSync.TaskRunner.dll"),
-        "--DbDataSync:Auth:Disabled", "true",
+        "--DbDataSync:App:RepoRoot", _repoRoot,
+        "--DbDataSync:State:DbPath", Path.Combine(_repoRoot, "state.db"),
+        "--DbDataSync:App:TaskRunnerDllPath", Path.Combine(_repoRoot, "DbDataSync.TaskRunner.dll"),
+        "--DbDataSync:Auth:Network:Admin", "loopback",
         .. extra,
     ];
 
     [Fact]
     public void AValueSetOnlyInTheFile_IsRead()
     {
-        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://file-only/");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync:App", "Url", "http://file-only/");
 
         using var app = DbDataSyncHost.Build(BaseArgs());
 
-        Assert.Equal("http://file-only/", app.Configuration["DbDataSync:Url"]);
+        Assert.Equal("http://file-only/", app.Configuration["DbDataSync:App:Url"]);
     }
 
     [Fact]
     public void ACommandLineArgument_OverridesTheFile()
     {
-        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://from-file/");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync:App", "Url", "http://from-file/");
 
-        using var app = DbDataSyncHost.Build(BaseArgs("--DbDataSync:Url", "http://from-cli/"));
+        using var app = DbDataSyncHost.Build(BaseArgs("--DbDataSync:App:Url", "http://from-cli/"));
 
-        Assert.Equal("http://from-cli/", app.Configuration["DbDataSync:Url"]);
+        Assert.Equal("http://from-cli/", app.Configuration["DbDataSync:App:Url"]);
     }
 
     [Fact]
     public void AnEnvironmentVariable_OverridesTheFile()
     {
-        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://from-file/");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync:App", "Url", "http://from-file/");
 
-        Environment.SetEnvironmentVariable("DbDataSync__Url", "http://from-env/");
+        Environment.SetEnvironmentVariable("DbDataSync__App__Url", "http://from-env/");
         try
         {
             using var app = DbDataSyncHost.Build(BaseArgs());
-            Assert.Equal("http://from-env/", app.Configuration["DbDataSync:Url"]);
+            Assert.Equal("http://from-env/", app.Configuration["DbDataSync:App:Url"]);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DbDataSync__Url", null);
+            Environment.SetEnvironmentVariable("DbDataSync__App__Url", null);
         }
     }
 
@@ -71,6 +71,6 @@ public sealed class DbDataSyncConfigFilePrecedenceTests : IDisposable
     {
         using var app = DbDataSyncHost.Build(BaseArgs());
 
-        Assert.Null(app.Configuration["DbDataSync:Url"]);
+        Assert.Null(app.Configuration["DbDataSync:App:Url"]);
     }
 }

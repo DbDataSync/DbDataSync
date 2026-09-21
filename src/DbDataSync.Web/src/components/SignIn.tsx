@@ -18,9 +18,6 @@ export function SignInScreen() {
   const [passkeyError, setPasskeyError] = useState<unknown>(null)
   const [passkeyBusy, setPasskeyBusy] = useState(false)
 
-  // Always offered, whatever the server lists: a passkey sign-in needs no server-side configuration
-  // beyond a relying-party id that already has a working default, and somebody who was invited has
-  // one whether or not this deployment also does Windows.
   const signInWithPasskey = async () => {
     setPasskeyBusy(true)
     setPasskeyError(null)
@@ -55,7 +52,7 @@ export function SignInScreen() {
             </button>
           )}
 
-          {isSupported() && (
+          {isSupported() && status?.methods.includes('passkeys') && (
             <button
               type="button"
               className="btn"
@@ -69,8 +66,8 @@ export function SignInScreen() {
 
           {status && status.methods.length === 0 && (
             <span className="hint">
-              No Windows groups are configured on this deployment. Sign in with a passkey if you have
-              been invited, or ask an administrator to run <code>dbdatasync invite</code>.
+              No sign-in method is configured on this deployment. Ask an administrator to configure
+              Windows groups or turn Passkeys back on.
             </span>
           )}
         </div>

@@ -1,5 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using DbDataSync.Api.Auth;
+using DbDataSync.Api.Configuration;
+using DbDataSync.Core.Config;
+using DbDataSync.Core.Git;
 
 namespace DbDataSync.Cli;
 
@@ -106,7 +110,14 @@ public static class ServiceCommand
         }
 
         var root = Path.GetFullPath(CliOptions.Read(args, "--repo") ?? CliOptions.DefaultRoot);
-        var url = CliOptions.Read(args, "--url") ?? "http://localhost:5080";
+        // Explicit vs. defaulted matters: an explicit --url is written into dbdatasync.config.yaml
+        // (below) so it survives every future restart; a defaulted one is never written, or a bare
+        // re-run to change --account would stomp whatever App:Url the operator has since configured
+        // through the Admin screen.
+        var explicitUrl = CliOptions.Read(args, "--url");
+        var url = explicitUrl
+            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
+            ?? ApiOptions.DefaultUrl;
         var account = CliOptions.Read(args, "--account");
 
         // A warning, not a refusal — sc.exe has no equivalent of systemd's ProtectHome, so a
@@ -124,7 +135,11 @@ public static class ServiceCommand
             Console.WriteLine();
         }
 
-        var binPath = $"\"{executable}\" serve --repo \"{root}\" --url {url}";
+        // No --url baked in: serve already resolves DbDataSync:App:Url from dbdatasync.config.yaml
+        // (flag > env var > file), so baking one in here would win over that file forever — an
+        // operator editing Url through the Admin screen would see it silently ignored on every
+        // restart. An explicit --url given here is written into the file itself, below, instead.
+        var binPath = $"\"{executable}\" serve --repo \"{root}\"";
 
         // sc.exe's parser wants each `key=` and its value as two SEPARATE argv tokens — exactly what
         // typing them at a cmd.exe prompt produces, since the unescaped space between "start=" and
@@ -144,6 +159,17 @@ public static class ServiceCommand
         {
             arguments.Add("obj=");
             arguments.Add(account);
+        }
+
+        // Only when explicitly given, and only when there is already a git-tracked config to write it
+        // into — service install assumes a repo `serve`/`setup` already created; skipping silently
+        // otherwise, rather than writing an uncommitted file, matches every other config write in this
+        // app being git-tracked.
+        if (explicitUrl is not null && LibGit2Sharp.Repository.IsValid(root))
+        {
+            DbDataSyncConfigFile.SetValue(root, "DbDataSync:App", "Url", explicitUrl);
+            new GitCommitService(root).CommitChanges(
+                [DbDataSyncConfigFile.PathIn(root)], "Set 'DbDataSync:App:Url' in dbdatasync.config.yaml", CurrentUser.SystemAuthor);
         }
 
         Console.WriteLine($"Registering the '{ServiceName}' service:");

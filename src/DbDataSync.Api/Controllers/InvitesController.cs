@@ -73,6 +73,9 @@ public sealed class InvitesController(
     [HttpPost("begin-registration")]
     public IActionResult BeginRegistration([FromBody] RedeemInviteRequest request)
     {
+        if (!passkeys.Enabled)
+            return BadRequest(new { error = "Passkeys are turned off on this deployment." });
+
         if (invites.Find(request.Code) is not { } invite)
             return NotFound(new { error = "This invitation is not valid." });
 
@@ -101,6 +104,9 @@ public sealed class InvitesController(
         [FromBody] AuthenticatorAttestationRawResponse response,
         CancellationToken cancellationToken)
     {
+        if (!passkeys.Enabled)
+            return BadRequest(new { error = "Passkeys are turned off on this deployment." });
+
         if (Request.Cookies[RegistrationStateCookie] is not { } state)
             return BadRequest(new { error = "This registration was not started here, or has expired. Try again." });
 
@@ -144,6 +150,9 @@ public sealed class InvitesController(
     [HttpPost("~/api/auth/passkey/begin")]
     public IActionResult BeginAssertion()
     {
+        if (!passkeys.Enabled)
+            return BadRequest(new { error = "Passkeys are turned off on this deployment." });
+
         var (options, state) = passkeys.BeginAssertion();
         StoreState(AssertionStateCookie, state);
         return Ok(options);
@@ -154,6 +163,9 @@ public sealed class InvitesController(
     public async Task<IActionResult> CompleteAssertion(
         [FromBody] AuthenticatorAssertionRawResponse response, CancellationToken cancellationToken)
     {
+        if (!passkeys.Enabled)
+            return BadRequest(new { error = "Passkeys are turned off on this deployment." });
+
         if (Request.Cookies[AssertionStateCookie] is not { } state)
             return BadRequest(new { error = "This sign-in was not started here, or has expired. Try again." });
 

@@ -4,7 +4,7 @@ using DbDataSync.Core.Config;
 namespace DbDataSync.Cli.Tests;
 
 /// <summary>
-/// <c>dbdatasync health</c> falls back to a resolved config's <c>DbDataSync:Url</c> when <c>--url</c> isn't
+/// <c>dbdatasync health</c> falls back to a resolved config's <c>DbDataSync:App:Url</c> when <c>--url</c> isn't
 /// passed, before falling back to the hardcoded container default — phase 79.
 /// </summary>
 public sealed class HealthCommandTests : IDisposable
@@ -17,7 +17,7 @@ public sealed class HealthCommandTests : IDisposable
     public async Task NoUrlFlag_ConfiguredUrlInFile_IsUsed()
     {
         using var server = new AnsweringServer();
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", server.Url);
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", server.Url);
 
         var exitCode = await RunHealthAsync(["--repo", _root]);
 
@@ -29,7 +29,7 @@ public sealed class HealthCommandTests : IDisposable
     public async Task UrlFlag_WinsOverTheConfiguredUrl()
     {
         using var server = new AnsweringServer();
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "http://127.0.0.1:1"); // nothing listens here
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", "http://127.0.0.1:1"); // nothing listens here
 
         var exitCode = await RunHealthAsync(["--repo", _root, "--url", server.Url]);
 

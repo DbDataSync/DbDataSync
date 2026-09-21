@@ -16,10 +16,10 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_DefaultRoot_IncludesStateDirectoryAndHardening()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync");
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "dbdatasync");
 
         Assert.Contains("Type=notify", unit);
-        Assert.Contains("""ExecStart="/usr/bin/dbdatasync" serve --repo "/var/lib/dbdatasync" --url http://localhost:5080""", unit);
+        Assert.Contains("ExecStart=\"/usr/bin/dbdatasync\" serve --repo \"/var/lib/dbdatasync\"", unit);
         Assert.Contains("User=dbdatasync", unit);
         Assert.Contains("Group=dbdatasync", unit);
         Assert.Contains("WorkingDirectory=/var/lib/dbdatasync", unit);
@@ -37,7 +37,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_ByDefault_HasNoPrivilegedStepAndNoSelfUpdate()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync");
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "dbdatasync");
 
         Assert.DoesNotContain("ExecStartPre", unit);
         Assert.DoesNotContain("apply-update", unit);
@@ -52,7 +52,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_WithSelfUpdate_AppliesAPendingUpdateBeforeEveryStart_OutsideTheSandbox_WithoutBlockingAStart()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "dbdatasync", selfUpdate: true);
 
         const string pre = "ExecStartPre=-+\"/usr/bin/dbdatasync\" internal apply-update --repo \"/var/lib/dbdatasync\"";
         Assert.Contains(pre, unit);
@@ -63,7 +63,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_WithSelfUpdate_QuotesTheApplyStepsPathsToo()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync tool", "/var/lib/db data sync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync tool", "/var/lib/db data sync", "dbdatasync", selfUpdate: true);
 
         Assert.Contains("ExecStartPre=-+\"/usr/bin/dbdatasync tool\" internal apply-update --repo \"/var/lib/db data sync\"", unit);
     }
@@ -74,7 +74,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_WithSelfUpdate_TreatsExit75AsACleanRestart()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "dbdatasync", selfUpdate: true);
 
         Assert.Contains("SuccessExitStatus=75", unit);
         Assert.Contains("RestartForceExitStatus=75", unit);
@@ -84,7 +84,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_WithSelfUpdate_MarksItselfAsSelfUpdateCapable()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "dbdatasync", selfUpdate: true);
 
         Assert.Contains("Environment=DBDATASYNC_SELF_UPDATE=1", unit);
         Assert.Equal("DBDATASYNC_SELF_UPDATE=1", SystemdService.SelfUpdateMarker);
@@ -94,7 +94,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_WithSelfUpdate_ANonDefaultRoot_GetsTheStepToo_AndKeepsItsOwnExtras()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/srv/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true);
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/srv/dbdatasync", "dbdatasync", selfUpdate: true);
 
         Assert.Contains("ExecStartPre=-+\"/usr/bin/dbdatasync\" internal apply-update --repo \"/srv/dbdatasync\"", unit);
         Assert.Contains("ReadWritePaths=/srv/dbdatasync", unit);
@@ -103,7 +103,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_WithSelfUpdate_StaysAWellFormedUnit_EveryLineInTheServiceSection()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", "/usr/lib/dotnet", selfUpdate: true);
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "dbdatasync", "/usr/lib/dotnet", selfUpdate: true);
 
         // No line is glued onto another and none has picked up stray indentation.
         foreach (var line in unit.Split('\n'))
@@ -117,7 +117,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_NonDefaultRoot_SkipsHardeningButStillGrantsReadWriteAccess()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/srv/dbdatasync", "http://localhost:5080", "dbdatasync");
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/srv/dbdatasync", "dbdatasync");
 
         Assert.DoesNotContain("NoNewPrivileges=yes", unit);
         Assert.DoesNotContain("\nProtectSystem=strict", unit);
@@ -128,7 +128,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_QuotesTheExecutableAndRepoPathsForSystemdsOwnParsing()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync tool", "/var/lib/db data sync", "http://localhost:5080", "dbdatasync");
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync tool", "/var/lib/db data sync", "dbdatasync");
 
         Assert.Contains("\"/usr/bin/dbdatasync tool\"", unit);
         Assert.Contains("\"/var/lib/db data sync\"", unit);
@@ -138,7 +138,7 @@ public sealed class SystemdServiceTests : IDisposable
     public void RenderUnit_WithADotnetRoot_EmitsItAsAScopedEnvironmentLine()
     {
         var unit = SystemdService.RenderUnit(
-            "/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", "/usr/lib/dotnet");
+            "/usr/bin/dbdatasync", "/var/lib/dbdatasync", "dbdatasync", "/usr/lib/dotnet");
 
         Assert.Contains("Environment=DOTNET_ROOT=/usr/lib/dotnet", unit);
     }
@@ -146,7 +146,7 @@ public sealed class SystemdServiceTests : IDisposable
     [Fact]
     public void RenderUnit_WithNoDotnetRoot_OmitsTheLineEntirely()
     {
-        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync");
+        var unit = SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "dbdatasync");
 
         Assert.DoesNotContain("DOTNET_ROOT", unit);
     }
@@ -209,7 +209,7 @@ public sealed class SystemdServiceTests : IDisposable
     {
         var env = new FakeSystemdEnvironment();
 
-        var exitCode = SystemdService.Install(["--repo", _root, "--url", "http://localhost:5080", "--user", "testsvc"], env);
+        var exitCode = SystemdService.Install(["--repo", _root, "--url", "--user", "testsvc"], env);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("testsvc", env.CreatedUsers);

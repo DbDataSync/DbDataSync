@@ -61,7 +61,7 @@ RUN dotnet /app/DbDataSync.Cli.dll internal build-catalog-cache /app/library-cac
 # Build this one explicitly: `docker build --target runtime -t dbdatasync:<v>-runtime .`
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
-ENV DbDataSync__RepoRoot=/var/lib/dbdatasync
+ENV DbDataSync__App__RepoRoot=/var/lib/dbdatasync
 VOLUME ["/var/lib/dbdatasync"]
 
 WORKDIR /app
@@ -96,12 +96,13 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0
 # One mount is a complete deployment: the config repository and the state database live together, so
 # a backup of this directory is a backup of everything that is not the image.
 #
-# DbDataSync__RepoRoot is not a container-only name — it's the environment-variable form of the
-# DbDataSync:RepoRoot config key (phase 112), the same one an interactive install or a Windows/Linux
+# DbDataSync__App__RepoRoot is not a container-only name — it's the environment-variable form of the
+# DbDataSync:App:RepoRoot config key (phase 112, regrouped under App: in phase 164), the same one an
+# interactive install or a Windows/Linux
 # service points at its own machine-wide data directory with. This container happens to already
 # resolve /var/lib/dbdatasync as CliOptions.DefaultRoot's own Linux answer, but setting it explicitly
 # here means the image's behaviour doesn't depend on that coincidence continuing to hold.
-ENV DbDataSync__RepoRoot=/var/lib/dbdatasync
+ENV DbDataSync__App__RepoRoot=/var/lib/dbdatasync
 VOLUME ["/var/lib/dbdatasync"]
 
 WORKDIR /app

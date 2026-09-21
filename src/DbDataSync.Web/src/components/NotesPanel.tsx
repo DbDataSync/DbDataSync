@@ -38,7 +38,7 @@ export function NotesPanel({ value, onChange, subject, testId = 'notes' }: {
           // stored input rendered in other people's sessions; this is the reminder that they are being read with a richer renderer.
           <span
             className="badge-rich-markdown"
-            title="An administrator turned on rich Markdown for Notes on this server (DbDataSync:NotesRichMarkdown). Tables and task lists render; raw HTML is never interpreted, and images show as links."
+            title="An administrator turned on rich Markdown for Notes on this server (DbDataSync:Notes:MarkdownRenderer). Tables and task lists render; raw HTML is never interpreted, and images show as links."
             data-testid={`${testId}-rich-badge`}
           >
             Rich Markdown on

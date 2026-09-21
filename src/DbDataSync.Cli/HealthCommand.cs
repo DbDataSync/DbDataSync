@@ -19,13 +19,13 @@ public static class HealthCommand
 {
     public static async Task<int> RunAsync(string[] args)
     {
-        // Falls back to a resolved config's DbDataSync:Url before the hardcoded container default, so
+        // Falls back to a resolved config's DbDataSync:App:Url before the hardcoded container default, so
         // `dbdatasync health` against a config-backed install doesn't need --url repeated on every call.
         // The container's own HEALTHCHECK always passes --url explicitly (no config file to find inside
         // the image's working directory), so it is unaffected either way.
         var root = DbDataSyncRoot.Resolve(args);
         var url = CliOptions.Read(args, "--url")
-            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:Url")
+            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
             ?? "http://127.0.0.1:8080";
         var endpoint = $"{url.TrimEnd('/')}/api/health";
 

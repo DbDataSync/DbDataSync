@@ -1,5 +1,6 @@
 using DbDataSync.Api;
 using DbDataSync.Api.Auth;
+using DbDataSync.Api.Configuration;
 using DbDataSync.Api.Services;
 using Microsoft.Extensions.DependencyInjection;
 using DbDataSync.Core.Config;
@@ -44,14 +45,14 @@ public static class ServeCommand
             }
 
             var stateDb = CliOptions.Read(args, "--state-db") ?? Path.Combine(root, "state.db");
-            // --url / DbDataSync__Url still override the file, exactly like every other DbDataSync:*
-            // key (see DbDataSyncHost.InsertConfigFile) — the file is read here, rather than through
-            // DbDataSyncHost.Build's own configuration chain, because the translation to --urls, below,
-            // has to happen before that chain exists.
+            // --url / DbDataSync__App__Url still override the file, exactly like every other
+            // DbDataSync:* key (see DbDataSyncHost.InsertConfigFile) — the file is read here, rather
+            // than through DbDataSyncHost.Build's own configuration chain, because the translation to
+            // --urls, below, has to happen before that chain exists.
             var url = CliOptions.Read(args, "--url")
-                ?? Environment.GetEnvironmentVariable("DbDataSync__Url")
-                ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:Url")
-                ?? "http://localhost:5080";
+                ?? Environment.GetEnvironmentVariable("DbDataSync__App__Url")
+                ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
+                ?? ApiOptions.DefaultUrl;
 
             try
             {
@@ -64,17 +65,7 @@ public static class ServeCommand
 
             await EnsureDuckDbInstalledAsync(root);
 
-            // Passed as configuration rather than mutated into the environment, so the same values
-            // reach the host the same way they would from appsettings.json or an operator's own
-            // environment.
-            var hostArgs = new List<string>(args.Where(a => !IsCliOnly(a)))
-            {
-                "--DbDataSync:RepoRoot", root,
-                "--DbDataSync:StateDbPath", stateDb,
-                "--urls", url,
-            };
-
-            var app = DbDataSyncHost.Build([.. hostArgs]);
+            var app = DbDataSyncHost.Build(BuildHostArgs(args, root, stateDb, url));
 
             // Phase 136: right now, under a service, there is no confirmation anywhere that startup
             // *completed* — only SCM's own Running status, which says nothing about whether the app
@@ -164,6 +155,18 @@ public static class ServeCommand
             new GitCommitService(root).CommitChanges(
                 [DbDataSyncConfigFile.PathIn(root)], "Add starter dbdatasync.config.yaml", CurrentUser.SystemAuthor);
         }
+        else
+        {
+            // A no-op for a fresh repo (nothing to migrate) or one already on phase 164's key names —
+            // only prints/commits when there was real old-shaped content to rewrite.
+            var migrated = LegacyConfigMigration.Migrate(root);
+            if (migrated.Count > 0)
+            {
+                Console.WriteLine("dbdatasync.config.yaml used pre-phase-164 key names — migrated automatically:");
+                foreach (var change in migrated)
+                    Console.WriteLine($"  {change}");
+            }
+        }
     }
 
     /// <summary>
@@ -234,7 +237,52 @@ public static class ServeCommand
     }
 
     /// <summary>Arguments this command consumes itself, which the host would otherwise see as its
-    /// own and reject.</summary>
-    private static bool IsCliOnly(string argument) =>
-        argument is "--repo" or "--state-db" or "--url" || argument.StartsWith("--repo=", StringComparison.Ordinal);
+    /// own and reject. Each takes a separate value token (<c>--repo X</c>, not <c>--repo=X</c>), which
+    /// <see cref="BuildHostArgs"/> has to strip along with the flag itself.</summary>
+    private static bool IsCliOnly(string argument) => argument is "--repo" or "--state-db" or "--url";
+
+    /// <summary>
+    /// What actually reaches <see cref="DbDataSyncHost.Build"/> — every CLI-only flag *and its value*
+    /// stripped out, plus the resolved root/state-db path/URL passed through as ordinary configuration
+    /// (rather than mutated into the environment), so the same values reach the host the same way they
+    /// would from appsettings.json or an operator's own environment.
+    /// <para>
+    /// **Stripping only the flag token, leaving its value behind, is a real bug this method exists to
+    /// fix** — found while extracting it for phase 164's own regression test. <c>--DbDataSync:*</c>
+    /// arguments (<see cref="Microsoft.Extensions.Configuration.CommandLine.CommandLineConfigurationProvider"/>)
+    /// parse key/value tokens by counting from the start of the array: an odd number of leftover,
+    /// unrecognized non-flag tokens ahead of a real <c>--Key value</c> pair desyncs that counting, and
+    /// the pair silently fails to parse at all — verified directly against the real provider. A single
+    /// <c>dbdatasync serve --repo X</c> (no <c>--url</c>) left exactly one such orphan and would have
+    /// silently dropped <em>every</em> <c>--DbDataSync:*</c> argument appended after it, App:RepoRoot
+    /// and State:DbPath included — not merely a display glitch, a deployment silently running against
+    /// the wrong repo. Stripping the flag's value token too removes the orphan instead of leaving one
+    /// behind.
+    /// </para>
+    /// </summary>
+    internal static string[] BuildHostArgs(string[] args, string root, string stateDb, string url)
+    {
+        var passthrough = new List<string>();
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (IsCliOnly(args[i]))
+            {
+                i++; // also skip this flag's own value token
+                continue;
+            }
+
+            if (args[i].StartsWith("--repo=", StringComparison.Ordinal))
+                continue; // the one CLI-only flag with an inline value — no separate token to skip
+
+            passthrough.Add(args[i]);
+        }
+
+        return
+        [
+            .. passthrough,
+            "--DbDataSync:App:RepoRoot", root,
+            "--DbDataSync:State:DbPath", stateDb,
+            "--urls", url,
+        ];
+    }
 }

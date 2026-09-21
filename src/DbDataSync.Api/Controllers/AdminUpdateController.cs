@@ -9,7 +9,7 @@ namespace DbDataSync.Api.Controllers;
 /// <summary>
 /// Updating this installation from the console (phase 159). Admin-only, stated on every action per this
 /// repository's convention, and closed by default: <c>apply</c> is refused unless
-/// <c>DbDataSync:SelfUpdateEnabled</c> is set.
+/// <c>DbDataSync:Updates:Mode</c> is set to <c>manual</c>.
 /// </summary>
 [ApiController]
 [Route("api/admin/update")]
@@ -36,7 +36,7 @@ public sealed class AdminUpdateController(UpdateService updates) : ControllerBas
                 return BadRequest(new { error = $"Unknown channel '{channel}'. Use stable, beta or snapshot." });
 
             if (!updates.IsChannelEnabled(parsed))
-                return StatusCode(StatusCodes.Status403Forbidden, new { error = $"The {parsed.ToString().ToLowerInvariant()} channel is not enabled (DbDataSync:SelfUpdateChannels)." });
+                return StatusCode(StatusCodes.Status403Forbidden, new { error = $"The {parsed.ToString().ToLowerInvariant()} channel is not enabled (DbDataSync:Updates:Channels)." });
 
             requested = parsed;
         }

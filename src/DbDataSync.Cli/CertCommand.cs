@@ -647,12 +647,12 @@ public static class CertCommand
     }
 
     /// <summary>The host tier 2's SANs are built from — <c>--url</c> if given (matching <c>serve</c>'s
-    /// own override), else whatever <c>DbDataSync:Url</c> is already configured to, else the same
+    /// own override), else whatever <c>DbDataSync:App:Url</c> is already configured to, else the same
     /// localhost default every other command falls back to.</summary>
     private static string ResolveConsoleHost(string root, string[] args)
     {
         var url = CliOptions.Read(args, "--url")
-            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:Url")
+            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
             ?? "http://localhost:5080";
         return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : "localhost";
     }

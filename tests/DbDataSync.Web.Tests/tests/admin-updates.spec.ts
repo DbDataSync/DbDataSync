@@ -76,7 +76,7 @@ test.describe('admin: Updates', () => {
 
     await page.goto('/admin/updates')
 
-    await expect(page.getByTestId('updates-disabled')).toContainText('DbDataSync:SelfUpdateEnabled')
+    await expect(page.getByTestId('updates-disabled')).toContainText('DbDataSync:Updates:Mode')
     await expect(page.getByTestId('updates-releases')).toHaveCount(0)
     await expect(page.getByTestId('updates-running-version')).toHaveText('2026.9.16.1005')
     await page.screenshot({ path: path.join(screenshotsDir, '159-updates-disabled.png'), fullPage: true })

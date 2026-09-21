@@ -62,15 +62,15 @@ internal sealed class AuthenticationTab : View
 
     public void Populate(IConfiguration configuration)
     {
-        if (string.Equals(configuration["DbDataSync:Auth:Disabled"], "true", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(configuration["DbDataSync:Auth:Network:Admin"], "loopback", StringComparison.OrdinalIgnoreCase))
         {
             _method.Value = 2;
         }
-        else if (!string.IsNullOrEmpty(configuration["DbDataSync:Auth:AdminGroup"]))
+        else if (!string.IsNullOrEmpty(configuration["DbDataSync:Auth:Windows:AdminGroup"]))
         {
             _method.Value = 1;
-            _adminGroup.Text = configuration["DbDataSync:Auth:AdminGroup"] ?? "";
-            _viewerGroup.Text = configuration["DbDataSync:Auth:ViewerGroup"] ?? "";
+            _adminGroup.Text = configuration["DbDataSync:Auth:Windows:AdminGroup"] ?? "";
+            _viewerGroup.Text = configuration["DbDataSync:Auth:Windows:ViewerGroup"] ?? "";
         }
         else
         {

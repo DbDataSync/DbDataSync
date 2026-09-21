@@ -11,7 +11,7 @@ internal static class LegacyRootMigration
 {
     /// <summary>
     /// Null unless resolution fell all the way through to the platform default — no <c>--repo</c>, no
-    /// walk-up hit, no <c>DbDataSync__RepoRoot</c> — the *new* default has no real configuration yet,
+    /// walk-up hit, no <c>DbDataSync__App__RepoRoot</c> — the *new* default has no real configuration yet,
     /// and the *old* per-user location does. An operator who set any of those overrides has already
     /// made an explicit choice; second-guessing it here would be noise, not help.
     /// </summary>
@@ -44,7 +44,7 @@ internal static class LegacyRootMigration
         The default is now {newRoot}. Either:
           - move that folder there, then re-run; or
           - keep it where it is: dbdatasync serve --repo "{legacyRoot}"
-            (and pass the same --repo to `service install` / set DbDataSync__RepoRoot / set it in
+            (and pass the same --repo to `service install` / set DbDataSync__App__RepoRoot / set it in
             dbdatasync.config.yaml)
         """;
 }

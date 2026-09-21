@@ -154,7 +154,7 @@ sudo dbdatasync update --to 2026.9.18.1918 --apply
 
 It asks first (`--yes` to skip the prompt, which is required when there is no terminal). It needs the same rights
 the printed commands would, which is why the example uses `sudo`. `--url` says where to check the service answers
-(default: the configured `DbDataSync:Url`), and `--health-timeout` how many seconds to wait for it (default 90).
+(default: the configured `DbDataSync:App:Url`), and `--health-timeout` how many seconds to wait for it (default 90).
 `dbdatasync update --status` shows what the last update did, and whether one is waiting or on trial. If an apply fails, its log is kept in a temporary directory whose path is printed.
 
 **Windows** does not have `--apply` yet: a running `dbdatasync.exe` and its service hold their own files open, so it
@@ -178,17 +178,17 @@ three things — the first is a decision only root can make:
    the service asked for. It is opt-in, and is only ever added by running that command as root: the service runs with
    fewer rights on purpose, and a setting the service itself could write must not be what switches a
    root-privileged step on. Without it, an ordinary unit is unchanged and the console will say why it cannot update.
-2. `DbDataSync:SelfUpdateEnabled` set to `true` (Admin → Configuration, or `dbdatasync.config.yaml`).
+2. `DbDataSync:Updates:Mode` set to `manual` (Admin → Configuration, or `dbdatasync.config.yaml`).
    `dbdatasync config check` warns when this is on and the unit was not registered with `--self-update`.
-3. Only `stable` is offered unless you allow more: `DbDataSync:SelfUpdateChannels` (`stable`, `beta`, `snapshot`,
+3. Only `stable` is offered unless you allow more: `DbDataSync:Updates:Channels` (`stable`, `beta`, `snapshot`,
    comma-separated). A snapshot is a development build — its download is checked only against a checksum published
    beside it, which catches corruption, not tampering.
 
 What pressing it does: the service stops starting new work (the scheduler pauses and changes over the API answer
-`409`), waits for running work to finish — up to `SelfUpdateDrainTimeoutSeconds`, default 120; anything left is picked
+`409`), waits for running work to finish — up to `Updates:DrainTimeoutSeconds`, default 120; anything left is picked
 up again after the restart — then exits with code 75, which its unit treats as a clean restart. Before the service
 starts again, systemd runs `dbdatasync internal apply-update` to install the new version. The new version counts as
-having worked once it has been serving for `SelfUpdateConfirmAfterSeconds` (default 60). **If it crashes or hangs
+having worked once it has been serving for `Updates:ConfirmAfterSeconds` (default 60). **If it crashes or hangs
 before then, the next start puts the previous version back** — from a copy of its package kept aside for the purpose —
 with nothing watching it but the restart systemd does anyway.
 

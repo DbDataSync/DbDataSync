@@ -1,5 +1,11 @@
 # Phase 159 — apply an update automatically, from the CLI and the web console (planned)
 
+**Updated 2026-09-21 (phase 164):** every `DbDataSync:SelfUpdate*` key this doc names below was renamed
+under phase 164's config reorg — `SelfUpdateEnabled` (bool) is now `Updates:Mode` (`manual`/`disabled`),
+and `SelfUpdateChannels`/`SelfUpdateDrainTimeoutSeconds`/`SelfUpdateConfirmAfterSeconds` are now
+`Updates:Channels`/`Updates:DrainTimeoutSeconds`/`Updates:ConfirmAfterSeconds`. Not rewritten
+line-by-line below; see `docs/configuration.md`'s `DbDataSync:Updates:*` section for the current names.
+
 **Status**: In progress. The Linux half of the spike is done (2026-09-19, findings below) and amended
 the design; the **Windows** half and the **root/sandbox** half could not be run on the machine available
 (no Windows host, no root, and this Ubuntu blocks the user namespaces a user unit needs for sandboxing) and

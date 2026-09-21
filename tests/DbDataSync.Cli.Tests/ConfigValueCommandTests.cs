@@ -33,66 +33,64 @@ public sealed class ConfigValueCommandTests : IDisposable
     [Fact]
     public async Task Set_WritesTheKeyIntoTheConfigFile_AndCommitsIt()
     {
-        var (code, output) = await Run("set", "NotesRichMarkdown", "true", "--repo", _root);
+        var (code, output) = await Run("set", "Notes:MarkdownRenderer", "rich", "--repo", _root);
 
         Assert.Equal(0, code);
-        Assert.Equal("true", DbDataSyncConfigFile.Read(_root)["DbDataSync:NotesRichMarkdown"]);
+        Assert.Equal("rich", DbDataSyncConfigFile.Read(_root)["DbDataSync:Notes:MarkdownRenderer"]);
         Assert.Contains("Restart the service", output);
         using var repo = new Repository(_root);
-        Assert.Contains("Set 'DbDataSync:NotesRichMarkdown'", repo.Commits.First().Message);
+        Assert.Contains("Set 'DbDataSync:Notes:MarkdownRenderer'", repo.Commits.First().Message);
     }
 
     [Fact]
     public async Task Set_WarnsBeforeEnablingARiskySetting_WithTheSameTextTheScreenShows()
     {
-        var (_, output) = await Run("set", "NotesRichMarkdown", "true", "--repo", _root);
+        var (_, output) = await Run("set", "Notes:MarkdownRenderer", "rich", "--repo", _root);
 
         Assert.Contains("Warning:", output);
-        Assert.Contains(DbDataSync.Api.Services.AdminConfigService.Writable("NotesRichMarkdown")!.Caution!, output);
+        Assert.Contains(DbDataSync.Api.Services.AdminConfigService.Writable("Notes:MarkdownRenderer")!.Caution!, output);
     }
 
     [Fact]
     public async Task Set_DoesNotWarnWhenTurningItBackOff()
     {
-        await Run("set", "NotesRichMarkdown", "true", "--repo", _root);
+        await Run("set", "Notes:MarkdownRenderer", "rich", "--repo", _root);
 
-        var (code, output) = await Run("set", "NotesRichMarkdown", "false", "--repo", _root);
+        var (code, output) = await Run("set", "Notes:MarkdownRenderer", "basic", "--repo", _root);
 
         Assert.Equal(0, code);
         Assert.DoesNotContain("Warning:", output);
-        Assert.Equal("false", DbDataSyncConfigFile.Read(_root)["DbDataSync:NotesRichMarkdown"]);
+        Assert.Equal("basic", DbDataSyncConfigFile.Read(_root)["DbDataSync:Notes:MarkdownRenderer"]);
     }
 
-    [Theory]
-    [InlineData("TRUE", "true")]
-    [InlineData("False", "false")]
-    public async Task Set_NormalisesABooleanSpelling(string given, string written)
-    {
-        await Run("set", "DbDataSync:NotesRichMarkdown", given, "--repo", _root);
-
-        Assert.Equal(written, DbDataSyncConfigFile.Read(_root)["DbDataSync:NotesRichMarkdown"]);
-    }
-
+    /// <summary>
+    /// Phase 164 removed every bare boolean from the catalog, so there is no writable key left whose
+    /// DefaultValue is "true"/"false" — the boolean-specific spelling normalization/refusal
+    /// <c>ConfigValueCommand.Set</c> used to have for that case was dead code once every setting became
+    /// a mode string, and was removed along with it. A nonsense value for a mode-string key is simply
+    /// written as given — there is no fixed enum to validate against here, matching every other
+    /// free-text setting (StateEngine, RelyingPartyId, ...) already.
+    /// </summary>
     [Fact]
-    public async Task Set_RefusesANonBooleanForAnOnOffSetting_AndWritesNothing()
+    public async Task Set_WritesWhateverValueIsGiven_ForAModeStringSetting()
     {
-        var (code, output) = await Run("set", "NotesRichMarkdown", "yes please", "--repo", _root);
+        var (code, output) = await Run("set", "Notes:MarkdownRenderer", "extremely rich", "--repo", _root);
 
-        Assert.Equal(1, code);
-        Assert.Contains("true or false", output);
-        Assert.False(DbDataSyncConfigFile.Read(_root).ContainsKey("DbDataSync:NotesRichMarkdown"));
+        Assert.Equal(0, code);
+        Assert.Equal("extremely rich", DbDataSyncConfigFile.Read(_root)["DbDataSync:Notes:MarkdownRenderer"]);
+        Assert.DoesNotContain("true or false", output);
     }
 
     [Theory]
     [InlineData("NoSuchSetting")]
-    [InlineData("Auth:AdminGroup")]      // nested: the screen shows it but the writer cannot address it
+    [InlineData("App:RepoRoot")]      // config-store root: how the file itself is found, never writable
     public async Task Set_RefusesAKeyTheAdminScreenWouldNotWrite(string key)
     {
         var (code, output) = await Run("set", key, "x", "--repo", _root);
 
         Assert.Equal(1, code);
         Assert.Contains("is not a setting this command can change", output);
-        Assert.Contains("NotesRichMarkdown", output); // lists what it can
+        Assert.Contains("Notes:MarkdownRenderer", output); // lists what it can
     }
 
     [Fact]
@@ -101,7 +99,7 @@ public sealed class ConfigValueCommandTests : IDisposable
         var elsewhere = Directory.CreateTempSubdirectory("dbdatasync-configvalue-empty-").FullName;
         try
         {
-            var (code, output) = await Run("set", "NotesRichMarkdown", "true", "--repo", elsewhere);
+            var (code, output) = await Run("set", "Notes:MarkdownRenderer", "rich", "--repo", elsewhere);
 
             Assert.Equal(1, code);
             Assert.Contains("dbdatasync setup", output);
@@ -116,19 +114,19 @@ public sealed class ConfigValueCommandTests : IDisposable
     [Fact]
     public async Task Get_ReportsWhatTheFileSays_OrThatItIsUnsetWithItsDefault()
     {
-        var (_, unset) = await Run("get", "NotesRichMarkdown", "--repo", _root);
+        var (_, unset) = await Run("get", "Notes:MarkdownRenderer", "--repo", _root);
         Assert.Contains("is not set", unset);
-        Assert.Contains("default: false", unset);
+        Assert.Contains("default: basic", unset);
 
-        await Run("set", "NotesRichMarkdown", "true", "--repo", _root);
-        var (_, set) = await Run("get", "NotesRichMarkdown", "--repo", _root);
-        Assert.Contains("DbDataSync:NotesRichMarkdown = true", set);
+        await Run("set", "Notes:MarkdownRenderer", "rich", "--repo", _root);
+        var (_, set) = await Run("get", "Notes:MarkdownRenderer", "--repo", _root);
+        Assert.Contains("DbDataSync:Notes:MarkdownRenderer = rich", set);
     }
 
     [Fact]
     public async Task WrongArgumentCounts_PrintUsage()
     {
-        Assert.Equal(1, (await Run("set", "NotesRichMarkdown", "--repo", _root)).ExitCode);
+        Assert.Equal(1, (await Run("set", "Notes:MarkdownRenderer", "--repo", _root)).ExitCode);
         Assert.Equal(1, (await Run("get", "--repo", _root)).ExitCode);
     }
 }

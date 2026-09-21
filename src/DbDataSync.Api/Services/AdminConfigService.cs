@@ -15,14 +15,14 @@ namespace DbDataSync.Api.Services;
 /// its live effective value, where that value actually came from, and what this screen can do about
 /// it.
 /// <para>
-/// <b>Only the flat, top-level <c>DbDataSync:&lt;Key&gt;</c> keys are file-writable</b> —
-/// <see cref="DbDataSyncConfigFile.SetValue"/>'s own doc comment already says its text-editing writer
-/// "does not handle arbitrary YAML nesting on the write side", and phase 79 explicitly judged that
-/// shape "sufficient for... phase 81's admin screen" rather than extending it. <c>DbDataSync:Auth:*</c>
-/// and <c>DbDataSync:Auth:Passkeys:*</c> are one or two levels deeper, and <c>Origins</c> is an array —
-/// none of which the writer can address — so those rows are shown for the same real-value/real-source
-/// honesty as everything else, but are never editable or adoptable here. See this phase's
-/// retrospective for the full reasoning.
+/// Phase 164 reorganized the whole key surface into groups (<c>App:*</c>, <c>State:*</c>,
+/// <c>Auth:Network:*</c>/<c>Auth:Windows:*</c>/<c>Auth:Passkeys:*</c>, <c>Updates:*</c>, <c>Nuget:Search:*</c>,
+/// <c>Notes:*</c>) and replaced every bare boolean with a named mode string. That reorg also found that
+/// the earlier "only flat, top-level keys are file-writable" claim was never actually true for
+/// <see cref="DbDataSyncConfigFile.SetValue"/> — its text-editing writer tolerates a colon-containing
+/// plain-scalar key or section (the exact mechanism <c>SetupSteps.cs</c> already relied on for the TUI
+/// path), so nested keys under <c>Auth:Windows:*</c>/<c>Auth:Passkeys:*</c> are now genuinely
+/// file-writable here too, not just display-only.
 /// </para>
 /// </summary>
 public sealed class AdminConfigService(
@@ -39,96 +39,118 @@ public sealed class AdminConfigService(
 
     private static readonly IReadOnlyList<KeyDefinition> Keys =
     [
-        new("DbDataSync:RepoRoot",
+        new("DbDataSync:App:RepoRoot",
             "Git-tracked config store root. This is how dbdatasync.config.yaml itself is found, so a " +
             "value inside that same file could never relocate it — not editable here.",
             SupportsWrite: false),
-        new("DbDataSync:Url",
+        new("DbDataSync:App:Url",
             "Console/API bind address. Only `dbdatasync serve`/`dbdatasync health` resolve this themselves " +
             "before translating it to Kestrel's --urls; the raw `dotnet run` entry point ignores it.",
             SupportsWrite: true),
-        new("DbDataSync:StateDbPath",
-            "The SQLite state file. Ignored when StateEngine is MsSql or Postgres.",
+        new("DbDataSync:App:AlternateUrls",
+            "Every other origin this deployment is also reached at, beyond App:Url — comma- or " +
+            "semicolon-separated. Purely additive: App:Url's own origin is always trusted for passkeys " +
+            "without needing to be listed here too.",
             SupportsWrite: true),
-        new("DbDataSync:StateEngine",
+        new("DbDataSync:App:TaskRunnerDllPath",
+            "Where DbDataSync.TaskRunner.dll is. Resolved automatically for a normal install or container.",
+            SupportsWrite: true),
+        new("DbDataSync:State:DbPath",
+            "The SQLite state file. Ignored when State:Engine is MsSql or Postgres.",
+            SupportsWrite: true),
+        new("DbDataSync:State:Engine",
             "Which database backs the state store. Sqlite, MsSql or Postgres — run history, the work " +
             "queue, watermarks, users and sessions all live here. An unrecognized value refuses to " +
             "start rather than silently falling back to Sqlite.",
             SupportsWrite: true),
-        new("DbDataSync:StateConnectionString",
-            "How to reach StateEngine when it isn't Sqlite. Never carries a password — set that " +
+        new("DbDataSync:State:ConnectionString",
+            "How to reach State:Engine when it isn't Sqlite. Never carries a password — set that " +
             "separately, below.",
             SupportsWrite: true, IsSecret: true),
-        new("DbDataSync:TaskRunnerDllPath",
-            "Where DbDataSync.TaskRunner.dll is. Resolved automatically for a normal install or container.",
-            SupportsWrite: true),
-        new("DbDataSync:StatePort",
+        new("DbDataSync:State:Port",
             "The loopback-only runner-state listener's port. 0 binds an ephemeral one.",
             SupportsWrite: true),
-        new("DbDataSync:RunRetentionDays",
+        new("DbDataSync:State:Retention:RunDays",
             "Finished runs older than this are pruned hourly. 0 keeps forever.",
             SupportsWrite: true, Unit: "days"),
-        new("DbDataSync:RunRetentionMaxPerMapping",
+        new("DbDataSync:State:Retention:RunMaxPerMapping",
             "Most recent N finished runs kept, per table mapping. 0 = no cap.",
             SupportsWrite: true, Unit: "runs"),
-        new("DbDataSync:RunPruningIntervalMinutes",
+        new("DbDataSync:State:Retention:PruningIntervalMinutes",
             "How often the retention sweep runs.",
             SupportsWrite: true, Unit: "minutes"),
-        new("DbDataSync:ChangeCheckRetentionDays",
+        new("DbDataSync:State:Retention:ChangeCheckDays",
             "How long the scheduler's change-check history (phase 75) is kept. 0 keeps forever.",
             SupportsWrite: true, Unit: "days"),
-        new("DbDataSync:NuGetSearchEnabled",
-            "Whether the Libraries screen's search box may call the public NuGet index. Disable in an " +
-            "air-gapped or locked-down deployment.",
+        new("DbDataSync:Nuget:Search:Mode",
+            "Whether the Libraries screen's search box may call the public NuGet index (enabled/disabled). " +
+            "Disable in an air-gapped or locked-down deployment.",
             SupportsWrite: true),
-        new("DbDataSync:NotesRichMarkdown",
-            "Whether Notes render tables, task lists and strikethrough with the full Markdown renderer instead of the " +
-            "small one they use by default. Off by default.",
+        new("DbDataSync:Notes:MarkdownRenderer",
+            "Which renderer Notes use: basic (small, safe default) or rich (tables, task lists, strikethrough).",
             SupportsWrite: true,
             Caution:
-                "Notes are written by one operator and shown in other people's sessions. With this on they go through a " +
-                "richer renderer. It is defended the way the Docs viewer is — raw HTML is never interpreted, only " +
-                "http(s) and mailto links are followed, and images show as links rather than loading — but a richer " +
-                "renderer is a wider surface: a convincingly crafted link, or a flaw in the library later. Leave it off " +
-                "unless your team needs tables in notes."),
-        new("DbDataSync:SelfUpdateEnabled",
-            "Whether an admin may update this installation from the Updates screen. Off by default: it replaces " +
-            "the code the service runs, as the service's own account. Needs a systemd unit written by this " +
-            "version or later (`dbdatasync service install`); Linux only for now.",
+                "Notes are written by one operator and shown in other people's sessions. The rich renderer is " +
+                "defended the way the Docs viewer is — raw HTML is never interpreted, only http(s) and mailto " +
+                "links are followed, and images show as links rather than loading — but it is a wider surface: " +
+                "a convincingly crafted link, or a flaw in the library later. Leave it basic unless your team " +
+                "needs tables in notes."),
+        new("DbDataSync:Updates:Mode",
+            "Whether, and how, an admin may update this installation from the Updates screen: manual or " +
+            "disabled. Disabled by default: it replaces the code the service runs, as the service's own " +
+            "account. Needs a systemd unit written by this version or later (`dbdatasync service install`); " +
+            "Linux only for now.",
             SupportsWrite: true),
-        new("DbDataSync:SelfUpdateChannels",
+        new("DbDataSync:Updates:Channels",
             "Which release channels the Updates screen may offer, comma-separated: stable, beta, snapshot. " +
             "A snapshot is a development build; its download is only checked against a checksum published " +
             "beside it.",
             SupportsWrite: true),
-        new("DbDataSync:SelfUpdateDrainTimeoutSeconds",
+        new("DbDataSync:Updates:DrainTimeoutSeconds",
             "How long an update waits for running work to finish before restarting the service anyway. " +
             "Anything interrupted is reconciled at the next start.",
             SupportsWrite: true, Unit: "seconds"),
-        new("DbDataSync:SelfUpdateConfirmAfterSeconds",
+        new("DbDataSync:Updates:ConfirmAfterSeconds",
             "How long an updated version must have been serving before the update counts as having worked. " +
             "Until then, a restart rolls the update back.",
             SupportsWrite: true, Unit: "seconds"),
-        new("DbDataSync:Auth:Disabled",
-            "Runs with no authentication at all. Nested under Auth, one level past what " +
-            "dbdatasync.config.yaml's writer can address — set via environment variable or CLI flag.",
-            SupportsWrite: false),
-        new("DbDataSync:Auth:AdminGroup",
-            "Windows group whose members are admins. Same nesting limit as Disabled, above.",
-            SupportsWrite: false),
-        new("DbDataSync:Auth:ViewerGroup",
-            "Windows group whose members are viewers. Same nesting limit.",
-            SupportsWrite: false),
+        new("DbDataSync:Auth:Network:Admin",
+            "Trusts an unauthenticated request from loopback as Admin: loopback or disabled. There is no " +
+            "\"from anywhere\" option for Admin — only Auth:Network:Viewer ever widens past loopback.",
+            SupportsWrite: true,
+            Caution:
+                "Anyone who can reach this loopback address — any local account on a shared host, not only " +
+                "the operator — gets Admin with no sign-in at all. Leave this disabled unless the deployment " +
+                "is a single-operator box."),
+        new("DbDataSync:Auth:Network:Viewer",
+            "Trusts an unauthenticated request as Viewer: remote, loopback, or disabled. Remote trusts any " +
+            "origin as Viewer; loopback restricts that to loopback only.",
+            SupportsWrite: true,
+            Caution:
+                "A Viewer can read replication state and configuration, just not change it. `remote` means " +
+                "anyone who can reach this deployment at all gets that without signing in."),
+        new("DbDataSync:Auth:Windows:Mode",
+            "Whether Windows group authentication is allowed at all: enabled or disabled. An operator can " +
+            "configure Auth:Windows:AdminGroup/ViewerGroup and still turn this off without clearing them.",
+            SupportsWrite: true),
+        new("DbDataSync:Auth:Windows:AdminGroup",
+            "Windows group whose members are admins.",
+            SupportsWrite: true),
+        new("DbDataSync:Auth:Windows:ViewerGroup",
+            "Windows group whose members are viewers.",
+            SupportsWrite: true),
+        new("DbDataSync:Auth:Passkeys:Mode",
+            "Whether passkey sign-in/enrollment is allowed at all: enabled or disabled. An operator can " +
+            "configure a relying-party id and still turn this off without clearing it.",
+            SupportsWrite: true),
         new("DbDataSync:Auth:Passkeys:RelyingPartyId",
-            "Bare domain passkeys are scoped to. Same nesting limit.",
-            SupportsWrite: false),
+            "Bare domain passkeys are scoped to. Deliberately independent of App:Url — see " +
+            "architecture/planning/todo/passkey-relying-party-migration.md for why changing this " +
+            "invalidates every already-registered passkey, whatever sets it.",
+            SupportsWrite: true),
         new("DbDataSync:Auth:Passkeys:RelyingPartyName",
-            "Shown in the OS passkey prompt. Same nesting limit.",
-            SupportsWrite: false),
-        new("DbDataSync:Auth:Passkeys:Origins",
-            "Full origin URLs passkeys are valid from. An array — dbdatasync.config.yaml's writer only " +
-            "ever writes one scalar per key, so this can never be file-writable.",
-            SupportsWrite: false),
+            "Shown in the OS passkey prompt.",
+            SupportsWrite: true),
     ];
 
     /// <summary>
@@ -159,9 +181,9 @@ public sealed class AdminConfigService(
     }
 
     /// <summary>
-    /// Writes one top-level key into dbdatasync.config.yaml and commits it — the same call whether this
-    /// is editing an already-file-sourced value or "adopting" one that was not. Returns null for a key
-    /// this screen does not know, or that is not file-writable (see the class doc comment).
+    /// Writes one key into dbdatasync.config.yaml and commits it — the same call whether this is editing an
+    /// already-file-sourced value or "adopting" one that was not. Returns null for a key this screen does not
+    /// know, or that is not file-writable (see the class doc comment).
     /// <para>
     /// <paramref name="author"/> is threaded in from the controller (<see cref="CurrentUser.Author"/>)
     /// rather than read from <c>IHttpContextAccessor</c> here — this service is a singleton with no
@@ -174,8 +196,11 @@ public sealed class AdminConfigService(
         if (definition is null || !definition.SupportsWrite)
             return null;
 
-        // Every writable key today is exactly two segments (DbDataSync:X) — see the class doc comment
-        // for why nothing deeper is ever in this list.
+        // The section stays the fixed "DbDataSync" and everything past it — however many segments —
+        // goes in as the key. DbDataSyncConfigFile.SetValue's text-editing writer tolerates a
+        // colon-containing plain-scalar key (verified with a round-trip test), which is exactly the
+        // mechanism SetupSteps.cs already relies on for the TUI path — this was never actually blocked
+        // by the writer, only by this catalog choosing not to expose it before phase 164.
         var localKey = definition.Key["DbDataSync:".Length..];
         DbDataSyncConfigFile.SetValue(apiOptions.RepoRoot, "DbDataSync", localKey, value);
         git.CommitChanges(
@@ -186,13 +211,13 @@ public sealed class AdminConfigService(
     }
 
     /// <summary>
-    /// Sets StateConnectionString's password through the same store <c>dbdatasync config secret set</c> writes
+    /// Sets State:ConnectionString's password through the same store <c>dbdatasync config secret set</c> writes
     /// to — this screen and the CLI command are two doors onto the same store, not two stores. The only
     /// key this applies to today; see docs/configuration.md's "Secrets" section.
     /// </summary>
     public bool SetStateConnectionSecret(string key, string value)
     {
-        if (!string.Equals(key, "DbDataSync:StateConnectionString", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(key, "DbDataSync:State:ConnectionString", StringComparison.OrdinalIgnoreCase))
             return false;
 
         secrets.Store(SecretRefs.ForAppSetting("stateConnectionString"), value);
@@ -305,31 +330,39 @@ public sealed class AdminConfigService(
     /// </summary>
     private string? DefaultFor(string key) => key switch
     {
-        "DbDataSync:RepoRoot" => apiOptions.RepoRoot,
-        "DbDataSync:Url" => null,
-        "DbDataSync:StateDbPath" => apiOptions.StateDbPath,
-        "DbDataSync:StateEngine" => apiOptions.StateEngine,
-        "DbDataSync:StateConnectionString" => apiOptions.StateConnectionString,
-        "DbDataSync:TaskRunnerDllPath" => apiOptions.TaskRunnerDllPath,
-        "DbDataSync:StatePort" => apiOptions.StatePort.ToString(),
-        "DbDataSync:RunRetentionDays" => apiOptions.RunRetentionDays?.ToString() ?? "0",
-        "DbDataSync:RunRetentionMaxPerMapping" => apiOptions.RunRetentionMaxPerMapping?.ToString() ?? "0",
-        "DbDataSync:RunPruningIntervalMinutes" => ((int)apiOptions.RunPruningInterval.TotalMinutes).ToString(),
-        "DbDataSync:ChangeCheckRetentionDays" => apiOptions.ChangeCheckRetentionDays?.ToString() ?? "0",
-        "DbDataSync:NuGetSearchEnabled" => apiOptions.NuGetSearchEnabled ? "true" : "false",
-        "DbDataSync:NotesRichMarkdown" => apiOptions.NotesRichMarkdown ? "true" : "false",
-        "DbDataSync:SelfUpdateEnabled" => apiOptions.SelfUpdateEnabled ? "true" : "false",
-        "DbDataSync:SelfUpdateChannels" => string.Join(",", apiOptions.SelfUpdateChannels.Select(c => c.ToString().ToLowerInvariant())),
-        "DbDataSync:SelfUpdateDrainTimeoutSeconds" => ((int)apiOptions.SelfUpdateDrainTimeout.TotalSeconds).ToString(),
-        "DbDataSync:SelfUpdateConfirmAfterSeconds" => ((int)apiOptions.SelfUpdateConfirmAfter.TotalSeconds).ToString(),
-        "DbDataSync:Auth:Disabled" => authOptions.Disabled ? "true" : "false",
-        "DbDataSync:Auth:AdminGroup" => authOptions.AdminGroup,
-        "DbDataSync:Auth:ViewerGroup" => authOptions.ViewerGroup,
+        "DbDataSync:App:RepoRoot" => apiOptions.RepoRoot,
+        "DbDataSync:App:Url" => apiOptions.Url,
+        "DbDataSync:App:AlternateUrls" => string.Join(", ", apiOptions.AlternateUrls),
+        "DbDataSync:App:TaskRunnerDllPath" => apiOptions.TaskRunnerDllPath,
+        "DbDataSync:State:DbPath" => apiOptions.StateDbPath,
+        "DbDataSync:State:Engine" => apiOptions.StateEngine,
+        "DbDataSync:State:ConnectionString" => apiOptions.StateConnectionString,
+        "DbDataSync:State:Port" => apiOptions.StatePort.ToString(),
+        "DbDataSync:State:Retention:RunDays" => apiOptions.RunRetentionDays?.ToString() ?? "0",
+        "DbDataSync:State:Retention:RunMaxPerMapping" => apiOptions.RunRetentionMaxPerMapping?.ToString() ?? "0",
+        "DbDataSync:State:Retention:PruningIntervalMinutes" => ((int)apiOptions.RunPruningInterval.TotalMinutes).ToString(),
+        "DbDataSync:State:Retention:ChangeCheckDays" => apiOptions.ChangeCheckRetentionDays?.ToString() ?? "0",
+        "DbDataSync:Nuget:Search:Mode" => Lower(apiOptions.NugetSearchMode),
+        "DbDataSync:Notes:MarkdownRenderer" => Lower(apiOptions.NotesRenderer),
+        "DbDataSync:Updates:Mode" => Lower(apiOptions.SelfUpdateMode),
+        "DbDataSync:Updates:Channels" => string.Join(",", apiOptions.SelfUpdateChannels.Select(c => c.ToString().ToLowerInvariant())),
+        "DbDataSync:Updates:DrainTimeoutSeconds" => ((int)apiOptions.SelfUpdateDrainTimeout.TotalSeconds).ToString(),
+        "DbDataSync:Updates:ConfirmAfterSeconds" => ((int)apiOptions.SelfUpdateConfirmAfter.TotalSeconds).ToString(),
+        "DbDataSync:Auth:Network:Admin" => Lower(authOptions.NetworkAdmin),
+        "DbDataSync:Auth:Network:Viewer" => Lower(authOptions.NetworkViewer),
+        "DbDataSync:Auth:Windows:Mode" => Lower(authOptions.WindowsMode),
+        "DbDataSync:Auth:Windows:AdminGroup" => authOptions.AdminGroup,
+        "DbDataSync:Auth:Windows:ViewerGroup" => authOptions.ViewerGroup,
+        "DbDataSync:Auth:Passkeys:Mode" => Lower(passkeyOptions.Mode),
         "DbDataSync:Auth:Passkeys:RelyingPartyId" => passkeyOptions.RelyingPartyId,
         "DbDataSync:Auth:Passkeys:RelyingPartyName" => passkeyOptions.RelyingPartyName,
-        "DbDataSync:Auth:Passkeys:Origins" => string.Join("; ", passkeyOptions.Origins),
         _ => null,
     };
+
+    /// <summary>Lowercase, matching how every mode-string setting is written in configuration
+    /// (<c>enabled</c>/<c>disabled</c>/<c>loopback</c>/... — never PascalCase in the file, even though
+    /// the .NET enum member is).</summary>
+    private static string Lower<TEnum>(TEnum value) where TEnum : struct, Enum => value.ToString().ToLowerInvariant();
 
     /// <summary>
     /// The literal this key falls back to when nothing configures it at all — what Reset writes into
@@ -347,18 +380,23 @@ public sealed class AdminConfigService(
     /// </summary>
     private static string? DefaultValueFor(string key) => key switch
     {
-        "DbDataSync:StateEngine" => ApiOptions.DefaultStateEngine,
-        "DbDataSync:StatePort" => ApiOptions.DefaultStatePort.ToString(),
-        "DbDataSync:RunRetentionDays" => ApiOptions.DefaultRunRetentionDays.ToString(),
-        "DbDataSync:RunRetentionMaxPerMapping" => ApiOptions.DefaultRunRetentionMaxPerMapping.ToString(),
-        "DbDataSync:RunPruningIntervalMinutes" => ApiOptions.DefaultRunPruningIntervalMinutes.ToString(),
-        "DbDataSync:ChangeCheckRetentionDays" => ApiOptions.DefaultChangeCheckRetentionDays.ToString(),
-        "DbDataSync:NuGetSearchEnabled" => ApiOptions.DefaultNuGetSearchEnabled ? "true" : "false",
-        "DbDataSync:NotesRichMarkdown" => ApiOptions.DefaultNotesRichMarkdown ? "true" : "false",
-        "DbDataSync:SelfUpdateEnabled" => ApiOptions.DefaultSelfUpdateEnabled ? "true" : "false",
-        "DbDataSync:SelfUpdateChannels" => ApiOptions.DefaultSelfUpdateChannels,
-        "DbDataSync:SelfUpdateDrainTimeoutSeconds" => ApiOptions.DefaultSelfUpdateDrainTimeoutSeconds.ToString(),
-        "DbDataSync:SelfUpdateConfirmAfterSeconds" => ApiOptions.DefaultSelfUpdateConfirmAfterSeconds.ToString(),
+        "DbDataSync:App:Url" => ApiOptions.DefaultUrl,
+        "DbDataSync:State:Engine" => ApiOptions.DefaultStateEngine,
+        "DbDataSync:State:Port" => ApiOptions.DefaultStatePort.ToString(),
+        "DbDataSync:State:Retention:RunDays" => ApiOptions.DefaultRunRetentionDays.ToString(),
+        "DbDataSync:State:Retention:RunMaxPerMapping" => ApiOptions.DefaultRunRetentionMaxPerMapping.ToString(),
+        "DbDataSync:State:Retention:PruningIntervalMinutes" => ApiOptions.DefaultRunPruningIntervalMinutes.ToString(),
+        "DbDataSync:State:Retention:ChangeCheckDays" => ApiOptions.DefaultChangeCheckRetentionDays.ToString(),
+        "DbDataSync:Nuget:Search:Mode" => Lower(ApiOptions.DefaultNugetSearchMode),
+        "DbDataSync:Notes:MarkdownRenderer" => Lower(ApiOptions.DefaultNotesRenderer),
+        "DbDataSync:Updates:Mode" => Lower(ApiOptions.DefaultSelfUpdateMode),
+        "DbDataSync:Updates:Channels" => ApiOptions.DefaultSelfUpdateChannels,
+        "DbDataSync:Updates:DrainTimeoutSeconds" => ApiOptions.DefaultSelfUpdateDrainTimeoutSeconds.ToString(),
+        "DbDataSync:Updates:ConfirmAfterSeconds" => ApiOptions.DefaultSelfUpdateConfirmAfterSeconds.ToString(),
+        "DbDataSync:Auth:Network:Admin" => Lower(AdminNetworkTrust.Disabled),
+        "DbDataSync:Auth:Network:Viewer" => Lower(ViewerNetworkTrust.Disabled),
+        "DbDataSync:Auth:Windows:Mode" => Lower(FeatureMode.Enabled),
+        "DbDataSync:Auth:Passkeys:Mode" => Lower(FeatureMode.Enabled),
         _ => null,
     };
 }
@@ -391,7 +429,7 @@ public sealed class AdminConfigService(
 /// <param name="DefaultValue">What Reset would write, or null when this key's default is contextual
 /// rather than a fixed literal (a path derived from the machine, say) — Reset has nothing to offer
 /// there, which is exactly why <see cref="CanReset"/> is never true when this is null.</param>
-/// <param name="Masked">True only for StateConnectionString, when <see cref="Value"/> or
+/// <param name="Masked">True only for State:ConnectionString, when <see cref="Value"/> or
 /// <see cref="RunningValue"/> (independently) contains an embedded credential — that one is withheld,
 /// never sent.</param>
 /// <param name="Unit">What a numeric <see cref="Value"/>/<see cref="RunningValue"/> is counted in
@@ -399,7 +437,7 @@ public sealed class AdminConfigService(
 /// a boolean). The screen only renders it beside a value that's actually numeric, so a key with a unit
 /// but an unset/non-numeric value shows no pill either.</param>
 /// <param name="Caution">A plain-language warning the screen shows beside this key, always, in both states — for a setting
-/// whose "on" widens what an attacker or a mistake can reach (phase 161: rich Markdown in Notes). Null for every other key.</param>
+/// whose "on" widens what an attacker or a mistake can reach. Null for every other key.</param>
 public sealed record AdminConfigEntry(
     string Key, string? Value, string? RunningValue, string Source, bool Editable, bool CanAdopt, bool CanReset,
     string? DefaultValue, bool Masked, string Description, string? Unit, string? Caution = null);

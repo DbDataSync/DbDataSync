@@ -1,4 +1,8 @@
 using System.Diagnostics;
+using DbDataSync.Api.Auth;
+using DbDataSync.Api.Configuration;
+using DbDataSync.Core.Config;
+using DbDataSync.Core.Git;
 
 namespace DbDataSync.Cli;
 
@@ -107,7 +111,14 @@ internal static class SystemdService
         }
 
         var root = Path.GetFullPath(CliOptions.Read(args, "--repo") ?? CliOptions.DefaultRoot);
-        var url = CliOptions.Read(args, "--url") ?? "http://localhost:5080";
+        // Explicit vs. defaulted matters: an explicit --url is written into dbdatasync.config.yaml
+        // (below) so it survives every future restart; a defaulted one is never written, or a bare
+        // re-run to change --user would stomp whatever App:Url the operator has since configured
+        // through the Admin screen.
+        var explicitUrl = CliOptions.Read(args, "--url");
+        var url = explicitUrl
+            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
+            ?? ApiOptions.DefaultUrl;
         var user = CliOptions.Read(args, "--user") ?? "dbdatasync";
         var selfUpdate = CliOptions.Has(args, "--self-update");
         var isManagedRoot = string.Equals(root, ManagedStateDirectoryRoot, StringComparison.Ordinal);
@@ -152,7 +163,7 @@ internal static class SystemdService
         try
         {
             Directory.CreateDirectory(root);
-            env.WriteUnitFile(UnitPath, RenderUnit(executable, root, url, user, ResolveDotnetRoot(), selfUpdate));
+            env.WriteUnitFile(UnitPath, RenderUnit(executable, root, user, ResolveDotnetRoot(), selfUpdate));
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
@@ -163,12 +174,23 @@ internal static class SystemdService
 
         env.ChownRecursive(root, user, user);
 
+        // Only when explicitly given, and only when there is already a git-tracked config to write it
+        // into — service install assumes a repo `serve`/`setup` already created; skipping silently
+        // otherwise, rather than writing an uncommitted file, matches every other config write in this
+        // app being git-tracked.
+        if (explicitUrl is not null && LibGit2Sharp.Repository.IsValid(root))
+        {
+            DbDataSyncConfigFile.SetValue(root, "DbDataSync:App", "Url", explicitUrl);
+            new GitCommitService(root).CommitChanges(
+                [DbDataSyncConfigFile.PathIn(root)], "Set 'DbDataSync:App:Url' in dbdatasync.config.yaml", CurrentUser.SystemAuthor);
+        }
+
         if (selfUpdate)
         {
             Console.WriteLine(
                 "Self-update is on for this unit: before every start it runs a privileged step that applies an update the " +
                 "service asked for, and rolls one back that never became healthy. Updating from the web console also needs " +
-                "DbDataSync:SelfUpdateEnabled.");
+                "DbDataSync:Updates:Mode set to manual.");
             Console.WriteLine();
         }
 
@@ -235,9 +257,14 @@ internal static class SystemdService
     /// unit; no machine-global side effect. Null omits the line entirely rather than emitting a wrong
     /// one — see <see cref="ResolveDotnetRoot"/>.
     /// </param>
-    internal static string RenderUnit(string executable, string root, string url, string user, string? dotnetRoot = null, bool selfUpdate = false)
+    internal static string RenderUnit(string executable, string root, string user, string? dotnetRoot = null, bool selfUpdate = false)
     {
-        var execStart = $"{QuoteForSystemd(executable)} serve --repo {QuoteForSystemd(root)} --url {url}";
+        // No --url baked in: serve already resolves DbDataSync:App:Url from dbdatasync.config.yaml
+        // (flag > env var > file), so baking one in here would win over that file forever — an
+        // operator editing Url through the Admin screen would see it silently ignored on every
+        // restart. An explicit --url given to `service install` is written into the file itself
+        // instead — see Install, above.
+        var execStart = $"{QuoteForSystemd(executable)} serve --repo {QuoteForSystemd(root)}";
         var isManagedRoot = string.Equals(root, ManagedStateDirectoryRoot, StringComparison.Ordinal);
 
         var serviceExtras = isManagedRoot

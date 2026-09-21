@@ -39,7 +39,7 @@ public sealed class StateDatabaseFactoryTests : IClassFixture<LibraryInstallFixt
         var ex = Assert.Throws<InvalidOperationException>(() =>
             StateDatabase.FromOptions(StateEngineIds.MsSql, _sqliteDbPath, null, SecretStore.ForProviders([]), _libraries));
 
-        Assert.Contains("DbDataSync:StateConnectionString", ex.Message);
+        Assert.Contains("DbDataSync:State:ConnectionString", ex.Message);
     }
 
     [Fact]

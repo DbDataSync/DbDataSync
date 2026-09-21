@@ -83,7 +83,7 @@ public sealed class SelfSignedCertificateService(
 
     private string ConsoleHost()
     {
-        var url = configuration["DbDataSync:Url"] ?? "http://localhost:5080";
+        var url = configuration["DbDataSync:App:Url"] ?? ApiOptions.DefaultUrl;
         return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : "localhost";
     }
 }

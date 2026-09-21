@@ -75,10 +75,10 @@ documents for a descriptor's own dialect.
 
 | key | default | prunes |
 | --- | --- | --- |
-| `DbDataSync:RunRetentionDays` | `90` | finished runs older than this (`0` = keep forever) |
-| `DbDataSync:RunRetentionMaxPerMapping` | `1000` | most recent N finished runs kept, per table mapping (`0` = no cap) |
-| `DbDataSync:RunPruningIntervalMinutes` | `60` | how often the sweep runs |
-| `DbDataSync:ChangeCheckRetentionDays` | `7` | how long `ChangeCheckHistory` rows live — this table writes constantly (one row per source group per scheduler tick) regardless of replication activity, so it has its own, much shorter window |
+| `DbDataSync:State:Retention:RunDays` | `90` | finished runs older than this (`0` = keep forever) |
+| `DbDataSync:State:Retention:RunMaxPerMapping` | `1000` | most recent N finished runs kept, per table mapping (`0` = no cap) |
+| `DbDataSync:State:Retention:PruningIntervalMinutes` | `60` | how often the sweep runs |
+| `DbDataSync:State:Retention:ChangeCheckDays` | `7` | how long `ChangeCheckHistory` rows live — this table writes constantly (one row per source group per scheduler tick) regardless of replication activity, so it has its own, much shorter window |
 
 One sweep, run by the API process itself (never `TaskRunner` — see "Single writer" below), prunes
 `TaskRuns` (and its `Logs`), `ChangeCheckHistory`, and `Notifications` together — a notification can't

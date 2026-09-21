@@ -40,9 +40,9 @@ public sealed class UnprunedApiFactory : TestApiFactory
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DbDataSync:RunRetentionDays"] = "0",
-                ["DbDataSync:RunRetentionMaxPerMapping"] = "0",
-                ["DbDataSync:ChangeCheckRetentionDays"] = "0",
+                ["DbDataSync:State:Retention:RunDays"] = "0",
+                ["DbDataSync:State:Retention:RunMaxPerMapping"] = "0",
+                ["DbDataSync:State:Retention:ChangeCheckDays"] = "0",
             });
         });
     }

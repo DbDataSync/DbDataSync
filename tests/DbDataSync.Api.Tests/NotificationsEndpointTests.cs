@@ -81,7 +81,7 @@ public sealed class NotificationsEndpointTests
     }
 
     /// <summary>
-    /// Authentication **off** — <c>DbDataSync:Auth:Disabled=true</c>, which is what
+    /// Authentication **off** — <c>DbDataSync:Auth:Network:Admin=loopback</c>, which is what
     /// <see cref="TestApiFactory"/> configures. There is no <c>CurrentUser.Id</c> here, and the
     /// defined answer is "everything is unread, forever", said out loud.
     /// </summary>

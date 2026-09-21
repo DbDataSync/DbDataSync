@@ -1,4 +1,5 @@
 using DbDataSync.Api.Auth;
+using DbDataSync.Api.Configuration;
 using Xunit;
 
 namespace DbDataSync.Api.Tests;
@@ -53,8 +54,8 @@ public sealed class PasskeyOptionsTests
     [Fact]
     public void TheDefaults_AreConsistent()
     {
-        var options = PasskeyOptions.FromConfiguration(
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var options = PasskeyOptions.FromConfiguration(configuration, ApiOptions.FromConfiguration(configuration));
 
         Assert.Equal("localhost", options.RelyingPartyId);
         Assert.Null(options.Problem());

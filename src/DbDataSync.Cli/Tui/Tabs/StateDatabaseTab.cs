@@ -64,12 +64,12 @@ internal sealed class StateDatabaseTab : View
 
     public void Populate(IConfiguration configuration)
     {
-        var engine = configuration["DbDataSync:StateEngine"];
+        var engine = configuration["DbDataSync:State:Engine"];
         var index = Array.IndexOf(Engines, engine);
         if (index >= 0)
             _engine.Value = index;
 
-        var connectionString = configuration["DbDataSync:StateConnectionString"];
+        var connectionString = configuration["DbDataSync:State:ConnectionString"];
         if (!string.IsNullOrEmpty(connectionString))
             _connection.Text = connectionString;
 

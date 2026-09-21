@@ -484,7 +484,10 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
         new(_config, factory, currentUser: null!, new MappingColumnReader(new UnusedColumnCatalog()));
 
     private ProvisioningService CreateServiceWithSideEffects(FakeConnectionFactory factory) =>
-        new(_config, factory, new CurrentUser(new HttpContextAccessor(), new AuthOptions()),
+        new(_config, factory,
+            new CurrentUser(
+                new HttpContextAccessor(), new AuthOptions(),
+                new PasskeyOptions { RelyingPartyId = "localhost", RelyingPartyName = "DbDataSync", Origins = new HashSet<string>() }),
             new MappingColumnReader(new FakeColumnCatalog()));
 
     private sealed class UnusedColumnCatalog : IColumnCatalog

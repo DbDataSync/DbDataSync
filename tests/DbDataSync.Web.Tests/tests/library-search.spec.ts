@@ -6,7 +6,7 @@ const screenshotsDir = screenshotDir('library-search')
 
 /**
  * Phase 119's NuGet search box on the Libraries screen — against the real public index, since this
- * suite's single API instance doesn't have a way to flip `DbDataSync:NuGetSearchEnabled` per test (the
+ * suite's single API instance doesn't have a way to flip `DbDataSync:Nuget:Search:Mode` per test (the
  * disabled/unavailable-degrades-to-manual-entry behavior is covered at the API layer by
  * `LibrarySearchTests`, and the client-side branch it drives is the same `status !== 'ok'` check this
  * test's "enabled" path already exercises the other side of).

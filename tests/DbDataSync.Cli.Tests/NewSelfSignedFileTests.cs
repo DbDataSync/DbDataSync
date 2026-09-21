@@ -29,7 +29,7 @@ public sealed class NewSelfSignedFileTests : IDisposable
     public void NewSelfSigned_WritesTheManagedPfxAndPointsKestrelAtIt_AndCommits()
     {
         ServeCommand.Prepare(_root);
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://console.local:5080");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", "https://console.local:5080");
 
         var exitCode = CertCommand.Run(["new-self-signed", "--repo", _root, "--days", "90"]);
 
@@ -51,7 +51,7 @@ public sealed class NewSelfSignedFileTests : IDisposable
     public void NewSelfSigned_SansCoverTheConsoleUrlHostAndLocalhost()
     {
         ServeCommand.Prepare(_root);
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "Url", "https://dbdatasync.example.com:5443");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:App", "Url", "https://dbdatasync.example.com:5443");
 
         CertCommand.Run(["new-self-signed", "--repo", _root]);
 

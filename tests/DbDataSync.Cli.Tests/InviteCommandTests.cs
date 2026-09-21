@@ -7,7 +7,7 @@ namespace DbDataSync.Cli.Tests;
 
 /// <summary>
 /// The concrete regression phase 79 exists to fix: before it, <c>InviteCommand</c> called
-/// <c>new StateDatabase(stateDb)</c> unconditionally — no branch for <c>DbDataSync:StateEngine</c> being
+/// <c>new StateDatabase(stateDb)</c> unconditionally — no branch for <c>DbDataSync:State:Engine</c> being
 /// anything but SQLite — so an admin locked out of an MsSql-backed deployment had no way to mint a
 /// recovery invite. This proves <c>dbdatasync invite</c> now works end to end against a
 /// <c>StateEngine: MsSql</c>-configured repo, secret included, and that the secret it uses is the one
@@ -77,8 +77,8 @@ public sealed class InviteCommandTests : IDisposable
         builder.Remove("Password");
         var connectionString = builder.ConnectionString.TrimEnd(';');
 
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "StateEngine", "MsSql");
-        DbDataSyncConfigFile.SetValue(_root, "DbDataSync", "StateConnectionString", connectionString);
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:State", "Engine", "MsSql");
+        DbDataSyncConfigFile.SetValue(_root, "DbDataSync:State", "ConnectionString", connectionString);
 
         // The same command an admin locked out of this deployment would actually run.
         Assert.Equal(0, SecretCommand.Run(["set", _secretRef, Password]));

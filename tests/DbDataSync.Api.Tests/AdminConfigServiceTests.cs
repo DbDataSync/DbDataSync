@@ -26,8 +26,8 @@ public sealed class AdminConfigServiceTests : IDisposable
 
     public void Dispose() => GitTempDirectory.DeleteRecursively(_repoRoot);
 
-    private const string UrlKey = "DbDataSync:Url";
-    private const string StateConnectionStringKey = "DbDataSync:StateConnectionString";
+    private const string UrlKey = "DbDataSync:App:Url";
+    private const string StateConnectionStringKey = "DbDataSync:State:ConnectionString";
 
     private AdminConfigService Build(IConfiguration? configuration = null)
     {
@@ -37,7 +37,7 @@ public sealed class AdminConfigServiceTests : IDisposable
             configuration,
             apiOptions,
             AuthOptions.FromConfiguration(configuration),
-            PasskeyOptions.FromConfiguration(configuration),
+            PasskeyOptions.FromConfiguration(configuration, apiOptions),
             new GitCommitService(_repoRoot),
             SecretStore.ForProviders([new InMemorySecretProvider()]),
             new RestartRequiredState(apiOptions));
@@ -45,7 +45,7 @@ public sealed class AdminConfigServiceTests : IDisposable
 
     /// <summary>The same precedence InsertConfigFile establishes: the file first, environment variables
     /// after (so either can still override it), matching docs/configuration.md's own documented ordering. Always
-    /// carries DbDataSync:RepoRoot pointed at this test's own temp directory — otherwise ApiOptions
+    /// carries DbDataSync:App:RepoRoot pointed at this test's own temp directory — otherwise ApiOptions
     /// defaults it to "&lt;cwd&gt;/dbdatasync-repo", which is not where this test's own SetValue/Read
     /// calls (against _repoRoot) are looking.</summary>
     private IConfiguration ConfigurationWithFile(IReadOnlyDictionary<string, string?>? fileData = null)
@@ -53,7 +53,7 @@ public sealed class AdminConfigServiceTests : IDisposable
         var builder = new ConfigurationBuilder();
         if (fileData is not null)
             builder.Add(new DbDataSyncConfigFileSource { InitialData = fileData });
-        builder.AddInMemoryCollection(new Dictionary<string, string?> { ["DbDataSync:RepoRoot"] = _repoRoot });
+        builder.AddInMemoryCollection(new Dictionary<string, string?> { ["DbDataSync:App:RepoRoot"] = _repoRoot });
         builder.AddEnvironmentVariables();
         return builder.Build();
     }
@@ -62,7 +62,7 @@ public sealed class AdminConfigServiceTests : IDisposable
     /// The Admin screen lists "every <c>DbDataSync:*</c> key docs/configuration.md documents" — and nothing checked that the
     /// document and the catalog agree, so a key could ship undocumented (or the reverse) and only a reader would find out
     /// (phase 162). Each key's environment-variable form is what the document's tables list beside it, and the form is
-    /// unambiguous: <c>DbDataSync:Auth:AdminGroup</c> is <c>DbDataSync__Auth__AdminGroup</c>.
+    /// unambiguous: <c>DbDataSync:Auth:Windows:AdminGroup</c> is <c>DbDataSync__Auth__Windows__AdminGroup</c>.
     /// </summary>
     [Fact]
     public void EveryKeyTheAdminScreenListsIsDocumentedInConfigurationMd()
@@ -72,7 +72,6 @@ public sealed class AdminConfigServiceTests : IDisposable
 
         var undocumented = service.List()
             .Select(entry => entry.Key.Replace(":", "__"))
-            // Prefix match: the one array key is documented as `..._Origins__0`, `__1`, ...
             .Where(env => !docs.Contains($"`{env}", StringComparison.Ordinal))
             .ToList();
 
@@ -101,11 +100,13 @@ public sealed class AdminConfigServiceTests : IDisposable
 
         var entry = service.Get(UrlKey)!;
 
+        // App:Url now always resolves to ApiOptions.DefaultUrl rather than null — see ApiOptions.Url's
+        // own doc comment for why that's a real default now, not a contextual one. Unlike the old
+        // contextual-null case, there genuinely is a value here to put in the file, so CanAdopt is true.
         Assert.Equal("default", entry.Source);
-        Assert.Null(entry.Value);
+        Assert.Equal(ApiOptions.DefaultUrl, entry.Value);
         Assert.False(entry.Editable);
-        // Nothing to adopt when there is genuinely no value.
-        Assert.False(entry.CanAdopt);
+        Assert.True(entry.CanAdopt);
     }
 
     [Fact]
@@ -113,60 +114,79 @@ public sealed class AdminConfigServiceTests : IDisposable
     {
         var service = Build(ConfigurationWithFile());
 
-        var entry = service.Get("DbDataSync:StateEngine")!;
+        var entry = service.Get("DbDataSync:State:Engine")!;
 
         Assert.Equal("default", entry.Source);
         Assert.Equal("Sqlite", entry.Value);
     }
 
-    private const string NotesKey = "DbDataSync:NotesRichMarkdown";
+    private const string NotesKey = "DbDataSync:Notes:MarkdownRenderer";
 
     [Fact]
-    public void NotesRichMarkdown_IsOffByDefault_EditableOnceInTheFile_AndCarriesItsWarning()
+    public void NotesMarkdownRenderer_IsBasicByDefault_EditableOnceInTheFile_AndCarriesItsWarning()
     {
         var service = Build(ConfigurationWithFile());
 
         var entry = service.Get(NotesKey)!;
 
-        Assert.Equal("false", entry.Value);
-        Assert.Equal("false", entry.RunningValue);
-        Assert.Equal("false", entry.DefaultValue);
+        Assert.Equal("basic", entry.Value);
+        Assert.Equal("basic", entry.RunningValue);
+        Assert.Equal("basic", entry.DefaultValue);
         // Beside the control in both states, and for this key only — nothing else on the screen carries one.
         Assert.False(string.IsNullOrWhiteSpace(entry.Caution));
         Assert.Contains("other people's sessions", entry.Caution);
-        Assert.All(service.List().Where(e => e.Key != NotesKey), e => Assert.Null(e.Caution));
+        Assert.All(service.List().Where(e => e.Key != NotesKey && e.Key != "DbDataSync:Auth:Network:Admin"
+                && e.Key != "DbDataSync:Auth:Network:Viewer"), e => Assert.Null(e.Caution));
     }
 
     [Fact]
-    public void NotesRichMarkdown_IsAFlatKey_SoTheWriterCanAddressIt()
+    public void NotesMarkdownRenderer_IsANestedKey_AndStillFileWritable()
     {
-        // The catalog's own rule: only top-level DbDataSync:<Key> keys are file-writable, which is why this is not
-        // DbDataSync:Notes:RichMarkdown — a nested key would have been shown but never editable.
+        // Phase 164: the "only flat top-level keys are file-writable" claim this test's own predecessor
+        // (NotesRichMarkdown_IsAFlatKey_SoTheWriterCanAddressIt) rested on was never actually true for
+        // DbDataSyncConfigFile.SetValue's writer — see AdminConfigService's class doc comment.
         var service = Build(ConfigurationWithFile());
 
-        var written = service.Set(NotesKey, "true", CurrentUser.SystemAuthor)!;
+        var written = service.Set(NotesKey, "rich", CurrentUser.SystemAuthor)!;
 
         Assert.Equal("file", written.Source);
-        Assert.Equal("true", written.Value);
-        Assert.Equal("false", written.RunningValue); // running process unchanged until a restart
-        Assert.Equal("true", DbDataSyncConfigFile.Read(_repoRoot)[NotesKey]);
-        Assert.True(ApiOptions.FromConfiguration(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot))).NotesRichMarkdown);
+        Assert.Equal("rich", written.Value);
+        Assert.Equal("basic", written.RunningValue); // running process unchanged until a restart
+        Assert.Equal("rich", DbDataSyncConfigFile.Read(_repoRoot)[NotesKey]);
+        Assert.Equal(
+            NotesRenderer.Rich,
+            ApiOptions.FromConfiguration(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot))).NotesRenderer);
     }
 
     [Fact]
     public void Writable_IsTheOneCatalogTheCliAndSetupReadToo()
     {
-        var key = AdminConfigService.Writable("NotesRichMarkdown");
+        var key = AdminConfigService.Writable("Notes:MarkdownRenderer");
 
         Assert.Equal(NotesKey, key!.Key);
-        Assert.Equal("false", key.DefaultValue);
+        Assert.Equal("basic", key.DefaultValue);
         Assert.NotNull(key.Caution);
-        Assert.Equal(key.Key, AdminConfigService.Writable("dbdatasync:notesrichmarkdown")!.Key);
-        // Unknown, nested (not file-writable) and unrelated names are refused.
+        Assert.Equal(key.Key, AdminConfigService.Writable("dbdatasync:notes:markdownrenderer")!.Key);
         Assert.Null(AdminConfigService.Writable("Nope"));
-        Assert.Null(AdminConfigService.Writable("Auth:AdminGroup"));
-        Assert.Contains("NotesRichMarkdown", AdminConfigService.WritableKeyNames());
-        Assert.DoesNotContain("Auth:AdminGroup", AdminConfigService.WritableKeyNames());
+        Assert.Contains("Notes:MarkdownRenderer", AdminConfigService.WritableKeyNames());
+    }
+
+    /// <summary>Phase 164's other confirmed finding: a nested key genuinely is file-writable once the
+    /// catalog says so — Auth:Windows:AdminGroup is the concrete case that used to be display-only.</summary>
+    [Fact]
+    public void ANestedAuthKey_IsNowFileWritable()
+    {
+        var key = AdminConfigService.Writable("Auth:Windows:AdminGroup");
+
+        Assert.NotNull(key);
+        Assert.Contains("Auth:Windows:AdminGroup", AdminConfigService.WritableKeyNames());
+
+        var service = Build(ConfigurationWithFile());
+        var author = new GitAuthor("Test Admin", "admin@example.com");
+        var written = service.Set("DbDataSync:Auth:Windows:AdminGroup", "DBADMINS", author);
+
+        Assert.NotNull(written);
+        Assert.Equal("DBADMINS", DbDataSyncConfigFile.Read(_repoRoot)["DbDataSync:Auth:Windows:AdminGroup"]);
     }
 
     [Fact]
@@ -174,19 +194,19 @@ public sealed class AdminConfigServiceTests : IDisposable
     {
         var service = Build(ConfigurationWithFile());
 
-        Assert.Equal("days", service.Get("DbDataSync:RunRetentionDays")!.Unit);
-        Assert.Equal("runs", service.Get("DbDataSync:RunRetentionMaxPerMapping")!.Unit);
-        Assert.Equal("minutes", service.Get("DbDataSync:RunPruningIntervalMinutes")!.Unit);
-        Assert.Equal("days", service.Get("DbDataSync:ChangeCheckRetentionDays")!.Unit);
+        Assert.Equal("days", service.Get("DbDataSync:State:Retention:RunDays")!.Unit);
+        Assert.Equal("runs", service.Get("DbDataSync:State:Retention:RunMaxPerMapping")!.Unit);
+        Assert.Equal("minutes", service.Get("DbDataSync:State:Retention:PruningIntervalMinutes")!.Unit);
+        Assert.Equal("days", service.Get("DbDataSync:State:Retention:ChangeCheckDays")!.Unit);
         // Not a plain magnitude — an engine name and a filesystem path, not a count of anything.
-        Assert.Null(service.Get("DbDataSync:StateEngine")!.Unit);
+        Assert.Null(service.Get("DbDataSync:State:Engine")!.Unit);
         Assert.Null(service.Get(UrlKey)!.Unit);
     }
 
     [Fact]
     public void AFileSourcedKey_IsEditable_AndSetWritesAndCommitsIt()
     {
-        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://initial/");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "App:Url", "http://initial/");
         var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
 
         var before = service.Get(UrlKey)!;
@@ -204,7 +224,7 @@ public sealed class AdminConfigServiceTests : IDisposable
         Assert.Equal("http://changed/", DbDataSyncConfigFile.Read(_repoRoot)[UrlKey]);
 
         using var repo = new LibGit2Sharp.Repository(_repoRoot);
-        Assert.Contains("DbDataSync:Url", repo.Head.Tip.Message);
+        Assert.Contains("DbDataSync:App:Url", repo.Head.Tip.Message);
     }
 
     /// <summary>Reset is Adopt's inverse: putting the factory default back into the file rather than
@@ -213,19 +233,19 @@ public sealed class AdminConfigServiceTests : IDisposable
     [Fact]
     public void AFileSourcedKeyAwayFromItsDefault_CanBeReset_BackToTheApplicationDefault()
     {
-        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "StateEngine", "Postgres");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "State:Engine", "Postgres");
         var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
 
-        var before = service.Get("DbDataSync:StateEngine")!;
+        var before = service.Get("DbDataSync:State:Engine")!;
         Assert.Equal("Postgres", before.Value);
         Assert.Equal("Sqlite", before.DefaultValue);
         Assert.True(before.CanReset);
 
         var author = new GitAuthor("Test Admin", "admin@example.com");
-        var reset = service.Set("DbDataSync:StateEngine", before.DefaultValue!, author)!;
+        var reset = service.Set("DbDataSync:State:Engine", before.DefaultValue!, author)!;
 
         Assert.Equal("Sqlite", reset.Value);
-        Assert.Equal("Sqlite", DbDataSyncConfigFile.Read(_repoRoot)["DbDataSync:StateEngine"]);
+        Assert.Equal("Sqlite", DbDataSyncConfigFile.Read(_repoRoot)["DbDataSync:State:Engine"]);
         // Already at the default — nothing left to reset.
         Assert.False(reset.CanReset);
     }
@@ -236,10 +256,10 @@ public sealed class AdminConfigServiceTests : IDisposable
     [Fact]
     public void AFileSourcedKeyWithNoFixedDefault_CanNeverBeReset()
     {
-        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Url", "http://initial/");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "State:ConnectionString", "Server=sql01;Database=DbDataSyncState;");
         var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
 
-        var entry = service.Get(UrlKey)!;
+        var entry = service.Get(StateConnectionStringKey)!;
         Assert.Null(entry.DefaultValue);
         Assert.False(entry.CanReset);
     }
@@ -251,16 +271,16 @@ public sealed class AdminConfigServiceTests : IDisposable
     [Fact]
     public void EditingAFileSourcedKey_MovesValue_ButNotTheFrozenRunningValue()
     {
-        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "StateEngine", "MsSql");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "State:Engine", "MsSql");
         var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
 
-        var before = service.Get("DbDataSync:StateEngine")!;
+        var before = service.Get("DbDataSync:State:Engine")!;
         Assert.Equal("file", before.Source);
         Assert.Equal("MsSql", before.Value);
         Assert.Equal("MsSql", before.RunningValue);
 
         var author = new GitAuthor("Test Admin", "admin@example.com");
-        var after = service.Set("DbDataSync:StateEngine", "Postgres", author)!;
+        var after = service.Set("DbDataSync:State:Engine", "Postgres", author)!;
 
         Assert.Equal("Postgres", after.Value);
         // Still MsSql: ApiOptions was built once, from the configuration this service was constructed
@@ -275,38 +295,38 @@ public sealed class AdminConfigServiceTests : IDisposable
     [Fact]
     public void OverridingThenEditingAnEnvVarSourcedKey_OnlyDivergesAfterTheSecondEdit()
     {
-        Environment.SetEnvironmentVariable("DbDataSync__StateEngine", "MsSql");
+        Environment.SetEnvironmentVariable("DbDataSync__State__Engine", "MsSql");
         try
         {
             var service = Build(ConfigurationWithFile());
             var author = new GitAuthor("Test Admin", "admin@example.com");
 
-            var entry = service.Get("DbDataSync:StateEngine")!;
+            var entry = service.Get("DbDataSync:State:Engine")!;
             Assert.Equal("environment variable", entry.Source);
             Assert.Equal("MsSql", entry.Value);
             Assert.Equal("MsSql", entry.RunningValue);
             Assert.True(entry.CanAdopt);
 
-            var adopted = service.Set("DbDataSync:StateEngine", entry.Value!, author)!;
+            var adopted = service.Set("DbDataSync:State:Engine", entry.Value!, author)!;
             Assert.Equal("file", adopted.Source);
             Assert.Equal("MsSql", adopted.Value);
             Assert.Equal("MsSql", adopted.RunningValue);
             Assert.Equal(adopted.Value, adopted.RunningValue); // Just adopted — nothing to apply yet.
 
-            var edited = service.Set("DbDataSync:StateEngine", "Postgres", author)!;
+            var edited = service.Set("DbDataSync:State:Engine", "Postgres", author)!;
             Assert.Equal("Postgres", edited.Value);
             Assert.Equal("MsSql", edited.RunningValue); // Still frozen — this is the queued, unapplied change.
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DbDataSync__StateEngine", null);
+            Environment.SetEnvironmentVariable("DbDataSync__State__Engine", null);
         }
     }
 
     [Fact]
     public void AnEnvVarSourcedKey_IsReadOnly_ButCanBeAdopted()
     {
-        Environment.SetEnvironmentVariable("DbDataSync__Url", "http://from-env/");
+        Environment.SetEnvironmentVariable("DbDataSync__App__Url", "http://from-env/");
         try
         {
             var service = Build(ConfigurationWithFile());
@@ -325,7 +345,7 @@ public sealed class AdminConfigServiceTests : IDisposable
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DbDataSync__Url", null);
+            Environment.SetEnvironmentVariable("DbDataSync__App__Url", null);
         }
     }
 
@@ -333,7 +353,7 @@ public sealed class AdminConfigServiceTests : IDisposable
     public void ACommandLineSourcedKey_IsLabeledCommandLine()
     {
         var builder = new ConfigurationBuilder();
-        builder.AddCommandLine(["--DbDataSync:Url", "http://from-cli/"]);
+        builder.AddCommandLine(["--DbDataSync:App:Url", "http://from-cli/"]);
         var service = Build(builder.Build());
 
         var entry = service.Get(UrlKey)!;
@@ -342,17 +362,25 @@ public sealed class AdminConfigServiceTests : IDisposable
         Assert.Equal("http://from-cli/", entry.Value);
     }
 
+    /// <summary>Phase 164's replacement for the old blanket Auth:Disabled: two independent, role-scoped
+    /// modes, both genuinely file-writable now (unlike the flag they replaced).</summary>
     [Fact]
-    public void ANestedAuthKey_IsNeverWritable_EvenIfItLooksFileSourced()
+    public void AuthNetworkKeys_AreFileWritable_AndDefaultToDisabled()
     {
         var service = Build(ConfigurationWithFile());
 
-        var entry = service.Get("DbDataSync:Auth:Disabled")!;
-        Assert.False(entry.Editable);
-        Assert.False(entry.CanAdopt);
+        var admin = service.Get("DbDataSync:Auth:Network:Admin")!;
+        var viewer = service.Get("DbDataSync:Auth:Network:Viewer")!;
+        Assert.Equal("disabled", admin.Value);
+        Assert.Equal("disabled", viewer.Value);
+        Assert.NotNull(admin.Caution);
+        Assert.NotNull(viewer.Caution);
 
         var author = new GitAuthor("Test Admin", "admin@example.com");
-        Assert.Null(service.Set("DbDataSync:Auth:Disabled", "true", author));
+        var written = service.Set("DbDataSync:Auth:Network:Admin", "loopback", author);
+
+        Assert.NotNull(written);
+        Assert.Equal("loopback", DbDataSyncConfigFile.Read(_repoRoot)["DbDataSync:Auth:Network:Admin"]);
     }
 
     [Fact]
@@ -362,7 +390,7 @@ public sealed class AdminConfigServiceTests : IDisposable
     [Fact]
     public void AFileSourcedStateConnectionString_IsNeverMasked()
     {
-        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "StateConnectionString", "Server=sql01;Database=DbDataSyncState;");
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "State:ConnectionString", "Server=sql01;Database=DbDataSyncState;");
         var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
 
         var entry = service.Get(StateConnectionStringKey)!;
@@ -372,12 +400,12 @@ public sealed class AdminConfigServiceTests : IDisposable
         Assert.Equal("Server=sql01;Database=DbDataSyncState;", entry.Value);
     }
 
-    /// <summary>An env-var StateConnectionString carrying a raw password is withheld entirely — never
+    /// <summary>An env-var State:ConnectionString carrying a raw password is withheld entirely — never
     /// sent as Value, and not adoptable (there is nothing safe to write).</summary>
     [Fact]
     public void AnEnvVarStateConnectionStringWithAPassword_IsMaskedAndNotAdoptable()
     {
-        Environment.SetEnvironmentVariable("DbDataSync__StateConnectionString", "Server=sql01;Password=hunter2;");
+        Environment.SetEnvironmentVariable("DbDataSync__State__ConnectionString", "Server=sql01;Password=hunter2;");
         try
         {
             var service = Build(ConfigurationWithFile());
@@ -391,16 +419,16 @@ public sealed class AdminConfigServiceTests : IDisposable
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DbDataSync__StateConnectionString", null);
+            Environment.SetEnvironmentVariable("DbDataSync__State__ConnectionString", null);
         }
     }
 
-    /// <summary>An env-var StateConnectionString with no credential in it is safe to show and adopt —
+    /// <summary>An env-var State:ConnectionString with no credential in it is safe to show and adopt —
     /// the password, if any, always lives in the secret store, never in this value.</summary>
     [Fact]
     public void AnEnvVarStateConnectionStringWithoutAPassword_IsShownAndAdoptable()
     {
-        Environment.SetEnvironmentVariable("DbDataSync__StateConnectionString", "Server=sql01;Database=DbDataSyncState;");
+        Environment.SetEnvironmentVariable("DbDataSync__State__ConnectionString", "Server=sql01;Database=DbDataSyncState;");
         try
         {
             var service = Build(ConfigurationWithFile());
@@ -413,7 +441,7 @@ public sealed class AdminConfigServiceTests : IDisposable
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DbDataSync__StateConnectionString", null);
+            Environment.SetEnvironmentVariable("DbDataSync__State__ConnectionString", null);
         }
     }
 
@@ -426,7 +454,7 @@ public sealed class AdminConfigServiceTests : IDisposable
             ConfigurationWithFile(),
             apiOptions,
             AuthOptions.FromConfiguration(ConfigurationWithFile()),
-            PasskeyOptions.FromConfiguration(ConfigurationWithFile()),
+            PasskeyOptions.FromConfiguration(ConfigurationWithFile(), apiOptions),
             new GitCommitService(_repoRoot),
             secrets,
             new RestartRequiredState(apiOptions));
@@ -452,7 +480,7 @@ public sealed class AdminConfigServiceTests : IDisposable
             ConfigurationWithFile(),
             apiOptions,
             AuthOptions.FromConfiguration(ConfigurationWithFile()),
-            PasskeyOptions.FromConfiguration(ConfigurationWithFile()),
+            PasskeyOptions.FromConfiguration(ConfigurationWithFile(), apiOptions),
             new GitCommitService(_repoRoot),
             secrets,
             new RestartRequiredState(apiOptions));

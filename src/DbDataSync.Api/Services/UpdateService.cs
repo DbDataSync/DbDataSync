@@ -132,8 +132,8 @@ public sealed class UpdateService(
     /// act on. Checked in the order an admin would fix things.</summary>
     public UpdateCapability Capability()
     {
-        if (!options.SelfUpdateEnabled)
-            return new UpdateCapability(false, false, "Updating from the console is turned off. Set DbDataSync:SelfUpdateEnabled to true.");
+        if (options.SelfUpdateMode == UpdatesMode.Disabled)
+            return new UpdateCapability(false, false, "Updating from the console is turned off. Set DbDataSync:Updates:Mode to manual.");
 
         if (facts.IsWindows)
         {
@@ -228,7 +228,7 @@ public sealed class UpdateService(
 
     public async Task<UpdateRequestResult> RequestAsync(string version, string? requestedBy, CancellationToken cancellationToken)
     {
-        if (!options.SelfUpdateEnabled)
+        if (options.SelfUpdateMode == UpdatesMode.Disabled)
             return Refuse(UpdateRequestOutcome.Disabled, Capability().Reason!);
 
         var capability = Capability();
@@ -239,7 +239,7 @@ public sealed class UpdateService(
             return Refuse(UpdateRequestOutcome.InvalidVersion, "That is not a stable, beta or snapshot version of DbDataSync.");
 
         if (!options.SelfUpdateChannels.Contains(channel))
-            return Refuse(UpdateRequestOutcome.ChannelNotEnabled, $"The {channel.ToString().ToLowerInvariant()} channel is not enabled (DbDataSync:SelfUpdateChannels).");
+            return Refuse(UpdateRequestOutcome.ChannelNotEnabled, $"The {channel.ToString().ToLowerInvariant()} channel is not enabled (DbDataSync:Updates:Channels).");
 
         lock (_gate)
         {

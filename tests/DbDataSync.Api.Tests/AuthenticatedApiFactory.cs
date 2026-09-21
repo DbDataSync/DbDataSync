@@ -34,12 +34,12 @@ public class AuthenticatedApiFactory : WebApplicationFactory<Program>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DbDataSync:RepoRoot"] = RepoRoot,
-                ["DbDataSync:StateDbPath"] = Path.Combine(RepoRoot, "state.db"),
+                ["DbDataSync:App:RepoRoot"] = RepoRoot,
+                ["DbDataSync:State:DbPath"] = Path.Combine(RepoRoot, "state.db"),
                 // Named, so AuthOptions.WindowsEnabled is true and the deployment is a configured one
                 // rather than the authentication-disabled escape hatch.
-                ["DbDataSync:Auth:AdminGroup"] = "DbDataSyncAdmins",
-                ["DbDataSync:Auth:ViewerGroup"] = "DbDataSyncViewers",
+                ["DbDataSync:Auth:Windows:AdminGroup"] = "DbDataSyncAdmins",
+                ["DbDataSync:Auth:Windows:ViewerGroup"] = "DbDataSyncViewers",
             });
         });
 

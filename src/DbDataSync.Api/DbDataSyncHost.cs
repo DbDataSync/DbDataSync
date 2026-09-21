@@ -88,7 +88,8 @@ public static class DbDataSyncHost
         // config — ProvisioningService among them — fail to construct: a singleton cannot hold a
         // per-request value, and the accessor exists precisely so it does not have to.
         builder.Services.AddSingleton<CurrentUser>();
-        builder.Services.AddSingleton(sp => PasskeyOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
+        builder.Services.AddSingleton(sp =>
+            PasskeyOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<ApiOptions>()));
         builder.Services.AddSingleton<PasskeyService>();
         builder.Services.AddSingleton(sp => CertificateOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
 
@@ -293,7 +294,7 @@ public static class DbDataSyncHost
         // directly off builder.Configuration, the same way InsertConfigFile resolves RepoRoot above:
         // this decision has to be made before the DI container exists, so ApiOptions (which comes from
         // DI) isn't resolvable yet.
-        var certificateRepoRoot = builder.Configuration["DbDataSync:RepoRoot"]
+        var certificateRepoRoot = builder.Configuration["DbDataSync:App:RepoRoot"]
             ?? Path.Combine(Directory.GetCurrentDirectory(), "dbdatasync-repo");
         if (string.Equals(
                 builder.Configuration["Kestrel:Certificates:Default:Path"],
@@ -311,19 +312,19 @@ public static class DbDataSyncHost
             .AddScheme<AuthenticationSchemeOptions, SessionAuthenticationHandler>(
                 SessionAuthenticationHandler.SchemeName, _ => { });
 
-        // Also gated on Auth:Disabled — found necessary by a real failure, not a hypothetical: with
-        // auth disabled, AddNegotiate() was still being registered on every Windows host (this check
-        // is purely OperatingSystem.IsWindows()-gated, independent of Disabled), and merely having
-        // Negotiate registered as an available scheme is enough for ASP.NET Core's real, Windows-native
-        // SSPI implementation to require IConnectionItemsFeature on every request through the
-        // authentication middleware — a real Kestrel connection feature TestServer (what
-        // WebApplicationFactory-based tests run against) does not implement, throwing NotSupportedException
-        // even for a route nothing ever challenges for Negotiate. Read directly off builder.Configuration,
-        // not DI, for the same reason certificateRepoRoot above does: this runs before builder.Build().
-        // An operator who explicitly disabled auth gets nothing to lose here either way — Negotiate
-        // existing but never being the effective scheme was already true whenever SessionAuthenticationHandler's
-        // own Disabled short-circuit accepted every request first.
-        if (OperatingSystem.IsWindows() && !AuthOptions.FromConfiguration(builder.Configuration).Disabled)
+        // Also gated on WindowsEnabled (phase 164: mode enabled *and* a group actually configured) —
+        // found necessary by a real failure, not a hypothetical: with no group configured,
+        // AddNegotiate() was still being registered on every Windows host (this check used to be purely
+        // OperatingSystem.IsWindows()-gated), and merely having Negotiate registered as an available
+        // scheme is enough for ASP.NET Core's real, Windows-native SSPI implementation to require
+        // IConnectionItemsFeature on every request through the authentication middleware — a real
+        // Kestrel connection feature TestServer (what WebApplicationFactory-based tests run against)
+        // does not implement, throwing NotSupportedException even for a route nothing ever challenges
+        // for Negotiate. Read directly off builder.Configuration, not DI, for the same reason
+        // certificateRepoRoot above does: this runs before builder.Build(). A deployment with no
+        // Windows group configured gets nothing to lose here either way — Negotiate existing but never
+        // being the effective scheme was already true whenever nothing could ever satisfy it.
+        if (OperatingSystem.IsWindows() && AuthOptions.FromConfiguration(builder.Configuration).WindowsEnabled)
             authentication.AddNegotiate();
 
         builder.Services.AddAuthorizationBuilder()
@@ -429,7 +430,7 @@ public static class DbDataSyncHost
     /// time <see cref="WebApplication.CreateBuilder(string[])"/> returns — later sources win ties. A
     /// plain <c>builder.Configuration.AddXyz(...)</c> call here would append this source *last*,
     /// making it win over an env var or CLI flag, which is backwards: the whole point of the file is
-    /// to hold a default that a one-off <c>--DbDataSync:Url</c> or <c>DbDataSync__Url</c> can still
+    /// to hold a default that a one-off <c>--DbDataSync:App:Url</c> or <c>DbDataSync__App__Url</c> can still
     /// override. Finding the first <see cref="EnvironmentVariablesConfigurationSource"/> and inserting
     /// there reproduces appsettings.json's own slot instead.
     /// </para>
@@ -444,7 +445,7 @@ public static class DbDataSyncHost
     /// </summary>
     private static void InsertConfigFile(WebApplicationBuilder builder)
     {
-        var repoRoot = builder.Configuration["DbDataSync:RepoRoot"]
+        var repoRoot = builder.Configuration["DbDataSync:App:RepoRoot"]
             ?? Path.Combine(Directory.GetCurrentDirectory(), "dbdatasync-repo");
 
         if (!File.Exists(DbDataSyncConfigFile.PathIn(repoRoot)))

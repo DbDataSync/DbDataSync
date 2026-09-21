@@ -52,9 +52,9 @@ public sealed class RunPruningService(
             // turned both caps off should see that reflected somewhere, and an operator who thinks they
             // configured retention and did not should find out here rather than from a disk.
             logger.LogInformation(
-                "History pruning is off: none of DbDataSync:RunRetentionDays, " +
-                "DbDataSync:RunRetentionMaxPerMapping or DbDataSync:ChangeCheckRetentionDays is set to a " +
-                "positive value.");
+                "History pruning is off: none of DbDataSync:State:Retention:RunDays, " +
+                "DbDataSync:State:Retention:RunMaxPerMapping or DbDataSync:State:Retention:ChangeCheckDays " +
+                "is set to a positive value.");
             return;
         }
 

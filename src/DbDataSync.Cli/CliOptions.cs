@@ -29,7 +29,7 @@ public static class CliOptions
     /// <c>/var/lib/&lt;pkg&gt;</c>, which every other Unix-like OS (Solaris/illumos, NetBSD, OpenBSD —
     /// none of which .NET has an <c>OperatingSystem.IsX()</c> for) also falls through to as the
     /// least-surprising generic answer; an operator on one of those sets
-    /// <c>DbDataSync__RepoRoot</c> instead if <c>/var/lib</c> is not idiomatic there.
+    /// <c>DbDataSync__App__RepoRoot</c> instead if <c>/var/lib</c> is not idiomatic there.
     /// </summary>
     public static string DefaultRoot =>
         OperatingSystem.IsWindows()

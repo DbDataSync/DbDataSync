@@ -67,7 +67,7 @@ public sealed class UpdateConfirmationServiceTests : IDisposable
     {
         var options = ApiOptions.FromConfiguration(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["DbDataSync:RepoRoot"] = _root,
+            ["DbDataSync:App:RepoRoot"] = _root,
         }).Build());
         // The grace period, in milliseconds, so a test does not wait a minute.
         options = new ApiOptions

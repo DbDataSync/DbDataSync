@@ -46,7 +46,7 @@ public sealed partial class StateDatabase
 
         if (stateConnectionString is null)
             throw new InvalidOperationException(
-                $"DbDataSync:StateEngine is '{engine}', which needs DbDataSync:StateConnectionString. " +
+                $"DbDataSync:State:Engine is '{engine}', which needs DbDataSync:State:ConnectionString. " +
                 "Only SQLite is configured by path.");
 
         // MsSql and Postgres need to be (re)registered against *this* LibraryRegistry before

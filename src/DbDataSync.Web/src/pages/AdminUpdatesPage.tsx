@@ -40,7 +40,7 @@ function formatUtc(iso: string | null): string {
  * than reporting an error — the same session cookie still works afterwards, because sessions live in the state
  * database, not in memory. If the service is not back within two minutes it says so, and where to look.
  *
- * Closed by default on the server: with `DbDataSync:SelfUpdateEnabled` off nothing here can apply anything, and
+ * Closed by default on the server: with `DbDataSync:Updates:Mode` disabled nothing here can apply anything, and
  * the page says how to turn it on rather than showing buttons that would refuse.
  */
 export function AdminUpdatesPage() {
@@ -94,7 +94,7 @@ export function AdminUpdatesPage() {
           <div className="banner" data-testid="updates-disabled">
             <span className="mark">!</span>
             <span>
-              Updating from the console is turned off. Set <span className="mono">DbDataSync:SelfUpdateEnabled</span>{' '}
+              Updating from the console is turned off. Set <span className="mono">DbDataSync:Updates:Mode</span>{' '}
               to <span className="mono">true</span> under Configuration to turn it on — it replaces the code the
               service runs, so it is off unless someone chooses it.
             </span>
