@@ -102,35 +102,106 @@ being wherever the tip of everyone's combined work happened to land.
 
 ## Branch protection
 
-`main` and `test` carry the **same** protection, for the same reason: force pushes and deletions are
-blocked, and nothing else is.
+`main` and `test` are **writable only by the pipelines**. Everything else — a direct push, a merged pull
+request, from anyone including an organization owner — is refused.
 
-| setting | value |
+That is a repository **ruleset** (`Pipelines only: main and test`), not classic branch protection:
+
+| rule | effect |
 | --- | --- |
-| force pushes | blocked |
-| deletions | blocked |
-| pull request required | no |
-| required status checks | none |
-| enforced for admins | no |
+| `update` | no ref update to `main`/`test` at all, which covers direct pushes **and** PR merges |
+| `deletion` | neither branch can be deleted |
+| `non_fast_forward` | no force pushes |
+| bypass | the **DbDataSync Pipelines** GitHub App (id 5026881), and nothing else |
 
-**Why nothing stronger.** Both branches are advanced by a workflow pushing directly —
-`promote-test.yml` pushes `dev:test`, `release.yml` pushes the released SHA to `main` — and a
-pull-request requirement blocks a direct push outright. `GITHUB_TOKEN` cannot be granted an exception
-under classic branch protection: adding `github-actions` to the push allowlist is accepted by the API
-and then **silently dropped** (verified against this repo, 2026-09-18). Required status checks would
-probably survive, since both pushes carry a SHA whose checks are already green, but "probably" is the
-wrong property for the only automated steps in this flow — and `release.yml` now asserts that green run
-explicitly, which is the stronger and more legible version of the same guarantee.
+`dev` carries no rules. It is where everything lands, and the whole point of the other two being
+unwritable is that `dev` stays the only branch anyone pushes to.
 
-**What the protection that remains actually buys.** Release tags point into `main`'s history, so
-rewriting it would orphan a published release; and `promote-test.yml` refuses to advance `test` if it
-holds a commit `dev` doesn't, which is exactly the moment someone would be tempted to flatten `test` to
-make the error go away. Blocking force pushes and deletions is precisely the guard for both, and neither
-is something a PR requirement was protecting.
+### Why an app, and not `GITHUB_TOKEN`
 
-**What is now convention rather than enforcement:** that humans don't push to `main` or `test` by hand.
-Nothing stops it. Under this model nobody has a reason to — all work goes to `dev` — but it is honest to
-say the tooling no longer prevents it.
+Both branches are advanced by a workflow pushing directly — `promote-test.yml` pushes `dev:test`,
+`release.yml` pushes the released SHA to `main` — so whatever guards them has to let those two through
+and nothing else. `GITHUB_TOKEN` cannot be that exception, by three separate routes:
+
+- **Classic branch protection** accepts `github-actions` in a push allowlist and then **silently drops
+  it** (verified against this repo, 2026-09-18). This is why the protection here used to be force-push
+  and deletion only: with no way to exempt the pipelines, anything stronger would have blocked them.
+- **A repository ruleset** refuses it outright: *"Actor GitHub Actions integration must be part of the
+  ruleset source or owner organization"*. Actions is a first-party integration, not an app installed on
+  this organization, so it cannot be named as a bypass actor here.
+- **An organization ruleset**, where it might be accepted, requires a **GitHub Team** plan. This
+  organization is on `free`.
+
+What a repository ruleset here *will* accept as a bypass actor, probed directly: `DeployKey`,
+`RepositoryRole` and `OrganizationAdmin`. The latter two are no help — `GITHUB_TOKEN` is neither. That
+leaves an identity we own, and a **GitHub App beats a deploy key**: its tokens are short-lived, and the
+bypass names that one app rather than admitting any write deploy key that exists on the repo.
+
+So both workflows mint a token from the app (`actions/create-github-app-token`) and hand it to
+`actions/checkout`, whose `persist-credentials` leaves it in the local git config for the plain
+`git push` that follows. The app holds **Contents: read and write** and is installed on this repository
+only.
+
+Deliberately unchanged: `gh api` / `gh release create` take `GH_TOKEN` explicitly and keep using
+`GITHUB_TOKEN`, as does `id-token: write` for NuGet Trusted Publishing. In `release.yml` only the `main`
+fast-forward is actually gated — the tag push is `refs/tags`, which the ruleset does not target — but the
+token is wired in at checkout so the job speaks as one identity rather than two.
+
+### The ordering trap — already written down above, and walked into anyway
+
+"The mechanics" already states it: **`workflow_run` workflows are read from the default branch**, which
+only moves at a release cut. It was not read before this change was made, and the consequence was
+exactly the one predicted there: while the app-token change sat on `dev` and `test`, every promote still
+ran `main`'s older copy and pushed as `GITHUB_TOKEN`. A promote succeeding proved nothing about the app,
+and was briefly mistaken for proof that it did work.
+
+`release.yml` is the opposite: it is `workflow_dispatch` and refuses unless dispatched against `test`, so
+it runs **`test`'s** copy and picked the change up immediately.
+
+That asymmetry dictates the order any future change to this machinery has to follow:
+
+1. Land the change on `dev`; it reaches `test` by the ordinary promote.
+2. **Lock `main` first, not `test`.** `release.yml` already runs the new copy, so the release exercises
+   the new mechanism, while `promote-test` keeps working on the old one.
+3. Run a release. Its `main` fast-forward is the **last** step, after the package is published — so a
+   broken bypass leaves a release that genuinely happened with `main` merely lagging, not a broken
+   release.
+4. Only once `main` carries the new `promote-test.yml` — i.e. after that release — extend the lock to
+   `test`.
+
+Done in that order on 2026-09-21: release `2026.9.21.2347` pushed `main` through the active ruleset,
+which is what proved the bypass, and `test` was locked afterwards.
+
+
+### A side effect: `test` and `main` now get their own CI runs
+
+"The mechanics" records, as a constraint, that **a push made with `GITHUB_TOKEN` triggers no other
+workflow** — which is why `test` never got a CI run of its own despite `ci.yml` listing it under
+`push: branches: [dev, test, main]`.
+
+**A push made with a GitHub App token does trigger workflows.** So moving the pipelines onto the app
+incidentally removed that constraint: the promotion's push to `test` and the release's push to `main`
+now each start a CI run, which is what `ci.yml` was already asking for ("All three need this suite to
+actually mean anything at each stage, not just the last one"). Observed immediately — release
+`2026.9.21.2347`'s push to `main` started a CI run on `main`, where the previous release's did not.
+
+That is the configured intent finally happening, but it is not free: a commit travelling `dev` →
+`test` → `main` now runs the full suite **three times** instead of once, and this suite is not cheap
+(`dotnet-windows` alone is ~30 minutes). Nothing loops — `promote-test.yml` reacts to CI on `dev` only,
+and `publish-snapshot.yml` still reacts to the promotion rather than to CI — so the cost is the whole of
+the effect.
+
+Worth a deliberate decision rather than leaving it as an accident of the token change: either accept
+three runs as the price of each stage meaning something, or narrow `ci.yml`'s `push` branches and let
+the promotion's own green-CI requirement carry the guarantee it already carries.
+
+### Recovering if the bypass ever breaks
+
+Delete the ruleset. Note that the fallback `release.yml`'s own comment suggests — `git push origin
+<sha>:main` — is exactly what the ruleset blocks, so it is not available while the ruleset is active;
+removing the ruleset is the first step, not the second. Nothing here can be repaired with a force push
+either, and that is deliberate: release tags point into `main`'s history, so rewriting it would orphan a
+published release.
 
 ## What this does not change
 
