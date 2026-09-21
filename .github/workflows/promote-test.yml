@@ -23,10 +23,26 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      # A token from the DbDataSync Pipelines GitHub App (id 5026881), not GITHUB_TOKEN. The ruleset on
+      # `main`/`test` blocks every ref update except from that app, and GITHUB_TOKEN cannot be granted
+      # the exception: classic branch protection silently drops `github-actions` from a push allowlist
+      # (verified 2026-09-18), and a ruleset refuses it outright — "Actor GitHub Actions integration must
+      # be part of the ruleset source or owner organization" — because Actions is a first-party
+      # integration, not an app installed on this org. An org-level ruleset, where it might be accepted,
+      # needs a GitHub Team plan. Hence an app we own, whose id a ruleset will take as a bypass actor.
+      # Its only permission is Contents: read and write.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: "5026881"
+          private-key: ${{ secrets.PIPELINE_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v7
         with:
           ref: dev
           fetch-depth: 0
+          # persist-credentials (on by default) leaves this token in the local git config, which is what
+          # makes the plain `git push` below go out as the app rather than as GITHUB_TOKEN.
+          token: ${{ steps.app-token.outputs.token }}
       - name: Fast-forward test to dev
         # Refuses rather than force-pushes if test somehow isn't an ancestor of dev's new tip — that
         # would mean something landed directly on test outside this workflow, which should never happen

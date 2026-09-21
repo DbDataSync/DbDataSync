@@ -45,11 +45,25 @@ jobs:
     outputs:
       version: ${{ steps.pack.outputs.shipped }}
     steps:
+      # A token from the DbDataSync Pipelines GitHub App (id 5026881). The ruleset on `main`/`test`
+      # admits only that app, and GITHUB_TOKEN cannot be given the exception — see promote-test.yml's
+      # own note for why. Only the `main` fast-forward at the end is actually gated by the ruleset (the
+      # tag push is refs/tags, which the ruleset does not target), but the token is wired in at checkout
+      # so every git operation in this job speaks as one identity rather than two.
+      #
+      # `gh api`/`gh release create` below are unaffected: they take GH_TOKEN explicitly, and keep using
+      # GITHUB_TOKEN. So does `id-token: write` for NuGet Trusted Publishing.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: "5026881"
+          private-key: ${{ secrets.PIPELINE_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v7
         with:
           # The fast-forward of `main` at the end has to prove `main` is an ancestor of this commit
           # before it pushes; the default shallow clone cannot answer that question at all.
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
 
       # A release is cut from `test` — the validated snapshot `promote-test.yml` only ever advances to
       # a commit whose CI run passed — and ends by fast-forwarding `main` to whatever shipped, so
