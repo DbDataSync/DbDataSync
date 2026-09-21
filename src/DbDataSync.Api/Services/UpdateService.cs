@@ -51,7 +51,10 @@ public sealed record UpdateStatusResponse(
     string LogPath,
     IReadOnlyList<UpdateHistoryEntry> History);
 
-public sealed record ReleaseResponse(string Version, string Channel, DateTimeOffset? BuiltUtc, bool Installed, bool Newer);
+/// <param name="Url">A page a human can read about this exact version — nuget.org's package-version page
+/// for stable/beta, the GitHub Release page for a snapshot. Never null: every channel has one.</param>
+public sealed record ReleaseResponse(
+    string Version, string Channel, DateTimeOffset? BuiltUtc, bool Installed, bool Newer, string Url);
 
 public enum UpdateRequestOutcome
 {
@@ -208,7 +211,8 @@ public sealed class UpdateService(
                     results.Add(new ReleaseResponse(
                         release.Version.Text, each.ToString().ToLowerInvariant(), release.BuiltUtc,
                         installed is not null && release.Version.Equals(installed),
-                        installed is not null && release.Version > installed));
+                        installed is not null && release.Version > installed,
+                        ReleaseUrlFor(release)));
                 }
             }
             catch (ReleaseSourceException ex)
@@ -223,6 +227,14 @@ public sealed class UpdateService(
 
         return results;
     }
+
+    /// <summary>A page a human can read about this exact release. A snapshot already carries its own
+    /// GitHub Release page (<see cref="ReleaseInfo.ReleaseUrl"/>, read off the release's own <c>html_url</c>);
+    /// stable/beta come from nuget.org's flat-container index, which has no such field, so that one is
+    /// built from the package id and version — nuget.org's own URL scheme for a specific version page.</summary>
+    private static string ReleaseUrlFor(ReleaseInfo release) =>
+        release.ReleaseUrl?.ToString()
+        ?? $"https://www.nuget.org/packages/{ReleaseSources.PackageId}/{release.Version.Text}";
 
     // --- asking for an update ----------------------------------------------------------------------------
 

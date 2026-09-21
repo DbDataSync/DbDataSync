@@ -1517,6 +1517,11 @@ export interface AdminConfigEntry {
   /** A plain-language warning to show beside the key in both states — for a setting whose "on" widens what a mistake or an
    * attacker can reach (phase 161). Null for every other key. */
   caution: string | null
+  /** The complete, closed set of legal values (lowercase) for a mode-string setting backed by a real
+   * enum, e.g. `["disabled", "manual"]` — render a dropdown/toggle instead of a free-text box. Null for
+   * a setting with no fixed set, or an open-ended one (State:Engine — a custom dialect can be registered
+   * beyond the three built-ins). */
+  allowedValues: string[] | null
 }
 
 // The Certificates section of the Admin screen (phase 83) — a second door onto the operations
@@ -1689,6 +1694,8 @@ export interface UpdateRelease {
   builtUtc: string | null
   installed: boolean
   newer: boolean
+  /** A page a human can read about this exact version — nuget.org for stable/beta, the GitHub Release page for a snapshot. */
+  url: string
 }
 
 export interface UpdateReleases {

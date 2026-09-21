@@ -35,17 +35,19 @@ const statusOf = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+const nugetUrl = (version: string) => `https://www.nuget.org/packages/DbDataSync/${version}`
+
 const RELEASES = {
   stable: [
-    { version: '2026.9.18.1918', channel: 'stable', builtUtc: '2026-09-18T19:18:00Z', installed: false, newer: true },
-    { version: '2026.9.16.1005', channel: 'stable', builtUtc: '2026-09-16T10:05:00Z', installed: true, newer: false },
-    { version: '2026.9.11.532', channel: 'stable', builtUtc: '2026-09-11T05:32:00Z', installed: false, newer: false },
+    { version: '2026.9.18.1918', channel: 'stable', builtUtc: '2026-09-18T19:18:00Z', installed: false, newer: true, url: nugetUrl('2026.9.18.1918') },
+    { version: '2026.9.16.1005', channel: 'stable', builtUtc: '2026-09-16T10:05:00Z', installed: true, newer: false, url: nugetUrl('2026.9.16.1005') },
+    { version: '2026.9.11.532', channel: 'stable', builtUtc: '2026-09-11T05:32:00Z', installed: false, newer: false, url: nugetUrl('2026.9.11.532') },
   ],
   beta: [
-    { version: '2026.9.12.721-beta', channel: 'beta', builtUtc: '2026-09-12T07:21:00Z', installed: false, newer: false },
+    { version: '2026.9.12.721-beta', channel: 'beta', builtUtc: '2026-09-12T07:21:00Z', installed: false, newer: false, url: nugetUrl('2026.9.12.721-beta') },
   ],
   snapshot: [
-    { version: '2026.9.19.1432-snapshot.g65615e7', channel: 'snapshot', builtUtc: '2026-09-19T14:32:00Z', installed: false, newer: true },
+    { version: '2026.9.19.1432-snapshot.g65615e7', channel: 'snapshot', builtUtc: '2026-09-19T14:32:00Z', installed: false, newer: true, url: 'https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-2026.9.19.1432-snapshot.g65615e7' },
   ],
 } as const
 

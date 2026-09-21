@@ -10,7 +10,9 @@ import { useIsAdmin } from '../components/useIsAdmin'
 import { useAdminConfig, useRestartRequired, useSetAdminConfig, useSetAdminConfigSecret } from '../api/hooks'
 import type { AdminConfigEntry } from '../api/types'
 
-const COLUMNS = '1.3fr 1.6fr 1.3fr 1.3fr'
+// Key, Source, Value, Running — Source sits right before Value (not last) since the two are read
+// together: "where did this come from" answers "can I trust it" before "what does it say".
+const COLUMNS = '1.3fr 1.3fr 1.6fr 1.3fr'
 const STATE_CONNECTION_STRING_KEY = 'DbDataSync:State:ConnectionString'
 const NUMERIC = /^-?\d+(\.\d+)?$/
 
@@ -21,6 +23,22 @@ function shortDescription(description: string): string {
   return match ? match[0] : description
 }
 
+/**
+ * Buckets entries by the first `:`-separated fragment of their key (App/State/Auth/Updates/Nuget/Notes),
+ * preserving catalog order both across and within groups — the backend's own `Keys` list is already
+ * grouped this way, so a single pass suffices; this never re-sorts, just splits on group change.
+ */
+function groupByFirstFragment(entries: AdminConfigEntry[]): { group: string; entries: AdminConfigEntry[] }[] {
+  const groups: { group: string; entries: AdminConfigEntry[] }[] = []
+  for (const entry of entries) {
+    const group = entry.key.replace(/^DbDataSync:/, '').split(':')[0]
+    const current = groups[groups.length - 1]
+    if (current?.group === group) current.entries.push(entry)
+    else groups.push({ group, entries: [entry] })
+  }
+  return groups
+}
+
 /** A value with its unit pill beside it, or just the value — a key can carry a unit
  * (RunRetentionDays' is "days") and still have a non-numeric or unset value nothing should be
  * attached to, so the check is on the actual value in front of you, not on the key alone. */
@@ -29,6 +47,36 @@ function ValueWithUnit({ value, unit, testId }: { value: string; unit: string | 
     <span className="row" style={{ gap: 6 }} data-testid={testId}>
       <span className="mono">{value}</span>
       {unit && NUMERIC.test(value) && <span className="unit-pill">{unit}</span>}
+    </span>
+  )
+}
+
+/**
+ * A closed set of legal values (`entry.allowedValues`) as one joined button bar rather than a free-text
+ * box — every mode-string setting today has 2-3 options, small enough that seeing them all beats hiding
+ * them behind a dropdown click.
+ */
+function ModeToggle({ value, options, onChange, disabled, testId }: {
+  value: string | null
+  options: string[]
+  onChange: (next: string) => void
+  disabled?: boolean
+  testId?: string
+}) {
+  return (
+    <span className="toggle-bar" role="group" data-testid={testId}>
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          className={`btn btn-sm${value === option ? ' btn-primary' : ''}`}
+          disabled={disabled || value === option}
+          onClick={() => onChange(option)}
+          data-testid={testId ? `${testId}-${option}` : undefined}
+        >
+          {option}
+        </button>
+      ))}
     </span>
   )
 }
@@ -104,17 +152,22 @@ export function AdminConfigPage() {
 
         <div className="card flush" data-testid="admin-config-table">
           <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
-            <span>Key</span><span>Value</span><span>Running</span><span>Source</span>
+            <span>Key</span><span>Source</span><span>Value</span><span>Running</span>
           </div>
           {isLoading && <div className="empty">Loading…</div>}
-          {(entries ?? []).map((entry) => (
-            <Row
-              key={entry.key}
-              entry={entry}
-              onSave={save}
-              onSaveSecret={entry.key === STATE_CONNECTION_STRING_KEY ? saveSecret : undefined}
-              busy={setValue.isPending || setSecret.isPending}
-            />
+          {groupByFirstFragment(entries ?? []).map(({ group, entries: groupEntries }) => (
+            <div key={group}>
+              <div className="grid-group-head" data-testid={`admin-config-group-${group}`}>{group}</div>
+              {groupEntries.map((entry) => (
+                <Row
+                  key={entry.key}
+                  entry={entry}
+                  onSave={save}
+                  onSaveSecret={entry.key === STATE_CONNECTION_STRING_KEY ? saveSecret : undefined}
+                  busy={setValue.isPending || setSecret.isPending}
+                />
+              ))}
+            </div>
           ))}
         </div>
       </div>
@@ -158,11 +211,51 @@ function Row({ entry, onSave, onSaveSecret, busy }: {
         </div>
       </div>
 
+      {/* Read together with Value, right beside it — "where did this come from" answers "can I trust
+          it" before "what does it say". */}
+      <span className="row" style={{ gap: 6 }}>
+        <span className="dim" data-testid={`admin-config-source-${shortKey}`}>{entry.source}</span>
+
+        {entry.canAdopt && (
+          <button
+            type="button"
+            className="btn-link quiet"
+            disabled={busy}
+            title="Write the current value into dbdatasync.config.yaml, making it the value used after a restart"
+            onClick={() => entry.value && onSave(entry.key, entry.value)}
+            data-testid={`admin-config-adopt-${shortKey}`}
+          >
+            Override
+          </button>
+        )}
+
+        {entry.canReset && (
+          <button
+            type="button"
+            className="btn-link quiet"
+            disabled={busy}
+            title={`Reset to the application default (${entry.defaultValue}), used after a restart`}
+            onClick={() => entry.defaultValue && onSave(entry.key, entry.defaultValue)}
+            data-testid={`admin-config-reset-${shortKey}`}
+          >
+            Reset
+          </button>
+        )}
+      </span>
+
       <div>
         {entry.masked ? (
           <span className="faint" data-testid={`admin-config-value-${shortKey}`}>
             hidden — carries a credential from its source, never shown here
           </span>
+        ) : entry.editable && entry.allowedValues ? (
+          <ModeToggle
+            value={entry.value}
+            options={entry.allowedValues}
+            onChange={(next) => onSave(entry.key, next)}
+            disabled={busy}
+            testId={`admin-config-value-${shortKey}`}
+          />
         ) : entry.editable ? (
           <span className="row" style={{ gap: 6 }}>
             <EditableValue
@@ -203,36 +296,6 @@ function Row({ entry, onSave, onSaveSecret, busy }: {
       ) : (
         <span className="faint" data-testid={`admin-config-running-${shortKey}`}>not set</span>
       )}
-
-      <span className="row" style={{ gap: 6 }}>
-        <span className="dim" data-testid={`admin-config-source-${shortKey}`}>{entry.source}</span>
-
-        {entry.canAdopt && (
-          <button
-            type="button"
-            className="btn-link quiet"
-            disabled={busy}
-            title="Write the current value into dbdatasync.config.yaml, making it the value used after a restart"
-            onClick={() => entry.value && onSave(entry.key, entry.value)}
-            data-testid={`admin-config-adopt-${shortKey}`}
-          >
-            Override
-          </button>
-        )}
-
-        {entry.canReset && (
-          <button
-            type="button"
-            className="btn-link quiet"
-            disabled={busy}
-            title={`Reset to the application default (${entry.defaultValue}), used after a restart`}
-            onClick={() => entry.defaultValue && onSave(entry.key, entry.defaultValue)}
-            data-testid={`admin-config-reset-${shortKey}`}
-          >
-            Reset
-          </button>
-        )}
-      </span>
 
       {entry.caution && (
         // In both states, in the row of the setting it is about: what somebody deciding needs to read, not a confirmation

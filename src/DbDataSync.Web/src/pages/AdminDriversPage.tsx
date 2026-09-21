@@ -6,7 +6,7 @@ import { ErrorBanner } from '../components/ErrorBanner'
 import { RestartRequiredBanner } from '../components/RestartRequiredBanner'
 import { useIsAdmin } from '../components/useIsAdmin'
 import { useDrivers, useInstallDriverFromCatalog, useKnownDrivers, useRestartRequired } from '../api/hooks'
-import type { DriverSummary, KnownDriverSummary } from '../api/types'
+import type { DriverCapabilitySummary, DriverSummary, KnownDriverSummary } from '../api/types'
 
 const COLUMNS = '1.1fr 1.6fr 0.9fr 1.1fr 1.8fr'
 
@@ -108,24 +108,62 @@ export function AdminDriversPage() {
 }
 
 function DriverRow({ driver }: { driver: DriverSummary }) {
-  const capabilities = [
-    ...driver.capabilities.readers,
-    ...driver.capabilities.staging,
-    ...driver.capabilities.writers,
-  ]
-
   return (
     <div
       className="grid-row"
-      style={{ gridTemplateColumns: COLUMNS, gap: 14 }}
+      style={{ gridTemplateColumns: COLUMNS, gap: 14, height: 'auto', minHeight: 38, alignItems: 'start', paddingTop: 9, paddingBottom: 9 }}
       data-testid={`admin-driver-row-${driver.id}`}
     >
       <span className="mono">{driver.id}</span>
       <span>{driver.displayName}</span>
       <span className="dim" data-testid={`admin-driver-source-${driver.id}`}>{SOURCE_LABEL[driver.source]}</span>
       <span className="mono">{driver.library ?? <span className="faint">—</span>}</span>
-      <span className="hint wrap">{capabilities.length > 0 ? capabilities.join(', ') : <span className="faint">none</span>}</span>
+      <CapabilityPills capabilities={driver.capabilities} testId={`admin-driver-capabilities-${driver.id}`} />
     </div>
+  )
+}
+
+const CAPABILITY_GROUPS: { key: keyof DriverCapabilitySummary; label: string; badgeClass: string }[] = [
+  { key: 'readers', label: 'Read', badgeClass: 'badge-reader' },
+  { key: 'staging', label: 'Stage', badgeClass: 'badge-staging' },
+  { key: 'writers', label: 'Write', badgeClass: 'badge-writer' },
+]
+
+/** Kind names grouped by what they belong to, and capped per group — a driver with a couple dozen
+ * writer kinds used to render as one unbroken comma-joined line that overlaid whatever came after it
+ * in the row. Small color-coded pills wrap onto their own lines instead, and a group or its "+N"
+ * overflow pill carries the full list as a native tooltip rather than dropping it. */
+function CapabilityPills({ capabilities, testId }: { capabilities: DriverCapabilitySummary; testId: string }) {
+  const groups = CAPABILITY_GROUPS
+    .map((group) => ({ ...group, kinds: capabilities[group.key] as string[] }))
+    .filter((group) => group.kinds.length > 0)
+
+  if (groups.length === 0) return <span className="faint">none</span>
+
+  const maxPerGroup = 3
+
+  return (
+    <span className="row" style={{ gap: 10, flexWrap: 'wrap', rowGap: 4 }} data-testid={testId}>
+      {groups.map((group) => {
+        const shown = group.kinds.slice(0, maxPerGroup)
+        const overflow = group.kinds.slice(maxPerGroup)
+        return (
+          <span
+            key={group.key}
+            className="row"
+            style={{ gap: 3, flexWrap: 'wrap' }}
+            title={`${group.label}: ${group.kinds.join(', ')}`}
+          >
+            {shown.map((kind) => (
+              <span key={kind} className={`badge ${group.badgeClass}`}>{kind}</span>
+            ))}
+            {overflow.length > 0 && (
+              <span className={`badge ${group.badgeClass}`} title={overflow.join(', ')}>+{overflow.length}</span>
+            )}
+          </span>
+        )
+      })}
+    </span>
   )
 }
 

@@ -193,6 +193,7 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
 
   const searchWorks = probed && !search.isError && search.data?.status === 'ok'
   const results = search.data?.status === 'ok' ? (search.data.results ?? []) : []
+  const uninstalledKnown = (knownLibraries ?? []).filter((k) => !installedIds.has(k.id))
 
   const runSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -234,21 +235,29 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
       <div className="card-head">
         <span className="card-title">Find a library to install</span>
       </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {(knownLibraries ?? []).length > 0 && (
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            {(knownLibraries ?? [])
-              .filter((k) => !installedIds.has(k.id))
-              .map((entry) => (
-                <QuickAddChip
-                  key={entry.id}
-                  entry={entry}
-                  onPick={() => pick({ id: entry.packageId, version: '', versionLocked: false, factoryType: '' })}
-                />
-              ))}
+      <div className="card-body" style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+        {uninstalledKnown.length > 0 && (
+          <div
+            style={{
+              display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, width: 180,
+              borderRight: '1px solid var(--card-inner-edge)', paddingRight: 16,
+            }}
+            data-testid="admin-libraries-known-sidebar"
+          >
+            <span className="hint" style={{ textTransform: 'uppercase', fontSize: 11, letterSpacing: '.05em', marginBottom: 4 }}>
+              Well-known libraries
+            </span>
+            {uninstalledKnown.map((entry) => (
+              <QuickAddChip
+                key={entry.id}
+                entry={entry}
+                onPick={() => pick({ id: entry.packageId, version: '', versionLocked: false, factoryType: '' })}
+              />
+            ))}
           </div>
         )}
 
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
         {!probed ? (
           <div className="hint">Checking whether NuGet search is available…</div>
         ) : searchWorks ? (
@@ -329,6 +338,7 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
         )}
 
         <ErrorBanner error={installError} />
+        </div>
       </div>
 
       {confirmTrust && selected && (
@@ -354,6 +364,7 @@ function QuickAddChip({ entry, onPick }: { entry: KnownLibrarySummary; onPick: (
       title={entry.description}
       onClick={onPick}
       data-testid={`admin-libraries-chip-${entry.id}`}
+      style={{ display: 'block', textAlign: 'left', width: '100%', padding: '3px 0' }}
     >
       + {entry.displayName}
     </button>
@@ -375,7 +386,9 @@ function SearchResultRow({ result, curated, onSelect }: {
     >
       <div>
         <div className="row" style={{ gap: 8 }}>
-          <strong>{result.id}</strong>
+          <a href={`https://www.nuget.org/packages/${result.id}`} target="_blank" rel="noopener noreferrer">
+            <strong>{result.id}</strong>
+          </a>
           {result.verified && <span className="unit-pill" title="Verified publisher">verified</span>}
           {curated && <span className="unit-pill">vetted</span>}
           <span className="dim">{formatDownloads(result.totalDownloads)} downloads</span>

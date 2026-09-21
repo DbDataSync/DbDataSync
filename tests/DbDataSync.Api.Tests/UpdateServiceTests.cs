@@ -90,6 +90,7 @@ public sealed class UpdateServiceTests : IDisposable
     private static string GitHubJson() =>
         $$"""
         [{"tag_name":"snapshot-{{Snapshot}}","draft":false,"prerelease":true,
+          "html_url":"https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-{{Snapshot}}",
           "assets":[
            {"name":"DbDataSync.{{Snapshot}}.nupkg","browser_download_url":"https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-{{Snapshot}}/DbDataSync.{{Snapshot}}.nupkg"},
            {"name":"DbDataSync.{{Snapshot}}.nupkg.sha512","browser_download_url":"https://github.com/DbDataSync/DbDataSync/releases/download/snapshot-{{Snapshot}}/DbDataSync.{{Snapshot}}.nupkg.sha512"}]}]
@@ -281,6 +282,22 @@ public sealed class UpdateServiceTests : IDisposable
         Assert.Equal(new[] { true, false, false }, releases.Select(r => r.Newer));
         Assert.Equal(new[] { false, true, false }, releases.Select(r => r.Installed));
         Assert.All(releases, r => Assert.Equal("stable", r.Channel));
+    }
+
+    /// <summary>A stable/beta release has no page of its own from nuget.org's flat-container index, so
+    /// its Url is built from the nuget.org package-version URL scheme; a snapshot already carries its
+    /// GitHub Release page (<c>html_url</c>) and that is used as-is.</summary>
+    [Fact]
+    public async Task Releases_ExposeAHumanReadablePage_NugetForStableAndBeta_GitHubForSnapshot()
+    {
+        var (service, _, _, _) = Build();
+
+        var releases = await service.ListReleasesAsync(null, 10, [], CancellationToken.None);
+
+        var stable = Assert.Single(releases, r => r.Channel == "stable" && r.Version == "2026.9.18.1918");
+        Assert.Equal("https://www.nuget.org/packages/DbDataSync/2026.9.18.1918", stable.Url);
+        var snapshot = Assert.Single(releases, r => r.Channel == "snapshot");
+        Assert.Equal($"https://github.com/DbDataSync/DbDataSync/releases/tag/snapshot-{Snapshot}", snapshot.Url);
     }
 
     [Fact]

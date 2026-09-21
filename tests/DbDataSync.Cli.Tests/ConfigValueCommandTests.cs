@@ -67,18 +67,40 @@ public sealed class ConfigValueCommandTests : IDisposable
     /// Phase 164 removed every bare boolean from the catalog, so there is no writable key left whose
     /// DefaultValue is "true"/"false" — the boolean-specific spelling normalization/refusal
     /// <c>ConfigValueCommand.Set</c> used to have for that case was dead code once every setting became
-    /// a mode string, and was removed along with it. A nonsense value for a mode-string key is simply
-    /// written as given — there is no fixed enum to validate against here, matching every other
-    /// free-text setting (StateEngine, RelyingPartyId, ...) already.
+    /// a mode string, and was removed along with it. Its replacement (AllowedValues) only applies to a
+    /// mode string backed by a real, closed enum — an open-ended free-text setting like State:Engine
+    /// (a custom dialect can be registered beyond the three built-ins) still takes whatever is given.
     /// </summary>
     [Fact]
-    public async Task Set_WritesWhateverValueIsGiven_ForAModeStringSetting()
+    public async Task Set_WritesWhateverValueIsGiven_ForAnOpenEndedSetting()
     {
-        var (code, output) = await Run("set", "Notes:MarkdownRenderer", "extremely rich", "--repo", _root);
+        var (code, output) = await Run("set", "State:Engine", "SomeCustomDialect", "--repo", _root);
 
         Assert.Equal(0, code);
-        Assert.Equal("extremely rich", DbDataSyncConfigFile.Read(_root)["DbDataSync:Notes:MarkdownRenderer"]);
+        Assert.Equal("SomeCustomDialect", DbDataSyncConfigFile.Read(_root)["DbDataSync:State:Engine"]);
         Assert.DoesNotContain("true or false", output);
+        Assert.DoesNotContain("must be one of", output);
+    }
+
+    /// <summary>A mode-string setting has a complete, closed set of legal values (derived from a real
+    /// enum) — a value outside that set is refused rather than silently written.</summary>
+    [Fact]
+    public async Task Set_RefusesAValueNotInTheAllowedSet_ForAModeStringSetting()
+    {
+        var (code, output) = await Run("set", "Updates:Mode", "sometimes", "--repo", _root);
+
+        Assert.Equal(1, code);
+        Assert.Contains("must be one of: disabled, manual", output);
+        Assert.False(DbDataSyncConfigFile.Read(_root).ContainsKey("DbDataSync:Updates:Mode"));
+    }
+
+    [Fact]
+    public async Task Set_AcceptsAnAllowedValue_CaseInsensitively()
+    {
+        var (code, _) = await Run("set", "Updates:Mode", "MANUAL", "--repo", _root);
+
+        Assert.Equal(0, code);
+        Assert.Equal("MANUAL", DbDataSyncConfigFile.Read(_root)["DbDataSync:Updates:Mode"]);
     }
 
     [Theory]

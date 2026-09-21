@@ -35,7 +35,21 @@ public sealed class AdminConfigService(
     RestartRequiredState restartRequired)
 {
     private sealed record KeyDefinition(
-        string Key, string Description, bool SupportsWrite, bool IsSecret = false, string? Unit = null, string? Caution = null);
+        string Key, string Description, bool SupportsWrite, bool IsSecret = false, string? Unit = null,
+        string? Caution = null, IReadOnlyList<string>? AllowedValues = null);
+
+    /// <summary>Lowercase enum member names, in declaration order — for a key whose value is a closed
+    /// set backed by a real C# enum (a mode string), so the Admin screen can render a dropdown/toggle
+    /// instead of a free-text box. Derived rather than hand-typed per key, so it can't drift from the
+    /// enum <see cref="DefaultFor"/>/<see cref="DefaultValueFor"/> already parse against.
+    /// <para>
+    /// Deliberately not used for <c>State:Engine</c>: its id space is open (a custom
+    /// <c>StateDialect</c> can be registered beyond the three built-ins), so constraining it to a fixed
+    /// dropdown would be wrong, not just incomplete.
+    /// </para>
+    /// </summary>
+    private static IReadOnlyList<string> AllowedValuesFor<TEnum>() where TEnum : struct, Enum =>
+        Enum.GetNames<TEnum>().Select(name => name.ToLowerInvariant()).ToList();
 
     private static readonly IReadOnlyList<KeyDefinition> Keys =
     [
@@ -85,10 +99,10 @@ public sealed class AdminConfigService(
         new("DbDataSync:Nuget:Search:Mode",
             "Whether the Libraries screen's search box may call the public NuGet index (enabled/disabled). " +
             "Disable in an air-gapped or locked-down deployment.",
-            SupportsWrite: true),
+            SupportsWrite: true, AllowedValues: AllowedValuesFor<FeatureMode>()),
         new("DbDataSync:Notes:MarkdownRenderer",
             "Which renderer Notes use: basic (small, safe default) or rich (tables, task lists, strikethrough).",
-            SupportsWrite: true,
+            SupportsWrite: true, AllowedValues: AllowedValuesFor<NotesRenderer>(),
             Caution:
                 "Notes are written by one operator and shown in other people's sessions. The rich renderer is " +
                 "defended the way the Docs viewer is — raw HTML is never interpreted, only http(s) and mailto " +
@@ -100,7 +114,7 @@ public sealed class AdminConfigService(
             "disabled. Disabled by default: it replaces the code the service runs, as the service's own " +
             "account. Needs a systemd unit written by this version or later (`dbdatasync service install`); " +
             "Linux only for now.",
-            SupportsWrite: true),
+            SupportsWrite: true, AllowedValues: AllowedValuesFor<UpdatesMode>()),
         new("DbDataSync:Updates:Channels",
             "Which release channels the Updates screen may offer, comma-separated: stable, beta, snapshot. " +
             "A snapshot is a development build; its download is only checked against a checksum published " +
@@ -117,7 +131,7 @@ public sealed class AdminConfigService(
         new("DbDataSync:Auth:Network:Admin",
             "Trusts an unauthenticated request from loopback as Admin: loopback or disabled. There is no " +
             "\"from anywhere\" option for Admin — only Auth:Network:Viewer ever widens past loopback.",
-            SupportsWrite: true,
+            SupportsWrite: true, AllowedValues: AllowedValuesFor<AdminNetworkTrust>(),
             Caution:
                 "Anyone who can reach this loopback address — any local account on a shared host, not only " +
                 "the operator — gets Admin with no sign-in at all. Leave this disabled unless the deployment " +
@@ -125,14 +139,14 @@ public sealed class AdminConfigService(
         new("DbDataSync:Auth:Network:Viewer",
             "Trusts an unauthenticated request as Viewer: remote, loopback, or disabled. Remote trusts any " +
             "origin as Viewer; loopback restricts that to loopback only.",
-            SupportsWrite: true,
+            SupportsWrite: true, AllowedValues: AllowedValuesFor<ViewerNetworkTrust>(),
             Caution:
                 "A Viewer can read replication state and configuration, just not change it. `remote` means " +
                 "anyone who can reach this deployment at all gets that without signing in."),
         new("DbDataSync:Auth:Windows:Mode",
             "Whether Windows group authentication is allowed at all: enabled or disabled. An operator can " +
             "configure Auth:Windows:AdminGroup/ViewerGroup and still turn this off without clearing them.",
-            SupportsWrite: true),
+            SupportsWrite: true, AllowedValues: AllowedValuesFor<FeatureMode>()),
         new("DbDataSync:Auth:Windows:AdminGroup",
             "Windows group whose members are admins.",
             SupportsWrite: true),
@@ -142,7 +156,7 @@ public sealed class AdminConfigService(
         new("DbDataSync:Auth:Passkeys:Mode",
             "Whether passkey sign-in/enrollment is allowed at all: enabled or disabled. An operator can " +
             "configure a relying-party id and still turn this off without clearing it.",
-            SupportsWrite: true),
+            SupportsWrite: true, AllowedValues: AllowedValuesFor<FeatureMode>()),
         new("DbDataSync:Auth:Passkeys:RelyingPartyId",
             "Bare domain passkeys are scoped to. Deliberately independent of App:Url — see " +
             "architecture/planning/todo/passkey-relying-party-migration.md for why changing this " +
@@ -164,7 +178,9 @@ public sealed class AdminConfigService(
         var full = key.StartsWith("DbDataSync:", StringComparison.OrdinalIgnoreCase) ? key : $"DbDataSync:{key}";
         var definition = Keys.FirstOrDefault(k => string.Equals(k.Key, full, StringComparison.OrdinalIgnoreCase));
         return definition is { SupportsWrite: true }
-            ? new WritableConfigKey(definition.Key, definition.Description, DefaultValueFor(definition.Key), definition.Caution)
+            ? new WritableConfigKey(
+                definition.Key, definition.Description, DefaultValueFor(definition.Key), definition.Caution,
+                definition.AllowedValues)
             : null;
     }
 
@@ -288,7 +304,7 @@ public sealed class AdminConfigService(
 
         return new AdminConfigEntry(
             definition.Key, value, runningValue, source, editable, canAdopt, canReset, defaultValue, masked,
-            definition.Description, definition.Unit, definition.Caution);
+            definition.Description, definition.Unit, definition.Caution, definition.AllowedValues);
     }
 
     /// <summary>
@@ -438,10 +454,18 @@ public sealed class AdminConfigService(
 /// but an unset/non-numeric value shows no pill either.</param>
 /// <param name="Caution">A plain-language warning the screen shows beside this key, always, in both states — for a setting
 /// whose "on" widens what an attacker or a mistake can reach. Null for every other key.</param>
+/// <param name="AllowedValues">The complete, closed set of legal values, lowercase — for a mode-string
+/// setting backed by a real C# enum, so the screen can render a dropdown/toggle instead of a free-text
+/// box. Null for a setting with no fixed set (a path, a group name, a count) or an open one
+/// (<c>State:Engine</c> — a custom dialect can be registered beyond the three built-ins).</param>
 public sealed record AdminConfigEntry(
     string Key, string? Value, string? RunningValue, string Source, bool Editable, bool CanAdopt, bool CanReset,
-    string? DefaultValue, bool Masked, string Description, string? Unit, string? Caution = null);
+    string? DefaultValue, bool Masked, string Description, string? Unit, string? Caution = null,
+    IReadOnlyList<string>? AllowedValues = null);
 
 /// <summary>A key <see cref="AdminConfigService.Writable"/> found: its full name, what it is for, the literal it falls back to
-/// (null when contextual), and the warning to show wherever it is changed (null for most).</summary>
-public sealed record WritableConfigKey(string Key, string Description, string? DefaultValue, string? Caution);
+/// (null when contextual), the warning to show wherever it is changed (null for most), and — for a
+/// mode-string setting backed by a real enum — the complete, closed set of legal values (null for an
+/// open-ended setting).</summary>
+public sealed record WritableConfigKey(
+    string Key, string Description, string? DefaultValue, string? Caution, IReadOnlyList<string>? AllowedValues = null);

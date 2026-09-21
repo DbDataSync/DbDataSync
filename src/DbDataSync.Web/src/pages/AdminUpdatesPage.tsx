@@ -298,7 +298,9 @@ function ReleaseRow({ release, disabled, onUpdate }: {
       style={{ gridTemplateColumns: COLUMNS, gap: 14 }}
       data-testid={`updates-release-${release.version}`}
     >
-      <span className="mono">{release.version}</span>
+      <a className="mono" href={release.url} target="_blank" rel="noopener noreferrer">
+        {release.version}
+      </a>
       <span className="hint">{formatUtc(release.builtUtc)}</span>
       <span className="status">
         <span className={`dot ${release.installed ? 'dot-ok' : release.newer ? 'dot-warn' : 'dot-idle'}`} />

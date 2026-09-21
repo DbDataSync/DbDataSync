@@ -30,6 +30,15 @@ public static class ConfigValueCommand
 
         var value = positional[1];
 
+        // A mode-string setting has a complete, closed set of legal values (derived from a real C#
+        // enum — see AdminConfigService.AllowedValuesFor). Case-insensitive, matching how every mode
+        // string is actually parsed (Enum.TryParse(..., ignoreCase: true, ...)).
+        if (key.AllowedValues is { } allowed && !allowed.Contains(value, StringComparer.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine($"{key.Key} must be one of: {string.Join(", ", allowed)} — not '{value}'.");
+            return 1;
+        }
+
         var root = DbDataSyncRoot.Resolve(args);
         // A git repository at the root, which `serve` and `setup` create along with the starter file — not ExistingSetup, which
         // also requires the file to already hold a value, and a fresh starter is only comments.

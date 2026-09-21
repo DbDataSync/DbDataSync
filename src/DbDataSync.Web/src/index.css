@@ -349,6 +349,18 @@ h1.crumb.mono { font-family: var(--mono); }
    for the dense tables that are most of this app. */
 .grid-row.auto { height: auto; min-height: 40px; padding-top: 6px; padding-bottom: 6px; }
 .grid-row:last-child { border-bottom: none; }
+/* A sub-header inside a .grid-row-shaped table, grouping rows by the first fragment of a dotted/
+   colon-separated key (the Admin config screen's App:/State:/Auth:/... sections) — quieter than
+   .grid-head so it doesn't read as a second table, but distinct enough to break up a long flat list. */
+.grid-group-head {
+  padding: 6px 14px 4px;
+  font: 600 10px var(--ui);
+  letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-7);
+  background: var(--row-head);
+  border-bottom: 1px solid var(--card-inner-edge);
+}
+.grid-group-head:not(:first-child) { border-top: 1px solid var(--card-inner-edge); }
 button.grid-row { border-left: none; border-right: none; border-top: none; background: none; width: 100%; cursor: pointer; }
 button.grid-row:hover { background: var(--row-head); }
 button.grid-row.active { background: var(--accent-row-alt); box-shadow: inset 2px 0 0 var(--accent); }
@@ -404,6 +416,18 @@ button.grid-row.active { background: var(--accent-row-alt); box-shadow: inset 2p
 }
 .btn-link.quiet { color: var(--ink-10); }
 .btn-link.quiet:hover { color: var(--danger-ink); }
+
+/* A small closed set of legal values (a mode string backed by a real enum — Admin config's
+   AllowedValues) as one joined control instead of a dropdown: every option is visible at once, which a
+   2-3-way choice earns and a <select> would hide behind a click. */
+.toggle-bar { display: inline-flex; }
+.toggle-bar .btn {
+  border-radius: 0;
+  border-right-width: 0;
+}
+.toggle-bar .btn:first-child { border-top-left-radius: 5px; border-bottom-left-radius: 5px; }
+.toggle-bar .btn:last-child { border-top-right-radius: 5px; border-bottom-right-radius: 5px; border-right-width: 1px; }
+.toggle-bar .btn.btn-primary { position: relative; z-index: 1; }
 
 /* A button that is only there to be clickable: the run-history status cell, where every row opens a
    details popup. Deliberately not .btn-link, which is accent coloured — applied to every row that
@@ -484,6 +508,12 @@ select.select {
 .badge-primary { background: #f4f3f0; border-color: #e2dfd8; color: #75726a; }
 .badge-bulk-load { background: #f4f0f8; border-color: #e0d6ec; color: #665081; }
 .badge-reconcile { background: #fbf0ef; border-color: #ecd6d3; color: #8a5650; }
+/* A driver's capabilities (Admin Drivers screen), grouped by what they belong to — readers pick up
+   the same blue used for a source connection elsewhere in the app, writers the same brown used for a
+   target, staging the neutral badge-primary palette since it belongs to neither side. */
+.badge-reader { background: #eaf2f7; border-color: #cddce6; color: #2a6f97; }
+.badge-staging { background: #f4f3f0; border-color: #e2dfd8; color: #75726a; }
+.badge-writer { background: #f7f1ea; border-color: #e6d7c6; color: #8a5a2b; }
 
 .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; display: inline-block; }
 .dot-ok { background: var(--ok); }
