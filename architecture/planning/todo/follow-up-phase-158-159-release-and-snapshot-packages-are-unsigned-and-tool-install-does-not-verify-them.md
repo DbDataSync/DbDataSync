@@ -132,6 +132,31 @@ until there is a verifier.
   repository, not a guess.
 - **Is a Sigstore verifier worth building** (option C as the tool's own gate), given `gh` cannot be assumed on servers?
 
+## Addendum (2026-09-21, phase 163): the container image is a third artifact with the same question
+
+Phase 163 publishes `ghcr.io/dbdatasync/dbdatasync` (amd64 and arm64). It is not signed either, and unlike a NuGet package there is
+no equivalent of "the client would not check anyway" to fall back on for the *pull* side: `docker pull` verifies digests, but not who
+produced them.
+
+What is and is not there today:
+
+- **Provenance attestations are on** (buildx's default when pushing by digest), so each per-architecture image carries an in-toto/SLSA
+  attestation manifest saying which workflow built it. That is a claim stored beside the image, not a signature anyone checks by
+  default; `imagetools inspect` shows the `unknown/unknown` entries that hold it.
+- **No image signature.** Nothing is `cosign`-signed and no GitHub artifact attestation is created for the image digest.
+- **The trust root is the same as for the snapshots**: TLS to the registry and who can push to the repository. A tag is mutable — `latest`
+  moves by design, and even a version tag can be replaced (`overwrite=true` on `publish-image.yml`, which exists for retries).
+
+This belongs in the same decision as options A–D above rather than beside it: if the release pipeline gains a signing identity for the
+package (option B) or GitHub attestations (option C), the image should be signed with the same identity in the same job, using the
+image **digest** the `merge` job already has. GitHub artifact attestations (`actions/attest-build-provenance`, `subject-name` = the image
+and `push-to-registry`) would give the image a verifiable claim with no key to manage, matching option C. Not done, and not asked for yet
+— recorded so the image is not forgotten when the package's answer is chosen.
+
+Open: does anyone verify an image's attestation before running it? `docker pull` does not, and `gh attestation verify oci://…` needs `gh`
+on the pulling machine; a Kubernetes admission policy (or `cosign verify`) would be the enforcement point, and is the operator's, not this
+project's.
+
 ## Sources
 
 NuGet: *Manage package trust boundaries* and *Signed Packages* (learn.microsoft.com/nuget); dotnet/sdk #37469; GitHub
