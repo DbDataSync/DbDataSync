@@ -24,10 +24,13 @@ The repo is **`DbDataSync/DbDataSync`**.
 
 ## Running a release
 
-The workflow always builds whatever is on `origin/main` — not your working tree, not a local commit
-that hasn't been pushed. Before dispatching, make sure the repo you're releasing from is clean and
-pushed: no uncommitted changes, and local `main` exactly matches `origin/main`. `scripts/release.sh`
-checks this itself and refuses to run otherwise, so the common case is just:
+The workflow always builds whatever is on `origin/test` — not your working tree, not a local commit
+that hasn't been pushed, and not `main` (`release.yml` refuses outright unless dispatched against
+`test` — see `architecture/branching-and-releases.md`; there is no separate `test` → `main` PR or push,
+cutting the release *is* what fast-forwards `main`). Before dispatching, make sure the repo you're
+releasing from is clean and pushed to `dev`, and that `dev` has already been promoted to `test` (only
+happens automatically after a green CI run — check `git log --oneline -1 origin/test`).
+`scripts/release.sh` checks this itself and refuses to run otherwise, so the common case is just:
 
 ```sh
 .claude/skills/nuget-release/scripts/release.sh          # a real, stable release
@@ -47,8 +50,8 @@ confirm with the user that releasing an older commit is actually what they want,
 If the script isn't available for some other reason:
 
 ```sh
-gh workflow run release.yml --repo DbDataSync/DbDataSync -f beta=false   # or beta=true
-gh run list --repo DbDataSync/DbDataSync --workflow Release --limit 3    # find the new run's id
+gh workflow run release.yml --repo DbDataSync/DbDataSync --ref test -f beta=false   # or beta=true
+gh run list --repo DbDataSync/DbDataSync --workflow Release --limit 3               # find the new run's id
 gh run watch <id> --repo DbDataSync/DbDataSync --exit-status
 ```
 
