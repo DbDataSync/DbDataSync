@@ -7,6 +7,17 @@ IDs" section, which this phase writes.
 in one pass because both trace back to the same root cause: every concurrent session/worktree sharing one
 flat namespace (one branch, one incrementing integer) with no structural collision protection.
 
+**Superseded, 2026-09-21 — read `architecture/branching-and-releases.md` for the current mechanism, not
+this doc's own description below.** Every "a PR" reference to `test` → `main` in this doc (the
+branching section, the retrospective, and the open questions) describes this phase's *original* design,
+which was tried and then deliberately replaced: **there is no `test` → `main` PR.** Cutting a release
+(`gh workflow run release.yml --ref test -f beta=false`) *is* the deliberate decision — `release.yml`
+fast-forwards `main` to the released commit as its own last step. See that doc's own "Why this replaced
+a `test` → `main` PR" section for why (a PR merge cannot fast-forward, so it minted an empty merge
+commit every time, and let `main` sit ahead of the last real release — exactly the ambiguity these
+branches exist to remove). This doc is left as-is below rather than edited in place, per a "done" phase
+doc's own rule — but nobody should act on its "a PR" text going forward.
+
 ## Why this phase exists
 
 This session's own history is the evidence: `phase-150` and `phase-154` were each independently claimed
