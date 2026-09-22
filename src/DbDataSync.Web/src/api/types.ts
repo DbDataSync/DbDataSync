@@ -808,6 +808,13 @@ export interface DriverKindsSummary {
   writers: string[]
 }
 
+/** The raw `driver.yaml` text — `GET`/`POST`/`PUT /api/drivers(/{id}/yaml)`, the driver-authoring
+ * form's own load/create/save. Raw, not a structured re-derivation, so a hand-authored field the
+ * form's structured controls don't model round-trips unchanged. */
+export interface DriverYaml {
+  yaml: string
+}
+
 /** One entry from `GET /api/drivers` — every driver currently registered: built-in, added from a
  * `driver.yaml` descriptor (phase 109d), or a compiled plugin (phase 109e). */
 export interface DriverSummary {

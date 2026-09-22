@@ -20,6 +20,7 @@ import type {
   DriverCapabilities,
   DriverKindsSummary,
   DriverSummary,
+  DriverYaml,
   FileSummary,
   FromCatalogResult,
   KnownDriverSummary,
@@ -497,6 +498,16 @@ export const api = {
      * hardcoded here, since `GenericDriverBase`'s own reader/staging/writer construction is the real
      * source of truth for which Kind strings are valid. */
     knownKinds: () => request<DriverKindsSummary>('/api/known-driver-kinds'),
+    /** The driver-authoring form's own load-for-editing — the raw file. */
+    getYaml: (id: string) => request<DriverYaml>(`/api/drivers/${encodeURIComponent(id)}/yaml`),
+    /** Create: validated entirely server-side before anything is written — a 400 carries the real
+     * parse/build error, a 409 means the id already exists. */
+    create: (yaml: string) =>
+      request<DriverYaml>('/api/drivers', { method: 'POST', body: JSON.stringify({ yaml }) }),
+    /** Save an existing driver's yaml. The yaml's own `id:` must still match `id` — renaming isn't
+     * supported here (400 otherwise). */
+    updateYaml: (id: string, yaml: string) =>
+      request<DriverYaml>(`/api/drivers/${encodeURIComponent(id)}/yaml`, { method: 'PUT', body: JSON.stringify({ yaml }) }),
   },
   preview: {
     get: (replicationName: string, mappingName: string) =>

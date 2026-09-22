@@ -3,7 +3,11 @@ import type { ScriptDiagnostic } from '../api/types'
 
 export interface CodeEditorProps {
   value: string
-  language: 'csharp' | 'sql'
+  // 'yaml' added for the driver-authoring form's own raw dialect/typeMap editor — the tokenizer was
+  // already registered (monacoSetup.ts, phase 35) for read-only config diffs; this is its first
+  // *editable* use. No live diagnostics for it the way script editing gets them (no compile endpoint
+  // to check a driver.yaml against as you type) — errors surface on Save instead.
+  language: 'csharp' | 'sql' | 'yaml'
   onChange: (value: string) => void
   /** Server-side compile or validation errors, shown as markers on the offending token. */
   diagnostics?: ScriptDiagnostic[]

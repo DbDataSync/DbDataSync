@@ -1,3 +1,4 @@
+using System.Reflection;
 using DbDataSync.Api.Auth;
 using DbDataSync.Api.Configuration;
 using DbDataSync.Api.Services;
@@ -69,6 +70,117 @@ public sealed class DriversController(
         GenericDriverBase<GenericDriverSpec>.SupportedReaderKinds,
         GenericDriverBase<GenericDriverSpec>.SupportedStagingKinds,
         GenericDriverBase<GenericDriverSpec>.SupportedWriterKinds));
+
+    /// <summary>The driver-authoring form's own "load for editing" — the raw file, not a structured
+    /// re-derivation of it, so a hand-authored field this UI's structured controls don't model round-trips
+    /// unchanged (see <c>driver-yaml-authoring-ui.md</c>'s own "Edit" section).</summary>
+    [Authorize(Policies.Admin)]
+    [HttpGet("{id}/yaml")]
+    public ActionResult<DriverYamlResponse> GetYaml(string id)
+    {
+        var yamlPath = Path.Combine(apiOptions.RepoRoot, "drivers", id, DriverLoader.DescriptorFileName);
+        return System.IO.File.Exists(yamlPath)
+            ? Ok(new DriverYamlResponse(System.IO.File.ReadAllText(yamlPath)))
+            : NotFound(new { error = $"No driver.yaml exists for '{id}'." });
+    }
+
+    /// <summary>
+    /// The driver-authoring form's own "create": validates entirely in memory before ever touching
+    /// disk — parse, then the identical <see cref="DriverDescriptorReader.BuildDriver"/> round-trip
+    /// <see cref="InstallFromCatalog"/> uses, but *before* writing rather than after, so a failure never
+    /// leaves a half-written driver directory behind. <c>409</c> if the id already exists (a
+    /// <c>driver.yaml</c> or a compiled <c>driver.json</c> either one — both live at the same
+    /// <c>drivers/&lt;id&gt;/</c> path).
+    /// </summary>
+    [Authorize(Policies.Admin)]
+    [HttpPost]
+    public async Task<ActionResult<DriverYamlResponse>> Create([FromBody] DriverYamlRequest body)
+    {
+        var (driver, descriptor, error) = TryBuild(body.Yaml);
+        if (error is not null)
+            return BadRequest(new { error });
+
+        var driverDir = Path.Combine(apiOptions.RepoRoot, "drivers", descriptor!.Id);
+        if (Directory.Exists(driverDir))
+            return Conflict(new { error = $"A driver named '{descriptor.Id}' already exists." });
+
+        Directory.CreateDirectory(driverDir);
+        await System.IO.File.WriteAllTextAsync(Path.Combine(driverDir, DriverLoader.DescriptorFileName), body.Yaml);
+
+        driverRegistry.Register(driver!);
+        restartRequired.Touch();
+        return Ok(new DriverYamlResponse(body.Yaml));
+    }
+
+    /// <summary>The driver-authoring form's own "save" for an existing driver — same validate-before-write
+    /// discipline as <see cref="Create"/>. Renaming isn't supported here: the yaml's own <c>id:</c> must
+    /// still match <paramref name="id"/>, refused (400) otherwise rather than silently creating a second
+    /// directory or orphaning the first.</summary>
+    [Authorize(Policies.Admin)]
+    [HttpPut("{id}/yaml")]
+    public async Task<ActionResult<DriverYamlResponse>> UpdateYaml(string id, [FromBody] DriverYamlRequest body)
+    {
+        var driverDir = Path.Combine(apiOptions.RepoRoot, "drivers", id);
+        if (!Directory.Exists(driverDir))
+            return NotFound(new { error = $"No driver named '{id}' exists." });
+
+        var (driver, descriptor, error) = TryBuild(body.Yaml);
+        if (error is not null)
+            return BadRequest(new { error });
+
+        if (descriptor!.Id != id)
+        {
+            return BadRequest(new
+            {
+                error = $"The yaml's own id ('{descriptor.Id}') must match '{id}' — renaming isn't " +
+                         "supported here; create a new driver instead.",
+            });
+        }
+
+        await System.IO.File.WriteAllTextAsync(Path.Combine(driverDir, DriverLoader.DescriptorFileName), body.Yaml);
+
+        driverRegistry.Register(driver!);
+        restartRequired.Touch();
+        return Ok(new DriverYamlResponse(body.Yaml));
+    }
+
+    /// <summary>
+    /// Parse + build, entirely in memory — no disk access, so <see cref="Create"/>/<see cref="UpdateYaml"/>
+    /// can validate before writing anything. <see cref="TargetInvocationException"/> is in the catch list
+    /// deliberately, not an oversight: <see cref="DriverDescriptorReader.BuildDriver"/>'s JDBC path
+    /// dispatches through <see cref="MethodInfo.Invoke"/>, which wraps whatever
+    /// <c>JdbcGenericDriver.FromDescriptor</c> itself throws (its own <see cref="NotSupportedException"/>
+    /// for a missing <c>jdbc:</c> block, say) — <see cref="InstallFromCatalog"/> never hit this because it
+    /// calls <see cref="DriverDescriptorReader.ToSpec"/> directly, bypassing <c>BuildDriver</c>'s
+    /// reflection dispatch entirely; this is the first caller to actually exercise that path with
+    /// operator-supplied YAML, where a failure needs a clean message, not a reflection wrapper's own.
+    /// </summary>
+    private (IDriver? Driver, DriverDescriptorYaml? Descriptor, string? Error) TryBuild(string? yaml)
+    {
+        if (string.IsNullOrWhiteSpace(yaml))
+            return (null, null, "yaml is required.");
+
+        DriverDescriptorYaml descriptor;
+        try
+        {
+            descriptor = DriverDescriptorReader.Deserialize(yaml);
+        }
+        catch (YamlDotNet.Core.YamlException ex)
+        {
+            return (null, null, $"Invalid YAML: {ex.Message}");
+        }
+
+        try
+        {
+            var driver = DriverDescriptorReader.BuildDriver(descriptor, libraryRegistry, apiOptions.RepoRoot);
+            return (driver, descriptor, null);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or TargetInvocationException)
+        {
+            var real = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
+            return (null, descriptor, InstallErrorFormatting.TailOf(real.Message));
+        }
+    }
 
     /// <summary>
     /// The one-click "add" from a <see cref="KnownDrivers"/> catalog entry (phase 120): installs the
@@ -179,3 +291,7 @@ public sealed record FromCatalogResult(string Id, string Library);
 /// actually name — see <see cref="DriversController.KnownKinds"/>.</summary>
 public sealed record DriverKindsSummary(
     IReadOnlyList<string> Readers, IReadOnlyList<string> Staging, IReadOnlyList<string> Writers);
+
+public sealed record DriverYamlRequest(string Yaml);
+
+public sealed record DriverYamlResponse(string Yaml);

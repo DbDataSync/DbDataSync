@@ -1,0 +1,267 @@
+import { useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { AppShell } from '../components/AppShell'
+import { CodeEditor } from '../components/CodeEditor'
+import { DriversTabs } from '../components/DriversTabs'
+import { ErrorBanner } from '../components/ErrorBanner'
+import { Field } from '../components/Field'
+import { FileUploadPanel } from '../components/FileUploadPanel'
+import { LibraryFindPanel } from '../components/LibraryFindPanel'
+import {
+  useCreateDriver, useDriverYaml, useFiles, useKnownDriverKinds, useLibraries, useUpdateDriverYaml,
+} from '../api/hooks'
+import { assembleDriverYaml, parseDriverYaml, RAW_BODY_SKELETON, type Base } from './driverYamlAssembly'
+
+interface FormState {
+  id: string
+  displayName: string
+  base: Base
+  library: string
+  driverClass: string
+  driverJarPaths: string[]
+  readers: string[]
+  staging: string[]
+  writers: string[]
+  rawBody: string
+}
+
+const EMPTY: FormState = {
+  id: '', displayName: '', base: 'adonet', library: '', driverClass: '', driverJarPaths: [],
+  readers: [], staging: [], writers: [], rawBody: RAW_BODY_SKELETON,
+}
+
+/**
+ * `driver.yaml` authoring — `driver-yaml-authoring-ui.md`, built. Structured controls for id/displayName/
+ * base/capabilities/jar-or-library, one raw YAML editor for dialect+typeMap+metadataQueries (see that
+ * doc's own "why one block, not three structured pieces" reasoning — splitting metadata-queries out
+ * needs parsing the raw dialect text to know whether `catalog: query` is already set, real complexity a
+ * v1 doesn't need). One route per action (`/drivers/new`, `/drivers/:id/edit`) rendering this same
+ * component, matching `ScriptEditPage`'s own new-vs-existing shape — `useParams` decides which.
+ */
+export function DriverEditPage() {
+  const { id: existingId } = useParams<{ id: string }>()
+  const isNew = !existingId
+  const navigate = useNavigate()
+
+  const { data: loaded } = useDriverYaml(existingId)
+  const { data: knownKinds } = useKnownDriverKinds()
+  const { data: libraries } = useLibraries()
+  const { data: files } = useFiles()
+  const create = useCreateDriver()
+  const update = useUpdateDriverYaml()
+
+  const [form, setForm] = useState<FormState>(EMPTY)
+  const [saveError, setSaveError] = useState<unknown>(null)
+  // Which driver's yaml the form was last populated from — React's own "adjust state during render"
+  // pattern (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
+  // rather than an effect: setState here runs before the browser paints, avoiding the extra render an
+  // effect would cost, and — the actual reason it has to be this shape, not just style — a re-fetch of
+  // the *same* driver (e.g. `useLibraries`' own invalidation after installing one from this same form)
+  // must not clobber an in-progress edit the way re-running on every `loaded` identity change would.
+  const [populatedFor, setPopulatedFor] = useState<string | undefined>(undefined)
+
+  if (loaded && populatedFor !== existingId) {
+    setForm(parseDriverYaml(loaded.yaml))
+    setPopulatedFor(existingId)
+  }
+
+  const saving = create.isPending || update.isPending
+
+  const save = async () => {
+    setSaveError(null)
+    const yaml = assembleDriverYaml(form)
+    try {
+      if (isNew) await create.mutateAsync(yaml)
+      else await update.mutateAsync({ id: existingId, yaml })
+      navigate('/drivers')
+    } catch (err) {
+      setSaveError(err)
+    }
+  }
+
+  const toggle = (list: string[], value: string): string[] =>
+    list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
+
+  const installedLibraryIds = new Set((libraries ?? []).map((l) => l.id))
+
+  return (
+    <AppShell crumbs={[{ label: 'Drivers' }]} tabs={<DriversTabs />}>
+      <div className="pane">
+        <div className="page-head">
+          <h1 className="page-title">{isNew ? 'New driver' : `Edit ${existingId}`}</h1>
+          <span className="page-note">
+            A <code>driver.yaml</code> descriptor — the same file <code>dbdatasync config driver install</code>
+            writes, editable here instead.
+          </span>
+        </div>
+
+        <ErrorBanner error={saveError} />
+
+        <div className="card" data-testid="driver-edit-form">
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div className="row" style={{ gap: 12 }}>
+              <Field label="Id">
+                <input
+                  type="text"
+                  className="input"
+                  value={form.id}
+                  disabled={!isNew}
+                  onChange={(e) => setForm({ ...form, id: e.target.value })}
+                  data-testid="driver-edit-id"
+                />
+              </Field>
+              <Field label="Display name">
+                <input
+                  type="text"
+                  className="input"
+                  value={form.displayName}
+                  onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+                  data-testid="driver-edit-display-name"
+                />
+              </Field>
+            </div>
+
+            <Field label="Base">
+              <div className="row" style={{ gap: 16 }}>
+                <label className="row" style={{ gap: 6 }}>
+                  <input
+                    type="radio"
+                    checked={form.base === 'adonet'}
+                    onChange={() => setForm({ ...form, base: 'adonet' })}
+                    data-testid="driver-edit-base-adonet"
+                  />
+                  ADO.NET
+                </label>
+                <label className="row" style={{ gap: 6 }}>
+                  <input
+                    type="radio"
+                    checked={form.base === 'jdbc'}
+                    onChange={() => setForm({ ...form, base: 'jdbc' })}
+                    data-testid="driver-edit-base-jdbc"
+                  />
+                  JDBC
+                </label>
+              </div>
+            </Field>
+
+            {form.base === 'adonet' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Field label="Library">
+                  <select
+                    className="input"
+                    value={form.library}
+                    onChange={(e) => setForm({ ...form, library: e.target.value })}
+                    data-testid="driver-edit-library-select"
+                  >
+                    <option value="">Choose an installed library…</option>
+                    {(libraries ?? []).map((l) => <option key={l.id} value={l.id}>{l.id}</option>)}
+                  </select>
+                </Field>
+                <LibraryFindPanel
+                  installedIds={installedLibraryIds}
+                  onInstalled={(installedId) => setForm({ ...form, library: installedId })}
+                />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Field label="Driver class">
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="org.postgresql.Driver"
+                    value={form.driverClass}
+                    onChange={(e) => setForm({ ...form, driverClass: e.target.value })}
+                    data-testid="driver-edit-driver-class"
+                  />
+                </Field>
+                <Field label="Jar(s)">
+                  <div className="card flush" data-testid="driver-edit-jar-picker">
+                    {(files ?? []).length === 0 && <div className="empty">No files uploaded yet.</div>}
+                    {(files ?? []).map((f) => (
+                      <label key={f.name} className="row" style={{ gap: 8, padding: '4px 10px' }}>
+                        <input
+                          type="checkbox"
+                          checked={form.driverJarPaths.includes(f.name)}
+                          onChange={() => setForm({ ...form, driverJarPaths: toggle(form.driverJarPaths, f.name) })}
+                          data-testid={`driver-edit-jar-${f.name}`}
+                        />
+                        {f.name}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+                <FileUploadPanel
+                  onUploaded={(names) => setForm({ ...form, driverJarPaths: [...form.driverJarPaths, ...names] })}
+                />
+              </div>
+            )}
+
+            <Field label="Pipeline phases">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <KindGroup
+                  label="Readers" options={knownKinds?.readers ?? []} selected={form.readers}
+                  onToggle={(k) => setForm({ ...form, readers: toggle(form.readers, k) })}
+                />
+                <KindGroup
+                  label="Staging" options={knownKinds?.staging ?? []} selected={form.staging}
+                  onToggle={(k) => setForm({ ...form, staging: toggle(form.staging, k) })}
+                />
+                <KindGroup
+                  label="Writers" options={knownKinds?.writers ?? []} selected={form.writers}
+                  onToggle={(k) => setForm({ ...form, writers: toggle(form.writers, k) })}
+                />
+              </div>
+            </Field>
+
+            <Field label="Dialect, type map, and metadata queries (raw YAML)">
+              <CodeEditor
+                language="yaml"
+                value={form.rawBody}
+                onChange={(rawBody) => setForm({ ...form, rawBody })}
+                minLines={8}
+                testId="driver-edit-raw-body"
+              />
+            </Field>
+
+            <div className="row" style={{ gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={saving || !form.id || !form.displayName}
+                onClick={() => void save()}
+                data-testid="driver-edit-save"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </AppShell>
+  )
+}
+
+function KindGroup({ label, options, selected, onToggle }: {
+  label: string
+  options: string[]
+  selected: string[]
+  onToggle: (kind: string) => void
+}) {
+  return (
+    <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+      <span className="dim" style={{ minWidth: 70 }}>{label}:</span>
+      {options.length === 0 && <span className="faint">none</span>}
+      {options.map((kind) => (
+        <label key={kind} className="row" style={{ gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={selected.includes(kind)}
+            onChange={() => onToggle(kind)}
+            data-testid={`driver-edit-kind-${kind}`}
+          />
+          {kind}
+        </label>
+      ))}
+    </div>
+  )
+}

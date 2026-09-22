@@ -15,6 +15,7 @@ const keys = {
   docPage: (slug: string) => ['docs', slug] as const,
   drivers: ['drivers'] as const,
   knownDriverKinds: ['known-driver-kinds'] as const,
+  driverYaml: (id: string) => ['drivers', id, 'yaml'] as const,
   libraries: ['libraries'] as const,
   files: ['files'] as const,
   knownLibraries: ['known-libraries'] as const,
@@ -143,6 +144,40 @@ export function useDrivers() {
  * derived from what this build of the server can construct), so no polling. */
 export function useKnownDriverKinds() {
   return useQuery({ queryKey: keys.knownDriverKinds, queryFn: api.drivers.knownKinds })
+}
+
+/** The driver-authoring form's own "load for editing" — disabled until an id is actually given, so the
+ * "new driver" case (no id yet) doesn't fire a request for `/api/drivers/undefined/yaml`. */
+export function useDriverYaml(id: string | undefined) {
+  return useQuery({
+    queryKey: keys.driverYaml(id ?? ''), queryFn: () => api.drivers.getYaml(id!), enabled: !!id,
+  })
+}
+
+/** Create — invalidates the drivers list and restart-required, the same pair every other
+ * drivers/libraries mutation already invalidates. */
+export function useCreateDriver() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (yaml: string) => api.drivers.create(yaml),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.drivers })
+      queryClient.invalidateQueries({ queryKey: keys.restartRequired })
+    },
+  })
+}
+
+/** Save an existing driver's yaml. */
+export function useUpdateDriverYaml() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, yaml }: { id: string; yaml: string }) => api.drivers.updateYaml(id, yaml),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: keys.drivers })
+      queryClient.invalidateQueries({ queryKey: keys.driverYaml(id) })
+      queryClient.invalidateQueries({ queryKey: keys.restartRequired })
+    },
+  })
 }
 
 /** Every installed library (phase 118's admin Libraries screen). Same call `useDrivers` already makes

@@ -15,10 +15,17 @@ type Selection = { id: string; version: string; versionLocked: boolean; factoryT
  * <para>
  * Extracted from `LibrariesPage` (previously page-local) so the driver-authoring form's own
  * connection-library picker can embed the identical flow instead of a second copy — `LibrariesPage`
- * itself is unchanged in behaviour, just importing this rather than defining it.
+ * itself is unchanged in behaviour, just importing this rather than defining it. `onInstalled` is that
+ * embedding's own hook: `LibrariesPage` doesn't need it (the installed-libraries table already re-fetches
+ * off the same query invalidation `useInstallLibrary` triggers), but a picker embedded in another form
+ * needs to know which id just became available to select, the same shape `FileUploadPanel`'s own
+ * `onUploaded` callback already has.
  * </para>
  */
-export function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
+export function LibraryFindPanel({ installedIds, onInstalled }: {
+  installedIds: Set<string>
+  onInstalled?: (id: string) => void
+}) {
   const { data: knownLibraries } = useKnownLibraries()
   const search = useSearchLibraries()
   const install = useInstallLibrary()
@@ -67,6 +74,7 @@ export function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }
       })
       setInstalledOk(true)
       setInstalledFactoryType(manifest.factoryType)
+      onInstalled?.(manifest.id)
     } catch (err) {
       setInstallError(err)
     }

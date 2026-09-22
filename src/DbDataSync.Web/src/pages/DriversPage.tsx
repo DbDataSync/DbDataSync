@@ -8,7 +8,7 @@ import { useIsAdmin } from '../components/useIsAdmin'
 import { useDrivers, useInstallDriverFromCatalog, useKnownDrivers, useRestartRequired } from '../api/hooks'
 import type { DriverCapabilitySummary, DriverSummary, KnownDriverSummary } from '../api/types'
 
-const COLUMNS = '1.1fr 1.6fr 0.9fr 1.1fr 1.8fr'
+const COLUMNS = '1.1fr 1.6fr 0.9fr 1.1fr 1.6fr 0.6fr'
 
 const SOURCE_LABEL: Record<DriverSummary['source'], string> = {
   builtin: 'Built-in',
@@ -65,6 +65,11 @@ export function DriversPage() {
             What can replicate today — the three built-in engines, plus any descriptor or compiled
             plugin installed on this host.
           </span>
+          <div className="right">
+            <Link to="/drivers/new" className="btn btn-primary" data-testid="new-driver-button">
+              New driver
+            </Link>
+          </div>
         </div>
 
         <RestartRequiredBanner show={!!restartRequired?.required} />
@@ -72,7 +77,7 @@ export function DriversPage() {
 
         <div className="card flush" data-testid="admin-drivers-table">
           <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
-            <span>Id</span><span>Display name</span><span>Source</span><span>Library</span><span>Capabilities</span>
+            <span>Id</span><span>Display name</span><span>Source</span><span>Library</span><span>Capabilities</span><span></span>
           </div>
           {isLoading && <div className="empty">Loading…</div>}
           {(drivers ?? []).map((driver) => <DriverRow key={driver.id} driver={driver} />)}
@@ -119,6 +124,16 @@ function DriverRow({ driver }: { driver: DriverSummary }) {
       <span className="dim" data-testid={`admin-driver-source-${driver.id}`}>{SOURCE_LABEL[driver.source]}</span>
       <span className="mono">{driver.library ?? <span className="faint">—</span>}</span>
       <CapabilityPills capabilities={driver.capabilities} testId={`admin-driver-capabilities-${driver.id}`} />
+      <span>
+        {/* Only a descriptor driver has a driver.yaml this form can load — a built-in has no file at
+            all, a compiled plugin's manifest is a different shape (driver.json, a real assembly) this
+            YAML-authoring form was never meant to edit. */}
+        {driver.source === 'descriptor' && (
+          <Link to={`/drivers/${encodeURIComponent(driver.id)}/edit`} className="btn-link quiet" data-testid={`admin-driver-edit-${driver.id}`}>
+            Edit
+          </Link>
+        )}
+      </span>
     </div>
   )
 }

@@ -10,6 +10,7 @@ import { ScriptEditPage } from './pages/ScriptEditPage'
 import { ScriptsPage } from './pages/ScriptsPage'
 import { AdminCertificatePage } from './pages/AdminCertificatePage'
 import { AdminConfigPage } from './pages/AdminConfigPage'
+import { DriverEditPage } from './pages/DriverEditPage'
 import { DriversPage } from './pages/DriversPage'
 import { FilesPage } from './pages/FilesPage'
 import { LibrariesPage } from './pages/LibrariesPage'
@@ -173,8 +174,10 @@ export default function App() {
           list itself), not a redirect target the way bare /admin is, since there's no reason to make
           the landing tab indirect when it already is one. */}
       <Route path="/drivers" element={<DriversPage />} />
+      <Route path="/drivers/new" element={<DriverEditPage />} />
       <Route path="/drivers/libraries" element={<LibrariesPage />} />
       <Route path="/drivers/files" element={<FilesPage />} />
+      <Route path="/drivers/:id/edit" element={<DriverEditPage />} />
 
       {/* A mistyped or stale URL lands somewhere real rather than on an empty frame with chrome. */}
       <Route path="*" element={<Navigate to="/replications" replace />} />
