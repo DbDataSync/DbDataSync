@@ -1,5 +1,6 @@
 using System.Data.Common;
 using DbDataSync.Core.Sql;
+using DbDataSync.Drivers.Abstractions;
 
 namespace DbDataSync.Drivers.Generic;
 
@@ -29,11 +30,10 @@ public sealed record GenericConnectionStringKeys(
 /// re-derived per compiled driver project.
 /// </summary>
 /// <param name="Id">The driver id this spec stands up — <see cref="GenericDriver.DriverType"/>.</param>
-/// <param name="Catalog"><see cref="InformationSchemaQueries"/> specifically, not the narrower
-/// <see cref="ITableCatalog"/>: <see cref="IDriver.ListTablesAsync"/> and
-/// <see cref="IDriver.ListDatabasesAsync"/> need more than that interface declares, and
-/// <c>information_schema</c> is the only catalog strategy this phase supports. A different strategy
-/// (Oracle's <c>ALL_*</c> views, ODBC's <c>GetSchema</c>) is a later phase's problem.</param>
+/// <param name="Catalog"><see cref="IDescriptorCatalog"/> — phase 167V widened this from the concrete
+/// <see cref="InformationSchemaQueries"/> so a descriptor can use a different strategy:
+/// <see cref="InformationSchemaQueries"/> (most engines), or <see cref="QueryCatalog"/> (an operator's
+/// own SQL, for a vendor whose catalog doesn't fit either — <c>driver.yaml</c>'s <c>catalog: query</c>).</param>
 /// <param name="Readers">Which of <see cref="GenericDriverKinds"/>'s reader Kinds to register:
 /// <see cref="GenericDriverKinds.Watermark"/>, <see cref="GenericDriverKinds.BatchReload"/>,
 /// <see cref="GenericDriverKinds.TriggerAudit"/>.</param>
@@ -58,7 +58,7 @@ public sealed record GenericDriverSpec(
     string Id,
     SqlDialect Dialect,
     DbProviderFactory ProviderFactory,
-    InformationSchemaQueries Catalog,
+    IDescriptorCatalog Catalog,
     IReadOnlyList<string> Readers,
     IReadOnlyList<string> Staging,
     IReadOnlyList<string> Writers,

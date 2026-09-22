@@ -18,3 +18,17 @@ public interface ITableCatalog
     Task<IReadOnlyList<ColumnMetadata>> GetColumnsAsync(
         DbConnection connection, string schema, string table, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// <see cref="ITableCatalog"/>, plus listing every table — what <see cref="GenericDriverSpec.Catalog"/>
+/// needs (<see cref="GenericDriver.ListTablesAsync"/> calls straight through), which bare
+/// <see cref="ITableCatalog"/> deliberately does not declare: not every catalog can answer it
+/// (<c>MsSqlCatalog</c> has no equivalent, and gets its driver's table list a different way), so it
+/// stays a separate, narrower opt-in rather than widening what every <see cref="ITableCatalog"/>
+/// implementer has to provide. <see cref="InformationSchemaQueries"/> and <see cref="QueryCatalog"/> —
+/// the two catalog strategies a <c>driver.yaml</c> descriptor can choose — both implement it.
+/// </summary>
+public interface IDescriptorCatalog : ITableCatalog
+{
+    Task<IReadOnlyList<TableMetadata>> ListTablesAsync(DbConnection connection, CancellationToken cancellationToken);
+}

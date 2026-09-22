@@ -1,3 +1,4 @@
+using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Generic;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -21,14 +22,21 @@ public static class DriverDescriptorReader
     /// <summary>Everything a <see cref="GenericDriver"/> needs except the library's factory itself.</summary>
     public static GenericDriverSpec ToSpec(DriverDescriptorYaml descriptor, System.Data.Common.DbProviderFactory factory)
     {
-        if (descriptor.Dialect.Catalog != "informationSchema")
-        {
-            throw new NotSupportedException(
-                $"Driver '{descriptor.Id}': catalog strategy '{descriptor.Dialect.Catalog}' is not " +
-                "supported — only 'informationSchema' is, for now.");
-        }
-
         var dialect = new DescriptorDialect(descriptor.Dialect, descriptor.TypeMap);
+
+        IDescriptorCatalog catalog = descriptor.Dialect.Catalog switch
+        {
+            "informationSchema" => new InformationSchemaQueries(dialect),
+            "query" => new QueryCatalog(
+                (descriptor.MetadataQueries ?? throw new NotSupportedException(
+                    $"Driver '{descriptor.Id}': catalog strategy 'query' requires a metadataQueries " +
+                    "block (tableQuery, columnQuery).")).TableQuery,
+                descriptor.MetadataQueries.ColumnQuery),
+            var other => throw new NotSupportedException(
+                $"Driver '{descriptor.Id}': catalog strategy '{other}' is not supported — " +
+                "'informationSchema' and 'query' are."),
+        };
+
         var keys = descriptor.Dialect.ConnectionStringKeys is { } k
             ? new GenericConnectionStringKeys(k.Host, k.Port, k.Database, k.Username, k.Password, k.ConnectTimeout, k.IntegratedSecurity)
             : new GenericConnectionStringKeys();
@@ -37,7 +45,7 @@ public static class DriverDescriptorReader
             descriptor.Id,
             dialect,
             factory,
-            new InformationSchemaQueries(dialect),
+            catalog,
             Readers: descriptor.Capabilities.Readers,
             Staging: descriptor.Capabilities.Staging,
             Writers: descriptor.Capabilities.Writers,

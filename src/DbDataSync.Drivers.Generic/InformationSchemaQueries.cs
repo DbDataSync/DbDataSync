@@ -19,7 +19,7 @@ namespace DbDataSync.Drivers.Generic;
 /// override with its own catalog query rather than let a wrong answer through.
 /// </para>
 /// </summary>
-public sealed class InformationSchemaQueries(SqlDialect dialect) : ITableCatalog
+public sealed class InformationSchemaQueries(SqlDialect dialect) : IDescriptorCatalog
 {
     public async Task<IReadOnlyList<TableMetadata>> ListTablesAsync(DbConnection connection, CancellationToken cancellationToken)
     {

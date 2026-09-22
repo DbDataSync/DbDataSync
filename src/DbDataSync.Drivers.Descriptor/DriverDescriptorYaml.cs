@@ -24,11 +24,17 @@ public sealed class DriverDescriptorYaml
     public Dictionary<string, TypeMapEntryYaml> TypeMap { get; set; } = new();
 
     public required DescriptorCapabilitiesYaml Capabilities { get; set; }
+
+    /// <summary>Required when <see cref="DescriptorDialectYaml.Catalog"/> is <c>query</c> — phase 167V.
+    /// Ignored otherwise.</summary>
+    public MetadataQueriesYaml? MetadataQueries { get; set; }
 }
 
 /// <param name="QuoteIdentifier">backtick | doubleQuote | bracket</param>
 /// <param name="RowLimit">limitOffset | offsetFetch</param>
-/// <param name="Catalog">informationSchema (the only strategy this phase supports)</param>
+/// <param name="Catalog">informationSchema | query — phase 167V added <c>query</c>, an operator's own
+/// SQL (see <see cref="MetadataQueriesYaml"/>), for a vendor whose catalog fits neither
+/// <c>information_schema</c> nor (for a JDBC-backed engine specifically) <c>DatabaseMetaData</c>.</param>
 /// <param name="DefaultDatabase">What a connection assembled from host/port (no explicit database)
 /// connects to before <c>UseDatabaseAsync</c> switches it, or when the engine doesn't support
 /// switching at all. Not in the plan doc's worked example, which showed no connection assembly at
@@ -66,6 +72,21 @@ public sealed class DescriptorCapabilitiesYaml
     public List<string> Readers { get; set; } = [];
     public List<string> Staging { get; set; } = [];
     public List<string> Writers { get; set; } = [];
+}
+
+/// <summary>
+/// The <c>catalog: query</c> escape hatch's own SQL — phase 167V. <c>{{schema}}</c>/<c>{{table}}</c> in
+/// <see cref="ColumnQuery"/>'s text are substituted with a quoted string literal before execution (a
+/// value being compared, e.g. <c>WHERE table_schema = {{schema}}</c> — not an identifier to quote);
+/// <see cref="TableQuery"/> takes neither (it lists every table, the same shape
+/// <c>InformationSchemaQueries.ListTablesAsync</c> already has). Row shapes — which columns are
+/// required, which are optional and what they default to when missing — are
+/// <c>DbDataSync.Drivers.Generic.QueryTableRow</c>/<c>QueryColumnRow</c>'s own doc comments.
+/// </summary>
+public sealed class MetadataQueriesYaml
+{
+    public required string TableQuery { get; set; }
+    public required string ColumnQuery { get; set; }
 }
 
 /// <summary>

@@ -2,7 +2,7 @@ dialect:
   quoteIdentifier: backtick        # backtick | doubleQuote | bracket
   parameterPrefix: "@"             # "@" -> @p , ":" -> :p , "?" -> positional
   rowLimit: limitOffset            # LIMIT n OFFSET m   (vs. offsetFetch for OFFSET..FETCH)
-  catalog: informationSchema       # informationSchema is the only strategy supported today
+  catalog: informationSchema       # informationSchema | query (query needs a metadataQueries block below)
   supportsChangeDatabase: true     # false -> a mapping naming another database is a config error
   defaultDatabase: ""              # what to connect to before a mapping names one
   # connectionStringKeys:          # uncomment and edit if this library's key names differ
