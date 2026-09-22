@@ -56,6 +56,21 @@ public sealed class DriversController(
     }
 
     /// <summary>
+    /// The driver-authoring UI's own capability checkboxes read this rather than hardcoding a list in
+    /// the SPA — <see cref="GenericDriverBase{TSpec}.SupportedReaderKinds"/>/<c>SupportedStagingKinds</c>/
+    /// <c>SupportedWriterKinds</c>, which structurally cannot list a kind
+    /// <see cref="GenericDriverBase{TSpec}"/>'s own reader/staging/writer construction would then reject
+    /// (both derive from the same factory dictionaries — see that class's own doc comment). Any closed
+    /// generic works here; the values don't depend on which <c>TSpec</c> instantiated them.
+    /// </summary>
+    [Authorize(Policies.Admin)]
+    [HttpGet("/api/known-driver-kinds")]
+    public ActionResult<DriverKindsSummary> KnownKinds() => Ok(new DriverKindsSummary(
+        GenericDriverBase<GenericDriverSpec>.SupportedReaderKinds,
+        GenericDriverBase<GenericDriverSpec>.SupportedStagingKinds,
+        GenericDriverBase<GenericDriverSpec>.SupportedWriterKinds));
+
+    /// <summary>
     /// The one-click "add" from a <see cref="KnownDrivers"/> catalog entry (phase 120): installs the
     /// entry's bound library at <paramref name="body"/>'s version (reusing it if already installed,
     /// same as <c>config driver install</c>'s CLI behaviour), then writes the bundled descriptor with
@@ -159,3 +174,8 @@ public sealed record DriverCapabilitySummary(
 public sealed record InstallFromCatalogRequest(string KnownDriverId, string Version);
 
 public sealed record FromCatalogResult(string Id, string Library);
+
+/// <summary>What a `driver.yaml`'s <c>capabilities.readers</c>/<c>.staging</c>/<c>.writers</c> may
+/// actually name — see <see cref="DriversController.KnownKinds"/>.</summary>
+public sealed record DriverKindsSummary(
+    IReadOnlyList<string> Readers, IReadOnlyList<string> Staging, IReadOnlyList<string> Writers);

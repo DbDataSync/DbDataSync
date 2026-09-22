@@ -799,6 +799,15 @@ export interface DriverCapabilitySummary {
   writers: string[]
 }
 
+/** `GET /api/known-driver-kinds` — the driver-authoring form's own capability checkboxes source these
+ * rather than hardcoding a list, since `GenericDriverBase`'s own construction is the real source of
+ * truth for which Kind strings are valid. */
+export interface DriverKindsSummary {
+  readers: string[]
+  staging: string[]
+  writers: string[]
+}
+
 /** One entry from `GET /api/drivers` — every driver currently registered: built-in, added from a
  * `driver.yaml` descriptor (phase 109d), or a compiled plugin (phase 109e). */
 export interface DriverSummary {

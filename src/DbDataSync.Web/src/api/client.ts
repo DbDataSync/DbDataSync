@@ -18,6 +18,7 @@ import type {
   ConnectionTestReport,
   CredentialSource,
   DriverCapabilities,
+  DriverKindsSummary,
   DriverSummary,
   FileSummary,
   FromCatalogResult,
@@ -492,6 +493,10 @@ export const api = {
       request<FromCatalogResult>('/api/drivers/from-catalog', {
         method: 'POST', body: JSON.stringify({ knownDriverId, version }),
       }),
+    /** The driver-authoring form's own capability checkboxes — sourced from the server rather than
+     * hardcoded here, since `GenericDriverBase`'s own reader/staging/writer construction is the real
+     * source of truth for which Kind strings are valid. */
+    knownKinds: () => request<DriverKindsSummary>('/api/known-driver-kinds'),
   },
   preview: {
     get: (replicationName: string, mappingName: string) =>

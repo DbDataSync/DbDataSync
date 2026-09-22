@@ -56,53 +56,67 @@ public abstract class GenericDriverBase<TSpec>(TSpec spec, ISegmentValueBinder b
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } = BuildStaging(spec);
     public IReadOnlyList<IChangeWriter> Writers { get; } = BuildWriters(spec, binder);
 
-    private static IReadOnlyList<IChangeReader> BuildReaders(TSpec spec, ISegmentValueBinder binder)
+    /// <summary>
+    /// One dictionary per category, keyed by <see cref="GenericDriverKinds"/> — <c>Build*</c> below look
+    /// a kind up here rather than switching on it directly, and <see cref="SupportedReaderKinds"/>/
+    /// <see cref="SupportedStagingKinds"/>/<see cref="SupportedWriterKinds"/> are these dictionaries' own
+    /// <c>.Keys</c>, not a separately maintained list. Worth doing, not just proposing it, because a
+    /// `switch` and a hand-written list beside it can silently disagree — found for real while building
+    /// the driver-authoring UI's own "don't hardcode this in TypeScript" endpoint:
+    /// <see cref="GenericDriverKinds.KeyReconcileScd2Close"/> had no case here at all even though
+    /// <c>PostgresDriver</c> constructs it directly (its own hand-written <c>Writers</c> list, identical
+    /// constructor shape) — a descriptor-driven <c>driver.yaml</c> listing it in <c>writers:</c> would
+    /// have thrown <see cref="ArgumentException"/> at construction. Fixed by adding the entry below, not
+    /// by excluding it — nothing about its construction is engine-specific, so there was no reason for
+    /// the generic path to be missing what the hand-written one already had.
+    /// </summary>
+    private static readonly Dictionary<string, Func<TSpec, ISegmentValueBinder, IChangeReader>> ReaderFactories = new()
     {
-        var readers = new List<IChangeReader>();
-        foreach (var kind in spec.Readers)
-        {
-            readers.Add(kind switch
-            {
-                GenericDriverKinds.Watermark => new WatermarkReader(spec.Dialect, binder),
-                GenericDriverKinds.BatchReload => new BatchReloadReader(spec.Dialect, binder),
-                GenericDriverKinds.TriggerAudit => new TriggerAuditReader(spec.Dialect, spec.Catalog),
-                GenericDriverKinds.KeyReconcile => new KeyReconcileReader(spec.Dialect, binder),
-                _ => throw new ArgumentException($"'{kind}' is not a generic reader Kind.", nameof(spec)),
-            });
-        }
-        return readers;
-    }
+        [GenericDriverKinds.Watermark] = (spec, binder) => new WatermarkReader(spec.Dialect, binder),
+        [GenericDriverKinds.BatchReload] = (spec, binder) => new BatchReloadReader(spec.Dialect, binder),
+        [GenericDriverKinds.TriggerAudit] = (spec, _) => new TriggerAuditReader(spec.Dialect, spec.Catalog),
+        [GenericDriverKinds.KeyReconcile] = (spec, binder) => new KeyReconcileReader(spec.Dialect, binder),
+    };
 
-    private static IReadOnlyList<IStagingProvider> BuildStaging(TSpec spec)
+    private static readonly Dictionary<string, Func<TSpec, IStagingProvider>> StagingFactories = new()
     {
-        var staging = new List<IStagingProvider>();
-        foreach (var kind in spec.Staging)
-        {
-            staging.Add(kind switch
-            {
-                GenericDriverKinds.StagingTable => new BatchInsertStagingProvider(spec.Dialect, spec.Catalog),
-                _ => throw new ArgumentException($"'{kind}' is not a generic staging Kind.", nameof(spec)),
-            });
-        }
-        return staging;
-    }
+        [GenericDriverKinds.StagingTable] = spec => new BatchInsertStagingProvider(spec.Dialect, spec.Catalog),
+    };
 
-    private static IReadOnlyList<IChangeWriter> BuildWriters(TSpec spec, ISegmentValueBinder binder)
+    private static readonly Dictionary<string, Func<TSpec, ISegmentValueBinder, IChangeWriter>> WriterFactories = new()
     {
-        var writers = new List<IChangeWriter>();
-        foreach (var kind in spec.Writers)
-        {
-            writers.Add(kind switch
-            {
-                GenericDriverKinds.DeleteInsert => new DeleteInsertWriter(spec.Dialect, spec.Catalog, binder),
-                GenericDriverKinds.KeyReconcileDelete => new KeyReconcileDeleteWriter(spec.Dialect, spec.Catalog, binder),
-                GenericDriverKinds.Snapshot => new SnapshotWriter(spec.Dialect, spec.Catalog),
-                GenericDriverKinds.Scd2 => new Scd2Writer(spec.Dialect, spec.Catalog),
-                _ => throw new ArgumentException($"'{kind}' is not a generic writer Kind.", nameof(spec)),
-            });
-        }
-        return writers;
-    }
+        [GenericDriverKinds.DeleteInsert] = (spec, binder) => new DeleteInsertWriter(spec.Dialect, spec.Catalog, binder),
+        [GenericDriverKinds.KeyReconcileDelete] = (spec, binder) => new KeyReconcileDeleteWriter(spec.Dialect, spec.Catalog, binder),
+        [GenericDriverKinds.Snapshot] = (spec, _) => new SnapshotWriter(spec.Dialect, spec.Catalog),
+        [GenericDriverKinds.Scd2] = (spec, _) => new Scd2Writer(spec.Dialect, spec.Catalog),
+        [GenericDriverKinds.KeyReconcileScd2Close] = (spec, binder) => new KeyReconcileScd2CloseWriter(spec.Dialect, spec.Catalog, binder),
+    };
+
+    /// <summary>Every <c>GenericDriverKinds</c> value a <c>driver.yaml</c>'s <c>capabilities.readers</c>/
+    /// <c>.staging</c>/<c>.writers</c> may actually name — what <c>GET /api/known-driver-kinds</c> (the
+    /// driver-authoring UI's checkbox source) reports, so the SPA can never offer a kind
+    /// <see cref="BuildWriters"/> (or its reader/staging siblings) would reject.</summary>
+    public static IReadOnlyList<string> SupportedReaderKinds => ReaderFactories.Keys.ToList();
+    public static IReadOnlyList<string> SupportedStagingKinds => StagingFactories.Keys.ToList();
+    public static IReadOnlyList<string> SupportedWriterKinds => WriterFactories.Keys.ToList();
+
+    private static IReadOnlyList<IChangeReader> BuildReaders(TSpec spec, ISegmentValueBinder binder) =>
+        spec.Readers.Select(kind => ReaderFactories.TryGetValue(kind, out var factory)
+            ? factory(spec, binder)
+            : throw new ArgumentException($"'{kind}' is not a generic reader Kind.", nameof(spec)))
+            .ToList();
+
+    private static IReadOnlyList<IStagingProvider> BuildStaging(TSpec spec) =>
+        spec.Staging.Select(kind => StagingFactories.TryGetValue(kind, out var factory)
+            ? factory(spec)
+            : throw new ArgumentException($"'{kind}' is not a generic staging Kind.", nameof(spec)))
+            .ToList();
+
+    private static IReadOnlyList<IChangeWriter> BuildWriters(TSpec spec, ISegmentValueBinder binder) =>
+        spec.Writers.Select(kind => WriterFactories.TryGetValue(kind, out var factory)
+            ? factory(spec, binder)
+            : throw new ArgumentException($"'{kind}' is not a generic writer Kind.", nameof(spec)))
+            .ToList();
 
     public abstract DbConnection CreateConnection(ConnectionConfig connection, string? credential);
 

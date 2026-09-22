@@ -1,5 +1,9 @@
+using System.Net;
 using System.Net.Http.Json;
+using DbDataSync.Api.Auth;
 using DbDataSync.Core.Config;
+using DbDataSync.Drivers.Generic;
+using DbDataSync.State;
 using Xunit;
 
 namespace DbDataSync.Api.Tests;
@@ -57,5 +61,40 @@ public sealed class DriversControllerTests
         Assert.False(fixtureDriver.BuiltIn);
         Assert.Equal("compiled", fixtureDriver.Source);
         Assert.Null(fixtureDriver.Library);
+    }
+}
+
+/// <summary>The driver-authoring UI's own <c>GET /api/known-driver-kinds</c> — real assertions that it
+/// reports exactly what <see cref="GenericDriverBase{TSpec}"/> itself accepts, not a copy that could
+/// drift, and that it's admin-gated like every other Drivers/Libraries mutation.</summary>
+[Trait("Category", "Integration")]
+public sealed class DriverKnownKindsTests(AuthenticatedApiFactory factory) : IClassFixture<AuthenticatedApiFactory>
+{
+    private sealed record KindsDto(List<string> Readers, List<string> Staging, List<string> Writers);
+
+    [Fact]
+    public async Task AViewer_IsRefused()
+    {
+        var client = await factory.SignedInAsAsync(UserRole.Viewer);
+
+        var response = await client.GetAsync("/api/known-driver-kinds");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnAdmin_SeesExactlyWhatGenericDriverBaseAccepts()
+    {
+        var client = await factory.SignedInAsAsync(UserRole.Admin);
+
+        var kinds = await client.GetFromJsonAsync<KindsDto>("/api/known-driver-kinds");
+
+        Assert.Equal(GenericDriverBase<GenericDriverSpec>.SupportedReaderKinds.OrderBy(x => x), kinds!.Readers.OrderBy(x => x));
+        Assert.Equal(GenericDriverBase<GenericDriverSpec>.SupportedStagingKinds.OrderBy(x => x), kinds.Staging.OrderBy(x => x));
+        Assert.Equal(GenericDriverBase<GenericDriverSpec>.SupportedWriterKinds.OrderBy(x => x), kinds.Writers.OrderBy(x => x));
+        // Found missing, then fixed (GenericDriverKindCatalogTests.KeyReconcileScd2Close_IsAGenericWriterKind
+        // pins the fix at the unit level) — asserted present here too, so this endpoint-level test would
+        // itself catch a future regression, not just repeat the unit test's own assertion.
+        Assert.Contains("KeyReconcileScd2Close", kinds.Writers);
     }
 }

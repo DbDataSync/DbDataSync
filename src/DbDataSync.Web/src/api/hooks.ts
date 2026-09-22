@@ -14,6 +14,7 @@ const keys = {
   about: ['about'] as const,
   docPage: (slug: string) => ['docs', slug] as const,
   drivers: ['drivers'] as const,
+  knownDriverKinds: ['known-driver-kinds'] as const,
   libraries: ['libraries'] as const,
   files: ['files'] as const,
   knownLibraries: ['known-libraries'] as const,
@@ -136,6 +137,12 @@ export function useSignOut() {
  * 109d) appears without a SPA change. Rarely if ever changes within a session, so no polling. */
 export function useDrivers() {
   return useQuery({ queryKey: keys.drivers, queryFn: api.drivers.list })
+}
+
+/** The driver-authoring form's own capability checkboxes — never changes within a session (it's
+ * derived from what this build of the server can construct), so no polling. */
+export function useKnownDriverKinds() {
+  return useQuery({ queryKey: keys.knownDriverKinds, queryFn: api.drivers.knownKinds })
 }
 
 /** Every installed library (phase 118's admin Libraries screen). Same call `useDrivers` already makes
