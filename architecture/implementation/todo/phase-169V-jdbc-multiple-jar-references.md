@@ -1,6 +1,6 @@
 # Phase 169V — `driver.yaml` names a list of JDBC jars, not one
 
-**Status**: Not started.
+**Status**: Built. See Retrospective.
 **Plan reference**: none — raised directly by the user, following on from phase 168V
 (`architecture/implementation/todo/phase-168V-generic-driver-base-and-jdbc-descriptor.md`).
 **Updated 2026-09-22**: `architecture/planning/todo/user-provided-files-store.md` resolved the
@@ -130,3 +130,50 @@ this is a rename, not a migration: no deprecation shim, no dual-field support.
   this as the fixture). Whichever fixture, the assertion is the same: `Class.forName` resolves the
   driver class from jar A and a class it references resolves from jar B, proving the combined classpath
   works, not just that both files were read.
+
+---
+
+# Retrospective
+
+## What shipped
+
+Exactly the design above, plus one thing the design didn't anticipate: threading `repoRoot` through
+`DriverDescriptorReader.BuildDriver` so `JdbcGenericDriver.FromDescriptor` could resolve `files/`-relative
+names into real paths. `BuildDriver`'s reflection convention changed from `FromDescriptor(DriverDescriptorYaml)`
+to `FromDescriptor(DriverDescriptorYaml, string repoRoot)` — free to change since `JdbcGenericDriver` is
+still the only implementer of the convention, so nothing else disagreed with the old signature.
+`DriverJarPaths` on `JdbcDriverSpec` itself carries **resolved, real paths** (not names) — resolution
+happens once, at `FromDescriptor`, the same "resolve at the boundary, carry a real value from there on"
+shape `library:` → `DbProviderFactory` already uses for the ADO.NET path. A direct construction (every
+test in this project) passes a literal path straight through, unchanged in spirit from before.
+
+## Two things found building it, neither in the original design
+
+- **YamlDotNet can't deserialize into `IReadOnlyList<string>`** — its default node deserializer needs a
+  concrete type to construct. `DescriptorCapabilitiesYaml`'s own list fields were already `List<string>`
+  for the identical reason; `JdbcDescriptorYaml.DriverJarPaths` needed the same fix, found live
+  (`YamlException: "No node deserializer was able to deserialize..."`) rather than caught by inspection.
+- **No JDK in this environment** (`which javac` — not found), so the "how to verify" section's first-choice
+  fixture (two jars with a real class-to-class dependency) wasn't buildable. Used its own named fallback
+  instead: a second, genuinely distinct real jar (`commons-logging-1.2.jar`, downloaded the same
+  `DownloadFile`-at-build-time way `postgresql.jar` already is) that contributes nothing pgJDBC needs,
+  listed *before* pgJDBC's own jar in `driverJarPaths` — proves `FromJarPaths`' combined classpath spans
+  more than one file (a driver class that only resolved from the first URL in the array would fail
+  outright here), short of the stronger "cross-jar class reference" proof the missing JDK would have let
+  it make.
+
+## Testing
+
+- `JdbcMultipleJarsTests.cs` (new) — the decoy-jar proof above.
+- `JdbcDescriptorTests.cs` — updated to build a real `files/` directory in a throwaway `repoRoot` (a copy
+  of the test project's own jar under a plain name) and reference it by name in the YAML, rather than a
+  literal path — proving the whole `driver.yaml` → `files/`-name → resolved path chain, not just the
+  lower-level `JdbcProviderFactory` API.
+- Every other direct `JdbcDriverSpec` construction across the test project (`JdbcCatalogTests`,
+  `JdbcChangeDatabaseTests`, `JdbcConnectionTests`, `JdbcReaderParityTests`, `JdbcWriterParityTests`)
+  updated mechanically (`jarPath` → `[jarPath]`) — no behavior change, confirmed by the full suite staying
+  green.
+
+Full `DbDataSync.Drivers.Jdbc.Tests` suite: 16/16 (15 existing + 1 new). `DbDataSync.Drivers.Descriptor.Tests`:
+33/33, unaffected in substance. Every composition root (`DbDataSync.Api`, `DbDataSync.TaskRunner`,
+`DbDataSync.Cli`) builds clean.

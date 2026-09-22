@@ -24,11 +24,19 @@ public static class DriverDescriptorReader
     /// <see cref="GenericDriver"/> the existing way, through <paramref name="libraries"/> and a
     /// <see cref="System.Data.Common.DbProviderFactory"/> — every pre-phase-168V <c>driver.yaml</c> keeps
     /// working unchanged. A named <c>base</c> is resolved via reflection to a public static
-    /// <c>FromDescriptor(DriverDescriptorYaml)</c> on the type it names — the same assembly-qualified-name
-    /// shape <c>library.json</c>'s own <c>factoryType</c> already uses — so a third kind never needs this
-    /// method to change, only a new <c>driver.yaml</c> naming it.
+    /// <c>FromDescriptor(DriverDescriptorYaml, string)</c> on the type it names — the same
+    /// assembly-qualified-name shape <c>library.json</c>'s own <c>factoryType</c> already uses — so a
+    /// third kind never needs this method to change, only a new <c>driver.yaml</c> naming it.
+    /// <para>
+    /// Phase 169V: the second parameter is <paramref name="repoRoot"/> — added to the convention because
+    /// <c>JdbcGenericDriver.FromDescriptor</c> needs it to resolve <c>jdbc.driverJarPaths</c> against
+    /// <c>&lt;repo&gt;/files/</c> (<c>DbDataSync.Libraries.FilesPaths</c>). No back-compat cost: it is
+    /// still the only <c>base</c> kind that exists, so this changes one call site
+    /// (<c>JdbcGenericDriver.FromDescriptor</c>'s own signature), not a convention already in use by two
+    /// different implementations that would now disagree.
+    /// </para>
     /// </summary>
-    public static IDriver BuildDriver(DriverDescriptorYaml descriptor, LibraryRegistry libraries)
+    public static IDriver BuildDriver(DriverDescriptorYaml descriptor, LibraryRegistry libraries, string repoRoot)
     {
         if (descriptor.Base is null)
             return new GenericDriver(ToSpec(descriptor, libraries.GetFactory(descriptor.Library)));
@@ -38,12 +46,13 @@ public static class DriverDescriptorReader
                 $"Driver '{descriptor.Id}': base '{descriptor.Base}' could not be resolved to a type. " +
                 "Use an assembly-qualified name, e.g. 'DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc'.");
 
-        var method = type.GetMethod("FromDescriptor", BindingFlags.Public | BindingFlags.Static, [typeof(DriverDescriptorYaml)])
+        var method = type.GetMethod(
+                "FromDescriptor", BindingFlags.Public | BindingFlags.Static, [typeof(DriverDescriptorYaml), typeof(string)])
             ?? throw new NotSupportedException(
                 $"Driver '{descriptor.Id}': base '{descriptor.Base}' has no public static " +
-                "FromDescriptor(DriverDescriptorYaml) method.");
+                "FromDescriptor(DriverDescriptorYaml, string) method.");
 
-        return (IDriver)method.Invoke(null, [descriptor])!;
+        return (IDriver)method.Invoke(null, [descriptor, repoRoot])!;
     }
 
     /// <summary>Everything a <see cref="GenericDriver"/> needs except the library's factory itself —

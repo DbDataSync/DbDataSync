@@ -22,7 +22,7 @@ public sealed class JdbcChangeDatabaseTests(JdbcTestDatabase db) : IClassFixture
     {
         var jarPath = Path.Combine(AppContext.BaseDirectory, "postgresql.jar");
         _driver = new JdbcGenericDriver(new JdbcDriverSpec(
-            "jdbc-changedb-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", jarPath,
+            "jdbc-changedb-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", [jarPath],
             Readers: [], Staging: [], Writers: []));
 
         var config = new ConnectionConfig

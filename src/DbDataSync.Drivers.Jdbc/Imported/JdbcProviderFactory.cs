@@ -23,10 +23,21 @@ internal sealed class JdbcProviderFactory : DbProviderFactory
         }, driverClass);
 
     public static JdbcProviderFactory FromJarPath(string jarPath, string driverClass) =>
-        FromJarUrl(new java.io.File(jarPath).toURI().toString(), driverClass);
+        FromJarPaths([jarPath], driverClass);
 
-    public static JdbcProviderFactory FromJarUrl(string jarUrl, string driverClass) =>
-        FromClassLoader(new java.net.URLClassLoader([new java.net.URL(jarUrl)]), driverClass);
+    /// <summary>
+    /// Phase 169V. <c>java.net.URLClassLoader</c>'s constructor already takes an array of URLs and treats
+    /// them as one combined classpath — a real vendor driver is not always one jar (Oracle's wallet
+    /// support needs <c>oraclepki.jar</c>/<c>osdt_cert.jar</c>/<c>osdt_core.jar</c> alongside
+    /// <c>ojdbc8.jar</c>; Db2 ships a separate license jar). Class resolution
+    /// (<see cref="FromClassLoader"/>'s <c>Class.forName</c>) needs no change either way: it already
+    /// searches the whole combined classpath a <c>URLClassLoader</c> was built from, one jar or several.
+    /// </summary>
+    public static JdbcProviderFactory FromJarPaths(IReadOnlyList<string> jarPaths, string driverClass) =>
+        FromClassLoader(
+            new java.net.URLClassLoader(
+                jarPaths.Select(p => new java.net.URL(new java.io.File(p).toURI().toString())).ToArray()),
+            driverClass);
 
     public static JdbcProviderFactory FromClassLoader(java.lang.ClassLoader classLoader, string driverClass)
     {

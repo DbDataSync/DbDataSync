@@ -42,7 +42,7 @@ public static class DriverLoader
             try
             {
                 var descriptor = DriverDescriptorReader.Read(yamlPath);
-                driverRegistry.Register(DriverDescriptorReader.BuildDriver(descriptor, libraryRegistry));
+                driverRegistry.Register(DriverDescriptorReader.BuildDriver(descriptor, libraryRegistry, repoRoot));
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException
                 or YamlDotNet.Core.YamlException)

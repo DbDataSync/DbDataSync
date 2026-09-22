@@ -20,7 +20,7 @@ public sealed class JdbcConnectionTests(JdbcTestDatabase db) : IClassFixture<Jdb
     {
         var jarPath = Path.Combine(AppContext.BaseDirectory, "postgresql.jar");
         _driver = new JdbcGenericDriver(new JdbcDriverSpec(
-            "jdbc-connection-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", jarPath,
+            "jdbc-connection-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", [jarPath],
             Readers: [], Staging: [], Writers: []));
 
         var config = new ConnectionConfig

@@ -35,7 +35,7 @@ public sealed class JdbcCatalogTests(JdbcTestDatabase db) : IClassFixture<JdbcTe
 
         var jarPath = Path.Combine(AppContext.BaseDirectory, "postgresql.jar");
         _jdbcDriver = new JdbcGenericDriver(new JdbcDriverSpec(
-            "jdbc-catalog-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", jarPath,
+            "jdbc-catalog-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", [jarPath],
             Readers: [], Staging: [], Writers: []));
 
         var config = new ConnectionConfig

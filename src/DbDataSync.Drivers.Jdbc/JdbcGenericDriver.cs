@@ -5,6 +5,7 @@ using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.Generic;
 using DbDataSync.Drivers.Jdbc.Imported;
+using DbDataSync.Libraries;
 
 namespace DbDataSync.Drivers.Jdbc;
 
@@ -13,7 +14,7 @@ namespace DbDataSync.Drivers.Jdbc;
 /// in phase 168V — <c>JdbcDriver</c> is what this class used to be called, before it could be built from
 /// a <c>driver.yaml</c> descriptor the same way <see cref="GenericDriver"/> already could.
 /// <para>
-/// Parameterized by <see cref="JdbcDriverSpec.DriverClass"/>/<see cref="JdbcDriverSpec.DriverJarPath"/>
+/// Parameterized by <see cref="JdbcDriverSpec.DriverClass"/>/<see cref="JdbcDriverSpec.DriverJarPaths"/>
 /// rather than hardcoding an engine — still exercised only from
 /// <c>DbDataSync.Drivers.Jdbc.Tests</c> directly, or from a <c>driver.yaml</c> that names this class as
 /// its <c>base</c>; still not in <c>BuiltInDrivers</c> (it takes a per-vendor driver class and jar, not a
@@ -34,7 +35,7 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>
     public JdbcGenericDriver(JdbcDriverSpec spec)
         : base(spec, spec.ValueBinder ?? new GenericValueBinder(spec.Dialect, new JdbcProviderFactoryHandle()))
     {
-        JdbcProviderFactory.FromJarPath(spec.DriverJarPath, spec.DriverClass);
+        JdbcProviderFactory.FromJarPaths(spec.DriverJarPaths, spec.DriverClass);
     }
 
     /// <summary>The <c>KnownLibraries</c> id this driver's own IKVM/<c>java.sql.*</c> usage depends on —
@@ -91,24 +92,35 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>
     /// <see cref="DescriptorCatalogResolution"/> resolves <c>catalog: query</c> exactly as
     /// <c>GenericDriver.FromDescriptor</c>'s does; the default when omitted is <see cref="JdbcCatalog.Instance"/>
     /// (<c>java.sql.DatabaseMetaData</c>), not <c>information_schema</c>.
+    /// <para>
+    /// Phase 169V: <paramref name="repoRoot"/> is what lets this resolve <c>jdbc.driverJarPaths</c> —
+    /// names inside <c>&lt;repo&gt;/files/</c>, not filesystem paths, see that field's own doc comment —
+    /// into the real, resolved paths <see cref="JdbcDriverSpec.DriverJarPaths"/> carries. The same
+    /// "resolve at the boundary, carry a real value from there on" shape <c>DriverDescriptorReader.ToSpec</c>'s
+    /// <c>library:</c> → <see cref="DbProviderFactory"/> resolution already uses for the ADO.NET path —
+    /// this is <c>BuildDriver</c>'s reflection convention's own second parameter (see its own doc comment),
+    /// not an ambient lookup.
+    /// </para>
     /// </summary>
-    public static IDriver FromDescriptor(DriverDescriptorYaml descriptor)
+    public static IDriver FromDescriptor(DriverDescriptorYaml descriptor, string repoRoot)
     {
         var jdbc = descriptor.Jdbc
             ?? throw new NotSupportedException(
-                $"Driver '{descriptor.Id}': base 'JdbcGenericDriver' requires a jdbc block (driverClass, driverJarPath).");
+                $"Driver '{descriptor.Id}': base 'JdbcGenericDriver' requires a jdbc block (driverClass, driverJarPaths).");
 
         var dialect = new DescriptorDialect(descriptor.Dialect, descriptor.TypeMap);
         var catalog = DescriptorCatalogResolution.Resolve(
             descriptor.Id, descriptor.Dialect.Catalog, descriptor.MetadataQueries?.TableQuery,
             descriptor.MetadataQueries?.ColumnQuery, @default: JdbcCatalog.Instance);
 
+        var jarPaths = jdbc.DriverJarPaths.Select(name => FilesPaths.FilePath(repoRoot, name)).ToList();
+
         return new JdbcGenericDriver(new JdbcDriverSpec(
             descriptor.Id,
             dialect,
             catalog,
             jdbc.DriverClass,
-            jdbc.DriverJarPath,
+            jarPaths,
             Readers: descriptor.Capabilities.Readers,
             Staging: descriptor.Capabilities.Staging,
             Writers: descriptor.Capabilities.Writers,

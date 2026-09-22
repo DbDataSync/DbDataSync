@@ -10,6 +10,11 @@
          needs the assembly loadable (see DbDataSync.Api/DbDataSync.TaskRunner's own new reference to
          this project), not a compile-time reference from Descriptor itself. -->
     <ProjectReference Include="..\DbDataSync.Drivers.Descriptor\DbDataSync.Drivers.Descriptor.csproj" />
+    <!-- Phase 169V: for FilesPaths, so JdbcGenericDriver.FromDescriptor can resolve driverJarPaths'
+         names against <repo>/files/. Already reachable transitively through Descriptor's own reference
+         to it (for LibraryRegistry) — stated explicitly here anyway, the same preference this project's
+         own Descriptor reference comment above already models. -->
+    <ProjectReference Include="..\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
   </ItemGroup>
 
   <ItemGroup>

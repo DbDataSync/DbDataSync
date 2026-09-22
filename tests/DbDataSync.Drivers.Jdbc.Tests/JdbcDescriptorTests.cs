@@ -44,15 +44,22 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
     [Fact]
     public async Task ADriverYamlNamingJdbcGenericDriver_BuildsAWorkingDriver()
     {
-        var jarPath = Path.Combine(AppContext.BaseDirectory, "postgresql.jar");
-        var yaml = """
+        // Phase 169V: driverJarPaths holds names inside <repo>/files/, not literal paths — a throwaway
+        // repoRoot with the test project's own already-downloaded jar copied into files/ under a plain
+        // name, the same shape a real operator upload would leave behind.
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"jdbc-descriptor-test-{Guid.NewGuid():N}");
+        var filesDir = Path.Combine(repoRoot, "files");
+        Directory.CreateDirectory(filesDir);
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "postgresql.jar"), Path.Combine(filesDir, "postgresql.jar"));
+
+        const string yaml = """
             id: postgres-via-jdbc
             displayName: Postgres (via JDBC)
             library: ikvm
             base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc
             jdbc:
               driverClass: org.postgresql.Driver
-              driverJarPath: __JAR_PATH__
+              driverJarPaths: [postgresql.jar]
             dialect:
               quoteIdentifier: doubleQuote
               parameterPrefix: "@"
@@ -71,14 +78,14 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
               readers: [Watermark, BatchReload]
               staging: []
               writers: []
-            """.Replace("__JAR_PATH__", jarPath);
+            """;
 
         var descriptor = DriverDescriptorReader.Deserialize(yaml);
         // Never actually consulted for a JDBC base — see JdbcGenericDriver.FromDescriptor's own doc
         // comment — but BuildDriver's signature is shared with the ADO.NET path, which does need one.
         var libraries = new LibraryRegistry(Path.GetTempPath());
 
-        var driver = DriverDescriptorReader.BuildDriver(descriptor, libraries);
+        var driver = DriverDescriptorReader.BuildDriver(descriptor, libraries, repoRoot);
 
         Assert.IsType<JdbcGenericDriver>(driver);
         Assert.Equal("postgres-via-jdbc", driver.DriverType);

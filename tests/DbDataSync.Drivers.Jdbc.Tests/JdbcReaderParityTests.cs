@@ -54,7 +54,7 @@ public sealed class JdbcReaderParityTests(JdbcTestDatabase db) : IClassFixture<J
 
         var jarPath = Path.Combine(AppContext.BaseDirectory, "postgresql.jar");
         _jdbcDriver = new JdbcGenericDriver(new JdbcDriverSpec(
-            "jdbc-parity-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", jarPath,
+            "jdbc-parity-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", [jarPath],
             Readers: [], Staging: [], Writers: []));
 
         var config = new ConnectionConfig

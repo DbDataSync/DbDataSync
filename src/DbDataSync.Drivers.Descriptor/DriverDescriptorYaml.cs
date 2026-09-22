@@ -49,12 +49,19 @@ public sealed class DriverDescriptorYaml
 
 /// <param name="DriverClass">The JDBC driver's fully-qualified Java class name —
 /// <c>org.postgresql.Driver</c>, for pgJDBC.</param>
-/// <param name="DriverJarPath">A literal filesystem path to the driver's jar — see
-/// <c>DbDataSync.Drivers.Jdbc.JdbcDriverSpec</c>'s own doc comment for why this is provisional.</param>
+/// <param name="DriverJarPaths">Phase 169V — one or more **names inside <c>&lt;repo&gt;/files/</c>**, not
+/// filesystem paths (<c>architecture/planning/todo/user-provided-files-store.md</c>). More than one jar
+/// is a real, not exotic, shape — Oracle's wallet support ships across four jars, Db2 ships a separate
+/// license jar. <c>DbDataSync.Drivers.Jdbc.JdbcGenericDriver.FromDescriptor</c> resolves each name against
+/// the store before building a <c>JdbcDriverSpec</c>.</param>
 public sealed class JdbcDescriptorYaml
 {
     public required string DriverClass { get; set; }
-    public required string DriverJarPath { get; set; }
+    // List<string>, not IReadOnlyList<string> — YamlDotNet's default node deserializer can't construct
+    // an interface type directly, the same reason DescriptorCapabilitiesYaml's own list fields below are
+    // concrete too. Found live (YamlException: "No node deserializer was able to deserialize..."), not
+    // assumed from the other class's own precedent alone.
+    public required List<string> DriverJarPaths { get; set; }
 }
 
 /// <param name="QuoteIdentifier">backtick | doubleQuote | bracket</param>

@@ -14,16 +14,20 @@ namespace DbDataSync.Drivers.Jdbc;
 /// </summary>
 /// <param name="DriverClass">The JDBC driver's fully-qualified Java class name — <c>org.postgresql.Driver</c>,
 /// for pgJDBC.</param>
-/// <param name="DriverJarPath">A literal filesystem path to the driver's jar. Provisional: real artifact
-/// resolution for a shipped JDBC engine (<c>jars/</c> vs <c>libraries/</c>) is still
-/// <c>architecture/planning/todo/jdbc-driver-support.md</c>'s own open question, not solved here — this
-/// is the same shape the test project's own MSBuild-downloaded jar already is.</param>
+/// <param name="DriverJarPaths">Phase 169V — real, resolved filesystem paths to the driver's jar(s), one
+/// element for the common single-jar case, more for a driver that ships split across several (Oracle's
+/// wallet support, Db2's license jar). A direct construction (the test projects' own shape) can pass any
+/// literal path; <see cref="JdbcGenericDriver.FromDescriptor"/> resolves a <c>driver.yaml</c>'s own
+/// <c>driverJarPaths</c> — names inside <c>&lt;repo&gt;/files/</c>, not paths — into this shape before
+/// constructing a <see cref="JdbcDriverSpec"/>, the same "id/name in, real path out" resolution
+/// <c>LibraryRegistry.GetFactory</c> already does for <see cref="GenericDriverSpec.ProviderFactory"/>'s
+/// own <c>library:</c> reference.</param>
 public sealed record JdbcDriverSpec(
     string Id,
     SqlDialect Dialect,
     IDescriptorCatalog Catalog,
     string DriverClass,
-    string DriverJarPath,
+    IReadOnlyList<string> DriverJarPaths,
     IReadOnlyList<string> Readers,
     IReadOnlyList<string> Staging,
     IReadOnlyList<string> Writers,

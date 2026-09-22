@@ -54,4 +54,24 @@
     <None Include="$(JdbcTestJarPath)" CopyToOutputDirectory="PreserveNewest" Link="postgresql.jar" Visible="false" />
   </ItemGroup>
 
+  <!-- Phase 169V's own "how to verify" fixture: a second, genuinely distinct jar with nothing pgJDBC
+       needs, proving JdbcProviderFactory.FromJarPaths' combined classpath actually spans more than one
+       file — not just tolerates a one-element list. A true two-interdependent-classes fixture (the doc's
+       first choice) needs javac/jar, unavailable in this environment (confirmed: `which javac` — not
+       found) — this decoy jar is the fallback the doc named, real rather than hand-waved. -->
+  <PropertyGroup>
+    <JdbcDecoyJarPath>$(BaseIntermediateOutputPath)jdbc-jars\commons-logging-1.2.jar</JdbcDecoyJarPath>
+  </PropertyGroup>
+
+  <Target Name="DownloadJdbcDecoyJar" BeforeTargets="BeforeBuild" Condition="!Exists('$(JdbcDecoyJarPath)')">
+    <MakeDir Directories="$(BaseIntermediateOutputPath)jdbc-jars" />
+    <DownloadFile
+      SourceUrl="https://repo1.maven.org/maven2/commons-logging/commons-logging/1.2/commons-logging-1.2.jar"
+      DestinationFolder="$(BaseIntermediateOutputPath)jdbc-jars" />
+  </Target>
+
+  <ItemGroup>
+    <None Include="$(JdbcDecoyJarPath)" CopyToOutputDirectory="PreserveNewest" Link="decoy.jar" Visible="false" />
+  </ItemGroup>
+
 </Project>
