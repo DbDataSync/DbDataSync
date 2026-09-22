@@ -63,7 +63,7 @@ public sealed class QueryCatalogDescriptorTests
             () => DriverDescriptorReader.ToSpec(descriptor, new StubDbProviderFactory()));
 
         Assert.Contains("nonsense", ex.Message);
-        Assert.Contains("informationSchema", ex.Message);
+        Assert.Contains("default", ex.Message);
         Assert.Contains("query", ex.Message);
     }
 }

@@ -13,7 +13,9 @@ public sealed class DriverDescriptorYaml
     /// <summary>The id of the <c>&lt;repo&gt;/libraries/&lt;id&gt;/library.json</c> this descriptor
     /// resolves its <see cref="System.Data.Common.DbProviderFactory"/> through — the library carries
     /// its own <c>factoryType</c> and package list, so the descriptor names it rather than repeating
-    /// them.</summary>
+    /// them. Ignored by a JDBC-backed <see cref="Base"/> (<c>DbDataSync.Drivers.Jdbc.JdbcGenericDriver</c>
+    /// resolves its own <c>ikvm</c> requirement independently of this field) — still worth setting to
+    /// <c>ikvm</c> there for a human reading the file, even though nothing reads it.</summary>
     public required string Library { get; set; }
 
     public required DescriptorDialectYaml Dialect { get; set; }
@@ -28,13 +30,40 @@ public sealed class DriverDescriptorYaml
     /// <summary>Required when <see cref="DescriptorDialectYaml.Catalog"/> is <c>query</c> — phase 167V.
     /// Ignored otherwise.</summary>
     public MetadataQueriesYaml? MetadataQueries { get; set; }
+
+    /// <summary>
+    /// Which class to build this descriptor into — an assembly-qualified type name (the same shape
+    /// <c>library.json</c>'s own <c>factoryType</c> already uses), resolved via reflection to a public
+    /// static <c>FromDescriptor(DriverDescriptorYaml)</c> method. Omitted (the common case) defaults to
+    /// <c>DbDataSync.Drivers.Generic.GenericDriver</c>, built the existing way (through
+    /// <see cref="Library"/> and a <see cref="System.Data.Common.DbProviderFactory"/>) — every
+    /// pre-phase-168V <c>driver.yaml</c> keeps working unchanged. Phase 168V's other kind is
+    /// <c>DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc</c>, which reads
+    /// <see cref="Jdbc"/> instead of <see cref="Library"/>.
+    /// </summary>
+    public string? Base { get; set; }
+
+    /// <summary>Required when <see cref="Base"/> names a JDBC-backed driver. Ignored otherwise.</summary>
+    public JdbcDescriptorYaml? Jdbc { get; set; }
+}
+
+/// <param name="DriverClass">The JDBC driver's fully-qualified Java class name —
+/// <c>org.postgresql.Driver</c>, for pgJDBC.</param>
+/// <param name="DriverJarPath">A literal filesystem path to the driver's jar — see
+/// <c>DbDataSync.Drivers.Jdbc.JdbcDriverSpec</c>'s own doc comment for why this is provisional.</param>
+public sealed class JdbcDescriptorYaml
+{
+    public required string DriverClass { get; set; }
+    public required string DriverJarPath { get; set; }
 }
 
 /// <param name="QuoteIdentifier">backtick | doubleQuote | bracket</param>
 /// <param name="RowLimit">limitOffset | offsetFetch</param>
-/// <param name="Catalog">informationSchema | query — phase 167V added <c>query</c>, an operator's own
-/// SQL (see <see cref="MetadataQueriesYaml"/>), for a vendor whose catalog fits neither
-/// <c>information_schema</c> nor (for a JDBC-backed engine specifically) <c>DatabaseMetaData</c>.</param>
+/// <param name="Catalog">Omitted (or <c>default</c>) | <c>query</c> — phase 168V. Omitted means this
+/// descriptor's <c>base</c> kind's own default catalog: <c>information_schema</c> for
+/// <c>GenericDriver</c>, <c>java.sql.DatabaseMetaData</c> for <c>JdbcGenericDriver</c>. <c>query</c> (see
+/// <see cref="MetadataQueriesYaml"/>) is an operator's own SQL, for a vendor whose default doesn't
+/// fit — phase 167V.</param>
 /// <param name="DefaultDatabase">What a connection assembled from host/port (no explicit database)
 /// connects to before <c>UseDatabaseAsync</c> switches it, or when the engine doesn't support
 /// switching at all. Not in the plan doc's worked example, which showed no connection assembly at
@@ -49,11 +78,22 @@ public sealed class DescriptorDialectYaml
     public required string QuoteIdentifier { get; set; }
     public required string ParameterPrefix { get; set; }
     public required string RowLimit { get; set; }
-    public required string Catalog { get; set; }
+    public string? Catalog { get; set; }
     public bool SupportsChangeDatabase { get; set; } = true;
     public string DefaultDatabase { get; set; } = "";
     public int? DefaultPort { get; set; }
     public DescriptorConnectionStringKeysYaml? ConnectionStringKeys { get; set; }
+
+    /// <summary>
+    /// False for every ADO.NET provider so far (SqlClient/Npgsql/MySqlConnector all match a
+    /// <c>DbParameter.ParameterName</c> carrying <paramref name="ParameterPrefix"/>'s own sigil against
+    /// the marker in the rendered SQL text themselves). True for a JDBC-backed engine: a JDBC
+    /// <c>PreparedStatement</c> has only ordinal <c>?</c> placeholders, so the command layer itself does
+    /// the name→position translation (matching <c>@name</c> markers) and needs the bare name to compare
+    /// against — see phase 165V's Finding 1, the exact bug this flag exists to avoid repeating for a
+    /// descriptor-driven JDBC engine.
+    /// </summary>
+    public bool ParameterNameIsBare { get; set; }
 }
 
 public sealed class DescriptorConnectionStringKeysYaml

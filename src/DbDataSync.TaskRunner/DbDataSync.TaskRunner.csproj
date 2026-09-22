@@ -10,6 +10,11 @@
     <ProjectReference Include="..\DbDataSync.Drivers.Postgres\DbDataSync.Drivers.Postgres.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.MySql\DbDataSync.Drivers.MySql.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Oracle\DbDataSync.Drivers.Oracle.csproj" />
+    <!-- Phase 168V: not used directly here — needed so a driver.yaml naming JdbcGenericDriver as its
+         base can be resolved via Type.GetType (DriverDescriptorReader.BuildDriver, in
+         DbDataSync.Drivers.Descriptor). JdbcGenericDriver is still not in BuiltInDrivers/registered by
+         default; this only makes it reachable if named. -->
+    <ProjectReference Include="..\DbDataSync.Drivers.Jdbc\DbDataSync.Drivers.Jdbc.csproj" />
     <ProjectReference Include="..\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
     <ProjectReference Include="..\DbDataSync.State\DbDataSync.State.csproj" />
     <ProjectReference Include="..\DbDataSync.Verification\DbDataSync.Verification.csproj" />

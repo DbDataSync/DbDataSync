@@ -39,7 +39,6 @@ public sealed class DescriptorDriverApiFactory : TestApiFactory
           quoteIdentifier: backtick
           parameterPrefix: "@"
           rowLimit: limitOffset
-          catalog: informationSchema
           supportsChangeDatabase: true
           defaultDatabase: ""
         typeMap:

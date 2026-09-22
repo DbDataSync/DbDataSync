@@ -10,7 +10,7 @@ namespace DbDataSync.Drivers.Jdbc.Tests;
 
 /// <summary>
 /// Phase 165V's own spike, made concrete: read the same Postgres table through the generic pipeline two
-/// ways — <see cref="JdbcDriver"/> (IKVM + pgJDBC) and Npgsql, the engine's own known-good driver, which
+/// ways — <see cref="JdbcGenericDriver"/> (IKVM + pgJDBC) and Npgsql, the engine's own known-good driver, which
 /// every other Postgres test in this repo already trusts — and assert the rows come back identical.
 /// <see cref="BatchReloadReaderAsync"/> exercises no parameters; <see cref="WatermarkReaderAsync"/>
 /// forces the <c>PreparedStatement</c> path across two successive incremental batches.
@@ -41,7 +41,7 @@ public sealed class JdbcReaderParityTests(JdbcTestDatabase db) : IClassFixture<J
     ];
 
     private NpgsqlConnection _npgsql = null!;
-    private JdbcDriver _jdbcDriver = null!;
+    private JdbcGenericDriver _jdbcDriver = null!;
     private System.Data.Common.DbConnection _jdbc = null!;
 
     public async Task InitializeAsync()
@@ -53,7 +53,9 @@ public sealed class JdbcReaderParityTests(JdbcTestDatabase db) : IClassFixture<J
             """);
 
         var jarPath = Path.Combine(AppContext.BaseDirectory, "postgresql.jar");
-        _jdbcDriver = new JdbcDriver("org.postgresql.Driver", jarPath);
+        _jdbcDriver = new JdbcGenericDriver(new JdbcDriverSpec(
+            "jdbc-parity-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", jarPath,
+            Readers: [], Staging: [], Writers: []));
 
         var config = new ConnectionConfig
         {

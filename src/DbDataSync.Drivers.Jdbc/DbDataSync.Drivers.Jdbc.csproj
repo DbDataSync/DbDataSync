@@ -4,6 +4,12 @@
     <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
     <ProjectReference Include="..\DbDataSync.Drivers.Generic\DbDataSync.Drivers.Generic.csproj" />
+    <!-- Phase 168V: for DriverDescriptorYaml, so JdbcGenericDriver.FromDescriptor can read one directly.
+         One-directional — DbDataSync.Drivers.Descriptor does not reference this project back; it finds
+         JdbcGenericDriver at runtime via Type.GetType on driver.yaml's own `base` type name, which only
+         needs the assembly loadable (see DbDataSync.Api/DbDataSync.TaskRunner's own new reference to
+         this project), not a compile-time reference from Descriptor itself. -->
+    <ProjectReference Include="..\DbDataSync.Drivers.Descriptor\DbDataSync.Drivers.Descriptor.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -16,7 +16,8 @@ public static class DriverTemplates
               quoteIdentifier: doubleQuote      # backtick | doubleQuote | bracket
               parameterPrefix: "@"              # "@" -> @p , ":" -> :p , "?" -> positional
               rowLimit: offsetFetch             # limitOffset | offsetFetch
-              catalog: informationSchema        # the only strategy supported today
+              # catalog: query                  # uncomment (+ a metadataQueries block) if
+                                                 # information_schema doesn't fit this engine
               supportsChangeDatabase: true
               defaultDatabase: ""
 

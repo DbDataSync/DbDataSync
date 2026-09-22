@@ -66,7 +66,7 @@ public sealed record GenericDriverSpec(
     string DefaultDatabase,
     int? DefaultPort = null,
     ISegmentValueBinder? ValueBinder = null,
-    string? DisplayName = null)
+    string? DisplayName = null) : IGenericDriverSpec
 {
     /// <summary>The common shape: every generic Kind, <c>information_schema</c> catalog, default
     /// connection-string keys. What most descriptor-shaped engines want; override individual

@@ -17,6 +17,7 @@ public sealed class DescriptorDialect : SqlDialect
     private readonly char _quoteOpen;
     private readonly char _quoteClose;
     private readonly string _parameterPrefix;
+    private readonly bool _parameterNameIsBare;
     private readonly bool _limitOffsetStyle;
     private readonly bool _supportsChangeDatabase;
     private readonly IReadOnlyDictionary<string, (IReadOnlyList<string> Placeholders, TypeMapEntryYaml Entry)> _typeMap;
@@ -32,6 +33,7 @@ public sealed class DescriptorDialect : SqlDialect
                 $"Unknown quoteIdentifier style '{spec.QuoteIdentifier}' (expected backtick, doubleQuote or bracket)."),
         };
         _parameterPrefix = spec.ParameterPrefix;
+        _parameterNameIsBare = spec.ParameterNameIsBare;
         _limitOffsetStyle = spec.RowLimit switch
         {
             "limitOffset" => true,
@@ -50,6 +52,11 @@ public sealed class DescriptorDialect : SqlDialect
         $"{_quoteOpen}{identifier.Replace(_quoteClose.ToString(), $"{_quoteClose}{_quoteClose}")}{_quoteClose}";
 
     public override string ParameterReference(string name) => $"{_parameterPrefix}{name}";
+
+    /// <summary>See <see cref="DescriptorDialectYaml.ParameterNameIsBare"/> — false keeps the base
+    /// class's own default (identical to <see cref="ParameterReference"/>, the sigil included), which
+    /// every ADO.NET provider so far tolerates.</summary>
+    public override string ParameterName(string name) => _parameterNameIsBare ? name : base.ParameterName(name);
 
     /// <summary>
     /// <c>SupportsChangeDatabase: false</c> makes this a config error rather than a runtime one that

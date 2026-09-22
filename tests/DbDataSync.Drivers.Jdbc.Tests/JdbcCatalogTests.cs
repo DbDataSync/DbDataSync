@@ -1,5 +1,6 @@
 using System.Data.Common;
 using DbDataSync.Core.Config;
+using DbDataSync.Core.Sql;
 using Npgsql;
 
 namespace DbDataSync.Drivers.Jdbc.Tests;
@@ -18,7 +19,7 @@ public sealed class JdbcCatalogTests(JdbcTestDatabase db) : IClassFixture<JdbcTe
     private readonly string _tableName = $"jdbc_catalog_spike_{Guid.NewGuid():N}";
 
     private NpgsqlConnection _npgsql = null!;
-    private JdbcDriver _jdbcDriver = null!;
+    private JdbcGenericDriver _jdbcDriver = null!;
     private DbConnection _jdbc = null!;
 
     public async Task InitializeAsync()
@@ -33,7 +34,9 @@ public sealed class JdbcCatalogTests(JdbcTestDatabase db) : IClassFixture<JdbcTe
             """);
 
         var jarPath = Path.Combine(AppContext.BaseDirectory, "postgresql.jar");
-        _jdbcDriver = new JdbcDriver("org.postgresql.Driver", jarPath);
+        _jdbcDriver = new JdbcGenericDriver(new JdbcDriverSpec(
+            "jdbc-catalog-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", jarPath,
+            Readers: [], Staging: [], Writers: []));
 
         var config = new ConnectionConfig
         {

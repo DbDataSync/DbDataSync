@@ -19,7 +19,7 @@ namespace DbDataSync.Drivers.Jdbc;
 /// override. See <c>architecture/planning/todo/jdbc-metadata-catalog.md</c>.
 /// </para>
 /// </summary>
-internal sealed class JdbcCatalog : ITableCatalog
+internal sealed class JdbcCatalog : IDescriptorCatalog
 {
     public static JdbcCatalog Instance { get; } = new();
 
