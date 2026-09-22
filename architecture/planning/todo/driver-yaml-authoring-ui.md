@@ -1,6 +1,11 @@
 # A simple web UI for authoring `driver.yaml`
 
-**Status**: Design, not phase-ready.
+**Status**: Core built 2026-09-22 (`DriverEditPage`, the `POST`/`GET`/`PUT` backend, `driverYamlAssembly.ts`).
+See Retrospective. What's still open: structured `typeMap` authoring (v2, as this doc always scoped it),
+"start from a `KnownDrivers` entry" (not built — `GET /api/known-drivers` doesn't expose a full descriptor
+body, only 4 metadata fields, contradicting what this doc originally assumed), and the JDBC create path
+has no Playwright coverage (needs a real jar + `ikvm` actually installed, neither set up in the test
+server — proven at the API level instead, where it doesn't need either).
 **Plan reference**: `architecture/planning/done/drivers-and-libraries-in-the-web-ui.md` — this is the
 doc its own "What this does not do" section named as follow-on work: *"Web authoring of `driver.yaml`
 descriptors (dialect, `typeMap`, capabilities)... its own planning doc later."* This is that doc.
@@ -184,3 +189,71 @@ Mirroring how `drivers-and-libraries-in-the-web-ui.md` itself split into 116–1
 3. The structured form (base, capabilities, library/jar picker embedding 2, metadata queries) plus the
    raw-YAML dialect/typeMap editor — the bulk of the UI.
 4. "Start from a `KnownDrivers` entry" — small, additive, fine to land whenever convenient inside 3.
+
+---
+
+# Retrospective
+
+## What shipped
+
+Every phase above except 4 (see "What's still open" in the Status line): the known-kinds endpoint (built
+alongside a real refactor of `GenericDriverBase` — see `phase-172V`'s own follow-on work, the switch→
+dictionary change that made `SupportedReaderKinds`/etc. structurally correct), the `files/` store (phase
+173V, already built before this), `DriverEditPage` and its backend.
+
+**One deliberate simplification from the design above, decided while building, not before**: §4/§5's
+three-way split (a catalog-strategy picker plus two SQL text areas as their own structured control,
+separate from a dialect/typeMap raw editor) became **one raw YAML block** covering dialect, typeMap, and
+metadataQueries together. Splitting metadata-queries out cleanly needs parsing the raw dialect text to
+know whether `catalog: query` is already set there — real complexity a v1 doesn't need, and arguably a
+more honest line anyway: those three are all "how this engine's SQL looks," which a vendor-familiar
+operator would naturally edit together. `driverYamlAssembly.ts`'s own top-level-key splitter is what makes
+even this simpler split possible — not a real YAML parser, deliberately: it finds top-level keys by
+"starts at column 0," reliable for this app's own generated shape, with the raw editor itself as the
+escape hatch when a hand-authored file doesn't split cleanly.
+
+**§2's other real correction**: `LibraryFindPanel` and the Files upload control genuinely weren't reusable
+when this doc first claimed they were ("reuses... wholesale") — both were page-local. Extracted first (a
+separate, already-pushed commit), *then* embedded here — `LibraryFindPanel` gained one new prop
+(`onInstalled`) so the driver form can react to a library it just installed, `FileUploadPanel`'s
+`onUploaded` already had the equivalent shape.
+
+## A real bug found building the backend, not part of the design above
+
+`DriverDescriptorReader.BuildDriver`'s JDBC path dispatches through `MethodInfo.Invoke`, which wraps
+whatever `JdbcGenericDriver.FromDescriptor` itself throws in a `TargetInvocationException`.
+`InstallFromCatalog` never hit this — it calls `DriverDescriptorReader.ToSpec` directly, bypassing
+`BuildDriver`'s reflection entirely. This authoring endpoint is the first caller to actually exercise that
+path with operator-supplied YAML, where a failure needs a clean message, not a reflection wrapper's own.
+Unwrapped in `DriversController.TryBuild`; proven with a real test (`Create_WithAJdbcBaseMissingItsJdbcBlock_...`),
+not just fixed and assumed correct.
+
+## A real product inconsistency found writing the Playwright test
+
+`LibraryFindPanel`'s own install (`POST /api/libraries`) keys a new library by *package* id
+(`"MySqlConnector"`), not the catalog's own id (`"mysql-connector"`) the way `POST /api/drivers/from-catalog`
+does — two different code paths landing on two different ids for what looks like the same "install
+mysql-connector" action. Found because `driver-authoring.spec.ts`'s own `selectOption('mysql-connector')`
+timed out for a full minute with no such option — not assumed, not guessed at. Documented separately:
+`follow-up-library-install-paths-disagree-on-the-resulting-library-id.md`, not fixed here (out of this
+doc's own scope, and needs a real decision about which behavior is correct).
+
+## Testing
+
+- `driverYamlAssembly.test.ts` — assemble/parse round-trips for ADO.NET and multi-jar JDBC shapes, and
+  that the raw body stays distinct from its structured neighbors in the assembled document.
+- `DriverAuthoringTests.cs` (API-level, 12 tests) — create/get/update, admin gating, the duplicate-id 409,
+  the invalid-YAML 400 (asserting nothing was written, via a before/after directory count — the shared
+  test fixture means outright absence isn't a safe assertion), and the `TargetInvocationException`-unwrapping
+  proof above.
+- `driver-authoring.spec.ts` (Playwright, 2 tests) — the real create-then-edit flow end to end: fill the
+  form, install a library inline via the embedded `LibraryFindPanel`, save, see it listed; open it for
+  editing, confirm the loaded fields match (id disabled and correct, capabilities pre-checked), change the
+  display name, save, confirm the change persisted.
+
+Verified together: `tsc -b`/`oxlint`/production `vite build`/full `vitest` suite (84/84) all clean;
+every Playwright spec touching the Drivers page re-run (18/18) for regressions; the API test suite's
+relevant classes green (17 total across `DriverAuthoringTests`/`DriverKnownKindsTests`/`DriversControllerTests`,
+confirmed individually — a combined-filter run hit an unrelated environment hang, chased down to ~40
+orphaned MSBuild worker nodes left behind by an earlier killed process, cleaned up but not worth re-chasing
+the combined run for once the individual results already stood).
