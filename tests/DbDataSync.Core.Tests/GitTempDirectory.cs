@@ -23,9 +23,18 @@ internal static class GitTempDirectory
     /// throw as a "Test Class Cleanup Failure", which sets the run's exit code **without appearing in
     /// any project's pass/fail counts**. A CI job where every project printed `Passed!` went red for
     /// three consecutive runs with nothing in the summary to explain it, and the one line naming the
-    /// cause was buried mid-log. If the retries are still losing after five seconds this throws — but
-    /// names the directory and the files still holding it open, so the next person reads a cause
-    /// instead of a bare exception type.
+    /// cause was buried mid-log.
+    /// </para>
+    /// <para>
+    /// If the retries are still losing after five seconds this no longer throws — it warns to stderr,
+    /// naming the directory and the files still holding it open, and leaves the directory for the OS
+    /// to reclaim. A leaked directory under the OS temp path is what that path is for; failing the job
+    /// over it turned an all-green test run red for a cleanup step nothing under test actually depends
+    /// on, and for a loaded assembly's own file (a non-collectible load context, confirmed) the retry
+    /// could never have won regardless — the wait was for something that only happens at process exit.
+    /// The message is still the point: a human reads a cause instead of a bare exception type, just
+    /// without the job dying to deliver it. See
+    /// architecture/planning/todo/follow-up-a-temp-dir-that-cannot-be-deleted-fails-a-job-whose-tests-all-passed.md.
     /// </para>
     /// </summary>
     public static void DeleteRecursively(string path)
@@ -48,14 +57,20 @@ internal static class GitTempDirectory
             {
                 if (DateTime.UtcNow >= deadline)
                 {
+                    // Don't fail the run over a leaked temp directory — the OS temp path is exactly
+                    // what cleans these up eventually, and for a loaded assembly's own file (confirmed
+                    // cause: a non-collectible AssemblyLoadContext holds it for the process's whole
+                    // life) no amount of retrying was ever going to win. Loud and non-fatal is what the
+                    // evidence supports: everything under test passed, only cleanup couldn't finish.
+                    // See architecture/planning/todo/follow-up-a-temp-dir-that-cannot-be-deleted-fails-a-job-whose-tests-all-passed.md.
                     var locked = StillOpen(path);
-                    throw new IOException(
-                        $"Could not delete the temp directory '{path}' after retrying for 5s. "
+                    Console.Error.WriteLine(
+                        $"WARNING: could not delete the temp directory '{path}' after retrying for 5s. "
                         + (locked.Count == 0
                             ? "No individual file reported as locked, so the directory itself is likely the one held open."
                             : $"Still open: {string.Join(", ", locked)}.")
-                        + $" Underlying error: {ex.Message}",
-                        ex);
+                        + $" Underlying error: {ex.Message}. Leaving it for the OS to reclaim.");
+                    return;
                 }
 
                 Thread.Sleep(attempt < 10 ? 10 : 100);

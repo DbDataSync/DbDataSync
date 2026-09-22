@@ -46,7 +46,7 @@ public sealed class WindowsServiceEventLogTests(ITestOutputHelper output)
         EnsureSourceRegisteredOrExplain();
 
         var marker = $"dbdatasync-test-{Guid.NewGuid():N}";
-        WindowsServiceEventLog.WriteError(new InvalidOperationException("boom"), marker);
+        WriteOrExplain(() => WindowsServiceEventLog.WriteError(new InvalidOperationException("boom"), marker));
 
         AssertWrittenBack(marker, EventLogEntryType.Error);
     }
@@ -58,7 +58,7 @@ public sealed class WindowsServiceEventLogTests(ITestOutputHelper output)
         EnsureSourceRegisteredOrExplain();
 
         var marker = $"dbdatasync-test-{Guid.NewGuid():N}";
-        WindowsServiceEventLog.WriteInformation(marker);
+        WriteOrExplain(() => WindowsServiceEventLog.WriteInformation(marker));
 
         AssertWrittenBack(marker, EventLogEntryType.Information);
     }
@@ -119,6 +119,43 @@ public sealed class WindowsServiceEventLogTests(ITestOutputHelper output)
                 + $"The underlying error was: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// <see cref="WindowsServiceEventLog.WriteError"/>/<see cref="WindowsServiceEventLog.WriteInformation"/>,
+    /// with the write's own access denial explained where it happens — the counterpart to
+    /// <see cref="EnsureSourceRegisteredOrExplain"/>, which only ever guarded registration. The observed
+    /// failure ("Cannot open log for source 'DbDataSync'.  — Access is denied") is not a
+    /// <see cref="SecurityException"/>, so it used to sail past that guard and surface as a bare assertion
+    /// failure with none of the elevation context the guard exists to supply. See
+    /// architecture/planning/todo/follow-up-event-log-tests-guard-registration-but-not-the-write.md.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void WriteOrExplain(Action write)
+    {
+        try
+        {
+            write();
+        }
+        catch (Exception ex) when (IsAccessDenied(ex))
+        {
+            Assert.Fail(
+                $"Could not write to the Event Log under source '{WindowsServiceEventLog.SourceName}'. "
+                + $"This process is {(WindowsElevation.IsAdministrator() ? "elevated" : "NOT elevated")} — a "
+                + "source that was just registered can still deny the first write until the Event Log service "
+                + "has picked up the registration, and the write path is not guaranteed to run with the same "
+                + "privileges the registration path had either way. Run this suite from an elevated prompt to "
+                + $"exercise these tests. The underlying error was: {ex.Message}");
+        }
+    }
+
+    /// <summary>Whether an exception out of the real Event Log write path is a permissions denial rather
+    /// than a genuine defect in what was written — registration fails this way with a
+    /// <see cref="SecurityException"/>, but the write path denies access as a bare message instead, so
+    /// both are checked.</summary>
+    private static bool IsAccessDenied(Exception ex) =>
+        ex is SecurityException
+        || ex.Message.Contains("Access is denied", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("Cannot open log for source", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Finds the entry just written and asserts its type, reporting everything it looked at either way.

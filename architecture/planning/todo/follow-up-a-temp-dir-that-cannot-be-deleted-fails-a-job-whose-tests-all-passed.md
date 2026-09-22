@@ -97,3 +97,20 @@ Not `dotnet-windows` — the `playwright` job on ubuntu. All **116 tests passed*
 subject — a cleanup that cannot finish turning a green run red — on a different platform and a different cleanup, so
 whatever replaces the throw here probably belongs there too (retry the removal, and report rather than fail when it
 still cannot). The commit under test (`305af60`) changed the SPA's renderer, not the teardown or the API.
+
+## Applied (2026-09-22): direction (1) — don't fail the run
+
+`GitTempDirectory.DeleteRecursively` (all six copies — Api, Core, Certificates, TaskRunner, Scripting, Cli) no
+longer throws when the five-second retry budget runs out: it writes the same "Still open: …" diagnostic to
+stderr as a `WARNING:` and returns, leaving the directory for the OS to reclaim. The diagnostic — the only
+reason any of this was ever diagnosable — is unchanged; only the throw is gone. Direction (2) (a collectible
+load context so `LibraryRegistry` can actually release the file) is not attempted here — it's a `LibraryRegistry`
+design change with runtime value beyond tests, and stays its own phase if anyone wants it, per this doc's own
+recommendation.
+
+The Linux occurrence (Playwright's `global-teardown.ts`, the ENOTEMPTY removing the scratch repo) gets the
+matching treatment: `fs.rmSync` now passes `maxRetries`/`retryDelay` (Node's own retry list covers `ENOTEMPTY`),
+and the whole call is wrapped in try/catch that warns to stderr instead of throwing out of global teardown.
+
+**Not proven:** both directions require watching `dotnet-windows` and `playwright` stay green across several
+consecutive runs with no re-runs — the catalogue's own definition of done — which hasn't happened yet.

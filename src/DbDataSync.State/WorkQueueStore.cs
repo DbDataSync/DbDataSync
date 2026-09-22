@@ -220,9 +220,16 @@ public sealed class WorkQueueStore(StateDatabase database)
     /// <param name="lane">Restrict the claim to one lane's <see cref="RunKind"/>s. Null claims from
     /// any lane — never what the worker wants (it drives each lane's channel from its own claim loop),
     /// but what a reconciliation check or a test that is not about the split means.</param>
-    public WorkItem? TryClaimNext(string taskName, string workerId, RunLane? lane = null)
+    /// <param name="runId">Test-only: claim a specific run rather than whatever is next for the task.
+    /// Production never passes this — a worker wants the queue's own priority order, not one run it
+    /// already knows about. It exists so a test can state "the row I just enqueued" as an intent instead
+    /// of inferring it from being the only thing in the queue, which silently stops being true the moment
+    /// anything else (a scheduler tick, another test) enqueues a competing row for the same task. See
+    /// architecture/planning/todo/follow-up-runwatermarktimetests-claims-the-wrong-row-again-via-the-real-scheduler.md.</param>
+    public WorkItem? TryClaimNext(string taskName, string workerId, RunLane? lane = null, Guid? runId = null)
     {
         var laneClause = lane is { } l ? $"AND RunKind IN {RunKindsIn(l)}" : "";
+        var runIdClause = runId is not null ? "AND RunId = $runId" : "";
         for (var attempt = 0; attempt < 5; attempt++)
         {
             var candidate = database.Retry(() =>
@@ -234,14 +241,17 @@ public sealed class WorkQueueStore(StateDatabase database)
                     FROM WorkQueue w
                     WHERE TaskName = $task AND Status = 'Pending' AND AvailableAtUtc <= $now
                       {laneClause}
+                      {runIdClause}
                       AND NOT EXISTS (
                         SELECT 1 FROM WorkQueue w2
                         WHERE w2.TaskName = w.TaskName AND w2.RunKind = w.RunKind AND w2.MappingName = w.MappingName
                           AND w2.Status IN ('Claimed','Running') AND w2.Id <> w.Id)
-                    ORDER BY Priority DESC, EnqueuedAtUtc ASC {database.Limit("take")};
+                    ORDER BY Priority DESC, EnqueuedAtUtc ASC, Id ASC {database.Limit("take")};
                     """);
                 cmd.Bind(database, "task", taskName);
                 cmd.Bind(database, "now", DateTimeOffset.UtcNow.ToString("O"));
+                if (runId is { } id)
+                    cmd.Bind(database, "runId", id.ToString());
                 cmd.Bind(database, "take", 1);
                 using var reader = cmd.ExecuteReader();
                 return reader.Read() ? ReadItem(reader) : null;

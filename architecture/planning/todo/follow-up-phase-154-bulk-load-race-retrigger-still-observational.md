@@ -90,3 +90,14 @@ two failures are *opposite*:
 Both commits were unrelated to this code (`5c7094a` changed docs only; `099230a` changed packaging and CI files).
 Two outcomes in opposite directions from the same test is what "asserted as if it were closed while still
 observational" predicts: the assertion picks one winner where the race can produce either.
+
+## Applied (2026-09-22)
+
+The `map2StillLoading` branch now checks both outcomes explicitly, matching the `map1Primary` branch ten lines
+above it: `"Failed"`/`MappingStillLoading` is still asserted when the retrigger's POST is served while the hold
+is still up, and `"Succeeded"` is now accepted as the equally-correct outcome when map-2's own Bulk Load clears
+the hold in the GET-then-POST gap before the retrigger lands. Nothing else in the test was relaxed — the failing
+branch's assertions (`MappingStillLoading`, "still loading") are untouched, and
+`RunExecutorTests.ExecuteWorkerAsync_AManualTriggerWhileStillLoading_FailsCleanly_BeforeAnyConnectionIsOpened`
+still exists and still owns the deterministic proof of the property. **Not proven:** this can only be confirmed
+by CI not showing this test flip between "Expected: Failed / Actual: Succeeded" and green over several runs.

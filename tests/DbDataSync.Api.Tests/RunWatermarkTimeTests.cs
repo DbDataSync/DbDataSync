@@ -29,7 +29,7 @@ namespace DbDataSync.Api.Tests;
 /// a fabricated time is worse than one showing a dash, because only one of the two is arguable.
 /// </para>
 /// </summary>
-public sealed class RunWatermarkTimeTests(TestApiFactory factory) : IClassFixture<TestApiFactory>
+public sealed class RunWatermarkTimeTests(RunWatermarkApiFactory factory) : IClassFixture<RunWatermarkApiFactory>
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -399,19 +399,26 @@ public sealed class RunWatermarkTimeTests(TestApiFactory factory) : IClassFixtur
 
         var runId = queue.Enqueue(taskName, RunKind.Primary, mappingName);
 
-        var item = queue.TryClaimNext(taskName, workerId: "watermark-time-tests");
+        // Claimed by run id, not "whatever's next for this task" — TryClaimNext otherwise claims per
+        // task, not per mapping or per run, so any other Pending row for the same task that sorts first
+        // wins. This class's own RunWatermarkApiFactory already removes the one producer known to create
+        // such a row (a live SchedulerService tick), but stating the intent here rather than inferring it
+        // from being the only thing in the queue is what stops a *third* producer from reintroducing the
+        // exact same failure a third time — see
+        // architecture/planning/todo/follow-up-runwatermarktimetests-claims-the-wrong-row-again-via-the-real-scheduler.md.
+        var item = queue.TryClaimNext(taskName, workerId: "watermark-time-tests", runId: runId);
         Assert.NotNull(item);
         Assert.Equal(runId, item.RunId);
 
         // A live pid, not a made-up dead one — see follow-up-phase-140-runwatermarktimetests-claims-
-        // the-wrong-queue-row-on-ci.md. This class's TestApiFactory host runs RunMonitorService for
-        // real, which calls ProcessSupervisor.ReconcileOrphanedRuns() once at startup on a background
-        // thread; a dead pid here is indistinguishable from a genuinely orphaned run, and reconcile can
-        // release this run's WorkQueue claim back to Pending while it's still in flight between this
-        // BeginRun and the MarkDone below — reproduced directly by calling ReconcileOrphanedRuns() mid-
-        // sequence. A stale Pending row then outranks (by EnqueuedAtUtc) whatever this test enqueues
-        // next, since TryClaimNext claims per task, not per mapping — the exact shape of the CI failure
-        // this replaces. The test process's own pid is always alive for the run's whole duration, so
+        // the-wrong-queue-row-on-ci.md. This class's host runs RunMonitorService for real, which calls
+        // ProcessSupervisor.ReconcileOrphanedRuns() once at startup on a background thread; a dead pid
+        // here is indistinguishable from a genuinely orphaned run, and reconcile can release this run's
+        // WorkQueue claim back to Pending while it's still in flight between this BeginRun and the
+        // MarkDone below — reproduced directly by calling ReconcileOrphanedRuns() mid-sequence. A stale
+        // Pending row then outranks (by EnqueuedAtUtc) whatever this test enqueues next, since
+        // TryClaimNext claims per task, not per mapping — the exact shape of the CI failure this
+        // replaces. The test process's own pid is always alive for the run's whole duration, so
         // reconcile's liveness check leaves it alone.
         runs.BeginRun(runId, pid: Environment.ProcessId);
         runs.CompleteRun(

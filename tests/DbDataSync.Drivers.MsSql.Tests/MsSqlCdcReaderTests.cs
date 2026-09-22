@@ -419,9 +419,19 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
             [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
         var earliestRows = await CollectAsync(earliest.Rows);
 
-        var row = Assert.Single(earliestRows);
-        Assert.Equal(2, (int)row["Id"]!);
-        Assert.Equal("Bob", (string)row["Name"]!);
+        // The row count is a proxy for inclusivity, not the property itself, and the guard above already
+        // says the proxy isn't exact: whether the first row's change survived the prune depends on where
+        // minLsn actually landed, not on where the cleanup was asked to put it. Deriving the expectation
+        // from the observed floor (rather than hard-coding "one") is what keeps this assertion correct
+        // when the prune lands short of the mark, which the guard says can happen under load.
+        var firstRowSurvived = MsSqlCdcCatalog.Compare(minLsn!, MsSqlCdcCatalog.FromWatermark(afterFirst)) <= 0;
+        Assert.Equal(firstRowSurvived ? 2 : 1, earliestRows.Count);
+
+        // Whatever the floor did to the first row, the second row's change is always at or above minLsn
+        // (the prune never overshoots it) and always last — this is the inclusive-read property itself.
+        var last = earliestRows[^1];
+        Assert.Equal(2, (int)last["Id"]!);
+        Assert.Equal("Bob", (string)last["Name"]!);
 
         // The rejected design, reproduced directly: the same LSN, read via the ordinary incremental
         // path instead of the inclusive one. sys.fn_cdc_increment_lsn moves past it, and the row this

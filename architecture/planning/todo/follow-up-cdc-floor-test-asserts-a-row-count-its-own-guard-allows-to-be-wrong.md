@@ -75,3 +75,14 @@ landing is not something the product promises.
   pruning to a mark between the two rows' LSNs, rather than waiting for a loaded runner to produce it.
 - The inclusive-read property is still asserted, and the rejected-design half of the test (`ReadIntent.Changes`
   from the same LSN returning nothing) is untouched.
+
+## Applied (2026-09-22)
+
+Took the second fix shape: the row count is now derived from the floor actually observed
+(`MsSqlCdcCatalog.Compare(minLsn!, MsSqlCdcCatalog.FromWatermark(afterFirst)) <= 0` decides whether the first
+row's change survived the prune, so 2 vs. 1 is computed rather than hard-coded), and the second row is asserted
+by taking the *last* returned row rather than assuming there is exactly one. The guard comment above it (the one
+that made this diagnosable) is untouched, and the rejected-design half of the test is untouched. Not yet forced
+directly (pruning to a mark between the two rows' LSNs on purpose) — the derived assertion is correct either way
+the real prune lands, which is what matters, but deliberately reproducing the short-landing case would be a
+stronger regression guard if anyone wants to add it later.

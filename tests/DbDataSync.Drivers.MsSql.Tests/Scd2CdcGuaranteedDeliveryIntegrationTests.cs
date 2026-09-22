@@ -245,19 +245,10 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
     /// key in the very same pass (Id 2) — proving the bulk path still carries every key the duplicate
     /// machinery does not have to touch, unaffected.
     /// </summary>
-    /// <summary>
-    /// Waits long enough that the next change is committed in a different clock tick from the last one.
-    /// <para>
-    /// These tests assert that two changes to one key were mapped to two distinct times (a delete before its re-insert, an
-    /// update before the next). <c>ScanAsync</c> between them guarantees two distinct mapping <em>points</em>, not two distinct
-    /// <em>times</em>: <c>cdc.lsn_time_mapping</c> takes each transaction's commit time, SQL Server's <c>datetime</c> resolves to
-    /// 3.33 ms, and a fast CI runner does an operation, a scan and the next operation well inside that. CI runs showed exactly
-    /// that — <c>d0 closed at …07:18:47.2300000, d1 opened at …07:18:47.2300000</c> — four times in five days (see
-    /// architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md). A row deleted and re-inserted inside
-    /// one tick legitimately gets ValidTo == ValidFrom; the tests want the case where it does not, so they make sure it does not.
-    /// </para>
-    /// </summary>
-    private static Task NextClockTickAsync() => Task.Delay(TimeSpan.FromMilliseconds(30));
+    // These tests assert that two changes to one key were mapped to two distinct times (a delete before its
+    // re-insert, an update before the next). A scan between them guarantees two distinct mapping *points*, not
+    // two distinct *times* — see CdcCaptureJob.ScanUntilPastAsync's own doc comment for why a fixed delay
+    // between the operations turned out not to be enough, and why these tests wait on that instead of on time.
 
     [Fact]
     public async Task APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation()
@@ -279,11 +270,10 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         // transactions and, in the all-changes fallback this fixture forces, two distinct __$start_lsn
         // values for Scd2Writer to key its per-row processing on.
         await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'b' WHERE Id = 1;");
-        await CdcCaptureJob.ScanAsync(_sourceConnection);
+        var afterFirstUpdate = await CdcCaptureJob.ScanAsync(_sourceConnection);
 
-        await NextClockTickAsync();
         await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'c' WHERE Id = 1;");
-        await CdcCaptureJob.ScanAsync(_sourceConnection);
+        await CdcCaptureJob.ScanUntilPastAsync(_sourceConnection, afterFirstUpdate);
 
         // A singleton key in the very same pass.
         await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'q' WHERE Id = 2;");
@@ -383,19 +373,17 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         // the two rows distinct __$start_lsn values, the same reason the test above scans between its
         // two updates.
         await ExecuteAsync(_sourceConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 4;");
-        await CdcCaptureJob.ScanAsync(_sourceConnection);
-        await NextClockTickAsync();
+        var afterDelete = await CdcCaptureJob.ScanAsync(_sourceConnection);
         await ExecuteAsync(_sourceConnection, $"""
             INSERT INTO dbo.[{_sourceTable}] (Id, Name, Note) VALUES (4, 'd1', 'n0');
             """);
-        await CdcCaptureJob.ScanAsync(_sourceConnection);
+        await CdcCaptureJob.ScanUntilPastAsync(_sourceConnection, afterDelete);
 
         // Id 5: changed, then gone.
         await ExecuteAsync(_sourceConnection, $"UPDATE dbo.[{_sourceTable}] SET Name = 'e1' WHERE Id = 5;");
-        await CdcCaptureJob.ScanAsync(_sourceConnection);
-        await NextClockTickAsync();
+        var afterUpdate = await CdcCaptureJob.ScanAsync(_sourceConnection);
         await ExecuteAsync(_sourceConnection, $"DELETE FROM dbo.[{_sourceTable}] WHERE Id = 5;");
-        await CdcCaptureJob.ScanAsync(_sourceConnection);
+        await CdcCaptureJob.ScanUntilPastAsync(_sourceConnection, afterUpdate);
 
         var (_, staged, written) = await RunPassAsync(watermark, ReadIntent.Changes);
         Assert.True(staged.HasChangeOrdering);

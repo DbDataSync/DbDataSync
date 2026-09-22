@@ -238,9 +238,23 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
                 $"/api/replications/{_replicationName}/runs", new StringContent("", Encoding.UTF8, "application/json")));
             var raceRuns = await Task.WhenAll(raceRunIds.Select(PollUntilTerminalAsync));
             var map2Race = Assert.Single(raceRuns, r => r.GetProperty("mappingName").GetString() == "map-2");
-            Assert.Equal("Failed", map2Race.GetProperty("status").GetString());
-            Assert.Equal("MappingStillLoading", map2Race.GetProperty("failureKind").GetString());
-            Assert.Contains("still loading", map2Race.GetProperty("errorSummary").GetString());
+            var map2RaceStatus = map2Race.GetProperty("status").GetString();
+            if (map2RaceStatus == "Failed")
+            {
+                // The intended branch: the retrigger's POST was served while the hold was still up.
+                Assert.Equal("MappingStillLoading", map2Race.GetProperty("failureKind").GetString());
+                Assert.Contains("still loading", map2Race.GetProperty("errorSummary").GetString());
+            }
+            else
+            {
+                // PollUntilHoldAsync only proves the hold was set at the moment it returned — map-2's own
+                // Bulk Load can still finish and clear it in the GET-then-POST gap before the retrigger's
+                // POST is served. Nothing left to collide with at that point, so this is just an ordinary,
+                // non-colliding run. Equally correct; not the shape this half of the test exists to name,
+                // but not a failure of anything it is actually checking either (mirrors the map-1 branch
+                // above, and see this test's own follow-up doc for why the branch can't be forced).
+                Assert.Equal("Succeeded", map2RaceStatus);
+            }
         }
         // Else: map-2's own load finished before this test could ever observe it Loading — the window
         // this half of the test exercises had already closed on its own, an environment-speed accident

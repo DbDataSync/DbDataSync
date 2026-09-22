@@ -95,3 +95,17 @@ expensive part and it is done.
 - `RunnerStateEndpointTests.The_remote_implementation_does_the_same_thing_as_the_local_one` stops being
   a candidate for this failure — and is not modified to achieve that.
 - `GetLogs`' `Flush()` call still exists and still means what its presence implies.
+
+## Applied (2026-09-22)
+
+Took the lock-across-drain-and-write option this doc weighed against the sequence-number alternative:
+`LogWriter.Flush()` is now `lock (_flushLock) { ... }` around the whole drain-and-commit, not just the drain, so
+a caller that finds the buffer already empty because another thread's `Flush()` just drained it cannot return
+from its own call until that other flush's transaction has committed. `GetLogs` was and is unmodified — it
+still calls `Flush()` first, and that call now actually delivers the guarantee its own presence implies. The one
+cost named in the doc (the lock is held across a database write, and `Log()` calls `Flush()` on its own hot path
+at the 50-line threshold) is accepted as-is: it's already the cost of the work, just exclusive now instead of
+overlapping, and `DbDataSync.State.Tests` (32 tests, `LogWriterTests` included) pass locally. Not done: forcing
+the race directly (a lowered flush interval, or a concurrent flush forced deliberately) to prove the fix rather
+than only removing the theoretical window — worth adding if anyone wants a regression test that would have
+caught this before it shipped.

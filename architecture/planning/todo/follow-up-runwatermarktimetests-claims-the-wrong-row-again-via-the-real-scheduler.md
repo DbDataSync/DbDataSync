@@ -86,3 +86,23 @@ Two things worth doing alongside, neither sufficient alone:
 - The helper's comment is updated: it currently explains only the reconcile producer, which reads as if
   that were the whole story.
 - Nothing in the class depends on the scheduler being live (checked, not assumed, before removing it).
+
+## Applied (2026-09-22): all three suggested fixes
+
+- **Stopped the test host scheduling.** `RunWatermarkApiFactory` (new, `TestApiFactory` subclass) removes
+  `SchedulerService`'s `IHostedService` registration; `RunWatermarkTimeTests` now uses it in place of the plain
+  `TestApiFactory`. Checked before removing: nothing in the class exercises scheduling, only how a page of run
+  history is dated.
+- **Claim the row the test means.** `WorkQueueStore.TryClaimNext` grew an optional `runId` parameter (default
+  `null`, so every other caller — the real worker included — is unaffected) that restricts the claim to that
+  specific run. `CompleteRun`'s helper now passes the run id it just enqueued, stating its intent instead of
+  inferring it from being next in the queue.
+- **Gave `ORDER BY` a deterministic tie-breaker.** `Priority DESC, EnqueuedAtUtc ASC` is now
+  `Priority DESC, EnqueuedAtUtc ASC, Id ASC` — a production change, not just a test one, since an arbitrary
+  order among equal timestamps affected real claim order too.
+
+The helper's comment now explains both producers (reconcile and the scheduler) rather than only the first.
+**Not proven:** needs several consecutive green runs of this class to confirm; the doc's own suggestion to
+force a `SchedulerService` tick between `Enqueue` and `TryClaimNext` deliberately, the way phase 140 forced
+`ReconcileOrphanedRuns()`, was not added — the scheduler is gone from this host entirely, so there's nothing
+left to force a tick on for this class specifically.

@@ -121,3 +121,23 @@ meaning (strict `<` / `!=`); nothing in the product was touched, and the class p
 that this ends the failures — it can only be shown by CI staying green on this class over several runs, which is the thing to
 watch. The other CDC failure seen the same day (`MsSqlCdcReaderTests.ChangesFromEarliest_…`, `Assert.Single() … 2 items`) is a
 different test and is not addressed here.
+
+## The 30 ms fix's own theory was falsified (2026-09-22)
+
+CI run `35776177912`, 2026-09-22, failed `APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation`
+with both mapped times identical — **with the 30 ms gap in place**. That rules out the theory the fix was built on: whatever
+actually governs how often a mapping point advances in `cdc.lsn_time_mapping` is not the `datetime` column's 3.33 ms rounding,
+or a fixed delay long enough on one runner would have been long enough on this one too. Waiting longer is guessing at an
+unknown granularity; the fix below checks instead of guessing.
+
+## Applied (2026-09-22): wait for a verified new mapping point, not a fixed delay
+
+`CdcCaptureJob.ScanAsync` now returns the latest `tran_end_time` from `cdc.lsn_time_mapping` it produced, and a new
+`CdcCaptureJob.ScanUntilPastAsync(connection, after)` re-scans (up to 30s, 100ms between attempts) until a scan actually
+produces a mapping point strictly after `after`, throwing with `DiagnoseAsync`'s output if it never does.
+`Scd2CdcGuaranteedDeliveryIntegrationTests`'s three delay-then-scan call sites (the second update of Id 1, the re-insert of
+Id 4, the delete of Id 5) now capture the prior operation's returned mapped time and call `ScanUntilPastAsync` with it instead
+of sleeping a guessed duration; `NextClockTickAsync` is removed. This proves the property the assertions actually need (two
+distinct mapping points) rather than betting a delay is long enough, on this runner and every future one. **Not proven:** that
+CI stays green on this class over several runs — that's still the thing to watch, and if `ScanUntilPastAsync` itself times out
+often, that's new information about the real granularity worth its own follow-up.

@@ -37,9 +37,11 @@ internal static class CdcCaptureJob
     /// Forces a synchronous scan of the log: everything committed before this returns is captured and
     /// its LSN mapped in <c>cdc.lsn_time_mapping</c>. Stops the Agent capture job first (it is
     /// restarted by <c>sp_cdc_enable_table</c>, so this cannot be a one-time step) and waits for it to
-    /// release the log reader.
+    /// release the log reader. Returns the latest <c>tran_end_time</c> the scan produced in
+    /// <c>cdc.lsn_time_mapping</c> — see <see cref="ScanUntilPastAsync"/>, which uses it to wait for a
+    /// genuinely later mapping point instead of guessing a delay.
     /// </summary>
-    public static async Task ScanAsync(SqlConnection connection)
+    public static async Task<DateTime> ScanAsync(SqlConnection connection)
     {
         await StopCaptureJobAsync(connection);
 
@@ -60,7 +62,7 @@ internal static class CdcCaptureJob
                         EXEC sys.sp_repldone @xactid = NULL, @xact_seqno = NULL, @numtrans = 0, @time = 0, @reset = 1;
                     END TRY BEGIN CATCH END CATCH;
                     """);
-                return;
+                return await LatestMappedTimeAsync(connection);
             }
             catch (SqlException ex) when (attempt < 20 && IsScanBusy(ex))
             {
@@ -68,6 +70,45 @@ internal static class CdcCaptureJob
                 // reader for a beat.
                 await Task.Delay(TimeSpan.FromSeconds(1));
             }
+        }
+    }
+
+    /// <summary>
+    /// The latest transaction commit time <c>cdc.lsn_time_mapping</c> has recorded — the same value
+    /// CDC's own mapped-time reads for the source table derive from, so comparing it before and after an
+    /// operation proves whether that operation actually got a new mapping point.
+    /// </summary>
+    public static async Task<DateTime> LatestMappedTimeAsync(SqlConnection connection)
+    {
+        var result = await ScalarAsync(connection, "SELECT MAX(tran_end_time) FROM cdc.lsn_time_mapping;");
+        return result is DateTime time ? time : DateTime.MinValue;
+    }
+
+    /// <summary>
+    /// Re-scans until <c>cdc.lsn_time_mapping</c> records a transaction strictly after
+    /// <paramref name="after"/> — proof the next tracked change will map to a genuinely later time,
+    /// rather than a fixed delay long enough on one runner and not on another. Replaces an earlier fix
+    /// that waited 30 ms on the theory that <c>datetime</c>'s 3.33 ms tick was the only granularity in
+    /// play; CI kept producing identical mapped times anyway even with that gap in place, so whatever
+    /// actually governs how often a mapping point advances is coarser or load-dependent, and worth
+    /// checking for rather than out-waiting (see
+    /// architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md).
+    /// </summary>
+    public static async Task<DateTime> ScanUntilPastAsync(SqlConnection connection, DateTime after)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (true)
+        {
+            var latest = await ScanAsync(connection);
+            if (latest > after)
+                return latest;
+
+            if (DateTime.UtcNow >= deadline)
+                throw new TimeoutException(
+                    $"cdc.lsn_time_mapping did not record a transaction after {after:O} within 30s "
+                    + $"(latest seen: {latest:O}). {await DiagnoseAsync(connection)}");
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
         }
     }
 

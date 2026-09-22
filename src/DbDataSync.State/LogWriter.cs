@@ -20,6 +20,7 @@ public sealed class LogWriter : IDisposable
     private readonly PeriodicTimer _timer;
     private readonly Task _flushLoop;
     private readonly CancellationTokenSource _cts = new();
+    private readonly object _flushLock = new();
     private int _pendingCount;
 
     public LogWriter(StateDatabase database)
@@ -49,56 +50,77 @@ public sealed class LogWriter : IDisposable
             Flush();
     }
 
+    /// <summary>
+    /// Drains the buffer and commits it. Held under <see cref="_flushLock"/> for the whole drain-and-write,
+    /// not just the drain: without that, a caller that finds the queue already empty (because another
+    /// thread's <see cref="Flush"/> just drained it) could run its own no-op "nothing pending" return and
+    /// let a caller relying on read-your-writes (<see cref="GetLogs"/>) query the database before the
+    /// other thread's transaction — the one that actually holds this caller's entries — has committed.
+    /// Locking the whole method makes that impossible: a <see cref="Flush"/> that finds nothing to drain
+    /// still cannot return until any <see cref="Flush"/> already in flight has committed, so by the time
+    /// it does return, everything enqueued before it was called is durable. See
+    /// architecture/planning/todo/follow-up-getlogs-flush-does-not-guarantee-read-your-writes.md.
+    /// <para>
+    /// Held across the database write, which is the one thing worth naming: <see cref="Log"/> itself
+    /// calls this at <see cref="FlushThreshold"/>, on its own hot path, so whichever thread crosses that
+    /// threshold now blocks other flushers for the duration of one batch commit. That is already true of
+    /// the work involved — it does not add new contention beyond what a batch write already costs — it
+    /// just makes the existing cost exclusive instead of overlapping.
+    /// </para>
+    /// </summary>
     public void Flush()
     {
-        var batch = new List<(Guid RunId, DateTimeOffset TimestampUtc, LogSeverity Level, string Message, string? SourceKey)>();
-        while (_buffer.TryDequeue(out var entry))
+        lock (_flushLock)
         {
-            batch.Add(entry);
-            Interlocked.Decrement(ref _pendingCount);
-        }
-
-        if (batch.Count == 0)
-            return;
-
-        _database.Retry(() =>
-        {
-            using var connection = _database.OpenConnection();
-            using var transaction = connection.BeginTransaction();
-            // Insert-or-ignore against UX_Logs_SourceKey: a replayed journal entry is dropped, and a
-            // live line (SourceKey NULL) never conflicts. The conflicting column is named explicitly
-            // — the untargeted form the other two engines allow has no SQL Server equivalent.
-            using var cmd = _database.Command(connection, transaction, _database.Dialect.InsertOrIgnore(
-                "Logs",
-                "RunId, TimestampUtc, Level, Message, SourceKey",
-                "$runId, $ts, $level, $message, $sourceKey",
-                "SourceKey",
-                // UX_Logs_SourceKey is partial — unique only where SourceKey is not null, which is
-                // what lets two genuinely identical live lines both be stored. The predicate has to
-                // travel with the target or the index is not the one being matched against.
-                "SourceKey IS NOT NULL"));
-
-            // One command, bound once and re-executed per line. A batch is the whole point of this
-            // writer, and rebuilding the parameter collection for each of a few hundred lines would
-            // undo it.
-            var runIdParam = Reusable(cmd, "runId");
-            var tsParam = Reusable(cmd, "ts");
-            var levelParam = Reusable(cmd, "level");
-            var messageParam = Reusable(cmd, "message");
-            var sourceKeyParam = Reusable(cmd, "sourceKey");
-
-            foreach (var entry in batch)
+            var batch = new List<(Guid RunId, DateTimeOffset TimestampUtc, LogSeverity Level, string Message, string? SourceKey)>();
+            while (_buffer.TryDequeue(out var entry))
             {
-                runIdParam.Value = entry.RunId.ToString();
-                tsParam.Value = entry.TimestampUtc.ToString("O");
-                levelParam.Value = entry.Level.ToString();
-                messageParam.Value = entry.Message;
-                sourceKeyParam.Value = (object?)entry.SourceKey ?? DBNull.Value;
-                cmd.ExecuteNonQuery();
+                batch.Add(entry);
+                Interlocked.Decrement(ref _pendingCount);
             }
 
-            transaction.Commit();
-        });
+            if (batch.Count == 0)
+                return;
+
+            _database.Retry(() =>
+            {
+                using var connection = _database.OpenConnection();
+                using var transaction = connection.BeginTransaction();
+                // Insert-or-ignore against UX_Logs_SourceKey: a replayed journal entry is dropped, and a
+                // live line (SourceKey NULL) never conflicts. The conflicting column is named explicitly
+                // — the untargeted form the other two engines allow has no SQL Server equivalent.
+                using var cmd = _database.Command(connection, transaction, _database.Dialect.InsertOrIgnore(
+                    "Logs",
+                    "RunId, TimestampUtc, Level, Message, SourceKey",
+                    "$runId, $ts, $level, $message, $sourceKey",
+                    "SourceKey",
+                    // UX_Logs_SourceKey is partial — unique only where SourceKey is not null, which is
+                    // what lets two genuinely identical live lines both be stored. The predicate has to
+                    // travel with the target or the index is not the one being matched against.
+                    "SourceKey IS NOT NULL"));
+
+                // One command, bound once and re-executed per line. A batch is the whole point of this
+                // writer, and rebuilding the parameter collection for each of a few hundred lines would
+                // undo it.
+                var runIdParam = Reusable(cmd, "runId");
+                var tsParam = Reusable(cmd, "ts");
+                var levelParam = Reusable(cmd, "level");
+                var messageParam = Reusable(cmd, "message");
+                var sourceKeyParam = Reusable(cmd, "sourceKey");
+
+                foreach (var entry in batch)
+                {
+                    runIdParam.Value = entry.RunId.ToString();
+                    tsParam.Value = entry.TimestampUtc.ToString("O");
+                    levelParam.Value = entry.Level.ToString();
+                    messageParam.Value = entry.Message;
+                    sourceKeyParam.Value = (object?)entry.SourceKey ?? DBNull.Value;
+                    cmd.ExecuteNonQuery();
+                }
+
+                transaction.Commit();
+            });
+        }
 
         DbParameter Reusable(DbCommand cmd, string name)
         {

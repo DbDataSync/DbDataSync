@@ -76,3 +76,17 @@ whoever owns phase 136/140's testing intent rather than being done quietly here.
 - On an unelevated machine these tests skip with a reason, or pass; they do not fail.
 - The next real occurrence has the class's own diagnostic output attached to this doc, and the cause above is
   narrowed from two candidates to one.
+
+## Applied (2026-09-22): the small fix — guard the write
+
+Both write calls (`WriteError_…`, `WriteInformation_…`) now go through a new `WriteOrExplain` helper that wraps
+the call in the same try/catch shape `EnsureSourceRegisteredOrExplain` already uses, and fails with the same
+elevation context — checking for `SecurityException` (registration's own failure mode) as well as an
+"Access is denied" / "Cannot open log for source" message (the write's own, which isn't a `SecurityException`
+and used to sail past the old guard). A permissions failure on the write now reports as one.
+
+**Not applied — deliberately, per this doc's own scoping:** the larger question (should these tests run at all
+on an unelevated machine, gated behind an explicit opt-in instead of always attempted) is left alone, since this
+doc already said that decision belongs to whoever owns phase 136/140's testing intent. Also not narrowed: which
+of the two write-side candidates (registration-not-yet-effective vs. a genuine privilege gap) is the real cause
+— the next real occurrence still needs to attach its diagnostic output here.

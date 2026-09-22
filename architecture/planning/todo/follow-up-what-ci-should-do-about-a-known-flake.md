@@ -57,16 +57,21 @@ should say a job needed a second attempt, so the frequency stays legible instead
 The catalogue's list was long and partly undiagnosed when it was written. **It no longer is.** Every failure
 it names now has a doc with a diagnosed cause and a fix shape:
 
-| failure | doc | shape of fix |
-| --- | --- | --- |
-| SCD2 CDC identical mapped times | [phase-154 SCD2](follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md) | test-harness; partly done (`a2a8d66` added a clock tick) |
-| Playwright `ENOTEMPTY` teardown | [temp dir](follow-up-a-temp-dir-that-cannot-be-deleted-fails-a-job-whose-tests-all-passed.md) | don't fail a run on an undeletable temp dir |
-| Bulk-load retrigger race | [phase-154 bulk load](follow-up-phase-154-bulk-load-race-retrigger-still-observational.md) | accept both outcomes, as the same test already does for `map-1` |
-| `RunWatermarkTimeTests` wrong row | [scheduler](follow-up-runwatermarktimetests-claims-the-wrong-row-again-via-the-real-scheduler.md) | stop the test host scheduling; claim by run id |
-| `MsSqlCdcReaderTests` floor | [CDC floor](follow-up-cdc-floor-test-asserts-a-row-count-its-own-guard-allows-to-be-wrong.md) | assert inclusivity, not a row count |
-| Event Log write denial | [Event Log](follow-up-event-log-tests-guard-registration-but-not-the-write.md) | guard the write; skip unelevated |
-| `UpdateConfirmationServiceTests` deadline | — | **done** (`c66b834`) |
-| `RunnerStateEndpointTests` empty logs | [GetLogs](follow-up-getlogs-flush-does-not-guarantee-read-your-writes.md) | serialize `LogWriter.Flush` |
+| failure | doc | shape of fix | status (2026-09-22) |
+| --- | --- | --- | --- |
+| SCD2 CDC identical mapped times | [phase-154 SCD2](follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md) | test-harness; the clock-tick delay (`a2a8d66`) was falsified by a same-day recurrence, replaced with a verified-wait (`ScanUntilPastAsync`) | applied, unproven over multiple CI runs |
+| Playwright `ENOTEMPTY` teardown | [temp dir](follow-up-a-temp-dir-that-cannot-be-deleted-fails-a-job-whose-tests-all-passed.md) | don't fail a run on an undeletable temp dir | applied (both the `dotnet-windows` and Playwright occurrences), unproven over multiple CI runs |
+| Bulk-load retrigger race | [phase-154 bulk load](follow-up-phase-154-bulk-load-race-retrigger-still-observational.md) | accept both outcomes, as the same test already does for `map-1` | applied, unproven over multiple CI runs |
+| `RunWatermarkTimeTests` wrong row | [scheduler](follow-up-runwatermarktimetests-claims-the-wrong-row-again-via-the-real-scheduler.md) | stop the test host scheduling; claim by run id | applied (both, plus the `ORDER BY` tie-breaker), unproven over multiple CI runs |
+| `MsSqlCdcReaderTests` floor | [CDC floor](follow-up-cdc-floor-test-asserts-a-row-count-its-own-guard-allows-to-be-wrong.md) | assert inclusivity, not a row count | applied |
+| Event Log write denial | [Event Log](follow-up-event-log-tests-guard-registration-but-not-the-write.md) | guard the write; skip unelevated | write guarded; the unelevated-skip policy question is explicitly left open |
+| `UpdateConfirmationServiceTests` deadline | — | **done** (`c66b834`) | done |
+| `RunnerStateEndpointTests` empty logs | [GetLogs](follow-up-getlogs-flush-does-not-guarantee-read-your-writes.md) | serialize `LogWriter.Flush` | applied |
+
+Every row now has a fix in place — see each doc's own "Applied" section for what changed and what's still
+unproven. What closes this doc per its own "How to verify when closed" is what hasn't happened yet: several
+consecutive `dev` pushes going green with no re-runs. Worth revisiting after a few days of CI history with these
+changes in.
 
 Most are small and test-side. Two (`GetLogs`, and whatever the Event Log write turns out to be) are product
 changes worth making on their own merits.
