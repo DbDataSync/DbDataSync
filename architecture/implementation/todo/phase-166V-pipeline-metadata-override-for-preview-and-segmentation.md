@@ -1,6 +1,12 @@
 # Phase 166V — Extend scripted metadata overrides to the pipeline's remaining live-catalog call sites
 
-**Status**: Design only — not yet built.
+**Status**: Superseded by `architecture/implementation/todo/phase-167V-jdbc-metadata-databasemetadata-and-generic-descriptor.md`.
+This phase's goal (route a bound `metadataProvider` script to `DescribeAsync`/`ExpandAutoSegmentsAsync`)
+is real, but its proposed `DbConnection`-keyed `ConditionalWeakTable` override is not the mechanism built.
+`ExpandAutoSegmentsAsync` gets a cache-threading fix instead (it doesn't need script-awareness once it
+reads `sourceColumns`). `DescribeAsync` gets script-awareness via `PreviewService` calling
+`ScriptedMetadata` directly and passing the result down `PreviewRequest`, not a per-connection catalog
+decorator. See phase 167V for the reasoning and the actual mechanism.
 **Plan reference**: `architecture/implementation/done/phase-029-scripted-metadata-providers.md` (built
 `ScriptSlots.MetadataProvider` — a connection-level script that overrides `IDriver.ListDatabasesAsync`/
 `ListTablesAsync`/`ListColumnsAsync` for the SPA's browsing pickers — and named, in its own "Open
