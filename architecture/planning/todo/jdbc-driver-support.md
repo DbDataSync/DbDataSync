@@ -136,10 +136,14 @@ Both forms must work:
 
 `libraries/` is NuGet-package-shaped (`library.json`, a `DbProviderFactory` type, an
 `AssemblyDependencyResolver` per directory, plus phase 109j's surface checking). A `.jar` is none of
-those. A sibling **`jars/`** root, enumerated the way `drivers/` already is, keeps two genuinely
-different artifact kinds apart. The IKVM-compiled `.dll` case is the interesting one: at that point the
-artifact *is* a managed assembly, so `libraries/` may genuinely be right for it — worth deciding
-deliberately rather than by accident.
+those.
+
+**Resolved 2026-09-22**: `architecture/planning/todo/user-provided-files-store.md` — neither `libraries/`
+nor a jar-specific `jars/` root as first floated here, but a general **`files/`**, "a standard place for
+user-provided files" (jars being the motivating and so far only case), with its own small management GUI.
+The IKVM-compiled `.dll` case stays separate from that store on purpose, for a different reason than
+originally guessed here: it's *derived* build output, not something an operator supplied, so it lives in
+`drivers/<id>/compiled/` instead — see `architecture/planning/todo/jdbc-ikvmreference-compile-button.md`.
 
 ## Testing — a Java 8 driver for an engine we already test
 

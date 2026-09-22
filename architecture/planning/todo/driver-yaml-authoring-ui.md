@@ -42,14 +42,12 @@ nothing else in the form is meaningfully generic across both.
 quick-add chips plus the NuGet search box — not reinvented here. Picking or installing one sets `Library`.
 
 **JDBC**: `DriverClass` (text — `org.postgresql.Driver`-shaped) plus a jar list. Where the jar *files*
-themselves come from is the one place this UI genuinely can't be designed in isolation — it depends on
-`jdbc-driver-feature-gaps.md`'s still-open `jars/` vs `libraries/` question. Proposed for v1, without
-resolving that question here: a plain upload control (multipart POST, one or more `.jar` files) writing
-into whatever directory that decision lands on, with a raw-path text field as the escape hatch for a jar
-that already exists on the server's filesystem — mirroring `JdbcDriverSpec.DriverJarPath`'s own doc
-comment calling the literal-path shape "provisional." **This sub-piece should be built after (or in
-lockstep with) that artifact-location decision, not ahead of it** — flagged as a real dependency, not
-glossed over.
+themselves come from — the one thing this UI couldn't be designed in isolation, when this doc was first
+written — is now resolved: `architecture/planning/todo/user-provided-files-store.md`'s `files/` store,
+with its own small GUI (Admin → Files). The jar picker here is "pick from `GET /api/files` or upload a
+new one inline," embedding that store's upload control the same way §2's ADO.NET half already embeds the
+Libraries search box rather than sending the operator to a different screen — one small multi-select
+list, not a new upload mechanism of its own.
 
 Once jars exist, `jdbc-ikvmreference-compile-button.md`'s "Compile" action is a natural next affordance
 on this same screen — out of scope for authoring itself, cross-referenced only.
@@ -146,7 +144,8 @@ confirmation belongs to the jar-upload/library-install sub-flows this form embed
 
 ## What this does not build
 
-- Jar upload / the `jars/` vs `libraries/` resolution — a real dependency, not solved here (see §2 above).
+- The `files/` store and its own upload GUI — `user-provided-files-store.md`'s scope, embedded here
+  (§2), not rebuilt here.
 - Structured `typeMap` authoring beyond the raw-YAML editor (v2 candidate).
 - `DELETE /api/drivers/{id}` — doesn't exist today for *any* driver, descriptor-authored-by-hand included;
   out of scope for this doc specifically.
@@ -161,8 +160,8 @@ Mirroring how `drivers-and-libraries-in-the-web-ui.md` itself split into 116–1
 
 1. `GET /api/known-driver-kinds` + `POST`/`GET`/`PUT /api/drivers/{id}/yaml` — the API surface, no UI yet,
    testable on its own the way every prior phase in that family was.
-2. The structured form (base, capabilities, library/jar picker minus upload, metadata queries) plus the
+2. `user-provided-files-store.md`'s own API + GUI (`GET`/`POST`/`DELETE /api/files`, Admin → Files) — a
+   real prerequisite for the JDBC half of 3, but independently useful and buildable first.
+3. The structured form (base, capabilities, library/jar picker embedding 2, metadata queries) plus the
    raw-YAML dialect/typeMap editor — the bulk of the UI.
-3. Jar upload, once the artifact-location question resolves — genuinely blocked on that decision, not a
-   sequencing preference.
-4. "Start from a `KnownDrivers` entry" — small, additive, fine to land whenever convenient inside 2 or 3.
+4. "Start from a `KnownDrivers` entry" — small, additive, fine to land whenever convenient inside 3.

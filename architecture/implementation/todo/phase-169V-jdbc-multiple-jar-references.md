@@ -3,6 +3,10 @@
 **Status**: Not started.
 **Plan reference**: none — raised directly by the user, following on from phase 168V
 (`architecture/implementation/todo/phase-168V-generic-driver-base-and-jdbc-descriptor.md`).
+**Updated 2026-09-22**: `architecture/planning/todo/user-provided-files-store.md` resolved the
+"literal filesystem path, provisional" question this phase originally deferred — `DriverJarPaths` entries
+are now **names within the new `files/` store**, not arbitrary filesystem paths. Unbuilt, so changed here
+directly rather than migrated; see that doc for the store itself, which this phase now depends on.
 
 ## Why
 
@@ -59,29 +63,39 @@ or several.
 - `JdbcDriverSpec.DriverJarPath: string` → `DriverJarPaths: IReadOnlyList<string>`
   (`src/DbDataSync.Drivers.Jdbc/JdbcDriverSpec.cs`).
 - `JdbcDescriptorYaml.DriverJarPath: string` → `DriverJarPaths: IReadOnlyList<string>`
-  (`src/DbDataSync.Drivers.Descriptor/DriverDescriptorYaml.cs`). YAML becomes:
+  (`src/DbDataSync.Drivers.Descriptor/DriverDescriptorYaml.cs`). Entries are **names inside `files/`**
+  (`user-provided-files-store.md`), not filesystem paths — resolved via `FilesPaths.FilePath(repoRoot,
+  name)` at the point `JdbcGenericDriver`'s constructor builds the class loader, the same "id/name in, real
+  path out" shape `LibraryRegistry.GetFactory` already uses for a library id. YAML becomes:
   ```yaml
   jdbc:
     driverClass: oracle.jdbc.OracleDriver
     driverJarPaths:
-      - /path/to/ojdbc8.jar
-      - /path/to/oraclepki.jar
-      - /path/to/osdt_cert.jar
-      - /path/to/osdt_core.jar
+      - ojdbc8.jar
+      - oraclepki.jar
+      - osdt_cert.jar
+      - osdt_core.jar
   ```
-  The common single-jar case is a one-element list (`driverJarPaths: [/path/to/postgresql.jar]`) —
+  The common single-jar case is a one-element list (`driverJarPaths: [postgresql-42.7.13.jar]`) —
   slightly more to type than today's `driverJarPath: ...`, accepted deliberately rather than supporting
   both a scalar and a list on the same field (two ways to write the same thing, with YamlDotNet's own
   scalar-or-sequence handling adding real complexity for a field that isn't shipped anywhere yet — see
   "Nothing external depends on today's shape" below).
-- `JdbcProviderFactory.FromJarPath`/`FromJarUrl` → add `FromJarPaths` (above); existing two stay as
-  thin single-element convenience wrappers, used only by direct-construction call sites (none currently
-  outside this repo's own tests).
+- `JdbcProviderFactory.FromJarPath`/`FromJarUrl` → add `FromJarPaths` (above), taking **resolved**
+  filesystem paths — the `files/`-name-to-path resolution happens one layer up, in
+  `JdbcGenericDriver`/`JdbcGenericDriver.FromDescriptor`, so `JdbcProviderFactory` itself stays ignorant
+  of where a jar came from, matching how it already has no notion of `libraries/` either. Existing
+  `FromJarPath`/`FromJarUrl` stay as thin single-element convenience wrappers.
 - `JdbcGenericDriver`'s constructor (`src/DbDataSync.Drivers.Jdbc/JdbcGenericDriver.cs:37`) —
   `JdbcProviderFactory.FromJarPath(spec.DriverJarPath, spec.DriverClass)` →
-  `JdbcProviderFactory.FromJarPaths(spec.DriverJarPaths, spec.DriverClass)`.
+  `JdbcProviderFactory.FromJarPaths(spec.DriverJarPaths.Select(name => FilesPaths.FilePath(repoRoot, name)).ToList(), spec.DriverClass)`.
+  `JdbcDriverSpec` itself keeps carrying **names**, not resolved paths — resolution happens at
+  construction time, the one place that already knows `repoRoot` (see `JdbcGenericDriver.FromDescriptor`'s
+  existing signature, which reads the descriptor but not yet `repoRoot` — that becomes a new parameter,
+  the same way `DriverDescriptorReader.BuildDriver` already threads a `LibraryRegistry` through for the
+  ADO.NET path's own artifact resolution).
 - `JdbcGenericDriver.FromDescriptor` (same file, ~line 106–115) — passes `jdbc.DriverJarPaths` through
-  instead of `jdbc.DriverJarPath`.
+  instead of `jdbc.DriverJarPath`, and gains the `repoRoot` parameter above.
 
 ### Nothing external depends on today's shape
 
@@ -93,14 +107,16 @@ this is a rename, not a migration: no deprecation shim, no dual-field support.
 
 ## What this phase does not build
 
-- No change to `jars/` vs `libraries/` artifact resolution — every path in `DriverJarPaths` is still a
-  literal filesystem path, same provisional status `JdbcDriverSpec.DriverJarPath`'s own doc comment
-  already carries. See `architecture/planning/todo/jdbc-driver-feature-gaps.md`.
+- The `files/` store itself (`GET`/`POST`/`DELETE /api/files`, the upload GUI) —
+  `user-provided-files-store.md`'s own scope, a dependency of this phase, not part of it. This phase can
+  still be built and tested with jars placed into `files/` by hand (matching how the test project's own
+  `DownloadJdbcTestJar` MSBuild target already drops a jar into a known location without any UI).
 - No validation that the jars listed are mutually compatible, or de-duplication if the same jar is
   named twice — `URLClassLoader` tolerates duplicates and irrelevant jars on its classpath without
   complaint, so there's nothing to add here.
-- No UI/CLI for picking multiple jars — `jdbc-driver-feature-gaps.md` covers the wider "no operator-facing
-  JDBC connection UI at all" gap this sits inside of.
+- No UI/CLI for picking multiple jars beyond what `user-provided-files-store.md`/`driver-yaml-authoring-ui.md`
+  cover — `jdbc-driver-feature-gaps.md` covers the wider "no operator-facing JDBC connection UI at all"
+  gap this sits inside of.
 
 ## How to verify when built
 

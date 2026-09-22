@@ -52,18 +52,18 @@ scoped here — it depends on the URL-template question above (what fields a for
 
 **Partly addressed, 2026-09-22**: `architecture/planning/todo/driver-yaml-authoring-ui.md` designs a
 general `driver.yaml`-authoring screen (base, capabilities, library/jar references, metadata queries),
-JDBC included — it doesn't resolve the URL-template or `jars/`-vs-`libraries/` questions, both still
-named as real dependencies inside that doc, but it's the "later planning doc" `drivers-and-libraries-in-the-web-ui.md`
-itself deferred this to.
+JDBC included — the `jars/`-vs-`libraries/` question below is now resolved (a third option, neither); the
+URL-template question is still open, still named as a real dependency inside that doc.
 
-## `jars/` vs `libraries/` — still the open question `jdbc-driver-support.md` left
+## `jars/` vs `libraries/` — resolved 2026-09-22, neither
 
-`JdbcDriverSpec.DriverJarPath`(s) is a literal filesystem path, unchanged by phase 169V's list support.
-`jdbc-driver-support.md`'s own "Where driver artifacts live" section already raised this and left it
-open: `libraries/` is NuGet-package-shaped (`library.json`, a `DbProviderFactory` type, an
-`AssemblyDependencyResolver`, phase 109j's surface checking) and a `.jar` fits none of that; a sibling
-`jars/` root was proposed, never built. This matters more once there's a UI (above) that needs to offer
-"which jar" as a real, discoverable choice rather than a path the operator already knows.
+`architecture/planning/todo/user-provided-files-store.md` decided this: not `jars/` (proposed, never
+built), not `libraries/` (NuGet-package-shaped — `library.json`, a `DbProviderFactory` type, an
+`AssemblyDependencyResolver`, phase 109j's surface checking — a `.jar` fits none of it), but a third,
+general **`files/`** — "a standard place for user-provided files," jars being the motivating and so far
+only real case, with its own small management GUI. `JdbcDriverSpec.DriverJarPath`(s) (169V, not yet built)
+was updated in place to carry names inside that store rather than literal filesystem paths, since nothing
+has shipped against the old shape yet.
 
 ## The `.dll`-precompilation alternative — spiked, still not adopted
 

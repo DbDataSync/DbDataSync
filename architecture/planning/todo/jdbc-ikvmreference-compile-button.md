@@ -5,7 +5,8 @@
 **Plan reference**: `architecture/planning/todo/jdbc-driver-support.md` ("Where driver artifacts live" —
 the `.jar` vs `.dll` trade-off this operationalizes), this session's own `IkvmReference` probe (folded
 into that doc), `architecture/implementation/todo/phase-170V-jdbc-ikvm-version-update.md` (the pinned
-IKVM version this compiles against).
+IKVM version this compiles against), `architecture/planning/todo/user-provided-files-store.md` (where the
+source jars live, and why the compiled output does *not* live there).
 
 ## The good news: half of this already exists, unused
 
@@ -28,12 +29,17 @@ that `.dll` on demand, from the web UI, safely.
 
 ## What "Compile" does
 
-1. Reads the driver's `driverJarPaths` (169V) and its pinned IKVM version (the same one
-   `DbDataSync.Drivers.Jdbc.csproj`/`KnownLibraries`'s `"ikvm"` entry name — phase 170V keeps these in
-   sync).
+1. Reads the driver's `driverJarPaths` (169V — names inside `files/`, resolved to real paths via
+   `FilesPaths.FilePath`) and its pinned IKVM version (the same one `DbDataSync.Drivers.Jdbc.csproj`/
+   `KnownLibraries`'s `"ikvm"` entry name — phase 170V keeps these in sync).
 2. Generates a throwaway `.csproj` — the exact shape this session's own scratch probe already proved
    works, and the same "generate a throwaway project, shell out to `dotnet`" mechanism
-   `LibraryInstaller.RestoreAsync` already uses for library installs, not a new pattern:
+   `LibraryInstaller.RestoreAsync` already uses for library installs, not a new pattern. **One
+   `IkvmReference` item, every jar listed on its `Compile` metadata** — confirmed against IKVM's own docs
+   (`doc/1.usage.md`): `Compile` is "a semi-colon separated list of Java class path items to compile into
+   the assembly," defaulting to the item's own `Include` when not set. Setting it explicitly to every jar
+   in `driverJarPaths` is exactly the "combine" mode, and is what this design uses — see "Combined, not
+   separate assemblies" below for why:
    ```xml
    <Project Sdk="Microsoft.NET.Sdk">
      <PropertyGroup>
@@ -44,7 +50,10 @@ that `.dll` on demand, from the web UI, safely.
        <PackageReference Include="IKVM" Version="{pinned}" />
      </ItemGroup>
      <ItemGroup>
-       <IkvmReference Include="{each of driverJarPaths}" />
+       <!-- one item, not one per jar — driverJarPaths joined onto Compile with ';' -->
+       <IkvmReference Include="{spec.Id}" Compile="{jar1.jar};{jar2.jar};...">
+         <AssemblyName>{spec.Id}</AssemblyName>
+       </IkvmReference>
      </ItemGroup>
    </Project>
    ```
@@ -55,6 +64,24 @@ that `.dll` on demand, from the web UI, safely.
 4. On success, records the produced assembly path and the IKVM version it was built with on the
    descriptor. On failure, surfaces the build output the same way `InstallErrorFormatting.TailOf` already
    trims a `dotnet publish` failure down to the useful tail rather than the whole MSBuild log.
+
+### Combined, not separate assemblies
+
+IKVM genuinely supports both, confirmed against its own docs rather than assumed:
+
+- **Combined** (used here): one `IkvmReference` item, `Compile="a.jar;b.jar;c.jar"` — every class from
+  every listed jar compiled into one output assembly.
+- **Separate, cross-referenced**: one `IkvmReference` item per jar, wired together with `References`
+  metadata (`doc/1.usage.md`'s own worked example: `<IkvmReference Include="bar.jar" References="foo.jar" />`
+  when `bar.jar`'s classes depend on `foo.jar`'s) — produces one assembly *per jar*.
+
+Combined is the deliberate choice: it keeps loading a one-string `CompiledAssemblyPath`
+(`Assembly.LoadFrom` + `GetType(driverClass)`, exactly what `FromAssemblyPath` already does, unchanged) —
+the separate-assemblies mode would need `FromAssemblyPath` to load several paths and know which one
+actually declares `driverClass`, real extra complexity this design has no reason to take on. The one thing
+combining gives up — reusing an already-compiled shared jar's assembly across two different drivers,
+which `References` mode would allow — isn't a real case yet (nothing in this repo shares a jar across two
+driver descriptors today), so there's nothing to lose by deferring it.
 
 ## Schema addition
 
@@ -106,6 +133,16 @@ can show the real state instead of a button that always just says "Compiled":
   loading until recompiled, is an open question below — the visible state is the same either way.
 - **Not compiled** — "Compile" as the only action, plain.
 
+## Where the compiled `.dll` lives
+
+Resolved (`user-provided-files-store.md`): **not** `files/` — that store is for what an operator
+*supplied*; a compiled assembly is *derived* build output, the same kind of thing as `libraries/*/lib/`'s
+restored packages. `drivers/<id>/compiled/` alongside the `driver.yaml`, gitignored the way restored
+library output already is (confirm that exclusion pattern actually exists today before assuming it, rather
+than copying an unverified assumption forward). Keeping the two apart matters: `files/{driverJarPaths}` is
+input a person chose and belongs in the config repo's own history; `drivers/<id>/compiled/{name}.dll` is
+output a build produced and doesn't.
+
 ## Open questions
 
 1. **Does a version mismatch block loading, or just warn?** Auto-falling-back to `FromJarPaths` when
@@ -114,26 +151,12 @@ can show the real state instead of a button that always just says "Compiled":
    routine IKVM bump into an outage for anyone who'd compiled. Leaning towards **warn, still load
    compiled** — matching how a stale library resolution is handled elsewhere in this repo (reported, not
    fatal) — but not decided here.
-2. **One `IkvmReference` item per jar — does it produce one assembly or several?** Unverified. This
-   session's probe only ever compiled a single jar. Before building this for real: extend the probe to
-   two `IkvmReference` items and inspect the build output — if it's one assembly per jar, `CreateConnection`
-   needs the *set* of produced paths, not one `CompiledAssemblyPath` string, and `FromAssemblyPath` may
-   need a sibling that loads several assemblies before resolving `driverClass` (paralleling 169V's
-   `FromJarPaths`). Blocks the schema shape above until answered — do not build the schema as written
-   without this check first.
-3. **Where does the compiled `.dll` live?** Same open question as the jar itself
-   (`jdbc-driver-feature-gaps.md`'s "`jars/` vs `libraries/`"), plus one more wrinkle: it's *derived*
-   build output, not an artifact an operator supplied — closer to `libraries/*/lib/`'s restored packages
-   (excluded from the config repo's own version control) than to the jar it was built from. Proposed:
-   `drivers/<id>/compiled/` alongside the `driver.yaml`, gitignored the way restored library output
-   already is — confirm that exclusion pattern actually exists today before assuming it, rather than
-   copying an unverified assumption into this doc.
-4. **SDK requirement.** Same as library install (phase 120's own decision): needs the .NET SDK present
+2. **SDK requirement.** Same as library install (phase 120's own decision): needs the .NET SDK present
    in the API process's environment. The default Docker image already moved to an SDK base for that
    reason — "Compile" rides the same requirement, no new image change needed, but the runtime-only image
    (phase 121, for shops wanting a minimal footprint) would need this action disabled/hidden there, the
    same way phase 121 already treats non-catalog library installs as unavailable on that image.
-5. **Build time and UX.** The probe measured ~8.6s for one jar. Multiple jars, or a slower host, could
+3. **Build time and UX.** The probe measured ~8.6s for one jar. Multiple jars, or a slower host, could
    push this well past what feels like a synchronous button click. `LibrariesController.Create` (library
    install) is synchronous and awaited in-request — the same precedent applies here, but worth explicitly
    deciding rather than assuming: is a multi-jar compile still fast enough to stay a blocking `POST`, or
