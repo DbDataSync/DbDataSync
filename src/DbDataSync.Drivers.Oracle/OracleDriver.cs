@@ -39,10 +39,10 @@ public sealed class OracleDriver : IDriver, IConnectionTester, IDialectProvider,
 
     public IReadOnlyList<IChangeReader> Readers { get; } =
     [
-        new WatermarkReader(OracleDialect.Instance, OracleCatalog.Instance, OracleValueBinding.Instance),
+        new WatermarkReader(OracleDialect.Instance, OracleValueBinding.Instance),
         new TriggerAuditReader(OracleDialect.Instance, OracleCatalog.Instance),
-        new BatchReloadReader(OracleDialect.Instance, OracleCatalog.Instance, OracleValueBinding.Instance),
-        new KeyReconcileReader(OracleDialect.Instance, OracleCatalog.Instance, OracleValueBinding.Instance),
+        new BatchReloadReader(OracleDialect.Instance, OracleValueBinding.Instance),
+        new KeyReconcileReader(OracleDialect.Instance, OracleValueBinding.Instance),
         new OracleFlashbackReader(OracleDialect.Instance),
     ];
 

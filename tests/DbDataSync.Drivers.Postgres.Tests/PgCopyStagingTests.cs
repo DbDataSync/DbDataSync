@@ -27,7 +27,7 @@ namespace DbDataSync.Drivers.Postgres.Tests;
 [Trait("Category", "Integration")]
 public sealed class PgCopyStagingTests(PostgresTestDatabase db) : IClassFixture<PostgresTestDatabase>, IAsyncLifetime
 {
-    private readonly BatchReloadReader _reader = new(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance);
+    private readonly BatchReloadReader _reader = new(PostgresDialect.Instance, PostgresValueBinding.Instance);
     private readonly DeleteInsertWriter _writer = new(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance);
 
     private NpgsqlConnection _source = null!;

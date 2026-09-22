@@ -51,10 +51,10 @@ public sealed class GenericDriver : IDriver, IConnectionTester, IDialectProvider
         {
             readers.Add(kind switch
             {
-                GenericDriverKinds.Watermark => new WatermarkReader(spec.Dialect, spec.Catalog, binder),
-                GenericDriverKinds.BatchReload => new BatchReloadReader(spec.Dialect, spec.Catalog, binder),
+                GenericDriverKinds.Watermark => new WatermarkReader(spec.Dialect, binder),
+                GenericDriverKinds.BatchReload => new BatchReloadReader(spec.Dialect, binder),
                 GenericDriverKinds.TriggerAudit => new TriggerAuditReader(spec.Dialect, spec.Catalog),
-                GenericDriverKinds.KeyReconcile => new KeyReconcileReader(spec.Dialect, spec.Catalog, binder),
+                GenericDriverKinds.KeyReconcile => new KeyReconcileReader(spec.Dialect, binder),
                 _ => throw new ArgumentException($"'{kind}' is not a generic reader Kind.", nameof(spec)),
             });
         }

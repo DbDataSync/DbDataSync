@@ -15,11 +15,11 @@ namespace DbDataSync.Drivers.Postgres.Tests;
 [Trait("Category", "Integration")]
 public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixture<PostgresTestDatabase>, IAsyncLifetime
 {
-    private readonly BatchReloadReader _reader = new(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance);
+    private readonly BatchReloadReader _reader = new(PostgresDialect.Instance, PostgresValueBinding.Instance);
     private readonly BatchInsertStagingProvider _staging = new(PostgresDialect.Instance, PostgresCatalog.Instance);
     private readonly DeleteInsertWriter _writer = new(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance);
     private readonly WatermarkReader _watermark =
-        new(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance);
+        new(PostgresDialect.Instance, PostgresValueBinding.Instance);
 
     private NpgsqlConnection _source = null!;
     private NpgsqlConnection _target = null!;

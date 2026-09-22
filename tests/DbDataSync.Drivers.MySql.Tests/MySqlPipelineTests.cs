@@ -19,11 +19,11 @@ public abstract class MySqlFamilyPipelineTestsBase<TFixture> : IClassFixture<TFi
     where TFixture : MySqlFamilyTestDatabase
 {
     private readonly TFixture _db;
-    private readonly BatchReloadReader _reader = new(MySqlDialect.Instance, MySqlCatalog.Instance, MySqlValueBinding.Instance);
+    private readonly BatchReloadReader _reader = new(MySqlDialect.Instance, MySqlValueBinding.Instance);
     private readonly BatchInsertStagingProvider _staging = new(MySqlDialect.Instance, MySqlCatalog.Instance);
     private readonly DeleteInsertWriter _writer = new(MySqlDialect.Instance, MySqlCatalog.Instance, MySqlValueBinding.Instance);
     private readonly WatermarkReader _watermark =
-        new(MySqlDialect.Instance, MySqlCatalog.Instance, MySqlValueBinding.Instance);
+        new(MySqlDialect.Instance, MySqlValueBinding.Instance);
 
     private MySqlConnection _source = null!;
     private MySqlConnection _target = null!;

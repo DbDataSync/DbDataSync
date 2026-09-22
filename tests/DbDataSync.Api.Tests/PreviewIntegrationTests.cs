@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using ClrKernel.Core.Secrets;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
+using DbDataSync.Core.Sql;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -34,6 +35,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
 
     private readonly HttpClient _client;
     private readonly SecretStore _secrets;
+    private readonly DbDataSync.State.ChangeWatermarkStore _watermarks;
     private readonly string _databaseName = $"DbDataSyncPreview_{Guid.NewGuid():N}";
     private readonly string _sourceTable = $"Src_{Guid.NewGuid():N}";
     private readonly string _targetTable = $"Tgt_{Guid.NewGuid():N}";
@@ -44,6 +46,7 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
     {
         _client = factory.CreateClient();
         _secrets = factory.Services.GetRequiredService<SecretStore>();
+        _watermarks = factory.Services.GetRequiredService<DbDataSync.State.ChangeWatermarkStore>();
     }
 
     public async Task InitializeAsync()
@@ -600,6 +603,122 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Null(name.Problem);
     }
 
+    /// <summary>
+    /// Phase 167V's actual point, proven end to end rather than argued from reading the code: preview
+    /// reads a bound <c>metadataProvider</c> script's answer, through <c>PreviewService</c> calling
+    /// <c>ScriptedMetadata</c> directly, not the source connection's real, native column type. Uses a
+    /// separate <c>Watermark</c>-reader replication against the same source table, since the shared
+    /// fixture's own replication uses <c>MsSqlChangeTracking</c>, whose <c>DescribeAsync</c> this phase
+    /// does not touch.
+    /// </summary>
+    [Fact]
+    public async Task APreviewsDeclaredParameter_ReflectsABoundScriptsAnswer_NotTheRealColumnType()
+    {
+        const string scriptName = "fake-id-type";
+        (await _client.PutAsJsonAsync($"/api/scripts/{scriptName}", new ScriptDefinition
+        {
+            Manifest = new ScriptConfig { Name = scriptName, Kind = "metadataProvider", EntryType = "FakeIdType" },
+            Code = """
+                using System.Collections.Generic;
+                using System.Linq;
+                using System.Threading;
+                using System.Threading.Tasks;
+                using DbDataSync.Drivers.Abstractions;
+                using DbDataSync.Scripting.Abstractions;
+
+                public sealed class FakeIdType : IMetadataProvider
+                {
+                    public Task<IReadOnlyList<string>> ListDatabasesAsync(MetadataContext c, CancellationToken ct) =>
+                        c.DriverDatabases(ct);
+
+                    public Task<IReadOnlyList<TableMetadata>> ListTablesAsync(MetadataContext c, string database, CancellationToken ct) =>
+                        c.DriverTables(database, ct);
+
+                    // Id is really `int` on the real table — reported here as `varchar(50)` instead, so
+                    // a preview that actually asked the live connection (rather than this script) would
+                    // declare a quoted string literal instead of a bare number.
+                    public async Task<IReadOnlyList<ColumnMetadata>> ListColumnsAsync(
+                        MetadataContext c, string database, string schema, string table, CancellationToken ct)
+                    {
+                        var columns = await c.DriverColumns(database, schema, table, ct);
+                        return columns
+                            .Select(x => x.Name == "Id" ? new ColumnMetadata("Id", "varchar(50)", x.IsNullable, x.IsPrimaryKey, x.IsIdentity) : x)
+                            .ToList();
+                    }
+                }
+                """,
+        }, JsonOptions)).EnsureSuccessStatusCode();
+
+        (await _client.PutAsJsonAsync($"/api/connections/{_connectionName}", new ConnectionInput
+        {
+            Name = _connectionName,
+            DriverType = DriverIds.MsSql,
+            Host = "localhost",
+            Port = 14330,
+            Database = _databaseName,
+            AuthMode = AuthMode.SqlAuth,
+            UserId = "sa",
+            Password = "DbDataSync_Test_Pw1",
+            Scripts = new Dictionary<string, ScriptBinding?> { ["metadataProvider"] = new ScriptBinding { ScriptName = scriptName } },
+        }, JsonOptions)).EnsureSuccessStatusCode();
+
+        var watermarkReplicationName = $"{_replicationName}-watermark";
+        (await _client.PutAsJsonAsync($"/api/replications/{watermarkReplicationName}", new ReplicationTaskConfig
+        {
+            Name = watermarkReplicationName,
+            Enabled = false,
+            Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
+            ChangeProcessing = new ChangeProcessingConfig
+            {
+                Reader = new ReaderConfig
+                {
+                    Kind = "Watermark",
+                    Options = new Dictionary<string, string> { ["watermarkColumn"] = "Id" },
+                },
+                Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
+                Writer = new WriterConfig { Kind = "MsSqlMerge" },
+            },
+            Endpoints = new TaskEndpoints
+            {
+                Source = new EndpointRef { ConnectionName = _connectionName, Database = _databaseName },
+                Target = new EndpointRef { ConnectionName = _connectionName, Database = _databaseName },
+            },
+        }, JsonOptions)).EnsureSuccessStatusCode();
+
+        (await _client.PutAsJsonAsync($"/api/replications/{watermarkReplicationName}/table-mappings/main", new TableMappingConfig
+        {
+            Name = "main",
+            Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableSpec { Schema = "dbo", Table = _targetTable }],
+            ColumnMappings =
+            [
+                new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
+            ],
+        }, JsonOptions)).EnsureSuccessStatusCode();
+
+        // Seeded directly, rather than through an actual trigger-and-wait pass: WatermarkReader.
+        // DescribeAsync only declares the previousWatermark parameter on an *incremental* preview
+        // (PreviousWatermark is not null), and this is the cheapest way to put the store in that state.
+        // No refresh-metadata call anywhere in this test, on purpose: this asserts preview goes live
+        // through the bound script, not that it happens to agree with whatever the mapping's cache holds.
+        _watermarks.SetWatermark(
+            watermarkReplicationName, "main",
+            WatermarkKey.Build(
+                new SourceTableRef { ConnectionName = _connectionName, Database = _databaseName, Schema = "dbo", Table = _sourceTable },
+                MsSqlDialect.Instance),
+            "1");
+
+        var response = await _client.GetAsync(
+            $"/api/replications/{watermarkReplicationName}/table-mappings/main/preview");
+        response.EnsureSuccessStatusCode();
+        var report = (await response.Content.ReadFromJsonAsync<PreviewReportDto>(JsonOptions))!;
+
+        var sourceRead = report.Statements.Single(s => s.Stage == "Source read" && s.DeclaredParameters is not null);
+        Assert.Contains("varchar(50)", sourceRead.DeclaredParameters, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("declare @previousWatermark int", sourceRead.DeclaredParameters, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed record InferredColumnTypeDto(
         string SourceColumn, string SourceType, string? TargetType, string? Fidelity, string? Problem);
 
@@ -631,7 +750,8 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         return names;
     }
 
-    private sealed record PreviewStatementDto(string Stage, string Title, string? Sql, string Origin, string? Detail);
+    private sealed record PreviewStatementDto(
+        string Stage, string Title, string? Sql, string Origin, string? Detail, string? DeclaredParameters = null);
     private sealed record PreviewReportDto(List<PreviewStatementDto> Statements, List<string> Problems);
 
     private async Task<PreviewReportDto> GetPreviewAsync()

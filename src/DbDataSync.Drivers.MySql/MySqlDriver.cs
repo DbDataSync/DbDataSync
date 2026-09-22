@@ -38,10 +38,10 @@ public sealed class MySqlDriver : IDriver, IConnectionTester, IDialectProvider, 
 
     public IReadOnlyList<IChangeReader> Readers { get; } =
     [
-        new WatermarkReader(MySqlDialect.Instance, MySqlCatalog.Instance, MySqlValueBinding.Instance),
+        new WatermarkReader(MySqlDialect.Instance, MySqlValueBinding.Instance),
         new TriggerAuditReader(MySqlDialect.Instance, MySqlCatalog.Instance),
-        new BatchReloadReader(MySqlDialect.Instance, MySqlCatalog.Instance, MySqlValueBinding.Instance),
-        new KeyReconcileReader(MySqlDialect.Instance, MySqlCatalog.Instance, MySqlValueBinding.Instance),
+        new BatchReloadReader(MySqlDialect.Instance, MySqlValueBinding.Instance),
+        new KeyReconcileReader(MySqlDialect.Instance, MySqlValueBinding.Instance),
     ];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =

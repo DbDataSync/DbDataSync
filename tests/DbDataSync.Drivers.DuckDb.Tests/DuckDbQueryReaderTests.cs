@@ -200,6 +200,6 @@ public sealed class DuckDbQueryReaderTests
             new PreviewRequest(
                 connection, Source,
                 new TableRef { ConnectionName = "t", Database = "", Schema = "", Table = "" },
-                [], options, PreviousWatermark: null),
+                [], options, PreviousWatermark: null, SourceColumns: [], TargetColumns: []),
             CancellationToken.None);
 }

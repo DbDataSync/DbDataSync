@@ -55,13 +55,28 @@ public sealed record PreviewStatement(
 /// do on every interaction.</param>
 /// <param name="PreviousWatermark">What the store holds for this mapping, so an incremental reader
 /// describes the statement it would issue *next*, not a first-run one.</param>
+/// <param name="SourceColumns">
+/// The source side's columns, resolved once by <c>PreviewService</c> before any component's
+/// <see cref="IStatementPreview.DescribeAsync"/> runs — phase 167V. Preview stays live on purpose (it
+/// shows an operator today's real table, not a possibly-stale cache — see
+/// <c>DbDataSync.Drivers.Generic.TargetShape</c>'s own doc comment for the target-side version of this
+/// same reasoning), but it goes live through <c>ScriptedMetadata</c>, the same path browsing and mapping
+/// refresh already use, rather than a component calling its driver's native catalog directly and
+/// silently ignoring a bound <c>metadataProvider</c> script. A component that needs the source's columns
+/// (a reload's segment column, a watermark column) reads this instead of asking its own <c>ITableCatalog</c>.
+/// </param>
+/// <param name="TargetColumns">As <paramref name="SourceColumns"/>, for the target side — what a writer's
+/// own <c>DescribeAsync</c> reads instead of asking its catalog, via
+/// <c>DbDataSync.Drivers.Generic.TargetShape.FromColumns</c>.</param>
 public sealed record PreviewRequest(
     DbConnection Connection,
     SourceTableRef Source,
     TableRef Target,
     IReadOnlyList<ColumnMapping> ColumnMappings,
     IReadOnlyDictionary<string, string> Options,
-    string? PreviousWatermark);
+    string? PreviousWatermark,
+    IReadOnlyList<ColumnMetadata> SourceColumns,
+    IReadOnlyList<ColumnMetadata> TargetColumns);
 
 /// <summary>
 /// A reader, staging provider or writer that can say what it would run without running it.

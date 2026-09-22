@@ -103,7 +103,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
     public async Task WatermarkReader_AppliesTheTransform()
     {
         await SeedAsync();
-        var reader = new WatermarkReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance);
+        var reader = new WatermarkReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "ModifiedAt" };
 
         var read = await reader.ReadChangesAsync(
@@ -116,7 +116,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
     public async Task GenericBatchReloadReader_AppliesTheTransform()
     {
         await SeedAsync();
-        var reader = new BatchReloadReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance);
+        var reader = new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
 
         var read = await reader.ReadChangesAsync(
             _connection, Source(), null, ReadIntent.InitialLoad, Transformed, MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None);

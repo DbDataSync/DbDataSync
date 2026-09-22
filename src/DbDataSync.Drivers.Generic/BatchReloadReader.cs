@@ -9,7 +9,9 @@ namespace DbDataSync.Drivers.Generic;
 /// <summary>
 /// Reads a whole source table, or one <see cref="BatchReloadSegment"/> of it, for a batch reload.
 /// Engine-neutral: an ordinary <c>SELECT</c> with a predicate, which is why it needs nothing from the
-/// engine but quoting, placeholders and a catalog.
+/// engine but quoting and placeholders — no catalog reference of its own since phase 167V; every column
+/// lookup comes from the mapping's cache (<c>ReadChangesAsync</c>, phase 91) or a pre-resolved
+/// <c>PreviewRequest</c> field (<c>DescribeAsync</c>), never a live call this class makes itself.
 /// <para>
 /// Deliberately not incremental: <c>previousWatermark</c> is ignored outright, because a reload's
 /// entire purpose is to re-read rows an incremental pass has already seen. Every row is yielded as
@@ -19,7 +21,7 @@ namespace DbDataSync.Drivers.Generic;
 /// converge rather than only ever add.
 /// </para>
 /// </summary>
-public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
+public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder binder)
     : IChangeReader, ISegmentExpandingReader, IStatementPreview
 {
     public string Kind => GenericDriverKinds.BatchReload;
@@ -81,9 +83,9 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
         await dialect.UseDatabaseAsync(request.Connection, request.Source.Database, cancellationToken);
 
         var segment = SegmentSerializer.ReadOptional(request.Options);
-        var columns = await catalog.GetColumnsAsync(
-            request.Connection, request.Source.Schema, request.Source.Table, cancellationToken);
-        var scope = SegmentScope.Build(dialect, binder, segment, columns);
+        // request.SourceColumns — phase 167V. Resolved once by PreviewService through ScriptedMetadata
+        // (so a bound metadataProvider script is honoured), not a live catalog.GetColumnsAsync call here.
+        var scope = SegmentScope.Build(dialect, binder, segment, request.SourceColumns);
 
         return
         [

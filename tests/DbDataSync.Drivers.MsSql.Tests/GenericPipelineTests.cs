@@ -20,7 +20,7 @@ namespace DbDataSync.Drivers.MsSql.Tests;
 [Trait("Category", "Integration")]
 public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<MsSqlTestDatabase>, IAsyncLifetime
 {
-    private readonly BatchReloadReader _reader = new(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance);
+    private readonly BatchReloadReader _reader = new(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
     private readonly BatchInsertStagingProvider _staging = new(MsSqlDialect.Instance, MsSqlCatalog.Instance);
     private readonly DeleteInsertWriter _writer = new(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance);
 
@@ -239,7 +239,11 @@ public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<M
     [Fact]
     public async Task FullReload_WithAPopulatedCache_NeverCallsTheLiveCatalogAnywhereInThePipeline()
     {
-        var reader = new BatchReloadReader(MsSqlDialect.Instance, new ThrowingTableCatalog(), MsSqlValueBinding.Instance);
+        // BatchReloadReader holds no ITableCatalog at all as of phase 167V — the guarantee this test
+        // exists to pin is now structural (there's nothing to call), not just runtime-tested. Kept
+        // anyway: staging and the writer below still hold one for their own DescribeAsync, unrelated to
+        // this reader's ReadChangesAsync.
+        var reader = new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
         var staging = new BatchInsertStagingProvider(MsSqlDialect.Instance, new ThrowingTableCatalog());
         var writer = new DeleteInsertWriter(MsSqlDialect.Instance, new ThrowingTableCatalog(), MsSqlValueBinding.Instance);
 

@@ -40,10 +40,10 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         new MsSqlChangeTrackingReader(),
         new MsSqlCdcReader(),
         new TriggerAuditReader(MsSqlDialect.Instance, MsSqlCatalog.Instance),
-        new WatermarkReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
+        new WatermarkReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance),
         new MsSqlBatchReloadReader(),
-        new BatchReloadReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
-        new KeyReconcileReader(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance),
+        new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance),
+        new KeyReconcileReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance),
     ];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } =

@@ -19,7 +19,7 @@ namespace DbDataSync.Drivers.Generic;
 /// target has that this scan didn't produce.
 /// </para>
 /// </summary>
-public sealed class KeyReconcileReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
+public sealed class KeyReconcileReader(SqlDialect dialect, ISegmentValueBinder binder)
     : IChangeReader, ISegmentExpandingReader, IStatementPreview
 {
     public string Kind => GenericDriverKinds.KeyReconcile;
@@ -100,13 +100,12 @@ public sealed class KeyReconcileReader(SqlDialect dialect, ITableCatalog catalog
         await dialect.UseDatabaseAsync(request.Connection, request.Source.Database, cancellationToken);
 
         var segment = SegmentSerializer.ReadOptional(request.Options);
-        var columns = await catalog.GetColumnsAsync(
-            request.Connection, request.Source.Schema, request.Source.Table, cancellationToken);
-        var scope = SegmentScope.Build(dialect, binder, segment, columns);
+        // request.SourceColumns — phase 167V. See BatchReloadReader.DescribeAsync's identical comment.
+        var scope = SegmentScope.Build(dialect, binder, segment, request.SourceColumns);
 
         var keyMappings = request.ColumnMappings.Count == 0
             ? request.ColumnMappings
-            : KeyColumnMappings(request.ColumnMappings, columns, "(preview)");
+            : KeyColumnMappings(request.ColumnMappings, request.SourceColumns, "(preview)");
 
         return
         [

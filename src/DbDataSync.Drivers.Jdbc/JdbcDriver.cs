@@ -50,8 +50,8 @@ public sealed class JdbcDriver : IDriver
 
     public IReadOnlyList<IChangeReader> Readers { get; } =
     [
-        new WatermarkReader(JdbcDialect.Instance, JdbcCatalog.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle())),
-        new BatchReloadReader(JdbcDialect.Instance, JdbcCatalog.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle())),
+        new WatermarkReader(JdbcDialect.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle())),
+        new BatchReloadReader(JdbcDialect.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle())),
     ];
 
     // No TriggerAuditReader (no shadow-table DDL for this path), no writers, no staging providers, no

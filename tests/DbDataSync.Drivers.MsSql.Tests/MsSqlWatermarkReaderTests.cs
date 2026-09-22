@@ -14,7 +14,7 @@ public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixt
     // Server's. Otherwise untouched from when it was MsSqlWatermarkReader — these tests are the proof
     // the move changed no behaviour.
     private readonly WatermarkReader _reader =
-        new(MsSqlDialect.Instance, MsSqlCatalog.Instance, MsSqlValueBinding.Instance);
+        new(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
     private SqlConnection _connection = null!;
     private string _tableName = null!;
 
@@ -287,7 +287,9 @@ public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixt
     [Fact]
     public async Task Incremental_WithAPopulatedCache_NeverCallsTheLiveCatalog()
     {
-        var reader = new WatermarkReader(MsSqlDialect.Instance, new ThrowingTableCatalog(), MsSqlValueBinding.Instance);
+        // WatermarkReader holds no ITableCatalog at all as of phase 167V — the guarantee this test
+        // exists to pin is now structural, not just runtime-tested.
+        var reader = new WatermarkReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name, Version) VALUES (1, 'Alice', 1);");
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "Version" };
 
@@ -308,7 +310,9 @@ public sealed class MsSqlWatermarkReaderTests(MsSqlTestDatabase db) : IClassFixt
     [Fact]
     public async Task Incremental_WithAnEmptyCache_ThrowsMetadataNotCached_AndNeverCallsTheLiveCatalog()
     {
-        var reader = new WatermarkReader(MsSqlDialect.Instance, new ThrowingTableCatalog(), MsSqlValueBinding.Instance);
+        // WatermarkReader holds no ITableCatalog at all as of phase 167V — the guarantee this test
+        // exists to pin is now structural, not just runtime-tested.
+        var reader = new WatermarkReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name, Version) VALUES (1, 'Alice', 1);");
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "Version" };
 

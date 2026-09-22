@@ -15,11 +15,11 @@ namespace DbDataSync.Drivers.Oracle.Tests;
 [Trait("Category", "Integration")]
 public sealed class OraclePipelineTests(OracleTestDatabase db) : IClassFixture<OracleTestDatabase>, IAsyncLifetime
 {
-    private readonly BatchReloadReader _reader = new(OracleDialect.Instance, OracleCatalog.Instance, OracleValueBinding.Instance);
+    private readonly BatchReloadReader _reader = new(OracleDialect.Instance, OracleValueBinding.Instance);
     private readonly BatchInsertStagingProvider _staging = new(OracleDialect.Instance, OracleCatalog.Instance);
     private readonly DeleteInsertWriter _writer = new(OracleDialect.Instance, OracleCatalog.Instance, OracleValueBinding.Instance);
     private readonly WatermarkReader _watermark =
-        new(OracleDialect.Instance, OracleCatalog.Instance, OracleValueBinding.Instance);
+        new(OracleDialect.Instance, OracleValueBinding.Instance);
 
     private readonly List<string> _tablesToDrop = [];
     private OracleConnection _source = null!;

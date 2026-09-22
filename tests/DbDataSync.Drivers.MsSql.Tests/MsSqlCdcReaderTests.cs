@@ -550,7 +550,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
                 {
                     ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = "Target",
                 },
-                [], new Dictionary<string, string>(), start),
+                [], new Dictionary<string, string>(), start, SourceColumns: [], TargetColumns: []),
             CancellationToken.None);
 
         Assert.Equal(2, statements.Count);

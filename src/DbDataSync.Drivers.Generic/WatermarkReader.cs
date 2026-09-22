@@ -24,7 +24,7 @@ namespace DbDataSync.Drivers.Generic;
 /// from scratch. This reader is the ongoing incremental-sync fallback; that one is the reload path.
 /// </para>
 /// </summary>
-public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, ISegmentValueBinder binder)
+public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder binder)
     : IChangeReader, IStatementPreview, IReadIntentDeclaring, IPositionCapturing
 {
     public string Kind => GenericDriverKinds.Watermark;
@@ -207,7 +207,8 @@ public sealed class WatermarkReader(SqlDialect dialect, ITableCatalog catalog, I
         List<PreviewParameter> parameters = [];
         if (incremental)
         {
-            var column = (await catalog.GetColumnsAsync(request.Connection, source.Schema, source.Table, cancellationToken))
+            // request.SourceColumns — phase 167V. See BatchReloadReader.DescribeAsync's identical comment.
+            var column = request.SourceColumns
                 .FirstOrDefault(c => string.Equals(c.Name, watermarkColumn, StringComparison.OrdinalIgnoreCase));
             if (column is not null)
             {

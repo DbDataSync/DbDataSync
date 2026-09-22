@@ -49,10 +49,10 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
 
     public IReadOnlyList<IChangeReader> Readers { get; } =
     [
-        new WatermarkReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
+        new WatermarkReader(PostgresDialect.Instance, PostgresValueBinding.Instance),
         new TriggerAuditReader(PostgresDialect.Instance, PostgresCatalog.Instance),
-        new BatchReloadReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
-        new KeyReconcileReader(PostgresDialect.Instance, PostgresCatalog.Instance, PostgresValueBinding.Instance),
+        new BatchReloadReader(PostgresDialect.Instance, PostgresValueBinding.Instance),
+        new KeyReconcileReader(PostgresDialect.Instance, PostgresValueBinding.Instance),
         // Phase 34: the first Postgres-specific reader. Logical decoding is a plain SQL function
         // returning rows, which is what lets it be a reader at all rather than a streaming subsystem.
         new PgLogicalSlotReader(PostgresDialect.Instance),

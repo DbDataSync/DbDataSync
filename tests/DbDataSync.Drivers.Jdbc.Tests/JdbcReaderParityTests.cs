@@ -105,7 +105,7 @@ public sealed class JdbcReaderParityTests(JdbcTestDatabase db) : IClassFixture<J
             _npgsql, Source(), null, ReadIntent.InitialLoad, Mappings, "parity", Columns(), options, CancellationToken.None);
         var expected = await MaterializeAsync(npgsqlResult.Rows);
 
-        var jdbcReader = new BatchReloadReader(JdbcDialect.Instance, JdbcCatalog.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle()));
+        var jdbcReader = new BatchReloadReader(JdbcDialect.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle()));
         var jdbcResult = await jdbcReader.ReadChangesAsync(
             _jdbc, Source(), null, ReadIntent.InitialLoad, Mappings, "parity", Columns(), options, CancellationToken.None);
         var actual = await MaterializeAsync(jdbcResult.Rows);
@@ -125,7 +125,7 @@ public sealed class JdbcReaderParityTests(JdbcTestDatabase db) : IClassFixture<J
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "created_at" };
 
         var npgsqlReader = PostgresReaders.OfType<WatermarkReader>().Single();
-        var jdbcReader = new WatermarkReader(JdbcDialect.Instance, JdbcCatalog.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle()));
+        var jdbcReader = new WatermarkReader(JdbcDialect.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle()));
 
         // First batch: no previous watermark, no PreparedStatement parameter yet — establishes a
         // matching starting watermark on both sides.

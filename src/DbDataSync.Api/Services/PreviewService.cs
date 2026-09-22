@@ -34,7 +34,8 @@ public sealed class PreviewService(
     DriverConnectionFactory connections,
     DriverRegistry driverRegistry,
     ScriptHost scriptHost,
-    ChangeWatermarkStore watermarks)
+    ChangeWatermarkStore watermarks,
+    ScriptedMetadata scriptedMetadata)
 {
     public async Task<PreviewReport> BuildAsync(
         string replicationName, string mappingName, CancellationToken cancellationToken)
@@ -79,22 +80,41 @@ public sealed class PreviewService(
             var previousWatermark = watermarks.GetWatermark(
                 task.Name, mapping.Name, WatermarkKey.Build(source, sourceDialect));
 
+            // Resolved once, here, rather than inside each component's own DescribeAsync — phase 167V.
+            // Goes through ScriptedMetadata, the same path browsing and mapping refresh already use, so
+            // a bound metadataProvider script's answer reaches preview too, instead of each component
+            // asking its own driver's native catalog directly and silently ignoring it. Still live —
+            // preview shows today's real table on purpose — just live through the path that checks for a
+            // script first.
+            var sourceColumns = await ResolveColumnsAsync(
+                source.ConnectionName, sourceConnection, sourceDriver, source.Database, source.Schema, source.Table,
+                "source", problems, cancellationToken);
+            var targetColumns = await ResolveColumnsAsync(
+                target.ConnectionName, targetConnection, targetDriver, target.Database, target.Schema, target.Table,
+                "target", problems, cancellationToken);
+
             await DescribeAsync(
                 driverRegistry.FindReader(sourceDriver.DriverType, processing.Reader.Kind),
                 $"reader '{processing.Reader.Kind}'", PreviewStages.SourceRead,
-                new PreviewRequest(sourceConnection, source, target, columnMappings, processing.Reader.Options, previousWatermark),
+                new PreviewRequest(
+                    sourceConnection, source, target, columnMappings, processing.Reader.Options, previousWatermark,
+                    sourceColumns, targetColumns),
                 statements, problems, cancellationToken);
 
             await DescribeAsync(
                 targetDriver.StagingProviders.FirstOrDefault(p => p.Kind == processing.Cache.Kind),
                 $"staging provider '{processing.Cache.Kind}'", PreviewStages.Staging,
-                new PreviewRequest(targetConnection, source, target, columnMappings, processing.Cache.Options, previousWatermark),
+                new PreviewRequest(
+                    targetConnection, source, target, columnMappings, processing.Cache.Options, previousWatermark,
+                    sourceColumns, targetColumns),
                 statements, problems, cancellationToken);
 
             await DescribeAsync(
                 targetDriver.Writers.FirstOrDefault(w => w.Kind == processing.Writer.Kind),
                 $"writer '{processing.Writer.Kind}'", PreviewStages.Write,
-                new PreviewRequest(targetConnection, source, target, columnMappings, processing.Writer.Options, previousWatermark),
+                new PreviewRequest(
+                    targetConnection, source, target, columnMappings, processing.Writer.Options, previousWatermark,
+                    sourceColumns, targetColumns),
                 statements, problems, cancellationToken);
         }
         finally
@@ -279,4 +299,33 @@ public sealed class PreviewService(
         driver is IDialectProvider provider
             ? provider.Dialect
             : throw new InvalidOperationException($"The '{driver.DriverType}' driver does not name a SQL dialect.");
+
+    /// <summary>
+    /// One side's columns for <see cref="PreviewRequest"/>, through <see cref="ScriptedMetadata"/> —
+    /// phase 167V. A failure here (the script threw, the driver's own catalog rejected the table) is
+    /// reported the same way <see cref="ApplyScriptedTransforms"/> already reports a failed
+    /// column-expression script: a problem, not a thrown exception that would abort the whole preview —
+    /// the empty list this returns then surfaces as each component's own "column not found" the same way
+    /// a genuinely uncached mapping already does.
+    /// </summary>
+    private async Task<IReadOnlyList<ColumnMetadata>> ResolveColumnsAsync(
+        string connectionName, DbConnection connection, IDriver driver,
+        string database, string schema, string table, string side,
+        List<string> problems, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(table))
+            return [];
+
+        try
+        {
+            var dialect = ScriptDialectAdapter.For(driver) ?? DialectlessScriptDialect.Instance;
+            return await scriptedMetadata.ListColumnsAsync(
+                connectionName, connection, driver, dialect, database, schema, table, cancellationToken);
+        }
+        catch (Exception ex) when (ex is DbException or InvalidOperationException or ScriptExecutionException)
+        {
+            problems.Add($"The {side} table's columns could not be read, so this preview may be incomplete: {ex.Message}");
+            return [];
+        }
+    }
 }
