@@ -1,6 +1,6 @@
 # Phase 170V — update IKVM 8.11.2 → 8.16.1
 
-**Status**: Not started.
+**Status**: Built. See Retrospective.
 **Plan reference**: none — raised directly by the user.
 
 ## Why
@@ -74,3 +74,36 @@ should move too so it doesn't read as stale):
   `jdbc-driver-support.md`'s "Where driver artifacts live") against 8.16.1 to confirm the `.dll`
   precompilation path (not adopted, but documented) still builds and connects — cheap, since the probe
   project already exists in scratch form.
+
+---
+
+# Retrospective
+
+Three version bumps applied — `DbDataSync.Drivers.Jdbc.csproj`, `DbDataSync.Drivers.Jdbc.Tests.csproj`,
+and `KnownLibraries.cs`'s `"ikvm"` entry's `PinnedVersion` — plus the two doc comments that named
+`8.11.2` explicitly, so nothing points at a stale version number after this.
+
+**Every verification in "How to verify when built" passed except one, skipped deliberately**:
+
+- Clean rebuild against 8.16.1 — 0 errors, 0 warnings.
+- Re-checked the build output for `ikvm/`, `ikvm.properties`, `libikvm.so` — still absent. The existing
+  `ExcludeAssets="runtime;build;buildTransitive;native"` list needed no changes for 8.16.1's package
+  layout.
+- Full `DbDataSync.Drivers.Jdbc.Tests` suite (all 12 tests, including phase 171V's new ones) green
+  against the live Postgres container — real `java.sql.*` connections, parameter binding, catalog
+  metadata, `ServerVersion`/`DataSource`, all exercised for real on 8.16.1, not just compiled against it.
+- `DbDataSync.Api`, `DbDataSync.TaskRunner`, `DbDataSync.Libraries` all build clean against the bump.
+- **Not run**: the `dbdatasync config library list` surface-check re-confirmation
+  (`java.sql.Types, IKVM.Java` still resolving as a real type via `DriverLibraryCompatibility`) — this
+  dev environment has no `libraries/ikvm/lib/` installed (the JDBC test project references IKVM directly,
+  un-excluded, the same way `DbDataSync.Drivers.Postgres.Tests` does for Npgsql — see that project's own
+  csproj comment), so there's nothing for the surface checker to check yet. The live test suite passing
+  is stronger evidence the assembly surface is intact than the metadata-only surface check would have
+  been anyway; worth running the CLI check for real the first time `libraries/ikvm/` actually gets
+  installed somewhere.
+- The optional `IkvmReference` probe re-run was skipped — nothing in this phase's own scope depends on
+  it, and `jdbc-ikvmreference-compile-button.md` will need its own fresh verification regardless once
+  that's actually built.
+
+No breaking change in the 8.11.2→8.16.1 gap materialized against this repo's actual usage, confirming
+this doc's own pre-build scan.

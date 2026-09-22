@@ -27,8 +27,10 @@
          MySqlConnector — this project compiles against IKVM's types the same way, just with more asset
          groups needing the same exclusion IKVM's own unusual packaging happens to require. See phase
          165V's retrospective for the full verification (a real JDBC connection through IKVM resolved
-         entirely from a separate libraries/ikvm/lib/ directory, not this project's own output). -->
-    <PackageReference Include="IKVM" Version="8.11.2" ExcludeAssets="runtime;build;buildTransitive;native" />
+         entirely from a separate libraries/ikvm/lib/ directory, not this project's own output).
+         Phase 170V: bumped 8.11.2 -> 8.16.1 (the exclusion list above was re-verified against 8.16.1's
+         package layout, still sufficient — no new asset group appeared). -->
+    <PackageReference Include="IKVM" Version="8.16.1" ExcludeAssets="runtime;build;buildTransitive;native" />
   </ItemGroup>
 
   <ItemGroup>
