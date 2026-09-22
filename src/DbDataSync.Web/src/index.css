@@ -936,6 +936,20 @@ select.select {
 }
 .find-aside .card-title { margin-bottom: 3px; }
 
+/* The curated `displayName`'s parenthesized real package name (e.g. "MySqlConnector"), split out of
+   the chip's title line and given its own smaller, dimmer line — see `splitDisplayName`. */
+.chip-subtitle { font: 400 11px var(--ui); color: var(--ink-4); }
+
+/* A minimal spinner — this app had no spinner primitive before the install-feedback follow-up; kept
+   small and colorless (`currentColor`) so it drops into a button of any color without its own theming. */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block; width: 10px; height: 10px; flex: none;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  opacity: 0.7;
+  animation: spin 0.7s linear infinite;
+}
+
 
 @media (max-width: 800px) {
   .find-layout { flex-direction: column; }

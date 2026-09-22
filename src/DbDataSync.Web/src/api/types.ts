@@ -871,6 +871,7 @@ export interface KnownLibrarySummary {
   displayName: string
   description: string
   packageId: string
+  pinnedVersion: string
 }
 
 /** One bundled, ready-made driver descriptor — `GET /api/known-drivers` (phase 117/118), the

@@ -103,7 +103,9 @@ export function LibraryFindPanel({ installedIds, onInstalled }: {
                 <QuickAddChip
                   key={entry.id}
                   entry={entry}
-                  onPick={() => pick({ id: entry.packageId, version: '', versionLocked: false, factoryType: '' })}
+                  onPick={() => pick({
+                    id: entry.packageId, version: entry.pinnedVersion, versionLocked: false, factoryType: '',
+                  })}
                 />
               ))}
             </aside>
@@ -209,7 +211,18 @@ export function LibraryFindPanel({ installedIds, onInstalled }: {
   )
 }
 
+/** Splits a curated `displayName` like `"MySQL / MariaDB (MySqlConnector)"` into the human label and
+ * the parenthesized real package name — `KnownLibraries.All`'s own doc comment describes exactly this
+ * shape ("a human-readable label... not the bare package id"), but every entry bakes both into one
+ * string. No entry lacks the parenthesized part today, but a label without one still renders fine (just
+ * no subtitle) rather than breaking. */
+function splitDisplayName(displayName: string): { label: string; packageName: string | null } {
+  const match = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(displayName)
+  return match ? { label: match[1], packageName: match[2] } : { label: displayName, packageName: null }
+}
+
 function QuickAddChip({ entry, onPick }: { entry: KnownLibrarySummary; onPick: () => void }) {
+  const { label, packageName } = splitDisplayName(entry.displayName)
   return (
     <button
       type="button"
@@ -219,7 +232,8 @@ function QuickAddChip({ entry, onPick }: { entry: KnownLibrarySummary; onPick: (
       data-testid={`admin-libraries-chip-${entry.id}`}
       style={{ display: 'block', textAlign: 'left', width: '100%', padding: '3px 0' }}
     >
-      + {entry.displayName}
+      <span>+ {label}</span>
+      {packageName && <div className="chip-subtitle">{packageName}</div>}
     </button>
   )
 }
@@ -272,6 +286,23 @@ function SearchResultRow({ result, curated, onSelect }: {
   )
 }
 
+/** Seconds since `active` last became `true`, ticking every second while it stays `true` — the only
+ * feedback available for an install today short of streaming `dotnet publish`'s own output (a bigger
+ * change, tracked separately): an install with a cold NuGet cache or a large dependency closure can run
+ * long enough that a static "Installing…" label reads as hung. */
+function useElapsedSeconds(active: boolean): number {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    if (!active) { setSeconds(0); return }
+    // Already 0 here: the effect above already reset it, either just now (install finished) or on
+    // this component's first render (the initial `useState(0)`) — nothing left to reset before timing.
+    const start = Date.now()
+    const id = window.setInterval(() => setSeconds(Math.floor((Date.now() - start) / 1000)), 1000)
+    return () => window.clearInterval(id)
+  }, [active])
+  return seconds
+}
+
 function InstallCommand({
   selection, curated, installing, installedOk, installedFactoryType, onChangeVersion, onChangeFactoryType, onInstall,
 }: {
@@ -292,6 +323,7 @@ function InstallCommand({
   const needsFactoryType = !curated
   const canInstall = hasVersion && !installing
   const command = `dbdatasync config library install ${id} --version ${version || '<v>'}`
+  const elapsedSeconds = useElapsedSeconds(installing)
 
   const copy = async () => {
     try {
@@ -350,7 +382,12 @@ function InstallCommand({
           onClick={onInstall}
           data-testid="admin-libraries-install-button"
         >
-          {installing ? 'Installing…' : 'Install'}
+          {installing ? (
+            <span className="row" style={{ gap: 6 }}>
+              <span className="spinner" aria-hidden="true" />
+              Installing… ({elapsedSeconds}s)
+            </span>
+          ) : 'Install'}
         </button>
         <button
           type="button"

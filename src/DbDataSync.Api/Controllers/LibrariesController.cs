@@ -48,7 +48,7 @@ public sealed class LibrariesController(
     [HttpGet("known-libraries")]
     public ActionResult<IReadOnlyList<KnownLibrarySummary>> ListKnownLibraries() =>
         Ok(KnownLibraries.All
-            .Select(e => new KnownLibrarySummary(e.Id, e.DisplayName, e.Description, e.PackageId))
+            .Select(e => new KnownLibrarySummary(e.Id, e.DisplayName, e.Description, e.PackageId, e.PinnedVersion))
             .ToList());
 
     [Authorize(Policies.Admin)]
@@ -134,6 +134,6 @@ public sealed class LibrariesController(
 /// <param name="Source">An alternate NuGet feed, or null for the default.</param>
 public sealed record CreateLibraryRequest(string PackageId, string Version, string? FactoryType, string? Source);
 
-public sealed record KnownLibrarySummary(string Id, string DisplayName, string Description, string PackageId);
+public sealed record KnownLibrarySummary(string Id, string DisplayName, string Description, string PackageId, string PinnedVersion);
 
 public sealed record KnownDriverSummary(string Id, string DisplayName, string Description, string BoundLibrary);
