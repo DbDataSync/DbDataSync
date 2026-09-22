@@ -263,12 +263,12 @@ public sealed class ChangeReaderFirstPassContractTests
     }
 
     /// <summary>
-    /// Every reader here is constructed with a real dialect and null-but-unused catalog/binder
-    /// dependencies, rather than via reflection's uninitialized-object trick: <c>SupportedIntents</c> is
-    /// a property initialised in the class body, which does not run at all unless the constructor does
-    /// — so an uninitialized instance would read as an empty set rather than as the real declaration.
-    /// The catalog and segment-value-binder dependencies are never touched by that initializer, so null
-    /// stands in for them here.
+    /// Every reader here is constructed with a real dialect and null-but-unused remaining dependencies,
+    /// rather than via reflection's uninitialized-object trick: <c>SupportedIntents</c> is a property
+    /// initialised in the class body, which does not run at all unless the constructor does — so an
+    /// uninitialized instance would read as an empty set rather than as the real declaration. Those
+    /// remaining dependencies (a segment-value binder; a catalog too, for the readers that still take
+    /// one) are never touched by that initializer, so null stands in for them here.
     /// </summary>
     private static object CreateUninitialized(Type type)
     {
@@ -279,7 +279,7 @@ public sealed class ChangeReaderFirstPassContractTests
             return Activator.CreateInstance(type, MsSqlDialect.Instance, null)!;
 
         if (type == typeof(WatermarkReader))
-            return Activator.CreateInstance(type, MsSqlDialect.Instance, null, null)!;
+            return Activator.CreateInstance(type, MsSqlDialect.Instance, null)!;
 
         // Phase 34: its own dialect rather than MsSql's, because unlike the readers above it is
         // engine-specific — the statements it issues are Postgres functions, not rendered SQL.

@@ -2,7 +2,9 @@ dialect:
   quoteIdentifier: backtick        # backtick | doubleQuote | bracket
   parameterPrefix: "@"             # "@" -> @p , ":" -> :p , "?" -> positional
   rowLimit: limitOffset            # LIMIT n OFFSET m   (vs. offsetFetch for OFFSET..FETCH)
-  catalog: informationSchema       # informationSchema is the only strategy supported today
+  # catalog: query                 # uncomment (+ a metadataQueries block below) if information_schema
+                                    # doesn't fit this engine — omitted means the base's own default
+                                    # (information_schema for the ADO.NET generic driver, this one)
   supportsChangeDatabase: true     # false -> a mapping naming another database is a config error
   defaultDatabase: ""              # what to connect to before a mapping names one
   # connectionStringKeys:          # uncomment and edit if this library's key names differ

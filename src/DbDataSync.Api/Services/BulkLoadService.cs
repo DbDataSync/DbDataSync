@@ -58,9 +58,12 @@ public sealed class BulkLoadService(
         {
             segments = await ExpandAsync(task, mapping, request.Segments, request.ReaderKind, cancellationToken);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException)
+        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException
+                                       or MetadataNotCachedException)
         {
-            // A bad segment column, an undividable column type, or an unreachable source are all the
+            // A bad segment column, an undividable column type, an unreachable source, or (phase 167V:
+            // ExpandAutoSegmentsAsync now resolves a segment column's type from the mapping's cache
+            // rather than a live catalog call) a segment column the cache doesn't have are all the
             // request being wrong or unrunnable — not a server fault, and worth saying plainly rather
             // than enqueueing work that is guaranteed to fail once a worker claims it.
             return TriggerResult.Invalid(ex.Message);
