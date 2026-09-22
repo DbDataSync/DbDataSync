@@ -50,6 +50,12 @@ even with 169V–172V built, a JDBC engine is only reachable by someone reading 
 scoped here — it depends on the URL-template question above (what fields a form would even show) and on
 `jars/` vs `libraries/` (below — what a "pick your driver jar" control would point at).
 
+**Partly addressed, 2026-09-22**: `architecture/planning/todo/driver-yaml-authoring-ui.md` designs a
+general `driver.yaml`-authoring screen (base, capabilities, library/jar references, metadata queries),
+JDBC included — it doesn't resolve the URL-template or `jars/`-vs-`libraries/` questions, both still
+named as real dependencies inside that doc, but it's the "later planning doc" `drivers-and-libraries-in-the-web-ui.md`
+itself deferred this to.
+
 ## `jars/` vs `libraries/` — still the open question `jdbc-driver-support.md` left
 
 `JdbcDriverSpec.DriverJarPath`(s) is a literal filesystem path, unchanged by phase 169V's list support.
@@ -68,6 +74,12 @@ risk and the multi-release-jar silent-skip behavior are both now *confirmed*, no
 IKVM's own docs. Conclusion unchanged: `.jar` (runtime `URLClassLoader` loading) stays the default. If
 this is ever revisited, it composes with the multiple-jar-references work (169V) — `IkvmReference` also
 accepts more than one jar — but nothing here proposes doing that now.
+
+**Revisited, 2026-09-22**: `architecture/planning/todo/jdbc-ikvmreference-compile-button.md` designs
+exactly this as an operator-triggered, per-driver action rather than something adopted by default — the
+compiled `.dll` becomes an opt-in acceleration a driver can have, not a replacement for the jar path.
+Found along the way: `JdbcProviderFactory.FromAssemblyPath` (the loading half of this) has existed,
+unused, since phase 165V.
 
 ## Retiring the hand-written `JdbcDialect`/`JdbcCatalog` path
 
