@@ -75,6 +75,24 @@ public static class KnownLibraries
             "DuckDB (embedded)", "The embedded analytical engine DbDataSync's own verification and custom " +
                 "segmenting strategies run on.",
             PinnedVersion: "1.5.5"),
+        // Phase 165V: genuinely not a DbProviderFactory-bearing package — IKVM is the Java-on-.NET
+        // runtime DbDataSync.Drivers.Jdbc uses to run a JDBC driver inside .NET, not an ADO.NET client
+        // library. FactoryType here names a real, public type in the assembly DbDataSync.Drivers.Jdbc's
+        // own compiled IL actually references (java.sql.Types, in IKVM.Java — confirmed by reflecting
+        // the real 8.11.2 assemblies rather than guessed, since IKVM.Runtime is a different assembly
+        // from the one the java.sql.*/java.util.* surface lives in), purely so this entry has an
+        // assembly name for DriverLibraryCompatibility's surface check to use (see
+        // DriverLibraryCompatibility.AssemblyNameFrom) — it is never registered as a real
+        // DbProviderFactory and DbProviderFactories.GetFactory("ikvm") is never called. `dbdatasync
+        // config library list` reports it as "DOES NOT RESOLVE" (confirmed: DbProviderFactories.GetFactory
+        // throws ArgumentException for a type that isn't a DbProviderFactory, which that command's own
+        // TryResolves already catches and reports gracefully, not a crash) — a known, harmless quirk of
+        // reusing this schema for a library that was never shaped like the other seven entries here.
+        new(
+            "ikvm", "IKVM", "java.sql.Types, IKVM.Java",
+            "IKVM (Java-on-.NET runtime)", "Runs a JDBC driver inside .NET for DbDataSync.Drivers.Jdbc's " +
+                "reader-only JDBC source support.",
+            PinnedVersion: "8.11.2"),
     ];
 
     /// <summary>Null when the package isn't in the starter table — the caller (the CLI) then requires

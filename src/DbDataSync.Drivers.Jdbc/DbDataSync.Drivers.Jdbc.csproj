@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbDataSync.Core\DbDataSync.Core.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Abstractions\DbDataSync.Drivers.Abstractions.csproj" />
+    <ProjectReference Include="..\DbDataSync.Drivers.Generic\DbDataSync.Drivers.Generic.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Excluded like every sibling driver's client library (Npgsql/MySqlConnector's own
+         ExcludeAssets="runtime") — resolved instead from <repo>/libraries/ikvm/lib/ at runtime via
+         LibraryRegistry (JdbcDriver.RequiredLibraryId => "ikvm"). IKVM's own package shape needs more
+         than "runtime" excluded, confirmed empirically rather than assumed: its bundled per-RID JRE
+         image (ikvm/<rid>/{bin,lib}/..., ikvm.properties) and native libikvm.so are copied by the
+         package's own buildTransitive targets and native-asset group, neither of which
+         ExcludeAssets="runtime" alone touches — building a throwaway probe with only "runtime" excluded
+         still left ikvm/, ikvm.properties and libikvm.so sitting in this project's own build output.
+         "build;buildTransitive;native" added on top stops all of it, confirmed by inspecting the build
+         output with each combination. What remains (a compile-time reference assembly from the
+         package's own ref/net8.0/) is exactly what Postgres/MySql already rely on for Npgsql/
+         MySqlConnector — this project compiles against IKVM's types the same way, just with more asset
+         groups needing the same exclusion IKVM's own unusual packaging happens to require. See phase
+         165V's retrospective for the full verification (a real JDBC connection through IKVM resolved
+         entirely from a separate libraries/ikvm/lib/ directory, not this project's own output). -->
+    <PackageReference Include="IKVM" Version="8.11.2" ExcludeAssets="runtime;build;buildTransitive;native" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DbDataSync.Drivers.Jdbc.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

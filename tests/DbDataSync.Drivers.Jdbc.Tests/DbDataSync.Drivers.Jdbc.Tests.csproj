@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- The "known-good" side of every parity test in this project — see phase 109h's identical
+         un-excluded reference in DbDataSync.Drivers.Postgres.Tests.csproj. -->
+    <PackageReference Include="Npgsql" Version="9.0.3" />
+    <!-- DbDataSync.Drivers.Jdbc now excludes IKVM's runtime/build/native assets (resolved instead from
+         libraries/ikvm/lib/ via LibraryRegistry in a real deployment — see that project's own csproj
+         comment) — the same reason DbDataSync.Drivers.Postgres.Tests keeps its own un-excluded Npgsql
+         reference. A standalone `dotnet test` here needs the real IKVM assets locally too, with nothing
+         installed under libraries/. -->
+    <PackageReference Include="IKVM" Version="8.11.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DbDataSync.Drivers.Jdbc\DbDataSync.Drivers.Jdbc.csproj" />
+    <!-- The "known-good" side of every parity test: PostgresDriver's own published readers, not a
+         hand-wired PostgresCatalog/PostgresValueBinding pair (both internal to that project). -->
+    <ProjectReference Include="..\..\src\DbDataSync.Drivers.Postgres\DbDataSync.Drivers.Postgres.csproj" />
+  </ItemGroup>
+
+  <!-- Phase 165V's own "Open question 2": every other engine's client library in this repo comes
+       through NuGet (ExcludeAssets="runtime") or LibraryRegistry, never a committed binary — a .jar is
+       neither. Downloaded here at build time (Maven Central, confirmed reachable) into an ignored obj/
+       path, rather than committed, per that same convention — see the phase doc's own reasoning. -->
+  <PropertyGroup>
+    <JdbcTestJarVersion>42.7.13</JdbcTestJarVersion>
+    <JdbcTestJarPath>$(BaseIntermediateOutputPath)jdbc-jars\postgresql-$(JdbcTestJarVersion).jar</JdbcTestJarPath>
+  </PropertyGroup>
+
+  <Target Name="DownloadJdbcTestJar" BeforeTargets="BeforeBuild" Condition="!Exists('$(JdbcTestJarPath)')">
+    <MakeDir Directories="$(BaseIntermediateOutputPath)jdbc-jars" />
+    <DownloadFile
+      SourceUrl="https://repo1.maven.org/maven2/org/postgresql/postgresql/$(JdbcTestJarVersion)/postgresql-$(JdbcTestJarVersion).jar"
+      DestinationFolder="$(BaseIntermediateOutputPath)jdbc-jars" />
+  </Target>
+
+  <ItemGroup>
+    <None Include="$(JdbcTestJarPath)" CopyToOutputDirectory="PreserveNewest" Link="postgresql.jar" Visible="false" />
+  </ItemGroup>
+
+</Project>
