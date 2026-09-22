@@ -1,6 +1,6 @@
 # Phase 171V — `JdbcConnection.ServerVersion`/`DataSource`: from "deferred" to "used and crashing"
 
-**Status**: Not started.
+**Status**: Built. See Retrospective.
 **Plan reference**: none — found while surveying JDBC feature gaps for the user.
 
 ## Why — this isn't a gap, it's a live bug
@@ -80,3 +80,20 @@ matching this project's own "prove it, don't assume it" pattern for every other 
   pins the actual failure mode found here.
 - Existing `JdbcCatalogTests`/`JdbcReaderParityTests`/`JdbcChangeDatabaseTests`/`JdbcDescriptorTests`
   unaffected — none of them go through `TestAsync`.
+
+---
+
+# Retrospective
+
+Built exactly as designed above — `ServerVersion`/`DataSource` now call `getMetaData().getDatabaseProductVersion()`/
+`.getURL()`, no try/catch needed (confirmed empirically: neither call failed against pgJDBC in any test
+run here, consistent with the "informational, never refused" reasoning above).
+
+New `tests/DbDataSync.Drivers.Jdbc.Tests/JdbcConnectionTests.cs` — five tests against the live Postgres
+container: `ServerVersion`/`DataSource` return real values, and — the one that actually pins the
+regression this phase exists to close — `TestAsync` on a real `JdbcGenericDriver` succeeds instead of
+throwing. Also picked up the `ConnectionString`-password-persistence fix
+(`follow-up-jdbcconnection-persists-the-password-in-connectionstring.md`) in the same pass, since both
+touch `JdbcConnection.Open()`/the connection's own state — two of the five new tests cover that.
+
+Full `DbDataSync.Drivers.Jdbc.Tests` suite green: 12/12, no regressions in the pre-existing tests.

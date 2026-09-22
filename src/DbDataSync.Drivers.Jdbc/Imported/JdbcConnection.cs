@@ -61,16 +61,19 @@ public sealed class JdbcConnection : DbConnection
         }
     }
 
-    // Not implemented: connection *testing* (phase 19) is out of scope for this reader spike (phase
-    // 165V) and is the only thing that would need these. DatabaseMetaData.getURL()/
-    // getDatabaseProductVersion() are cheap to add when that phase actually needs them.
-    public override string DataSource => throw new NotImplementedException(
-        "JdbcConnection.DataSource: deferred to a connection-testing phase (see phase 19); " +
-        "DatabaseMetaData.getURL() is the answer when that phase needs it.");
+    /// <summary>
+    /// Phase 171V — this was <c>throw new NotImplementedException(...)</c>, "deferred to a connection-testing
+    /// phase," until <see cref="DbDataSync.Drivers.Generic.GenericDriverBase{TSpec}.TestAsync"/> (phase 168V)
+    /// started calling <see cref="ServerVersion"/> unconditionally on a successful test — a
+    /// <c>NotImplementedException</c> isn't a <see cref="DbException"/>, so it wasn't caught there, and
+    /// every JDBC "Test Connection" crashed after the query that proved the connection worked. Both reads
+    /// are defined to never fail once a connection is open (unlike <c>setCatalog</c> — see
+    /// <see cref="ChangeDatabase"/>'s own doc comment — these are informational, not a request a driver has
+    /// a reason to refuse), so neither needs that method's try/catch-and-translate treatment.
+    /// </summary>
+    public override string DataSource => JavaSqlConnection.getMetaData().getURL();
 
-    public override string ServerVersion => throw new NotImplementedException(
-        "JdbcConnection.ServerVersion: deferred to a connection-testing phase (see phase 19); " +
-        "DatabaseMetaData.getDatabaseProductVersion() is the answer when that phase needs it.");
+    public override string ServerVersion => JavaSqlConnection.getMetaData().getDatabaseProductVersion();
 
     // Out of scope for a reader (see phase 165V's own planning doc reference): every generic *writer*
     // opens a transaction, but WatermarkReader/BatchReloadReader/TriggerAuditReader do not.
@@ -93,6 +96,15 @@ public sealed class JdbcConnection : DbConnection
             ?? throw new InvalidOperationException("The connection string must set JdbcUrl.");
         JavaSqlDriver = factory.JdbcDriver;
         _connection = factory.GetJdbcConnection(jdbcUrl, builder.GetProperties());
+
+        // Credential no longer readable back out via ConnectionString once it's done its job — the same
+        // posture SqlConnection's own default (Persist Security Info=false) takes, and the reason to take
+        // it here too: JdbcConnection is deliberately public (phase 167V) so a metadataProvider script can
+        // hold a direct reference via MetadataContext.Connection, which makes "a caller holding an
+        // already-open connection" a real case, not a hypothetical one.
+        builder.Remove("user");
+        builder.Remove("password");
+        ConnectionString = builder.ConnectionString;
     }
 
     public override void Close()

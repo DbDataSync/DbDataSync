@@ -1,7 +1,8 @@
 # Follow-up: `JdbcConnection.ConnectionString` keeps the password in plaintext for the connection's whole life
 
-Found while answering a question about JDBC credential handling, not while building a phase. Documented
-to fix later, not addressed here.
+**Resolved 2026-09-22**, built alongside phase 171V (same file, same `Open()` method). Found while
+answering a question about JDBC credential handling, documented to fix later — "later" turned out to be
+the same session.
 
 ## What's true today
 
@@ -77,3 +78,10 @@ public override void Open()
 Worth checking whether anything relies on re-reading `JdbcConnection.ConnectionString` post-`Open()` for a
 legitimate reason (e.g. a retry path that reopens from the stored string) before doing this — a quick grep
 of call sites, not a design question.
+
+## Resolution
+
+Built exactly as suggested above. The grep came back empty — nothing in this repo reads
+`JdbcConnection.ConnectionString` back after `Open()` — so the fix landed with no other call site to
+reconcile. Two new tests in `JdbcConnectionTests.cs` cover it: the password is gone from the stored
+string, and the rest of the round-trippable state (`JdbcUrl`/`JdbcDriver`) survives the strip.
