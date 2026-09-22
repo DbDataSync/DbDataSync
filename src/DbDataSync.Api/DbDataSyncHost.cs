@@ -113,6 +113,7 @@ public static class DbDataSyncHost
         builder.Services.AddSingleton<AdminConfigService>();
         builder.Services.AddSingleton<AdminCertificateService>();
         builder.Services.AddSingleton<LibrariesService>();
+        builder.Services.AddSingleton<FilesService>();
         // A short timeout: this is a read-only search-index query an operator is waiting on in a
         // browser tab, not a background job — a slow or unreachable public index should degrade the
         // Libraries screen to manual entry in a few seconds, not hang the request.

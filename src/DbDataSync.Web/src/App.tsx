@@ -11,6 +11,7 @@ import { ScriptsPage } from './pages/ScriptsPage'
 import { AdminCertificatePage } from './pages/AdminCertificatePage'
 import { AdminConfigPage } from './pages/AdminConfigPage'
 import { AdminDriversPage } from './pages/AdminDriversPage'
+import { AdminFilesPage } from './pages/AdminFilesPage'
 import { AdminLibrariesPage } from './pages/AdminLibrariesPage'
 import { AdminUpdatesPage } from './pages/AdminUpdatesPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
@@ -167,6 +168,7 @@ export default function App() {
       <Route path="/admin/certificate" element={<AdminCertificatePage />} />
       <Route path="/admin/drivers" element={<AdminDriversPage />} />
       <Route path="/admin/libraries" element={<AdminLibrariesPage />} />
+      <Route path="/admin/files" element={<AdminFilesPage />} />
       <Route path="/admin/updates" element={<AdminUpdatesPage />} />
 
       {/* A mistyped or stale URL lands somewhere real rather than on an empty frame with chrome. */}

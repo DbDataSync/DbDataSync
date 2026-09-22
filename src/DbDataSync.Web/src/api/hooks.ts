@@ -15,6 +15,7 @@ const keys = {
   docPage: (slug: string) => ['docs', slug] as const,
   drivers: ['drivers'] as const,
   libraries: ['libraries'] as const,
+  files: ['files'] as const,
   knownLibraries: ['known-libraries'] as const,
   knownDrivers: ['known-drivers'] as const,
   restartRequired: ['admin', 'restart-required'] as const,
@@ -183,6 +184,31 @@ export function useRemoveLibrary() {
       queryClient.invalidateQueries({ queryKey: keys.libraries })
       queryClient.invalidateQueries({ queryKey: keys.restartRequired })
     },
+  })
+}
+
+/** Every file in the `files/` store (phase 173V's admin Files screen). Changes only when an operator
+ * uploads or removes one — no polling, the same posture `useLibraries` already takes. */
+export function useFiles() {
+  return useQuery({ queryKey: keys.files, queryFn: api.files.list })
+}
+
+/** Uploads one or more files. No restart-required invalidation — unlike a library or driver, a file
+ * alone changes nothing already loaded; only a driver.yaml naming it does, and that's its own action. */
+export function useUploadFiles() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (files: FileList | File[]) => api.files.upload(files),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.files }),
+  })
+}
+
+/** Removes a file — `force: true` overrides the 409 a still-in-use one otherwise answers with. */
+export function useRemoveFile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, force }: { name: string; force?: boolean }) => api.files.remove(name, force),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.files }),
   })
 }
 

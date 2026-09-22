@@ -830,6 +830,24 @@ export interface LibrarySummary {
   pendingRestore: boolean
 }
 
+/** One file in the `files/` store — `GET /api/files` (phase 173V). A standard place for anything an
+ * operator uploads for a driver to reference (a JDBC jar, so far the only real case). */
+export interface FileSummary {
+  name: string
+  sizeBytes: number
+  uploadedAt: string
+  /** Every JDBC-backed descriptor driver on disk whose `jdbc.driverJarPaths` names this file. */
+  usedBy: string[]
+}
+
+/** One file's own upload outcome — `POST /api/files` reports one per file in the request, not
+ * all-or-nothing over a single stale name. */
+export interface UploadResult {
+  name: string
+  succeeded: boolean
+  error: string | null
+}
+
 /** One bundled, vetted library — `GET /api/known-libraries` (phase 117/118), the "available to add"
  * list for the Libraries screen. */
 export interface KnownLibrarySummary {

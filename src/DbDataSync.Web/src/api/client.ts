@@ -19,6 +19,7 @@ import type {
   CredentialSource,
   DriverCapabilities,
   DriverSummary,
+  FileSummary,
   FromCatalogResult,
   KnownDriverSummary,
   KnownLibrarySummary,
@@ -27,6 +28,7 @@ import type {
   LibrarySearchResponse,
   LibrarySummary,
   RestartRequiredStatus,
+  UploadResult,
   UpdateReleases,
   AboutInfo,
   UpdateStatus,
@@ -444,6 +446,33 @@ export const api = {
     /** Refused (409) while a driver still names this library, unless `force`. */
     remove: (id: string, force?: boolean) =>
       request<void>(`/api/libraries/${encodeURIComponent(id)}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+  },
+  files: {
+    /** Every file in the `files/` store (phase 173V's admin Files screen). */
+    list: () => request<FileSummary[]>('/api/files'),
+    /** `request` always JSON-encodes its body, which a file upload can't use — a dedicated call that
+     * hands the browser a `FormData` body and lets it set `Content-Type: multipart/form-data;
+     * boundary=...` itself (setting that header by hand breaks the boundary the browser would have
+     * chosen). One `UploadResult` per file, not all-or-nothing over a single stale name. */
+    upload: async (files: FileList | File[]): Promise<UploadResult[]> => {
+      const form = new FormData()
+      for (const file of files) form.append('files', file)
+      const response = await fetch('/api/files', { method: 'POST', credentials: 'same-origin', body: form })
+      if (!response.ok) {
+        let message = response.statusText
+        try {
+          const body = await response.json()
+          message = body.error ?? body.title ?? message
+        } catch {
+          // No JSON body — fall back to the status text already captured.
+        }
+        throw new ApiError(response.status, message)
+      }
+      return (await response.json()) as UploadResult[]
+    },
+    /** Refused (409) while a driver still names this file, unless `force`. */
+    remove: (name: string, force?: boolean) =>
+      request<void>(`/api/files/${encodeURIComponent(name)}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
   },
   drivers: {
     /** Every registered driver — the three built-ins plus any `driver.yaml` descriptor an operator has

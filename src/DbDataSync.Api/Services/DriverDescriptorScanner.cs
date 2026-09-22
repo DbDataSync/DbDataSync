@@ -15,7 +15,11 @@ public static class DriverDescriptorScanner
     /// <c>driver.json</c>-backed one.</param>
     /// <param name="LibraryId">The descriptor's <c>library:</c> reference — null for a compiled
     /// driver, which restores its package privately rather than through a shared library.</param>
-    public sealed record Entry(string DriverId, string Source, string? LibraryId);
+    /// <param name="JdbcJarNames">Phase 173V — the descriptor's <c>jdbc.driverJarPaths</c> (names inside
+    /// <c>files/</c>, per phase 169V), empty for anything that isn't a JDBC-backed descriptor. What
+    /// <c>FilesService.List</c>'s own <c>usedBy</c> computation groups by, the identical shape
+    /// <see cref="LibraryId"/> already gets grouped by for <c>library:</c>.</param>
+    public sealed record Entry(string DriverId, string Source, string? LibraryId, IReadOnlyList<string> JdbcJarNames);
 
     public static IReadOnlyList<Entry> Scan(string repoRoot)
     {
@@ -33,12 +37,12 @@ public static class DriverDescriptorScanner
                 if (File.Exists(yamlPath))
                 {
                     var descriptor = DriverDescriptorReader.Read(yamlPath);
-                    entries.Add(new Entry(descriptor.Id, "descriptor", descriptor.Library));
+                    entries.Add(new Entry(descriptor.Id, "descriptor", descriptor.Library, descriptor.Jdbc?.DriverJarPaths ?? []));
                 }
                 else if (File.Exists(jsonPath))
                 {
                     var manifest = CompiledDriverManifest.Read(jsonPath);
-                    entries.Add(new Entry(manifest.Id, "compiled", null));
+                    entries.Add(new Entry(manifest.Id, "compiled", null, []));
                 }
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException
