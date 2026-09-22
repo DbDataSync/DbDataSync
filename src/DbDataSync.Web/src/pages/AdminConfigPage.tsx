@@ -24,17 +24,30 @@ function shortDescription(description: string): string {
 }
 
 /**
+ * What each group of keys is called, keyed by the first `:`-separated fragment. A group with no entry
+ * here falls back to the fragment itself, so a future one gets a plain heading rather than no heading.
+ */
+const GROUP_NAMES: Record<string, string> = {
+  App: 'Application',
+  State: 'State store',
+  Nuget: 'NuGet',
+  Notes: 'Notes',
+  Updates: 'Updates',
+  Auth: 'Authentication',
+}
+
+/**
  * Buckets entries by the first `:`-separated fragment of their key (App/State/Auth/Updates/Nuget/Notes),
  * preserving catalog order both across and within groups — the backend's own `Keys` list is already
  * grouped this way, so a single pass suffices; this never re-sorts, just splits on group change.
  */
-function groupByFirstFragment(entries: AdminConfigEntry[]): { group: string; entries: AdminConfigEntry[] }[] {
-  const groups: { group: string; entries: AdminConfigEntry[] }[] = []
+function groupByFirstFragment(entries: AdminConfigEntry[]): { group: string; label: string; entries: AdminConfigEntry[] }[] {
+  const groups: { group: string; label: string; entries: AdminConfigEntry[] }[] = []
   for (const entry of entries) {
     const group = entry.key.replace(/^DbDataSync:/, '').split(':')[0]
     const current = groups[groups.length - 1]
     if (current?.group === group) current.entries.push(entry)
-    else groups.push({ group, entries: [entry] })
+    else groups.push({ group, label: GROUP_NAMES[group] ?? group, entries: [entry] })
   }
   return groups
 }
@@ -150,14 +163,21 @@ export function AdminConfigPage() {
 
         <ErrorBanner error={error ?? mutationError} />
 
-        <div className="card flush" data-testid="admin-config-table">
-          <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
-            <span>Key</span><span>Source</span><span>Value</span><span>Running</span>
-          </div>
-          {isLoading && <div className="empty">Loading…</div>}
-          {groupByFirstFragment(entries ?? []).map(({ group, entries: groupEntries }) => (
-            <div key={group}>
-              <div className="grid-group-head" data-testid={`admin-config-group-${group}`}>{group}</div>
+        {/* A card per group, not one card with a band between groups: the band grouped the rows but
+            still read as one long table, which is the thing that made "where are the auth settings"
+            a matter of reading every key. Each group carries its own header row, so a group scrolled
+            to in isolation still says which column is which. */}
+        <div className="config-groups" data-testid="admin-config-table">
+          {isLoading && <div className="card"><div className="empty">Loading…</div></div>}
+          {groupByFirstFragment(entries ?? []).map(({ group, label, entries: groupEntries }) => (
+            <div className="card flush" key={group} data-testid={`admin-config-group-${group}`}>
+              <div className="card-head tight">
+                <span className="card-title">{label}</span>
+                <span className="card-note mono">DbDataSync:{group}:*</span>
+              </div>
+              <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
+                <span>Key</span><span>Source</span><span>Value</span><span>Running</span>
+              </div>
               {groupEntries.map((entry) => (
                 <Row
                   key={entry.key}

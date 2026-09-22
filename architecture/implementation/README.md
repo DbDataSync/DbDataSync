@@ -72,7 +72,29 @@ So the order lives here, and is the one to work through:
 | 5 | **159K** — apply an update automatically, from the CLI and the web console | **follows 158K, which is done** (it executes 158K's `UpdatePlan` and reuses its `DbDataSync.Updates` library). **Built for Linux and the CLI; not yet verified on real hosts, and Windows is deliberately off** — see its Progress section for exactly what is and is not proven |
 | 6 | **163K** — the container image on GHCR, amd64 and arm64 | **implemented, not yet run in CI**: stays in `todo/` until `publish-image.yml` runs on a real release (it cannot before it reaches `main`), and until the arm64 image has been built on real arm hardware. Its own "First release checklist" has a manual step (make the package public) |
 
-Updated 2026-09-21 (latest): **164R is done.** Regrouped the whole `DbDataSync:*` key surface (`Url` → `App:Url`,
+Updated 2026-09-21 (latest): **165T is done** — unplanned, reported from use, and the bug in it is worth knowing
+about even if the screens it was reported against are not. `DbDataSyncConfigFile.SetValue` matched a key by the
+caller's own split between YAML section header and key line, but that split is invisible to `Read`, which flattens
+the file: `setup` and phase 164's migration write `DbDataSync:Auth:Network:` + `Admin`, while the Admin config
+screen and `config set` write `DbDataSync:` + `Auth:Network:Admin`. So on any install `setup` had configured, a
+write from the Admin screen found no line to change, **added a second one**, and left the reader to resolve two
+contradictory answers by document order — which the old value usually won. Nothing failed: 200, a commit, a restart
+banner, and the old value still there afterwards. Fixed by finding the key the way `Read` does (a flattened-name
+lookup, indent-aware, so a hand-written nested file matches too), with `RemoveValue` on the same lookup so the
+migration's write-new/drop-old pair cannot half-apply. Verifying it found a second phase 164 casualty: `SetValue`'s
+guard against committing a credential to this git-tracked file compared the bare key to `"StateConnectionString"`, a
+name **nothing has passed since phase 164 renamed it** — the guard had been matching nothing at all, and its test
+passed throughout because it was written against the old spelling. The same report's other two items are follow-ups
+to `b555c21`, which had already made both changes: its config-page grouping is a band inside one card, which groups
+the rows but still reads as one long table (now a card per group), and its libraries sidebar **rendered stacked
+above the search box anyway**, because an inline `display: flex` on `.card-body` overrode `display` and `gap` but
+not that rule's own `flex-direction: column` (now `.find-layout`/`.find-main`/`.find-aside` classes). See
+`architecture/implementation/done/phase-165T-config-writes-that-missed-their-own-key.md`, whose "What this does not
+do" names a third thing with the same symptom that is still there: the Source column calls a key "file"-sourced
+even when an environment variable overrides it at runtime.
+
+
+Updated 2026-09-21 (earlier): **164R is done.** Regrouped the whole `DbDataSync:*` key surface (`Url` → `App:Url`,
 `StateEngine` → `State:Engine`, retention settings under `State:Retention:*`, ...) and replaced every bare boolean
 with a named mode string (`Auth:Disabled` → the narrower, role-scoped `Auth:Network:Admin`/`Auth:Network:Viewer`;
 `SelfUpdateEnabled` → `Updates:Mode`; `NuGetSearchEnabled` → `Nuget:Search:Mode`; `NotesRichMarkdown` →

@@ -90,25 +90,51 @@ public static class DbDataSyncConfigFile
     /// parser/emitter event stream sees comments at all, and rebuilding a document from those events
     /// while injecting one new value is a lot of machinery for one file with a handful of keys). This
     /// instead edits the text directly — it finds the live (uncommented) line for <paramref
-    /// name="key"/> under <paramref name="section"/> and replaces its value, or inserts a new line
-    /// right after the section header if there isn't one yet. Every other line, comments included, is
-    /// copied through unchanged. The tradeoff: this assumes the flat, two-level shape the starter file
-    /// and every documented <c>DbDataSync:*</c> key actually use (<c>Section:</c> then two-space-indented
-    /// <c>Key: value</c> lines) — it does not handle arbitrary YAML nesting on the write side the way
-    /// <see cref="Read"/> does on the read side. That is sufficient for every key this phase or its
-    /// successor (phase 81's admin screen) needs to write.
+    /// name="key"/> and replaces its value, or inserts a new line right after the section header if
+    /// there isn't one yet. Every other line, comments included, is copied through unchanged.
+    /// </para>
+    /// <para>
+    /// <paramref name="section"/> and <paramref name="key"/> say where to write a key the file does
+    /// not have yet. A key it *does* have is updated where it already sits, whatever split between
+    /// header and key line it was written with — the split is invisible to <see cref="Read"/>, and
+    /// two writers in this codebase disagree about it: <c>setup</c> and phase 164's migration write
+    /// <c>DbDataSync:Auth:Network:</c> then <c>Admin</c>, while the Admin config screen and
+    /// <c>config set</c> write <c>DbDataSync:</c> then <c>Auth:Network:Admin</c>. Matching on the
+    /// section header alone therefore missed a key that was plainly there, added a second line for
+    /// it, and left the reader to choose between the two by document order — which is what made
+    /// disabling <c>Auth:Network:Admin</c> from the Admin screen appear to do nothing at all.
     /// </para>
     /// </summary>
     public static void SetValue(string repoRoot, string section, string key, string value)
     {
-        // No credential is ever written into this file — StateConnectionString is the one key that
-        // could carry one, and this is the one path anything writes it through.
-        if (string.Equals(key, "StateConnectionString", StringComparison.OrdinalIgnoreCase))
-            ConfigValidation.RejectEmbeddedCredential(value, $"{section}:{key}");
+        var fullKey = $"{section}:{key}";
+
+        // No credential is ever written into this file — the state connection string is the one key
+        // that could carry one, and this is the one path anything writes it through. Matched on the
+        // whole flattened key rather than the bare `key` argument, because either half moving
+        // (phase 164 renamed StateConnectionString to State:ConnectionString, and callers split it
+        // at different points) silently leaves a bare-name check matching nothing at all.
+        if (fullKey.EndsWith(":State:ConnectionString", StringComparison.OrdinalIgnoreCase)
+            || fullKey.EndsWith(":StateConnectionString", StringComparison.OrdinalIgnoreCase))
+            ConfigValidation.RejectEmbeddedCredential(value, fullKey);
 
         var path = PathIn(repoRoot);
         var lines = File.Exists(path) ? File.ReadAllLines(path).ToList() : [];
         var valueText = QuoteYamlScalar(value);
+
+        // Normally one line; more than one only in a file an earlier build already wrote the
+        // duplicate above into. All of them are set, rather than the extras pruned, so the file says
+        // one thing however the reader resolves it — without deleting a line somebody may have
+        // written a comment around.
+        var existing = FindKeyLines(lines, fullKey);
+        if (existing.Count > 0)
+        {
+            foreach (var (index, keyEnd) in existing)
+                lines[index] = $"{lines[index][..keyEnd]} {valueText}";
+
+            File.WriteAllLines(path, lines, Encoding.UTF8);
+            return;
+        }
 
         var sectionHeaderIndex = lines.FindIndex(l => l.TrimEnd() == $"{section}:");
         if (sectionHeaderIndex < 0)
@@ -118,38 +144,80 @@ public static class DbDataSyncConfigFile
 
             lines.Add($"{section}:");
             lines.Add($"  {key}: {valueText}");
-            File.WriteAllLines(path, lines, Encoding.UTF8);
-            return;
         }
-
-        var keyLinePrefix = $"  {key}:";
-        var sectionEnd = lines.Count;
-        var keyLineIndex = -1;
-        for (var i = sectionHeaderIndex + 1; i < lines.Count; i++)
-        {
-            var line = lines[i];
-            // The section ends at the next non-indented, non-blank line (a new top-level section).
-            if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && !line.TrimStart().StartsWith('#'))
-            {
-                sectionEnd = i;
-                break;
-            }
-
-            if (line.TrimStart().StartsWith(keyLinePrefix.TrimStart(), StringComparison.Ordinal)
-                && !line.TrimStart().StartsWith('#'))
-            {
-                keyLineIndex = i;
-                break;
-            }
-        }
-
-        var newLine = $"{keyLinePrefix} {valueText}";
-        if (keyLineIndex >= 0)
-            lines[keyLineIndex] = newLine;
         else
-            lines.Insert(sectionHeaderIndex + 1, newLine);
+        {
+            lines.Insert(sectionHeaderIndex + 1, $"  {key}: {valueText}");
+        }
 
         File.WriteAllLines(path, lines, Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// Every line that sets <paramref name="fullKey"/>, as the line's index and the offset just past
+    /// the colon ending its key — enough to replace the value without touching the key text or its
+    /// indentation, or to delete the line outright.
+    /// <para>
+    /// Keys are matched the way <see cref="Read"/> flattens them, so a key written as a nested
+    /// mapping, as a colon-joined name under a shorter header, or as any mix of the two all match.
+    /// This is the read side's model applied to the write side; the writer still only *creates* keys
+    /// in the flat two-level shape, which is all any caller here asks for.
+    /// </para>
+    /// </summary>
+    private static List<(int Index, int KeyEnd)> FindKeyLines(IReadOnlyList<string> lines, string fullKey)
+    {
+        var matches = new List<(int, int)>();
+        var open = new List<(int Indent, string Path)>(); // the mappings this line is inside, outermost first
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            var trimmed = line.TrimStart();
+            // A blank line, a comment, or a sequence item — none of them name a key.
+            if (trimmed.Length == 0 || trimmed.StartsWith('#') || trimmed.StartsWith('-'))
+                continue;
+
+            var colon = KeyColon(trimmed);
+            if (colon < 0)
+                continue;
+
+            var indent = line.Length - trimmed.Length;
+            while (open.Count > 0 && open[^1].Indent >= indent)
+                open.RemoveAt(open.Count - 1);
+
+            var name = trimmed[..colon];
+            var path = open.Count == 0 ? name : $"{open[^1].Path}:{name}";
+
+            // Nothing after the colon: a header, and everything more indented below it is inside it.
+            if (trimmed[(colon + 1)..].Trim().Length == 0)
+            {
+                open.Add((indent, path));
+                continue;
+            }
+
+            if (string.Equals(path, fullKey, StringComparison.OrdinalIgnoreCase))
+                matches.Add((i, indent + colon + 1));
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// Where the key ends on a <c>Key: value</c> line: the first colon that is followed by a space or
+    /// ends the line. That is YAML's own rule, and the only one that reads both
+    /// <c>Auth:Network:Admin: loopback</c> and <c>Url: http://localhost:5080</c> correctly — a colon
+    /// inside a key is never followed by a space, and one inside a value is never reached. -1 for a
+    /// line that names no key.
+    /// </summary>
+    private static int KeyColon(string trimmed)
+    {
+        for (var i = 0; i < trimmed.Length; i++)
+        {
+            if (trimmed[i] == ':' && (i == trimmed.Length - 1 || trimmed[i + 1] == ' '))
+                return i;
+        }
+
+        return -1;
     }
 
     /// <summary>
@@ -157,8 +225,12 @@ public static class DbDataSyncConfigFile
     /// when a later write makes an earlier one meaningless rather than merely stale. Phase 113:
     /// switching <c>Kestrel:Certificates:Default</c> from a PEM cert+key pair to a PFX file must drop
     /// the old <c>KeyPath</c>, or Kestrel's own certificate loader still treats the section as
-    /// PEM-shaped and tries to open the PFX file as a private key. A no-op when the section or key
-    /// does not exist.
+    /// PEM-shaped and tries to open the PFX file as a private key. A no-op when the key is not there.
+    /// <para>
+    /// Finds the key the same way <see cref="SetValue"/> does, for the same reason: the caller's
+    /// split between section and key is not necessarily the one the file was written with, and a
+    /// removal that quietly matches nothing leaves the superseded key behind still being read.
+    /// </para>
     /// </summary>
     public static void RemoveValue(string repoRoot, string section, string key)
     {
@@ -167,25 +239,15 @@ public static class DbDataSyncConfigFile
             return;
 
         var lines = File.ReadAllLines(path).ToList();
-        var sectionHeaderIndex = lines.FindIndex(l => l.TrimEnd() == $"{section}:");
-        if (sectionHeaderIndex < 0)
+        var matches = FindKeyLines(lines, $"{section}:{key}");
+        if (matches.Count == 0)
             return;
 
-        var keyLinePrefix = $"  {key}:";
-        for (var i = sectionHeaderIndex + 1; i < lines.Count; i++)
-        {
-            var line = lines[i];
-            if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && !line.TrimStart().StartsWith('#'))
-                break; // the next top-level section
+        // Back to front, so removing one line doesn't shift the index of the next.
+        for (var i = matches.Count - 1; i >= 0; i--)
+            lines.RemoveAt(matches[i].Index);
 
-            if (line.TrimStart().StartsWith(keyLinePrefix.TrimStart(), StringComparison.Ordinal)
-                && !line.TrimStart().StartsWith('#'))
-            {
-                lines.RemoveAt(i);
-                File.WriteAllLines(path, lines, Encoding.UTF8);
-                return;
-            }
-        }
+        File.WriteAllLines(path, lines, Encoding.UTF8);
     }
 
     /// <summary>

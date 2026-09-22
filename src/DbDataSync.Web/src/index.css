@@ -349,18 +349,6 @@ h1.crumb.mono { font-family: var(--mono); }
    for the dense tables that are most of this app. */
 .grid-row.auto { height: auto; min-height: 40px; padding-top: 6px; padding-bottom: 6px; }
 .grid-row:last-child { border-bottom: none; }
-/* A sub-header inside a .grid-row-shaped table, grouping rows by the first fragment of a dotted/
-   colon-separated key (the Admin config screen's App:/State:/Auth:/... sections) — quieter than
-   .grid-head so it doesn't read as a second table, but distinct enough to break up a long flat list. */
-.grid-group-head {
-  padding: 6px 14px 4px;
-  font: 600 10px var(--ui);
-  letter-spacing: .07em; text-transform: uppercase;
-  color: var(--ink-7);
-  background: var(--row-head);
-  border-bottom: 1px solid var(--card-inner-edge);
-}
-.grid-group-head:not(:first-child) { border-top: 1px solid var(--card-inner-edge); }
 button.grid-row { border-left: none; border-right: none; border-top: none; background: none; width: 100%; cursor: pointer; }
 button.grid-row:hover { background: var(--row-head); }
 button.grid-row.active { background: var(--accent-row-alt); box-shadow: inset 2px 0 0 var(--accent); }
@@ -908,3 +896,40 @@ select.select {
   background: var(--warn-bg, #fff4d6); border: 1px solid var(--warn-edge, #e6cf94); border-radius: 4px;
 }
 .config-caution .mark { flex: none; font-weight: 700; color: #7a5200; }
+
+/* ── Admin config: one table per key group (App, State, Auth, …) ─────────────── */
+
+/* The same 14px the pane puts between its own children, so a page of grouped tables keeps the
+   rhythm of every other page's stack of cards. */
+.config-groups { display: flex; flex-direction: column; gap: 14px; }
+
+/* The `DbDataSync:Auth:*` reminder sits at the far end of the header, away from the group's name:
+   it is there to be checked against `config set` or the docs, not read on the way past. */
+.config-groups .card-head .card-note { margin-left: auto; }
+
+/* ── Libraries: the find panel's known-library shortcuts ─────────────────────── */
+
+/* A class, not an inline `display: flex` on `.card-body` — that element's own rule sets
+   `flex-direction: column`, so an inline style overriding `display` and `gap` but not the direction
+   left the aside and the search box stacked, which is what this was doing. The aside keeps its side
+   of the card (left, as it was written), and below 800px the stack is deliberate: a 180px column
+   beside an input leaves neither usable. */
+.find-layout { display: flex; gap: 20px; align-items: flex-start; }
+.find-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.find-aside {
+  flex: 0 0 180px;
+  display: flex; flex-direction: column; gap: 3px;
+  padding-right: 16px;
+  border-right: 1px solid var(--card-inner-edge);
+}
+.find-aside .card-title { margin-bottom: 3px; }
+
+
+@media (max-width: 800px) {
+  .find-layout { flex-direction: column; }
+  .find-aside {
+    flex: none; align-self: stretch;
+    padding-right: 0; padding-bottom: 12px;
+    border-right: none; border-bottom: 1px solid var(--card-inner-edge);
+  }
+}

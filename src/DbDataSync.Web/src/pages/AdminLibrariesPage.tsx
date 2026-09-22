@@ -235,109 +235,106 @@ function LibraryFindPanel({ installedIds }: { installedIds: Set<string> }) {
       <div className="card-head">
         <span className="card-title">Find a library to install</span>
       </div>
-      <div className="card-body" style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-        {uninstalledKnown.length > 0 && (
-          <div
-            style={{
-              display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, width: 180,
-              borderRight: '1px solid var(--card-inner-edge)', paddingRight: 16,
-            }}
-            data-testid="admin-libraries-known-sidebar"
-          >
-            <span className="hint" style={{ textTransform: 'uppercase', fontSize: 11, letterSpacing: '.05em', marginBottom: 4 }}>
-              Well-known libraries
-            </span>
-            {uninstalledKnown.map((entry) => (
-              <QuickAddChip
-                key={entry.id}
-                entry={entry}
-                onPick={() => pick({ id: entry.packageId, version: '', versionLocked: false, factoryType: '' })}
-              />
-            ))}
-          </div>
-        )}
+      {/* `.find-layout` rather than an inline `display: flex`, because `.card-body` already sets
+          `flex-direction: column` — an inline style that overrides `display` and not `flexDirection`
+          leaves the two children stacked, which is exactly how this "sidebar" was rendering. */}
+      <div className="card-body">
+        <div className="find-layout">
+          {uninstalledKnown.length > 0 && (
+            <aside className="find-aside" data-testid="admin-libraries-known-sidebar">
+              <span className="card-title">Well-known libraries</span>
+              {uninstalledKnown.map((entry) => (
+                <QuickAddChip
+                  key={entry.id}
+                  entry={entry}
+                  onPick={() => pick({ id: entry.packageId, version: '', versionLocked: false, factoryType: '' })}
+                />
+              ))}
+            </aside>
+          )}
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {!probed ? (
-          <div className="hint">Checking whether NuGet search is available…</div>
-        ) : searchWorks ? (
-          <>
-            <form className="row" style={{ gap: 8 }} onSubmit={runSearch}>
-              <input
-                type="text"
-                className="input"
-                placeholder="Search NuGet — e.g. mysql"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                data-testid="admin-libraries-search-input"
-              />
-              <button type="submit" className="btn btn-sm" disabled={search.isPending} data-testid="admin-libraries-search-submit">
-                Search
-              </button>
-            </form>
+          <div className="find-main">
+            {!probed ? (
+              <div className="hint">Checking whether NuGet search is available…</div>
+            ) : searchWorks ? (
+              <>
+                <form className="row" style={{ gap: 8 }} onSubmit={runSearch}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Search NuGet — e.g. mysql"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    data-testid="admin-libraries-search-input"
+                  />
+                  <button type="submit" className="btn btn-sm" disabled={search.isPending} data-testid="admin-libraries-search-submit">
+                    Search
+                  </button>
+                </form>
 
-            {search.isPending && <div className="hint">Searching…</div>}
-            {!search.isPending && results.length === 0 && query && (
-              <div className="hint">No results for "{query}".</div>
+                {search.isPending && <div className="hint">Searching…</div>}
+                {!search.isPending && results.length === 0 && query && (
+                  <div className="hint">No results for "{query}".</div>
+                )}
+                {results.map((result) => (
+                  <SearchResultRow
+                    key={result.id}
+                    result={result}
+                    curated={isCurated(result.id)}
+                    onSelect={(version) => pick({ id: result.id, version, versionLocked: true, factoryType: '' })}
+                  />
+                ))}
+              </>
+            ) : (
+              <>
+                <div className="hint">
+                  NuGet search isn't available in this deployment — enter a package id and version directly.
+                </div>
+                <div className="row" style={{ gap: 8 }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Package id — e.g. MySqlConnector"
+                    value={manualId}
+                    onChange={(e) => setManualId(e.target.value)}
+                    data-testid="admin-libraries-manual-id"
+                  />
+                  <input
+                    type="text"
+                    className="input sm"
+                    placeholder="Version"
+                    value={manualVersion}
+                    onChange={(e) => setManualVersion(e.target.value)}
+                    data-testid="admin-libraries-manual-version"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={!manualId || !manualVersion}
+                    onClick={() => pick({ id: manualId, version: manualVersion, versionLocked: true, factoryType: '' })}
+                    data-testid="admin-libraries-manual-use"
+                  >
+                    Use
+                  </button>
+                </div>
+              </>
             )}
-            {results.map((result) => (
-              <SearchResultRow
-                key={result.id}
-                result={result}
-                curated={isCurated(result.id)}
-                onSelect={(version) => pick({ id: result.id, version, versionLocked: true, factoryType: '' })}
-              />
-            ))}
-          </>
-        ) : (
-          <>
-            <div className="hint">
-              NuGet search isn't available in this deployment — enter a package id and version directly.
-            </div>
-            <div className="row" style={{ gap: 8 }}>
-              <input
-                type="text"
-                className="input"
-                placeholder="Package id — e.g. MySqlConnector"
-                value={manualId}
-                onChange={(e) => setManualId(e.target.value)}
-                data-testid="admin-libraries-manual-id"
-              />
-              <input
-                type="text"
-                className="input sm"
-                placeholder="Version"
-                value={manualVersion}
-                onChange={(e) => setManualVersion(e.target.value)}
-                data-testid="admin-libraries-manual-version"
-              />
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={!manualId || !manualVersion}
-                onClick={() => pick({ id: manualId, version: manualVersion, versionLocked: true, factoryType: '' })}
-                data-testid="admin-libraries-manual-use"
-              >
-                Use
-              </button>
-            </div>
-          </>
-        )}
 
-        {selected && (
-          <InstallCommand
-            selection={selected}
-            curated={isCurated(selected.id)}
-            installing={install.isPending}
-            installedOk={installedOk}
-            installedFactoryType={installedFactoryType}
-            onChangeVersion={(version) => pick({ ...selected, version })}
-            onChangeFactoryType={(factoryType) => setSelected({ ...selected, factoryType })}
-            onInstall={requestInstall}
-          />
-        )}
+            {selected && (
+              <InstallCommand
+                selection={selected}
+                curated={isCurated(selected.id)}
+                installing={install.isPending}
+                installedOk={installedOk}
+                installedFactoryType={installedFactoryType}
+                onChangeVersion={(version) => pick({ ...selected, version })}
+                onChangeFactoryType={(factoryType) => setSelected({ ...selected, factoryType })}
+                onInstall={requestInstall}
+              />
+            )}
 
-        <ErrorBanner error={installError} />
+            <ErrorBanner error={installError} />
+          </div>
         </div>
       </div>
 
