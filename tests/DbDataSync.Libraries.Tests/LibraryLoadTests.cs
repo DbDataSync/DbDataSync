@@ -170,6 +170,56 @@ public sealed class LibraryLoadTests : IAsyncLifetime
         Assert.Contains("dbdatasync config library install", ex.Message);
     }
 
+    /// <summary>
+    /// The scenario `follow-up-library-install-paths-disagree-on-the-resulting-library-id.md` documented:
+    /// installed via `POST /api/libraries` (keyed by package id, <c>"MySqlConnector"</c>), then looked up
+    /// by the catalog id (<c>"mysql-connector"</c>) a driver.yaml's <c>library:</c> field or
+    /// <c>from-catalog</c> would use instead. Names the installed alias rather than the generic
+    /// "not installed" — the operator has it, just under the other name.
+    /// </summary>
+    [Fact]
+    public async Task GetFactory_ForACatalogId_WhenOnlyThePackageIdIsInstalled_NamesTheInstalledAlias()
+    {
+        await LibraryInstaller.InstallAsync(
+            _repoRoot, "MySqlConnector", [new PackageRef("MySqlConnector", "2.4.0")],
+            "MySqlConnector.MySqlConnectorFactory, MySqlConnector");
+        var registry = new LibraryRegistry(_repoRoot).LoadAll();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => registry.GetFactory("mysql-connector"));
+
+        Assert.Contains("but 'MySqlConnector' is", ex.Message);
+    }
+
+    /// <summary>The reverse direction: installed via the catalog id (<c>POST /api/drivers/from-catalog</c>'s
+    /// own shape), looked up by the raw package id instead.</summary>
+    [Fact]
+    public async Task GetFactory_ForAPackageId_WhenOnlyTheCatalogIdIsInstalled_NamesTheInstalledAlias()
+    {
+        await LibraryInstaller.InstallAsync(
+            _repoRoot, "mysql-connector", [new PackageRef("MySqlConnector", "2.4.0")],
+            "MySqlConnector.MySqlConnectorFactory, MySqlConnector");
+        var registry = new LibraryRegistry(_repoRoot).LoadAll();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => registry.GetFactory("MySqlConnector"));
+
+        Assert.Contains("'mysql-connector' is", ex.Message);
+    }
+
+    /// <summary>An id nobody's installed under either shape still gets the plain, original message — the
+    /// alias hint only fires when there is a real alias to name.</summary>
+    [Fact]
+    public async Task GetFactory_ForACatalogId_WhenNeitherShapeIsInstalled_NamesTheInstallCommand_NotAPhantomAlias()
+    {
+        await LibraryInstaller.InstallAsync(
+            _repoRoot, "Npgsql", [new PackageRef("Npgsql", "9.0.3")],
+            "Npgsql.NpgsqlFactory, Npgsql");
+        var registry = new LibraryRegistry(_repoRoot).LoadAll();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => registry.GetFactory("mysql-connector"));
+
+        Assert.Contains("dbdatasync config library install mysql-connector", ex.Message);
+    }
+
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

@@ -115,14 +115,47 @@ public sealed class LibraryRegistry
     /// <summary>
     /// <see cref="DbProviderFactories.GetFactory(string)"/>, with a message that names the fix
     /// (<c>dbdatasync config library install</c>) instead of the BCL's generic "no factory registered".
+    /// <para>
+    /// When <paramref name="id"/> isn't installed but is a <see cref="KnownLibraries"/> catalog entry
+    /// whose *other* id shape (catalog id vs. package id — see
+    /// <c>architecture/planning/todo/follow-up-library-install-paths-disagree-on-the-resulting-library-id.md</c>)
+    /// is installed, the message names that installed id instead of telling someone to install a library
+    /// they already have under a name they didn't expect.
+    /// </para>
     /// </summary>
     public DbProviderFactory GetFactory(string id)
     {
         if (!Installed.ContainsKey(id))
-            throw new InvalidOperationException(
-                $"Library '{id}' is not installed. Install it with `dbdatasync config library install {id}`.");
+        {
+            var installedAlias = FindInstalledAlias(id);
+            throw new InvalidOperationException(installedAlias is null
+                ? $"Library '{id}' is not installed. Install it with `dbdatasync config library install {id}`."
+                : $"Library '{id}' is not installed, but '{installedAlias}' is — the same package under its " +
+                  $"other id. Use '{installedAlias}' instead, or install '{id}' explicitly with " +
+                  $"`dbdatasync config library install {id}`.");
+        }
 
         return DbProviderFactories.GetFactory(id);
+    }
+
+    /// <summary>
+    /// Null unless <paramref name="id"/> matches a <see cref="KnownLibraries"/> entry's catalog id or
+    /// package id and the *other* shape of that same entry is actually installed — the one case worth
+    /// naming explicitly, since every other "not installed" is a plain miss with no better answer to give.
+    /// </summary>
+    private string? FindInstalledAlias(string id)
+    {
+        var entry = KnownLibraries.TryGetById(id)
+            ?? KnownLibraries.All.FirstOrDefault(e => string.Equals(e.PackageId, id, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+            return null;
+
+        if (!string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase) && Installed.ContainsKey(entry.Id))
+            return entry.Id;
+        if (!string.Equals(entry.PackageId, id, StringComparison.OrdinalIgnoreCase) && Installed.ContainsKey(entry.PackageId))
+            return entry.PackageId;
+
+        return null;
     }
 
     private static void ArmResolver(string libDir)
