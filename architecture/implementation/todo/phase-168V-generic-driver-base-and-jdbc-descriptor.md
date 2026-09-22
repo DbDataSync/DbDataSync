@@ -170,10 +170,10 @@ end-to-end test) replaces the single hardcoded, Postgres-scoped `JdbcDialect.ToC
 
 ## What's still open
 
-- **`JdbcDialect`/`JdbcCatalog` (the hand-written, phase-165V-shaped classes) still exist and are still
-  used by the existing parity tests.** Nothing forces a real, shipped JDBC engine to go through
-  `JdbcGenericDriver`/a descriptor — both paths work, side by side. Whether the hand-written path should
-  eventually be retired in favor of always going through a descriptor is a real question, not decided here.
+- **Whether the hand-written `JdbcDialect`/`JdbcCatalog` path should eventually be retired in favor of
+  always going through a descriptor** — moved to its own follow-up:
+  `architecture/planning/todo/follow-up-phase-168-hand-written-jdbc-path-vs-descriptor.md`. Both paths
+  work, side by side, today.
 - **Jar/artifact resolution remains a literal filesystem path** (`driverJarPath`), same as before this
   phase and same as the test project's own MSBuild-downloaded jar. `jars/` vs `libraries/` is still
   `jdbc-driver-support.md`'s own open question.
