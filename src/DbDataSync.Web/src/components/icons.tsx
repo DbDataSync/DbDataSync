@@ -122,12 +122,26 @@ export function BookIcon() {
   )
 }
 
-/** Admin — a gear, the universal mark for "settings" and nothing this app already uses elsewhere. */
+/**
+ * Admin — a gear, the universal mark for "settings" and nothing this app already uses elsewhere.
+ * One traced outline: eight flat-topped teeth on a root circle (joined by short arcs, not straight V-cuts,
+ * so the valleys read as part of a wheel rather than a star) plus the center hole — not the previous
+ * version's thin radiating lines, which read as a sun, and not a first attempt at separate rect/line
+ * teeth either, which at this stroke width had no room left for a hollow interior and read as solid
+ * blobs. Verified by rendering both the raw path and the actual 15x15 glyph before landing on this one.
+ */
 export function GearIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 16 16" {...stroke} strokeLinejoin="round">
-      <circle cx="8" cy="8" r="2.3" />
-      <path d="M8 2.3v1.6M8 12.1v1.6M13.7 8h-1.6M3.9 8H2.3M12.1 3.9l-1.1 1.1M5 10l-1.1 1.1M12.1 12.1l-1.1-1.1M5 6l-1.1-1.1" />
+      <path d="M 5.72 4.35 A 4.3 4.3 0 0 1 7.03 3.81 L 6.61 1.96 L 9.39 1.96 L 8.97 3.81
+               A 4.3 4.3 0 0 1 10.28 4.35 L 11.29 2.74 L 13.26 4.71 L 11.65 5.72
+               A 4.3 4.3 0 0 1 12.19 7.03 L 14.04 6.61 L 14.04 9.39 L 12.19 8.97
+               A 4.3 4.3 0 0 1 11.65 10.28 L 13.26 11.29 L 11.29 13.26 L 10.28 11.65
+               A 4.3 4.3 0 0 1 8.97 12.19 L 9.39 14.04 L 6.61 14.04 L 7.03 12.19
+               A 4.3 4.3 0 0 1 5.72 11.65 L 4.71 13.26 L 2.74 11.29 L 4.35 10.28
+               A 4.3 4.3 0 0 1 3.81 8.97 L 1.96 9.39 L 1.96 6.61 L 3.81 7.03
+               A 4.3 4.3 0 0 1 4.35 5.72 L 2.74 4.71 L 4.71 2.74 Z" />
+      <circle cx="8" cy="8" r="1.9" />
     </svg>
   )
 }
