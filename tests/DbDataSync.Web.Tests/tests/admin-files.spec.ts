@@ -21,7 +21,7 @@ test.describe.serial('admin: Files', () => {
   })
 
   test('uploading a .jar lists it, then it can be removed', async ({ page }) => {
-    await page.goto('/admin/files')
+    await page.goto('/drivers/files')
     await expect(page.getByRole('heading', { name: 'Files' })).toBeVisible()
 
     await page.getByTestId('admin-files-upload-input').setInputFiles(jarPath)
@@ -45,7 +45,7 @@ test.describe.serial('admin: Files', () => {
     const txtName = path.basename(txtPath)
 
     try {
-      await page.goto('/admin/files')
+      await page.goto('/drivers/files')
       await page.getByTestId('admin-files-upload-input').setInputFiles(txtPath)
 
       const result = page.getByTestId(`admin-files-upload-result-${txtName}`)

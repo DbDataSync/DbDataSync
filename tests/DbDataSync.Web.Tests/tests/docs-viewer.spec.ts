@@ -90,7 +90,7 @@ test('the admin screens that used to say "see docs/…" now link to the docs', a
   await page.getByTestId('config-docs-link').click()
   await expect(page).toHaveURL(/\/docs\/configuration$/)
 
-  await page.goto('/admin/drivers')
+  await page.goto('/drivers')
   await page.getByTestId('drivers-docs-link').click()
   await expect(page).toHaveURL(/\/docs\/drivers-and-libraries#descriptor-drivers$/)
 })

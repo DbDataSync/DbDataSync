@@ -120,12 +120,15 @@ it from the stale version. See the update landing there alongside this doc.
 
 ## Small GUI
 
-A new Admin tab, **Files** — plain: a table (name, size, uploaded date, used-by), an upload button, a
-delete action per row (with the `usedBy`-conflict/`force` dialog `Libraries`' own delete already has a
-precedent for). No preview, no in-browser jar inspection — "manage your files," not a jar explorer.
-Reachable both directly (Admin → Files) and inline from the driver-authoring form's jar picker
-(`driver-yaml-authoring-ui.md` §2), the same way that form already embeds the Libraries search box rather
-than sending the operator away to a different screen.
+**Updated 2026-09-22**: built as its own tab under a new **Drivers** rail section (own icon, admin-gated),
+alongside Drivers and Libraries — not under Admin. A UX review found Scripts' own precedent (open to any
+signed-in user, its own top-level rail item, not buried under Admin) argued for giving these three the
+same prominence, just admin-gated rather than open, since they're what someone configuring a replication
+reaches for, not host administration. Plain: a table (name, size, uploaded date, used-by), an upload
+button, a delete action per row (with the `usedBy`-conflict/`force` dialog `Libraries`' own delete already
+has a precedent for). No preview, no in-browser jar inspection — "manage your files," not a jar explorer.
+Reachable both directly (the Files tab) and inline from the driver-authoring form's jar picker
+(`driver-yaml-authoring-ui.md` §2) once that form extracts a reusable upload control from this page.
 
 ## What this does not build
 

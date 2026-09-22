@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { NotificationBell } from './NotificationBell'
 import { SignedInAs } from './SignIn'
 import { useIsAdmin } from './useIsAdmin'
-import { BookIcon, CodeIcon, DatabaseIcon, FlowIcon, GearIcon, GridIcon, LogoIcon } from './icons'
+import { BookIcon, CodeIcon, DatabaseIcon, FlowIcon, GearIcon, GridIcon, LogoIcon, PackageIcon } from './icons'
 
 /**
  * The chrome every screen sits in: a 46px icon rail, a 42px breadcrumb bar and a 46px tab bar.
@@ -60,6 +60,23 @@ export function AppShell({ crumbs, tabs, actions, children }: {
         >
           <CodeIcon />
         </NavLink>
+        {isAdmin && (
+          // Drivers, Libraries and Files: used by whoever configures a replication (same reason
+          // Scripts, just above, is not behind the Admin gate) but only an admin gets to change what
+          // engines and artifacts are installed on the host at all — Policies.Admin on every endpoint
+          // underneath enforces this for real; hiding the rail item is only about not offering a
+          // Viewer a destination that 403s on arrival. Links to the bare section root, not directly
+          // at /drivers/libraries or /drivers/files, so this stays lit on any tab inside the section —
+          // the same "stays lit while you are anywhere inside it" behaviour the Admin item below uses.
+          <NavLink
+            to="/drivers"
+            className={({ isActive }) => `rail-item ${isActive ? 'active' : ''}`}
+            title="Drivers"
+            data-testid="rail-drivers"
+          >
+            <PackageIcon />
+          </NavLink>
+        )}
         <span className="rail-item" style={{ color: 'var(--ink-faint)', cursor: 'default' }} title="Overview">
           <GridIcon />
         </span>

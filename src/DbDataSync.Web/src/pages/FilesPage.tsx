@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { AdminTabs } from '../components/AdminTabs'
+import { DriversTabs } from '../components/DriversTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { useIsAdmin } from '../components/useIsAdmin'
@@ -10,11 +10,11 @@ const COLUMNS = '2fr 1fr 1.4fr 1.4fr 1fr'
 
 /**
  * Phase 173V — `files/`, a standard place for anything an operator uploads for a driver to reference (a
- * JDBC jar, so far the only real case). Modeled directly on `AdminLibrariesPage`'s own row/remove/force
+ * JDBC jar, so far the only real case). Modeled directly on `LibrariesPage`'s own row/remove/force
  * pattern — deliberately simpler: no search box, no known-catalog chips, nothing that screen has that a
  * plain "manage your files" screen doesn't need.
  */
-export function AdminFilesPage() {
+export function FilesPage() {
   const isAdmin = useIsAdmin()
   const { data: files, isLoading, error } = useFiles()
   const remove = useRemoveFile()
@@ -26,7 +26,7 @@ export function AdminFilesPage() {
 
   if (!isAdmin) {
     return (
-      <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
+      <AppShell crumbs={[{ label: 'Drivers' }]} tabs={<DriversTabs />}>
         <div className="pane">
           <div className="empty">This screen is for administrators.</div>
         </div>
@@ -58,7 +58,7 @@ export function AdminFilesPage() {
   }
 
   return (
-    <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
+    <AppShell crumbs={[{ label: 'Drivers' }]} tabs={<DriversTabs />}>
       <div className="pane">
         <div className="page-head">
           <h1 className="page-title">Files</h1>

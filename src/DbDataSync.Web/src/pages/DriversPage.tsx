@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AdminTabs } from '../components/AdminTabs'
+import { DriversTabs } from '../components/DriversTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { RestartRequiredBanner } from '../components/RestartRequiredBanner'
@@ -22,7 +22,7 @@ const SOURCE_LABEL: Record<DriverSummary['source'], string> = {
  * offers. A catalog install (120) is always a curated pick, so it never opens the trust dialog the
  * Libraries screen's non-curated path does.
  */
-export function AdminDriversPage() {
+export function DriversPage() {
   const isAdmin = useIsAdmin()
   const { data: drivers, isLoading, error } = useDrivers()
   const { data: knownDrivers, error: knownError } = useKnownDrivers()
@@ -35,7 +35,7 @@ export function AdminDriversPage() {
   // showing a Viewer a screen of "Add" affordances that would 403 the moment they were used.
   if (!isAdmin) {
     return (
-      <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
+      <AppShell crumbs={[{ label: 'Drivers' }]} tabs={<DriversTabs />}>
         <div className="pane">
           <div className="empty">This screen is for administrators.</div>
         </div>
@@ -57,7 +57,7 @@ export function AdminDriversPage() {
   const installedIds = new Set((drivers ?? []).map((d) => d.id))
 
   return (
-    <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
+    <AppShell crumbs={[{ label: 'Drivers' }]} tabs={<DriversTabs />}>
       <div className="pane">
         <div className="page-head">
           <h1 className="page-title">Drivers</h1>

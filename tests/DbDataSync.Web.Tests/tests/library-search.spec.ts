@@ -13,7 +13,7 @@ const screenshotsDir = screenshotDir('library-search')
  */
 test.describe('admin: Libraries — NuGet search', () => {
   test('searching finds a real package, and a version is required before the install command appears', async ({ page }) => {
-    await page.goto('/admin/libraries')
+    await page.goto('/drivers/libraries')
 
     const searchInput = page.getByTestId('admin-libraries-search-input')
     // The probe-on-mount call has to settle (proving search is reachable) before the box replaces the
@@ -44,7 +44,7 @@ test.describe('admin: Libraries — NuGet search', () => {
   })
 
   test('a quick-add chip for a curated library not yet installed pre-fills its id', async ({ page }) => {
-    await page.goto('/admin/libraries')
+    await page.goto('/drivers/libraries')
 
     // Npgsql is bundled (phase 117) and not seeded by global setup, so its chip should be offered.
     const chip = page.getByTestId('admin-libraries-chip-npgsql')

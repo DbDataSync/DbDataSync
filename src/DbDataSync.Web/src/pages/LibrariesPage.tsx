@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AdminTabs } from '../components/AdminTabs'
+import { DriversTabs } from '../components/DriversTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { RestartRequiredBanner } from '../components/RestartRequiredBanner'
@@ -16,7 +16,7 @@ const COLUMNS = '1.2fr 1.7fr 1fr 1.3fr 1fr'
  * resolves its `DbProviderFactory` through — plus (119) a NuGet search box and (120) installing or
  * removing one directly from here.
  */
-export function AdminLibrariesPage() {
+export function LibrariesPage() {
   const isAdmin = useIsAdmin()
   const { data: libraries, isLoading, error } = useLibraries()
   const { data: restartRequired } = useRestartRequired()
@@ -27,7 +27,7 @@ export function AdminLibrariesPage() {
   // screen of affordances that would 403 the moment they were used.
   if (!isAdmin) {
     return (
-      <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
+      <AppShell crumbs={[{ label: 'Drivers' }]} tabs={<DriversTabs />}>
         <div className="pane">
           <div className="empty">This screen is for administrators.</div>
         </div>
@@ -45,7 +45,7 @@ export function AdminLibrariesPage() {
   }
 
   return (
-    <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
+    <AppShell crumbs={[{ label: 'Drivers' }]} tabs={<DriversTabs />}>
       <div className="pane">
         <div className="page-head">
           <h1 className="page-title">Libraries</h1>

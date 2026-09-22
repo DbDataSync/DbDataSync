@@ -10,9 +10,9 @@ import { ScriptEditPage } from './pages/ScriptEditPage'
 import { ScriptsPage } from './pages/ScriptsPage'
 import { AdminCertificatePage } from './pages/AdminCertificatePage'
 import { AdminConfigPage } from './pages/AdminConfigPage'
-import { AdminDriversPage } from './pages/AdminDriversPage'
-import { AdminFilesPage } from './pages/AdminFilesPage'
-import { AdminLibrariesPage } from './pages/AdminLibrariesPage'
+import { DriversPage } from './pages/DriversPage'
+import { FilesPage } from './pages/FilesPage'
+import { LibrariesPage } from './pages/LibrariesPage'
 import { AdminUpdatesPage } from './pages/AdminUpdatesPage'
 import { ReplicationDetailPage } from './pages/ReplicationDetailPage'
 import { HistoryTab, MappingsTab, MonitoringTab, OverviewTab } from './pages/replication-detail/tabs'
@@ -166,10 +166,15 @@ export default function App() {
       <Route path="/admin" element={<Navigate to="/admin/config" replace />} />
       <Route path="/admin/config" element={<AdminConfigPage />} />
       <Route path="/admin/certificate" element={<AdminCertificatePage />} />
-      <Route path="/admin/drivers" element={<AdminDriversPage />} />
-      <Route path="/admin/libraries" element={<AdminLibrariesPage />} />
-      <Route path="/admin/files" element={<AdminFilesPage />} />
       <Route path="/admin/updates" element={<AdminUpdatesPage />} />
+
+      {/* Drivers/Libraries/Files: moved out of Admin into their own rail section — what someone
+          configuring a replication reaches for, still admin-only. /drivers is a real page (the Drivers
+          list itself), not a redirect target the way bare /admin is, since there's no reason to make
+          the landing tab indirect when it already is one. */}
+      <Route path="/drivers" element={<DriversPage />} />
+      <Route path="/drivers/libraries" element={<LibrariesPage />} />
+      <Route path="/drivers/files" element={<FilesPage />} />
 
       {/* A mistyped or stale URL lands somewhere real rather than on an empty frame with chrome. */}
       <Route path="*" element={<Navigate to="/replications" replace />} />

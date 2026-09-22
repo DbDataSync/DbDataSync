@@ -13,7 +13,7 @@ const screenshotsDir = screenshotDir('admin-library-install')
  */
 test.describe.serial('admin: install and remove a non-curated library', () => {
   test('installing it with an explicit factory type opens the trust dialog and installs on confirm', async ({ page }) => {
-    await page.goto('/admin/libraries')
+    await page.goto('/drivers/libraries')
 
     const searchInput = page.getByTestId('admin-libraries-search-input')
     await expect(searchInput).toBeVisible({ timeout: 15_000 })
@@ -49,7 +49,7 @@ test.describe.serial('admin: install and remove a non-curated library', () => {
   })
 
   test('removing it (nothing depends on it) works with a plain confirm', async ({ page }) => {
-    await page.goto('/admin/libraries')
+    await page.goto('/drivers/libraries')
 
     const row = page.getByTestId('admin-library-row-Dapper')
     await expect(row).toBeVisible()

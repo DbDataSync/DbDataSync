@@ -14,7 +14,7 @@ const screenshotsDir = screenshotDir('admin-drivers-libraries')
  */
 test.describe.serial('admin: Drivers and Libraries', () => {
   test('adding mysql.generic from the catalog list installs it with no trust dialog, and it appears listed', async ({ page }) => {
-    await page.goto('/admin/drivers')
+    await page.goto('/drivers')
 
     const catalogRow = page.getByTestId(`admin-known-driver-${KNOWN_DRIVER_ID}`)
     await expect(catalogRow).toBeVisible()
@@ -36,7 +36,7 @@ test.describe.serial('admin: Drivers and Libraries', () => {
   })
 
   test('Drivers tab lists the three built-ins alongside the descriptor driver just installed', async ({ page }) => {
-    await page.goto('/admin/drivers')
+    await page.goto('/drivers')
 
     for (const id of ['MsSql', 'Postgres', 'DuckDb']) {
       const row = page.getByTestId(`admin-driver-row-${id}`)
@@ -53,7 +53,7 @@ test.describe.serial('admin: Drivers and Libraries', () => {
   })
 
   test('Libraries tab lists the installed library as resolving, curated, and used by the descriptor', async ({ page }) => {
-    await page.goto('/admin/libraries')
+    await page.goto('/drivers/libraries')
 
     await expect(page.getByRole('heading', { name: 'Libraries' })).toBeVisible()
 

@@ -46,6 +46,19 @@ export function FlowIcon() {
   )
 }
 
+/** Drivers/Libraries/Files — a package (box), for the artifacts a replication is built out of rather
+ * than the replications themselves. Distinct from Connections' cylinder — this is what's installed on
+ * the host, not what it talks to. */
+export function PackageIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" {...stroke} strokeLinejoin="round">
+      <path d="M8 1.5 14 4.5v7L8 14.5 2 11.5v-7Z" />
+      <path d="M2 4.5 8 7.5 14 4.5" />
+      <path d="M8 7.5v7" />
+    </svg>
+  )
+}
+
 /** Connections — a database cylinder. */
 export function DatabaseIcon() {
   return (

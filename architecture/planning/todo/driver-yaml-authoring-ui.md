@@ -26,9 +26,18 @@ structured authoring for it — see "Typemap: structured now, or raw YAML" below
 
 ## Layout
 
-Inside the existing Admin → **Drivers** tab, next to the two affordances already there (the `KnownDrivers`
-one-click add, and the copyable `dbdatasync config driver install …` command for a hand-authored file): a
-third, **"Build one"**, opening a form.
+**Updated 2026-09-22**, after the Drivers/Libraries/Files nav restructure: these three moved out of Admin
+into their own rail section (own icon, `/drivers`, `/drivers/libraries`, `/drivers/files` — still
+admin-gated, both at the rail-item level and per-endpoint `Policies.Admin`) — a real UX review found this
+matters more than a cosmetic move, because it also settles this doc's own page shape (below).
+
+A dedicated page, not a panel on the list — checked against the one precedent this app already has for
+"author a chunk of code/config, list it, edit it later" (Scripts: `ScriptsPage` list + a real
+`ScriptEditPage`, not a form bolted onto the list). `DriversPage` (the list, `/drivers`) gets a "New
+driver" button navigating to `DriverEditPage` at `/drivers/new` (and `/drivers/:id/edit` for editing an
+existing one) — the same two-page shape, not a growing panel next to the existing `KnownDrivers` one-click
+add and the copyable `dbdatasync config driver install …` command, which both stay on `DriversPage`
+itself, unchanged.
 
 ### 1. Base
 
@@ -38,16 +47,18 @@ nothing else in the form is meaningfully generic across both.
 
 ### 2. Connection library (ADO.NET) or driver jar(s) (JDBC)
 
-**ADO.NET**: reuses the *existing* library picker built for phase 119/120 wholesale — `KnownLibraries`
-quick-add chips plus the NuGet search box — not reinvented here. Picking or installing one sets `Library`.
+**ADO.NET**: reuses the library picker built for phase 119/120 — `KnownLibraries` quick-add chips plus the
+NuGet search box — not reinvented here. Picking or installing one sets `Library`.
 
-**JDBC**: `DriverClass` (text — `org.postgresql.Driver`-shaped) plus a jar list. Where the jar *files*
-themselves come from — the one thing this UI couldn't be designed in isolation, when this doc was first
-written — is now resolved: `architecture/planning/todo/user-provided-files-store.md`'s `files/` store,
-with its own small GUI (Admin → Files). The jar picker here is "pick from `GET /api/files` or upload a
-new one inline," embedding that store's upload control the same way §2's ADO.NET half already embeds the
-Libraries search box rather than sending the operator to a different screen — one small multi-select
-list, not a new upload mechanism of its own.
+**Checked, not assumed: this isn't a drop-in import today.** `LibraryFindPanel` (the whole chips+search+
+install flow, `LibrariesPage.tsx`) is a page-local function, not exported — same for the Files upload
+control (`FilesPage.tsx`). "Reuse" means extracting each into its own component first
+(`components/LibraryFindPanel.tsx`, `components/FileUploadPanel.tsx` or similar), a small, contained
+prerequisite this doc didn't originally price in, not a blocker.
+
+**JDBC**: `DriverClass` (text — `org.postgresql.Driver`-shaped) plus a jar list, picked from `GET
+/api/files` or uploaded inline via the now-extracted upload control — `architecture/planning/todo/user-provided-files-store.md`'s
+`files/` store, reachable directly too (Drivers section → Files tab) for general management.
 
 Once jars exist, `jdbc-ikvmreference-compile-button.md`'s "Compile" action is a natural next affordance
 on this same screen — out of scope for authoring itself, cross-referenced only.
@@ -85,8 +96,8 @@ hardcoded "JDBC can't write" rule that itself goes stale the moment 172V lands.
 A catalog-strategy picker: **Default** (informationSchema for ADO.NET, `DatabaseMetaData` for JDBC —
 labelled per the chosen base, not a bare "default"), or **Custom query**, which reveals two SQL text
 areas (`TableQuery`/`ColumnQuery`) — the exact two fields `MetadataQueriesYaml` already has. Good fit for
-the in-app Monaco editor (phase 028/160K already built it for scripts and docs) rather than a plain
-`<textarea>` — SQL syntax highlighting, nothing new to build for the editor itself.
+the in-app `CodeEditor` (`language="sql"`, phase 028/160K already built it for scripts) rather than a
+plain `<textarea>` — SQL syntax highlighting, nothing new to build for the editor itself.
 
 ### 5. Typemap: structured now, or raw YAML
 
@@ -95,13 +106,21 @@ Full structured authoring for `TypeMap` is genuinely harder than everything else
 (`decimal(p,s)` → `{ kind: Decimal, precision: p, scale: s }`) are a small DSL of their own, and a
 dropdown-and-fields UI for it is real, separate design work, not a checkbox list.
 
-Proposed v1: the same Monaco editor as above, dropped into "raw YAML for `dialect` and `typeMap`" — the
-two fields hardest to give a good structured UI, pre-filled with a skeleton and, when the operator picked
-a `KnownDrivers` entry as a starting point (see below), that entry's real `typeMap` as a starting point to
-edit rather than write from scratch. Structured authoring for `typeMap` specifically is a plausible v2,
-not blocking v1 — the honest scope line `drivers-and-libraries-in-the-web-ui.md` already drew ("no
-dialect/typeMap authoring UI") moves to "structured UI for everything except typeMap's own DSL, raw YAML
-with a real starting point for that," not all the way to "fully structured."
+Proposed v1: `CodeEditor` again, `language="yaml"`, dropped into "raw YAML for `dialect` and `typeMap`" —
+the two fields hardest to give a good structured UI, pre-filled with a skeleton and, when the operator
+picked a `KnownDrivers` entry as a starting point (see below), that entry's real `typeMap` as a starting
+point to edit rather than write from scratch. **Checked, not assumed**: Monaco's `yaml` tokenizer is
+already registered (`monacoSetup.ts`, phase 35, for read-only config diffs), so no new language to wire
+up — but `CodeEditorProps.language` is currently typed `'csharp' | 'sql'` only and needs widening to
+include `'yaml'`, and this would be the **first editable** YAML surface in the app (every existing use is
+`MonacoDiff`/read-only). No live diagnostic squiggles the way script editing gets them either — there's no
+compile endpoint for a driver.yaml to check against as you type; errors surface on Save, via the same
+round-trip validation §"Save / validate / edit" below already describes.
+
+Structured authoring for `typeMap` specifically is a plausible v2, not blocking v1 — the honest scope line
+`drivers-and-libraries-in-the-web-ui.md` already drew ("no dialect/typeMap authoring UI") moves to
+"structured UI for everything except typeMap's own DSL, raw YAML with a real starting point for that," not
+all the way to "fully structured."
 
 ### Starting from a `KnownDrivers` entry
 
@@ -160,7 +179,7 @@ Mirroring how `drivers-and-libraries-in-the-web-ui.md` itself split into 116–1
 
 1. `GET /api/known-driver-kinds` + `POST`/`GET`/`PUT /api/drivers/{id}/yaml` — the API surface, no UI yet,
    testable on its own the way every prior phase in that family was.
-2. `user-provided-files-store.md`'s own API + GUI (`GET`/`POST`/`DELETE /api/files`, Admin → Files) — a
+2. `user-provided-files-store.md`'s own API + GUI (`GET`/`POST`/`DELETE /api/files`, the Files tab) — a
    real prerequisite for the JDBC half of 3, but independently useful and buildable first.
 3. The structured form (base, capabilities, library/jar picker embedding 2, metadata queries) plus the
    raw-YAML dialect/typeMap editor — the bulk of the UI.
