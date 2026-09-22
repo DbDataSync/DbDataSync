@@ -235,6 +235,10 @@ Worth keeping two different "native type" questions distinct, since it's easy to
 
 ## Decided in this round
 
+**Status update**: carried out in `architecture/implementation/todo/phase-167V-jdbc-metadata-databasemetadata-and-generic-descriptor.md`,
+except the first bullet below (JDBC's own `typeMap`), which stays a decision, not yet built — see that
+phase doc's Retrospective for exactly what shipped and what's still deliberately deferred.
+
 - **JDBC's type-name parsing uses `driver.yaml`'s `typeMap`, not a hardcoded `JdbcDialect`.** Rather than
   one compiled `JdbcDialect.ToCanonicalType` C# switch trying to cover every vendor's spellings (today it
   only covers Postgres's), a JDBC-backed engine gets a descriptor — the same `GenericDriverSpec`/

@@ -1,6 +1,7 @@
 # Phase 167V — JDBC metadata: `DatabaseMetaData` default, `driver.yaml` escape hatches, phase 166V dropped
 
-**Status**: Building.
+**Status**: Built — items 1, 2 (partial — see Retrospective), 3, 5, 6. Item 4 (JDBC's own `typeMap`,
+converting `JdbcDriver` to a `GenericDriverSpec`) deliberately deferred — see Retrospective.
 **Plan reference**: `architecture/planning/todo/jdbc-metadata-catalog.md` (the full design, worked through
 in planning conversation — this phase carries it out), `architecture/implementation/done/phase-165V-jdbc-reader-spike-ikvm-postgres.md`
 (the driver this phase changes), `architecture/implementation/todo/phase-166V-pipeline-metadata-override-for-preview-and-segmentation.md`
@@ -65,4 +66,60 @@ in planning conversation — this phase carries it out), `architecture/implement
 
 # Retrospective
 
-(filled in as this phase is built)
+## What shipped
+
+- **`JdbcConnection` public**, with `JavaSqlDriver`/`JavaSqlConnection` replacing the `internal Underlying`.
+- **`JdbcCatalog` reads `java.sql.DatabaseMetaData`** instead of reusing `InformationSchemaQueries`.
+  `InformationSchemaQueries.FormatType` widened to `public` so `JdbcCatalog` (and now `QueryCatalog`)
+  reuse the same length/precision/scale assembly. Found by running the new tests against the live
+  container, not assumed: pgJDBC's `DatabaseMetaData` correctly flags a `nextval(...)`-backed default
+  (`serial`) as `IS_AUTOINCREMENT` — better than `InformationSchemaQueries`, which hardcodes
+  `IsIdentity: false` unconditionally — and reports `TYPE_NAME` as the synthesized pseudo-type
+  `"serial"` rather than the underlying `"int4"`, live evidence for why type-name parsing belongs in a
+  per-engine `typeMap` (item 4, deferred) rather than one hardcoded dialect.
+- **`ExpandAutoSegmentsAsync` reads the auto-segment column's type from `sourceColumns`** (the mapping's
+  phase 91 cache) instead of a live `catalog.GetColumnsAsync` call — across every implementer
+  (`BatchReloadReader`, `KeyReconcileReader`, `MsSqlBatchReloadReader`) and every caller
+  (`RunExecutor`, `ReconcileService`, `BulkLoadService`). `GetRangeAsync`'s own `SELECT MIN/MAX` stays
+  live — a data query, never part of this problem despite living in the same method.
+- **Preview honors a bound `metadataProvider` script** on the source side: `PreviewRequest` gained
+  `SourceColumns`/`TargetColumns`, resolved once by `PreviewService` via `ScriptedMetadata` (the same
+  script-aware path browsing and mapping refresh already use) before any `DescribeAsync` runs.
+  `BatchReloadReader`/`WatermarkReader`/`KeyReconcileReader`'s `DescribeAsync` read `request.SourceColumns`
+  instead of calling their own `catalog` — which, once nothing called it anymore (this and the
+  `ExpandAutoSegmentsAsync` fix together), became a dead constructor parameter, removed across every
+  compiled driver and `GenericDriverSpec`'s construction (10 files), including two tests whose
+  `ThrowingTableCatalog` double now pins a structural guarantee rather than a runtime-tested one. Proven
+  end to end, not just argued from the code: a new test binds a script reporting a column's type as
+  `varchar(50)` when the real column is `int`, and asserts an incremental preview's declared parameter
+  reflects the script's answer.
+- **`driver.yaml`'s `catalog: query` escape hatch**: `GenericDriverSpec.Catalog` widened from the
+  concrete `InformationSchemaQueries` to a new `IDescriptorCatalog` (kept separate from `ITableCatalog`
+  itself, since not every catalog — `MsSqlCatalog`, notably — can list tables); a new `QueryCatalog`
+  class runs an operator's own `tableQuery`/`columnQuery`, matched to `QueryTableRow`/`QueryColumnRow` by
+  column name. Caught before any test ran against it: the first draft substituted `{{schema}}`/`{{table}}`
+  as a quoted *identifier*, which is wrong SQL for the `WHERE table_schema = {{schema}}` shape these
+  queries actually need (a value comparison, not an identifier reference) — fixed to a quoted string
+  literal, which also meant `QueryCatalog` needs no `SqlDialect` at all.
+
+## What was deliberately not built
+
+- **`databaseMetaData` as a third `driver.yaml` catalog strategy.** Would need
+  `DbDataSync.Drivers.Descriptor` to reach `JdbcCatalog`, which is `internal` to `DbDataSync.Drivers.Jdbc`
+  — a real cross-project wiring decision, not scoped here.
+- **Converting the shipped JDBC driver from phase 165V's hand-written `JdbcDriver : IDriver` into a
+  `GenericDriverSpec` descriptor with its own per-vendor `typeMap`.** This is item 4 of the original
+  design — decided in planning, not built here. It's an architecture change to phase 165V's actual shape
+  (one descriptor per JDBC vendor, e.g. `postgres-via-jdbc.driver.yaml`, rather than one `JdbcDriver` type
+  serving every URL), not a small addition, and deserves its own dedicated phase.
+- The target-side (writer) equivalent of the `DescribeAsync` fix — `TargetShape.LoadAsync`, used by every
+  writer's own preview. Real, same shape as the source-side fix, but not JDBC-blocking: `JdbcDriver` has
+  no writers yet. Left as an explicit follow-up rather than folded in here.
+
+## Verification
+
+Full solution builds clean throughout. Against live containers: MsSql (124 + 23 targeted), MySql (28 + 8),
+Oracle (21 + 8), Jdbc (8, including 4 new `JdbcCatalogTests`), Postgres (18 touched — 14 unrelated
+`PgLogicalSlotTests` failures confirmed pre-existing/environmental, not caused by this phase), Generic
+(204, up from 200), DuckDb (33), Descriptor (32, up from 29), Api (13 `PreviewIntegrationTests` including
+the new script-honoring test) all green.
