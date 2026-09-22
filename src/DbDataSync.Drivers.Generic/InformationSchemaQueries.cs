@@ -100,8 +100,18 @@ public sealed class InformationSchemaQueries(SqlDialect dialect) : ITableCatalog
 
     /// <summary>Reassembles a DDL-ready spec. A bare type name would default a varchar column to
     /// length 1 and a decimal to scale 0 if used in a CREATE TABLE, which is exactly what the staging
-    /// provider does with it.</summary>
-    private static string FormatType(string dataType, int? maxLength, int? precision, int? scale)
+    /// provider does with it.
+    /// <para>
+    /// <c>public</c> rather than <c>private</c> — phase 167V — so <c>DbDataSync.Drivers.Jdbc</c>'s
+    /// <c>DatabaseMetaData</c>-based catalog can reuse the same length/precision/scale assembly rather
+    /// than reimplementing it: <c>java.sql.DatabaseMetaData.getColumns()</c>'s single <c>COLUMN_SIZE</c>
+    /// means either a length or a precision depending on the SQL type, unlike
+    /// <c>information_schema</c>'s separate columns, so the caller picks which one to pass and this
+    /// method's own logic is unchanged. `InformationSchemaQueries` is already a public class in this
+    /// public API surface, so this follows that, rather than adding `InternalsVisibleTo` for one method.
+    /// </para>
+    /// </summary>
+    public static string FormatType(string dataType, int? maxLength, int? precision, int? scale)
     {
         var lower = dataType.ToLowerInvariant();
         if (maxLength is int length)

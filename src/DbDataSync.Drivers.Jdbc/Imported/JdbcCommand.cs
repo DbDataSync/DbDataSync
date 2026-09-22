@@ -115,14 +115,14 @@ internal sealed partial class JdbcCommand : DbCommand
 
         if (_parameters.Count == 0)
         {
-            var statement = _connection.Underlying.createStatement();
+            var statement = _connection.JavaSqlConnection.createStatement();
             statement.setQueryTimeout(_commandTimeoutSeconds);
             _openStatement = statement;
             return (statement, CommandText);
         }
 
         var (sql, ordered) = TranslateParameters(CommandText);
-        var prepared = _connection.Underlying.prepareStatement(sql);
+        var prepared = _connection.JavaSqlConnection.prepareStatement(sql);
         prepared.setQueryTimeout(_commandTimeoutSeconds);
         for (var position = 0; position < ordered.Count; position++)
             Bind(prepared, position + 1, ordered[position]);
