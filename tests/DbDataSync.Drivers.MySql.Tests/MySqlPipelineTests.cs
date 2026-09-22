@@ -175,7 +175,8 @@ public abstract class MySqlFamilyPipelineTestsBase<TFixture> : IClassFixture<TFi
             SELECT i, CONCAT('row', i), i, NOW() FROM seq;
             """);
 
-        var expanded = await _reader.ExpandAutoSegmentsAsync(_source, Source(), [new AutoSegment("id", 4)], CancellationToken.None);
+        var expanded = await _reader.ExpandAutoSegmentsAsync(
+            _source, Source(), [new AutoSegment("id", 4)], Columns(), MappingName, CancellationToken.None);
         Assert.Equal(4, expanded.Count);
 
         long total = 0;

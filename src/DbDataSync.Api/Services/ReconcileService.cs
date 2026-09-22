@@ -200,7 +200,8 @@ public sealed class ReconcileService(
                     $"Reader '{ReaderKind}' cannot divide a column into buckets, so an Auto segment can't be used " +
                     "with it. Specify explicit list/range segments instead.");
 
-            return await expanding.ExpandAutoSegmentsAsync(connection, source, segments, cancellationToken);
+            return await expanding.ExpandAutoSegmentsAsync(
+                connection, source, segments, mapping.SourceColumns, mapping.Name, cancellationToken);
         }
     }
 }

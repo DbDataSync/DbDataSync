@@ -193,7 +193,8 @@ public sealed class OraclePipelineTests(OracleTestDatabase db) : IClassFixture<O
             SELECT LEVEL, 'row' || LEVEL, LEVEL, SYSTIMESTAMP FROM dual CONNECT BY LEVEL <= 100
             """);
 
-        var expanded = await _reader.ExpandAutoSegmentsAsync(_source, Source(), [new AutoSegment("ID", 4)], CancellationToken.None);
+        var expanded = await _reader.ExpandAutoSegmentsAsync(
+            _source, Source(), [new AutoSegment("ID", 4)], Columns(), MappingName, CancellationToken.None);
         Assert.Equal(4, expanded.Count);
 
         long total = 0;

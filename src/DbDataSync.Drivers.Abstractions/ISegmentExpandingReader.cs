@@ -16,10 +16,21 @@ public interface ISegmentExpandingReader
     /// Returns <paramref name="segments"/> with every <see cref="AutoSegment"/> replaced by its
     /// expansion and every other segment passed through unchanged, so the result is always free of
     /// <see cref="AutoSegment"/>. Called once, wherever segments are enqueued — never per unit of work.
+    /// <para>
+    /// <paramref name="sourceColumns"/>/<paramref name="mappingName"/> — phase 167V. An auto segment's
+    /// column *type* (needed only to know how to bucket the value range this method samples live — see
+    /// implementers) comes from the mapping's cache, the same way every cache-only run-time consumer
+    /// reads it since phase 91, via <see cref="CachedMetadataLookup.RequireColumn"/>. It is never asked
+    /// of the live catalog: sampling the column's actual value range has no cached substitute and stays
+    /// live, but looking up its type does, and reading it live had no defense once checked — see
+    /// <c>architecture/planning/todo/jdbc-metadata-catalog.md</c>.
+    /// </para>
     /// </summary>
     Task<IReadOnlyList<BatchReloadSegment>> ExpandAutoSegmentsAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         IReadOnlyList<BatchReloadSegment> segments,
+        IReadOnlyList<CachedColumn> sourceColumns,
+        string mappingName,
         CancellationToken cancellationToken);
 }

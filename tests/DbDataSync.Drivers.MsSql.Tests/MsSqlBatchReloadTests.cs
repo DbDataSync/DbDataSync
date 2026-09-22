@@ -384,7 +384,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
             """);
 
         var expanded = await _reader.ExpandAutoSegmentsAsync(
-            _sourceConnection, Source(), [new AutoSegment("Id", 3)], CancellationToken.None);
+            _sourceConnection, Source(), [new AutoSegment("Id", 3)], TargetColumns(), MappingName, CancellationToken.None);
 
         Assert.Equal(
             [new RangeSegment("Id", "1", "4"), new RangeSegment("Id", "4", "7"), new RangeSegment("Id", "7", "11")],
@@ -404,7 +404,8 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Region, Name) VALUES (1, 'EU', 'One');");
 
         BatchReloadSegment list = new ListSegment("Region", ["EU"]);
-        var expanded = await _reader.ExpandAutoSegmentsAsync(_sourceConnection, Source(), [list], CancellationToken.None);
+        var expanded = await _reader.ExpandAutoSegmentsAsync(
+            _sourceConnection, Source(), [list], TargetColumns(), MappingName, CancellationToken.None);
 
         Assert.Equal([list], expanded);
     }
@@ -415,7 +416,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
     public async Task ExpandAutoSegments_OnAnEmptyTable_YieldsOneFullSegment()
     {
         var expanded = await _reader.ExpandAutoSegmentsAsync(
-            _sourceConnection, Source(), [new AutoSegment("Id", 4)], CancellationToken.None);
+            _sourceConnection, Source(), [new AutoSegment("Id", 4)], TargetColumns(), MappingName, CancellationToken.None);
 
         Assert.Equal([new FullSegment()], expanded);
     }

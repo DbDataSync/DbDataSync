@@ -277,7 +277,8 @@ public sealed class BulkLoadService(
                     $"Reader '{readerKind}' cannot divide a column into buckets, so an Auto segment can't be used with " +
                     "it. Pick a reader that supports segmentation, or specify explicit list/range segments.");
 
-            return await expanding.ExpandAutoSegmentsAsync(connection, source, segments, cancellationToken);
+            return await expanding.ExpandAutoSegmentsAsync(
+                connection, source, segments, mapping.SourceColumns, mapping.Name, cancellationToken);
         }
     }
 }

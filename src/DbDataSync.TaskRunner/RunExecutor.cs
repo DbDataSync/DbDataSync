@@ -1504,9 +1504,12 @@ public sealed class RunExecutor(
             cancellationToken);
 
         // Auto segments are resolved against the source's actual value range, so they're expanded
-        // here rather than at config-save time — the range moves as the table does.
+        // here rather than at config-save time — the range moves as the table does. The column's *type*
+        // (as opposed to the value range, which still samples live) comes from mapping.SourceColumns —
+        // already loaded here, previously unused for this call — phase 167V.
         if (reader is ISegmentExpandingReader expanding)
-            segments = await expanding.ExpandAutoSegmentsAsync(sourceConnection, source, segments, cancellationToken);
+            segments = await expanding.ExpandAutoSegmentsAsync(
+                sourceConnection, source, segments, mapping.SourceColumns, mapping.Name, cancellationToken);
 
         return [.. segments];
     }

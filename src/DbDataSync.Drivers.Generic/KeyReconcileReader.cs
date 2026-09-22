@@ -125,13 +125,14 @@ public sealed class KeyReconcileReader(SqlDialect dialect, ITableCatalog catalog
         DbConnection sourceConnection,
         SourceTableRef source,
         IReadOnlyList<BatchReloadSegment> segments,
+        IReadOnlyList<CachedColumn> sourceColumns,
+        string mappingName,
         CancellationToken cancellationToken)
     {
         if (!segments.OfType<AutoSegment>().Any())
             return segments;
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
-        var columns = await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
 
         var expanded = new List<BatchReloadSegment>(segments.Count);
         foreach (var segment in segments)
@@ -142,9 +143,8 @@ public sealed class KeyReconcileReader(SqlDialect dialect, ITableCatalog catalog
                 continue;
             }
 
-            var column = columns.FirstOrDefault(c => string.Equals(c.Name, auto.Column, StringComparison.OrdinalIgnoreCase))
-                ?? throw new InvalidOperationException(
-                    $"Auto segment column '{auto.Column}' was not found on '{source.Schema}.{source.Table}'.");
+            // Cache-only — phase 167V. See BatchReloadReader.ExpandAutoSegmentsAsync's identical comment.
+            var column = sourceColumns.RequireColumn(mappingName, "source", auto.Column);
 
             var (min, max) = await GetRangeAsync(sourceConnection, source, column, cancellationToken);
             if (min is null || max is null)

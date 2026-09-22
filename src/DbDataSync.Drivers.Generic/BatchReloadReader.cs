@@ -105,13 +105,14 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
         DbConnection sourceConnection,
         SourceTableRef source,
         IReadOnlyList<BatchReloadSegment> segments,
+        IReadOnlyList<CachedColumn> sourceColumns,
+        string mappingName,
         CancellationToken cancellationToken)
     {
         if (!segments.OfType<AutoSegment>().Any())
             return segments;
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
-        var columns = await catalog.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
 
         var expanded = new List<BatchReloadSegment>(segments.Count);
         foreach (var segment in segments)
@@ -122,9 +123,11 @@ public sealed class BatchReloadReader(SqlDialect dialect, ITableCatalog catalog,
                 continue;
             }
 
-            var column = columns.FirstOrDefault(c => string.Equals(c.Name, auto.Column, StringComparison.OrdinalIgnoreCase))
-                ?? throw new InvalidOperationException(
-                    $"Auto segment column '{auto.Column}' was not found on '{source.Schema}.{source.Table}'.");
+            // The column's type — cache-only, phase 167V: no live catalog call here has a defense the
+            // way GetRangeAsync's own live sampling below does. sourceColumns already holds every column
+            // of the table (MappingColumnReader captures the whole catalog answer, not just mapped
+            // columns), so an auto-segment column that isn't itself individually mapped is still here.
+            var column = sourceColumns.RequireColumn(mappingName, "source", auto.Column);
 
             var (min, max) = await GetRangeAsync(sourceConnection, source, column, cancellationToken);
             if (min is null || max is null)
