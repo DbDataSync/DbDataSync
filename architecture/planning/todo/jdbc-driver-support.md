@@ -109,6 +109,31 @@ Both forms must work:
   stability between statically compiled assemblies and `IKVM.Java`/`IKVM.Runtime` across versions. So
   `.dll` is an optimisation, `.jar` is the default.
 
+  **Spiked 2026-09-22, confirmed rather than assumed.** A throwaway probe project
+  (`<IkvmReference Include="postgresql-42.7.13.jar" />`, IKVM 8.11.2, `net10.0`) built clean — 0 errors,
+  23 warnings — and the resulting statically-compiled `org.postgresql.Driver` connected to a live Postgres
+  container and ran a real query:
+  ```
+  Driver major version: 42, minor: 7
+  Connected. Catalog: postgres
+  SELECT 1 -> 1
+  ```
+  Build cost was ~8.6s for this one jar. Warnings broke down as: ~18 `IKVM0100` "class not found" for
+  optional dependencies pgJDBC references but doesn't need (OSGi, JNA, Waffle/Windows-SSPI,
+  checkerframework annotations — none of which this repo's usage touches), ~3 `IKVM0141` annotation-load
+  warnings (same checkerframework classes), and 2 `IKVM0101` warnings — pgJDBC's jar is a **multi-release
+  jar**; the two skipped classes are a `META-INF/versions/11/...LazyCleanerImpl` override IKVM's Java
+  8-only compiler can't parse (class format `55.0`), so IKVM silently falls back to the base (Java 8)
+  class. Didn't break this probe, but it's a real, silent divergence from what a real JVM would pick for
+  a multi-release jar, worth knowing before trusting `.dll` compilation of a jar that leans on that
+  mechanism for anything load-bearing.
+
+  This confirms both things this section already asserted as caveats rather than measurements — the
+  version-pinning risk is real (not just theoretical; see IKVM issue #519 below) and multi-release jars
+  are a genuine, silent gap, not a hypothetical one — without changing the conclusion: `.jar` stays the
+  default, `.dll` stays a possible future optimisation, not adopted here. See
+  `architecture/planning/todo/jdbc-driver-feature-gaps.md` for where this could go next.
+
 `libraries/` is NuGet-package-shaped (`library.json`, a `DbProviderFactory` type, an
 `AssemblyDependencyResolver` per directory, plus phase 109j's surface checking). A `.jar` is none of
 those. A sibling **`jars/`** root, enumerated the way `drivers/` already is, keeps two genuinely
@@ -208,3 +233,5 @@ parameter design at once — and every one of those is currently an assumption.
 - [ikvmnet/ikvm-jdbc](https://github.com/ikvmnet/ikvm-jdbc) — `IKVM.Jdbc` / `IKVM.Jdbc.Data`
 - [JdbcWrapper.Ado.Data on NuGet](https://www.nuget.org/packages/JdbcWrapper.Ado.Data)
 - [chequer-io/JDBC.NET](https://github.com/chequer-io/JDBC.NET) — the upstream it forks
+- [ikvmnet/ikvm#519](https://github.com/ikvmnet/ikvm/issues/519) — a real report of an `IkvmReference`-compiled
+  assembly breaking across an IKVM version bump, cited for the version-pinning risk above
