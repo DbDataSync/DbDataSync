@@ -75,10 +75,49 @@ public sealed class JdbcConnection : DbConnection
 
     public override string ServerVersion => JavaSqlConnection.getMetaData().getDatabaseProductVersion();
 
-    // Out of scope for a reader (see phase 165V's own planning doc reference): every generic *writer*
-    // opens a transaction, but WatermarkReader/BatchReloadReader/TriggerAuditReader do not.
-    protected override DbTransaction BeginDbTransaction(IsolationLevel il) => throw new NotImplementedException(
-        "JdbcConnection.BeginDbTransaction: writers are out of scope for the reader-only JDBC driver (phase 165V).");
+    /// <summary>
+    /// Phase 172V — was <c>throw new NotImplementedException(...)</c>, "writers are out of scope for the
+    /// reader-only JDBC driver (phase 165V)." <c>java.sql.Connection</c> carries transaction state on the
+    /// connection itself, not per-statement the way SQL Server's client library does — every statement run
+    /// while <c>autoCommit == false</c> is implicitly part of the open transaction, which is why
+    /// <see cref="JdbcCommand"/>'s own <c>DbTransaction</c> setter needs to do nothing beyond storing the
+    /// value for the ADO.NET contract to round-trip.
+    /// </summary>
+    protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
+    {
+        JavaSqlConnection.setAutoCommit(false);
+        if (isolationLevel != IsolationLevel.Unspecified)
+        {
+            try
+            {
+                JavaSqlConnection.setTransactionIsolation(JavaTransactionIsolation(isolationLevel));
+            }
+            catch (java.sql.SQLException ex)
+            {
+                JavaSqlConnection.setAutoCommit(true);
+                throw new InvalidOperationException(
+                    $"This JDBC driver rejected isolation level '{isolationLevel}' " +
+                    $"(java.sql.Connection.setTransactionIsolation threw: {ex.Message}). " +
+                    "Leave the isolation level unspecified to use this driver's own default.", ex);
+            }
+        }
+        return new JdbcTransaction(this, isolationLevel);
+    }
+
+    /// <summary>Every generic writer in this codebase calls <c>BeginTransactionAsync</c> with no level
+    /// argument — always <see cref="IsolationLevel.Unspecified"/> today, which never reaches this method
+    /// at all (see <see cref="BeginDbTransaction"/>'s own guard). Built for contract-completeness, not
+    /// because anything here currently exercises it.</summary>
+    private static int JavaTransactionIsolation(IsolationLevel level) => level switch
+    {
+        IsolationLevel.ReadUncommitted => java.sql.Connection.TRANSACTION_READ_UNCOMMITTED,
+        IsolationLevel.ReadCommitted => java.sql.Connection.TRANSACTION_READ_COMMITTED,
+        IsolationLevel.RepeatableRead => java.sql.Connection.TRANSACTION_REPEATABLE_READ,
+        IsolationLevel.Serializable => java.sql.Connection.TRANSACTION_SERIALIZABLE,
+        _ => throw new NotSupportedException(
+            $"'{level}' has no java.sql.Connection.TRANSACTION_* equivalent — " +
+            "ReadUncommitted/ReadCommitted/RepeatableRead/Serializable are the only levels JDBC expresses."),
+    };
 
     public override void Open()
     {

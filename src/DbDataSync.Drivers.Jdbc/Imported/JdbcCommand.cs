@@ -50,8 +50,15 @@ internal sealed partial class JdbcCommand : DbCommand
         }
     }
 
-    // Out of scope: writers (which need transactions) are not part of this reader-only phase.
-    protected override DbTransaction? DbTransaction { get => null; set => throw new NotImplementedException(); }
+    /// <summary>
+    /// Phase 172V. Stores what's assigned so the ADO.NET contract round-trips it — nothing here actually
+    /// reads it back. Unlike SQL Server's client library, a JDBC statement is never explicitly bound to a
+    /// transaction object: every statement run through <see cref="_connection"/>'s own
+    /// <c>java.sql.Connection</c> while it's mid-transaction (<c>autoCommit == false</c>, set by
+    /// <see cref="JdbcConnection.BeginDbTransaction"/>) is implicitly part of that transaction already.
+    /// </summary>
+    private DbTransaction? _transaction;
+    protected override DbTransaction? DbTransaction { get => _transaction; set => _transaction = value; }
     public override UpdateRowSource UpdatedRowSource { get => UpdateRowSource.None; set { } }
     public override bool DesignTimeVisible { get; set; }
     protected override DbParameterCollection DbParameterCollection => _parameters;
@@ -154,6 +161,21 @@ internal sealed partial class JdbcCommand : DbCommand
         return (translated, ordered);
     }
 
+    /// <summary>
+    /// Phase 172V: dispatches on <paramref name="parameter"/>'s own <c>.Value</c> CLR runtime type, not
+    /// <c>.DbType</c> — found, not assumed, while getting a real write working. <c>GenericValueBinder</c>'s
+    /// own watermark-parameter path sets <c>DbType</c> explicitly (from <c>dialect.ToCanonicalType</c>),
+    /// which is how this worked at all for readers. <c>DbDataSync.Drivers.Generic.DbCommandExtensions
+    /// .AddParameter</c> — the plain helper <c>BatchInsertStagingProvider</c> uses for every staged
+    /// value, on every engine — never sets it, and <see cref="JdbcParameter.DbType"/> has no fallback
+    /// inference the way <c>SqlParameter</c>/<c>NpgsqlParameter</c> do internally when left at its default
+    /// (<c>DbType.String</c>): every staged non-string value bound as a literal string, which Postgres's
+    /// own prepared-statement type checking then rejects outright for a typed column (confirmed live:
+    /// <c>"column \"id\" is of type integer but expression is of type character varying"</c>). The CLR
+    /// value itself is the reliable signal here — every caller has a real <c>System.DateTime</c>/
+    /// <c>int</c>/<c>decimal</c>/... regardless of whether it bothered to set <c>DbType</c> to match, so
+    /// switching on it removes the dependency on that ever being set correctly, for every caller at once.
+    /// </summary>
     private static void Bind(java.sql.PreparedStatement statement, int position, JdbcParameter parameter)
     {
         if (parameter.Value is null or DBNull)
@@ -162,49 +184,55 @@ internal sealed partial class JdbcCommand : DbCommand
             return;
         }
 
-        switch (parameter.DbType)
+        switch (parameter.Value)
         {
-            case DbType.Boolean:
-                statement.setBoolean(position, (bool)parameter.Value);
+            case bool b:
+                statement.setBoolean(position, b);
                 break;
-            case DbType.SByte:
-                statement.setByte(position, unchecked((byte)(sbyte)parameter.Value));
+            case sbyte sb:
+                statement.setByte(position, unchecked((byte)sb));
                 break;
-            case DbType.Int16:
-                statement.setShort(position, (short)parameter.Value);
+            case byte by:
+                statement.setByte(position, by);
                 break;
-            case DbType.Int32:
-                statement.setInt(position, (int)parameter.Value);
+            case short s:
+                statement.setShort(position, s);
                 break;
-            case DbType.Int64:
-                statement.setLong(position, (long)parameter.Value);
+            case int i:
+                statement.setInt(position, i);
                 break;
-            case DbType.Single:
-                statement.setFloat(position, (float)parameter.Value);
+            case long l:
+                statement.setLong(position, l);
                 break;
-            case DbType.Double:
-                statement.setDouble(position, (double)parameter.Value);
+            case float f:
+                statement.setFloat(position, f);
                 break;
-            case DbType.Decimal or DbType.Currency or DbType.VarNumeric:
-                statement.setBigDecimal(position, ToJavaBigDecimal((decimal)parameter.Value));
+            case double d:
+                statement.setDouble(position, d);
                 break;
-            case DbType.Date:
-                statement.setDate(position, java.sql.Date.valueOf(((DateOnly)parameter.Value).ToString("yyyy-MM-dd")));
+            case decimal dec:
+                statement.setBigDecimal(position, ToJavaBigDecimal(dec));
                 break;
-            case DbType.Time:
-                statement.setTime(position, java.sql.Time.valueOf(TimeOnly.FromTimeSpan((TimeSpan)parameter.Value).ToString("HH:mm:ss")));
+            case DateOnly date:
+                statement.setDate(position, java.sql.Date.valueOf(date.ToString("yyyy-MM-dd")));
                 break;
-            case DbType.DateTime or DbType.DateTime2:
-                statement.setTimestamp(position, ToJavaTimestamp((DateTime)parameter.Value));
+            case TimeOnly time:
+                statement.setTime(position, java.sql.Time.valueOf(time.ToString("HH:mm:ss")));
                 break;
-            case DbType.DateTimeOffset:
-                statement.setTimestamp(position, ToJavaTimestamp(((DateTimeOffset)parameter.Value).UtcDateTime));
+            case TimeSpan span:
+                statement.setTime(position, java.sql.Time.valueOf(TimeOnly.FromTimeSpan(span).ToString("HH:mm:ss")));
                 break;
-            case DbType.Binary:
-                statement.setBytes(position, (byte[])parameter.Value);
+            case DateTimeOffset dto:
+                statement.setTimestamp(position, ToJavaTimestamp(dto.UtcDateTime));
                 break;
-            case DbType.Guid:
-                statement.setString(position, parameter.Value.ToString());
+            case DateTime dt:
+                statement.setTimestamp(position, ToJavaTimestamp(dt));
+                break;
+            case byte[] bytes:
+                statement.setBytes(position, bytes);
+                break;
+            case Guid guid:
+                statement.setString(position, guid.ToString());
                 break;
             default:
                 statement.setString(position, Convert.ToString(parameter.Value, CultureInfo.InvariantCulture));
@@ -233,7 +261,15 @@ internal sealed partial class JdbcCommand : DbCommand
         DbType.DateTime or DbType.DateTime2 => java.sql.Types.TIMESTAMP,
         DbType.DateTimeOffset => java.sql.Types.TIMESTAMP_WITH_TIMEZONE,
         DbType.Binary => java.sql.Types.VARBINARY,
-        _ => java.sql.Types.VARCHAR,
+        // Phase 172V: was Types.VARCHAR, wrong for the same reason Bind's non-null path used to trust
+        // DbType — a NULL staged value's DbType is whatever DbCommandExtensions.AddParameter left it at
+        // (never set, defaults to DbType.String), which is unrelated to the target column's real type.
+        // Found live: pgJDBC's setNull honors the declared sqlType, and a NULL declared VARCHAR into a
+        // numeric column threw "column ... is of type numeric but expression is of type character
+        // varying" — the identical failure shape the non-null path had, just for setNull instead of
+        // setString. Types.NULL is JDBC's own "no specific type" — the correct default when there's no
+        // real signal, not a specific-but-wrong guess.
+        _ => java.sql.Types.NULL,
     };
 
     protected override void Dispose(bool disposing)

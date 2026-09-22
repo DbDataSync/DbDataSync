@@ -1,6 +1,6 @@
 # Phase 172V — JDBC write support: transactions are the only real blocker
 
-**Status**: Not started.
+**Status**: Built. See Retrospective.
 **Plan reference**: `architecture/planning/todo/follow-up-phase-168-hand-written-jdbc-path-vs-descriptor.md`
 (open question 4 there — "how much writer symmetry to preserve" — this phase answers it directly),
 `architecture/implementation/done/phase-165V-jdbc-reader-spike-ikvm-postgres.md` (the "reader first, a
@@ -182,3 +182,78 @@ ADO.NET driver on identical data, not against nothing.
 - Existing reader tests (`JdbcCatalogTests`, `JdbcReaderParityTests`, `JdbcChangeDatabaseTests`,
   `JdbcDescriptorTests`) stay green — this phase touches `JdbcConnection`/`JdbcCommand`, which every
   reader test already exercises indirectly.
+
+---
+
+# Retrospective
+
+## What shipped
+
+The transaction primitive, exactly as designed above — `JdbcConnection.BeginDbTransaction`,
+`Imported/JdbcTransaction.cs`, and `JdbcCommand.DbTransaction`'s setter now storing rather than throwing.
+"Everything else already exists" held completely true: no changes to `BatchInsertStagingProvider`,
+`DeleteInsertWriter`, or any other generic writer were needed.
+
+## What the design didn't anticipate — a real, pre-existing binding bug
+
+The design doc's own claim — "everything else a writer needs already exists" — was right about the SQL
+generation and transaction layers, but the first real write immediately hit a bug that had nothing to do
+with transactions:
+
+```
+org.postgresql.util.PSQLException: ERROR: column "id" is of type integer but expression is of type character varying
+```
+
+`DbDataSync.Drivers.Generic.DbCommandExtensions.AddParameter` — the plain helper `BatchInsertStagingProvider`
+uses for every staged value, on every engine — never sets `DbParameter.DbType`. Every other engine's own
+provider (`SqlParameter`, `NpgsqlParameter`, ...) infers a wire type from `.Value`'s CLR runtime type
+internally when `DbType` is left unset; `JdbcParameter` is a from-scratch, storage-only class (phase 165V)
+with no such fallback — it trusted `.DbType` literally, which defaulted to `DbType.String` and stayed
+there for every staged value. This was **always broken**, just never reachable before this phase, since no
+JDBC writer existed to stage anything.
+
+Fixed by rewriting `JdbcCommand.Bind` to dispatch on `parameter.Value`'s own CLR runtime type instead of
+`.DbType` — the reliable signal, present on every call regardless of whether the caller bothered to set
+`DbType` to match. The one case with no CLR value to inspect — `setNull` — had the identical bug one level
+down: its type-hint fallback was `java.sql.Types.VARCHAR`, which pgJDBC honors literally, so a NULL staged
+into a `numeric` column threw the same class of error for `setNull` that non-null values threw for
+`setString`. Fixed by changing that fallback to `java.sql.Types.NULL` — JDBC's own "no specific type,"
+not a specific-but-wrong guess.
+
+Both fixes are described in full in their own doc comments (`JdbcCommand.Bind`'s and `JavaSqlType`'s).
+Neither is JDBC-vendor-specific — this bug (and its fix) apply to any JDBC driver this connection could
+ever load, not just pgJDBC.
+
+## Testing
+
+New `tests/DbDataSync.Drivers.Jdbc.Tests/JdbcWriterParityTests.cs`, modeled directly on
+`PostgresPipelineTests`' pipeline shape and `JdbcReaderParityTests`' dual-driver comparison: one Postgres
+source table, two target tables (one written through `PostgresDriver`'s own native components, one through
+`JdbcGenericDriver`'s), compared for identical results. Three tests:
+
+- `FullReload_ProducesTheSameRowsAsTheNativeDriver` — the parity proof, including a `NULL` value (the
+  exact case that found the `setNull` bug above).
+- `Reload_RemovesRowsDeletedAtTheSource_SameAsTheNativeDriver` — reconciliation parity.
+- `AFailedWrite_RollsBackRatherThanLeavingTheScopeEmptied` — a NOT NULL violation mid-`INSERT`, asserting
+  the target is left unchanged. This exercises `DeleteInsertWriter`'s own explicit `catch { RollbackAsync
+  }` path (not `JdbcTransaction.Dispose`'s implicit rollback, which shares the same `Rollback()`
+  implementation but isn't separately exercised) — proves `Commit`/`Rollback` round-trip to a real
+  `java.sql.Connection` correctly under a genuine failure, not just that the C# code path was reached.
+
+One thing the original design got right in advance and didn't need changing: the "no isolation level"
+path was indeed all that needed proving — every test here uses `IsolationLevel.Unspecified`, matching
+every generic writer's own call sites, exactly as predicted.
+
+Full `DbDataSync.Drivers.Jdbc.Tests` suite: 15/15 green (12 existing + 3 new), no regressions. Every
+composition root (`DbDataSync.Api`, `DbDataSync.TaskRunner`, `DbDataSync.Cli`) still builds clean.
+
+## What's still open
+
+- `KeyReconcileDelete`/`Scd2`/`Snapshot` writer kinds were not individually tested — only `DeleteInsert`.
+  The transaction primitive they all share is proven; each writer's own generated SQL against a real
+  `PreparedStatement` is not, per the design doc's own "at least one test per writer kind actually
+  enabled" caveat. Worth a follow-up if any of these get enabled on a real `driver.yaml`.
+- Not yet wired into any real `driver.yaml` — `JdbcDriverSpec.Writers`/`JdbcGenericDriver.FromDescriptor`
+  already flow a `writers:` list through unchanged (no code change needed there, confirmed by this
+  phase's own test constructing a `JdbcDriverSpec` with `Writers: [GenericDriverKinds.DeleteInsert]`
+  directly), but no shipped descriptor exercises it yet.
