@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { DriversTabs } from '../components/DriversTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
+import { FileUploadPanel } from '../components/FileUploadPanel'
+import { formatBytes } from '../components/formatBytes'
 import { useIsAdmin } from '../components/useIsAdmin'
-import { useFiles, useRemoveFile, useUploadFiles } from '../api/hooks'
+import { useFiles, useRemoveFile } from '../api/hooks'
 import type { FileSummary } from '../api/types'
 
 const COLUMNS = '2fr 1fr 1.4fr 1.4fr 1fr'
@@ -12,17 +14,14 @@ const COLUMNS = '2fr 1fr 1.4fr 1.4fr 1fr'
  * Phase 173V — `files/`, a standard place for anything an operator uploads for a driver to reference (a
  * JDBC jar, so far the only real case). Modeled directly on `LibrariesPage`'s own row/remove/force
  * pattern — deliberately simpler: no search box, no known-catalog chips, nothing that screen has that a
- * plain "manage your files" screen doesn't need.
+ * plain "manage your files" screen doesn't need. The upload control itself is `FileUploadPanel` —
+ * extracted so the driver-authoring form's own jar picker can embed the identical thing.
  */
 export function FilesPage() {
   const isAdmin = useIsAdmin()
   const { data: files, isLoading, error } = useFiles()
   const remove = useRemoveFile()
-  const upload = useUploadFiles()
   const [removeError, setRemoveError] = useState<unknown>(null)
-  const [uploadError, setUploadError] = useState<unknown>(null)
-  const [uploadResults, setUploadResults] = useState<{ name: string; succeeded: boolean; error: string | null }[] | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   if (!isAdmin) {
     return (
@@ -43,20 +42,6 @@ export function FilesPage() {
     }
   }
 
-  const doUpload = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return
-    setUploadError(null)
-    setUploadResults(null)
-    try {
-      const results = await upload.mutateAsync(fileList)
-      setUploadResults(results)
-    } catch (err) {
-      setUploadError(err)
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
-
   return (
     <AppShell crumbs={[{ label: 'Drivers' }]} tabs={<DriversTabs />}>
       <div className="pane">
@@ -68,7 +53,7 @@ export function FilesPage() {
           </span>
         </div>
 
-        <ErrorBanner error={error ?? removeError ?? uploadError} />
+        <ErrorBanner error={error ?? removeError} />
 
         <div className="card flush" data-testid="admin-files-table">
           <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
@@ -81,39 +66,8 @@ export function FilesPage() {
           ))}
         </div>
 
-        <div className="card" data-testid="admin-files-upload-panel" style={{ marginTop: 20 }}>
-          <div className="card-head">
-            <span className="card-title">Upload a file</span>
-          </div>
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div className="row" style={{ gap: 8 }}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".jar"
-                multiple
-                onChange={(e) => void doUpload(e.target.files)}
-                disabled={upload.isPending}
-                data-testid="admin-files-upload-input"
-              />
-              {upload.isPending && <span className="hint">Uploading…</span>}
-            </div>
-            <div className="hint">.jar files only, for now.</div>
-            {uploadResults && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {uploadResults.map((r) => (
-                  <div
-                    key={r.name}
-                    className="hint"
-                    style={{ color: r.succeeded ? 'var(--ok)' : 'var(--bad)' }}
-                    data-testid={`admin-files-upload-result-${r.name}`}
-                  >
-                    {r.name}: {r.succeeded ? 'uploaded' : r.error}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        <div style={{ marginTop: 20 }}>
+          <FileUploadPanel />
         </div>
       </div>
     </AppShell>
@@ -177,10 +131,4 @@ function FileRow({ file, onRemove, busy }: {
       </span>
     </div>
   )
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }

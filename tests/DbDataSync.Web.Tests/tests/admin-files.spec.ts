@@ -24,9 +24,9 @@ test.describe.serial('admin: Files', () => {
     await page.goto('/drivers/files')
     await expect(page.getByRole('heading', { name: 'Files' })).toBeVisible()
 
-    await page.getByTestId('admin-files-upload-input').setInputFiles(jarPath)
+    await page.getByTestId('files-upload-input').setInputFiles(jarPath)
 
-    const result = page.getByTestId(`admin-files-upload-result-${jarName}`)
+    const result = page.getByTestId(`files-upload-result-${jarName}`)
     await expect(result).toBeVisible({ timeout: 10_000 })
     await expect(result).toContainText('uploaded')
 
@@ -46,9 +46,9 @@ test.describe.serial('admin: Files', () => {
 
     try {
       await page.goto('/drivers/files')
-      await page.getByTestId('admin-files-upload-input').setInputFiles(txtPath)
+      await page.getByTestId('files-upload-input').setInputFiles(txtPath)
 
-      const result = page.getByTestId(`admin-files-upload-result-${txtName}`)
+      const result = page.getByTestId(`files-upload-result-${txtName}`)
       await expect(result).toBeVisible({ timeout: 10_000 })
       await expect(result).toContainText('not an accepted file type')
       await expect(page.getByTestId(`admin-file-row-${txtName}`)).toHaveCount(0)
