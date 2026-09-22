@@ -203,14 +203,19 @@ public sealed class DriversController(
         if (Directory.Exists(driverDir))
             return Conflict(new { error = $"A driver named '{entry.Id}' already exists." });
 
-        if (!libraryRegistry.Installed.ContainsKey(entry.BoundLibraryId))
+        // A library's id is always its real NuGet package id — entry.BoundLibraryId is only the lookup
+        // key into the KnownLibraries catalog, never what a library ends up installed under (see
+        // architecture/planning/todo/follow-up-library-install-paths-disagree-on-the-resulting-library-id.md).
+        var catalogLibrary = KnownLibraries.TryGetById(entry.BoundLibraryId)!;
+        var libraryId = catalogLibrary.PackageId;
+
+        if (!libraryRegistry.Installed.ContainsKey(libraryId))
         {
-            var catalogLibrary = KnownLibraries.TryGetById(entry.BoundLibraryId)!;
             LibraryInstaller.LibraryInstallResult result;
             try
             {
                 result = await LibraryInstaller.InstallOrDeferAsync(
-                    apiOptions.RepoRoot, entry.BoundLibraryId,
+                    apiOptions.RepoRoot, libraryId,
                     [new PackageRef(catalogLibrary.PackageId, body.Version)], catalogLibrary.FactoryType);
             }
             catch (InvalidOperationException ex)
@@ -218,7 +223,7 @@ public sealed class DriversController(
                 return BadRequest(new { error = InstallErrorFormatting.TailOf(ex.Message) });
             }
 
-            libraryRegistry.RegisterInstalled(entry.BoundLibraryId);
+            libraryRegistry.RegisterInstalled(libraryId);
 
             // On the runtime-only image (phase 121), the in-image cache only ever matches the catalog
             // entry's own pinned version — a from-catalog request for any other version can't be
@@ -233,14 +238,14 @@ public sealed class DriversController(
                 {
                     error = $"No SDK is available here to restore '{catalogLibrary.PackageId}' {body.Version}, and " +
                              $"it doesn't match the in-image catalog cache's pinned version ({catalogLibrary.PinnedVersion}). " +
-                             $"'{entry.BoundLibraryId}' was written but is pending restore — pass the pinned version, " +
+                             $"'{libraryId}' was written but is pending restore — pass the pinned version, " +
                              "or run `config library sync` on a host with the SDK, then retry.",
                 });
             }
         }
 
         Directory.CreateDirectory(driverDir);
-        var yaml = KnownDrivers.Render(entry, entry.Id, entry.DisplayName, entry.BoundLibraryId);
+        var yaml = KnownDrivers.Render(entry, entry.Id, entry.DisplayName, libraryId);
         var yamlPath = Path.Combine(driverDir, DriverLoader.DescriptorFileName);
         await System.IO.File.WriteAllTextAsync(yamlPath, yaml);
 
@@ -263,7 +268,7 @@ public sealed class DriversController(
         }
 
         restartRequired.Touch();
-        return Ok(new FromCatalogResult(entry.Id, entry.BoundLibraryId));
+        return Ok(new FromCatalogResult(entry.Id, libraryId));
     }
 }
 

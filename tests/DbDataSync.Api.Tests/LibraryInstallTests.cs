@@ -148,15 +148,18 @@ public sealed class LibraryInstallTests : IDisposable
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<FromCatalogResultDto>();
         Assert.Equal("mysql.generic", result!.Id);
-        Assert.Equal("mysql-connector", result.Library);
+        // The real NuGet package id, not the catalog shorthand ("mysql-connector") the request named —
+        // a library's id is always its package id, see
+        // follow-up-library-install-paths-disagree-on-the-resulting-library-id.md.
+        Assert.Equal("MySqlConnector", result.Library);
 
         var drivers = await client.GetFromJsonAsync<List<DriverDto>>("/api/drivers");
         var driver = drivers!.Single(d => d.Id == "mysql.generic");
         Assert.Equal("descriptor", driver.Source);
-        Assert.Equal("mysql-connector", driver.Library);
+        Assert.Equal("MySqlConnector", driver.Library);
 
         var libraries = await client.GetFromJsonAsync<List<LibraryDto>>("/api/libraries");
-        var library = libraries!.Single(l => l.Id == "mysql-connector");
+        var library = libraries!.Single(l => l.Id == "MySqlConnector");
         Assert.Contains("mysql.generic", library.UsedBy);
     }
 
@@ -182,12 +185,12 @@ public sealed class LibraryInstallTests : IDisposable
             version = "2.4.0",
         })).EnsureSuccessStatusCode();
 
-        var refused = await client.DeleteAsync("/api/libraries/mysql-connector");
+        var refused = await client.DeleteAsync("/api/libraries/MySqlConnector");
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
         var refusedBody = await refused.Content.ReadAsStringAsync();
         Assert.Contains("mysql.generic", refusedBody);
 
-        var forced = await client.DeleteAsync("/api/libraries/mysql-connector?force=true");
+        var forced = await client.DeleteAsync("/api/libraries/MySqlConnector?force=true");
         Assert.Equal(HttpStatusCode.NoContent, forced.StatusCode);
 
         // A fresh host over the same repo root — this process never hot-reloads a removed library, so

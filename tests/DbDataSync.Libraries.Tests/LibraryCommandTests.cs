@@ -96,16 +96,31 @@ public sealed class LibraryCommandTests : IAsyncLifetime
         Assert.Contains("System.Data.SqlClient.SqlClientFactory, System.Data.SqlClient", _output.ToString());
     }
 
+    /// <summary>A library's id is always its real NuGet package id — typing the catalog shorthand
+    /// resolves the package and factory type from it, but the library still ends up keyed by
+    /// <c>MySqlConnector</c>, not <c>mysql-connector</c> (see
+    /// `follow-up-library-install-paths-disagree-on-the-resulting-library-id.md`).</summary>
     [Fact]
-    public async Task InstallByCatalogId_FillsPackageIdAndFactoryTypeFromTheCatalog()
+    public async Task InstallByCatalogId_FillsPackageIdAndFactoryTypeFromTheCatalog_AndIsKeyedByThePackageId()
     {
         Assert.Equal(0, await RunAsync("install", "mysql-connector", "--version", "2.4.0"));
 
-        var manifest = LibraryManifest.Read(LibraryPaths.ManifestPath(LibraryPaths.LibraryDir(_repoRoot, "mysql-connector")));
-        Assert.Equal("mysql-connector", manifest.Id);
+        var manifest = LibraryManifest.Read(LibraryPaths.ManifestPath(LibraryPaths.LibraryDir(_repoRoot, "MySqlConnector")));
+        Assert.Equal("MySqlConnector", manifest.Id);
         var package = Assert.Single(manifest.Packages);
         Assert.Equal("MySqlConnector", package.Id);
         Assert.Equal("2.4.0", package.Version);
         Assert.Equal("MySqlConnector.MySqlConnectorFactory, MySqlConnector", manifest.FactoryType);
+    }
+
+    /// <summary><c>--as</c> is still an explicit, honored override — the canonicalization to the
+    /// package id only fills in when the operator didn't already choose a name.</summary>
+    [Fact]
+    public async Task InstallByCatalogId_WithAnExplicitAs_UsesThatIdInstead()
+    {
+        Assert.Equal(0, await RunAsync("install", "mysql-connector", "--as", "my-mysql", "--version", "2.4.0"));
+
+        var manifest = LibraryManifest.Read(LibraryPaths.ManifestPath(LibraryPaths.LibraryDir(_repoRoot, "my-mysql")));
+        Assert.Equal("my-mysql", manifest.Id);
     }
 }

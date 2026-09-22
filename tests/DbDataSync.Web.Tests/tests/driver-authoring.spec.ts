@@ -22,11 +22,10 @@ test.describe.serial('admin: driver authoring', () => {
     await page.getByTestId('driver-edit-id').fill(driverId)
     await page.getByTestId('driver-edit-display-name').fill('Authoring E2E driver')
 
-    // ADO.NET is the default; the mysql-connector quick-add chip installs+selects it inline — but
-    // unlike POST /api/drivers/from-catalog (which uses the catalog's own "mysql-connector" id),
-    // LibraryFindPanel's own install always goes through POST /api/libraries, which keys the new
-    // library by *package* id ("MySqlConnector") regardless of the curated pick's own catalog id.
-    // Found live (a `selectOption('mysql-connector')` timed out — no such option), not assumed.
+    // ADO.NET is the default; the mysql-connector quick-add chip installs+selects it inline. A library's
+    // id is always its real NuGet package id ("MySqlConnector"), never the catalog shorthand
+    // ("mysql-connector") the chip is labeled with — every install path agrees on this now (see
+    // follow-up-library-install-paths-disagree-on-the-resulting-library-id.md).
     const chip = page.getByTestId('admin-libraries-chip-mysql-connector')
     await expect(chip).toBeVisible()
     await chip.click()

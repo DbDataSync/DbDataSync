@@ -69,11 +69,15 @@ public static class LibraryCommand
             return 1;
         }
 
-        var id = CliOptions.Read(args, "--as") ?? packageIds[0];
         var version = CliOptions.Read(args, "--version");
         var source = CliOptions.Read(args, "--source");
 
         var catalogEntry = packageIds.Count == 1 ? KnownLibraries.TryGetById(packageIds[0]) : null;
+        // A library's id is always its real NuGet package id — a catalog id like "mysql-connector" is
+        // shorthand for typing the package id, never a name the install itself gets keyed under (see
+        // architecture/planning/todo/follow-up-library-install-paths-disagree-on-the-resulting-library-id.md).
+        // --as still overrides explicitly, same as it always has.
+        var id = CliOptions.Read(args, "--as") ?? catalogEntry?.PackageId ?? packageIds[0];
         // Null is fine here — LibraryInstaller.InstallAsync tries phase 122's reflection-assist against
         // the restored closure before it requires --factory-type explicitly.
         var factoryType = CliOptions.Read(args, "--factory-type") ?? catalogEntry?.FactoryType ?? KnownLibraries.TryGet(packageIds[0]);

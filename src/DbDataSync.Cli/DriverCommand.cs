@@ -134,9 +134,9 @@ public static class DriverCommand
             }
         }
 
-        var libraryName = CliOptions.Read(args, "--library") ?? knownDriver?.BoundLibraryId;
+        var requestedLibraryName = CliOptions.Read(args, "--library") ?? knownDriver?.BoundLibraryId;
         var version = CliOptions.Read(args, "--version");
-        if (libraryName is null || version is null)
+        if (requestedLibraryName is null || version is null)
         {
             Console.Error.WriteLine(
                 "--version <v> is required, and so is --library <name> unless --from names a catalog " +
@@ -146,6 +146,13 @@ public static class DriverCommand
 
         var displayName = CliOptions.Read(args, "--display-name") ?? id;
 
+        var catalogLibrary = KnownLibraries.TryGetById(requestedLibraryName);
+        // A library's id is always its real NuGet package id — a catalog id like "mysql-connector"
+        // (whether typed via --library or defaulted from --from's own bound library) is shorthand for
+        // typing the package id, never a name the install itself gets keyed under (see
+        // architecture/planning/todo/follow-up-library-install-paths-disagree-on-the-resulting-library-id.md).
+        var libraryName = catalogLibrary?.PackageId ?? requestedLibraryName;
+
         var registry = new LibraryRegistry(repoRoot).LoadAll();
         if (registry.Installed.ContainsKey(libraryName))
         {
@@ -153,7 +160,6 @@ public static class DriverCommand
         }
         else
         {
-            var catalogLibrary = KnownLibraries.TryGetById(libraryName);
             var factoryType = CliOptions.Read(args, "--factory-type") ?? catalogLibrary?.FactoryType ?? KnownLibraries.TryGet(libraryName);
             if (factoryType is null)
             {
@@ -163,8 +169,7 @@ public static class DriverCommand
                 return 1;
             }
 
-            var packageId = catalogLibrary?.PackageId ?? libraryName;
-            var package = new PackageRef(packageId, version);
+            var package = new PackageRef(libraryName, version);
             try
             {
                 await LibraryInstaller.InstallAsync(repoRoot, libraryName, [package], factoryType);

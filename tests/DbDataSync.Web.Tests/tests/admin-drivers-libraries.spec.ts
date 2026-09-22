@@ -9,8 +9,9 @@ const screenshotsDir = screenshotDir('admin-drivers-libraries')
  * Phase 118's read-only Drivers and Libraries admin screens, plus (phase 120) installing the one
  * bundled catalog driver through the real "Add" button as this spec's own fixture setup — a better
  * one than a CLI shortcut now that installing is a real, tested feature. Runs first (alphabetically,
- * before every other admin- or library-prefixed spec in this suite), so mysql.generic/mysql-connector
- * are in place for anything later that assumes an already-installed descriptor driver.
+ * before every other admin- or library-prefixed spec in this suite), so mysql.generic and its bound
+ * library (installed as MySqlConnector — its real package id, see KNOWN_DRIVER_LIBRARY) are in place
+ * for anything later that assumes an already-installed descriptor driver.
  */
 test.describe.serial('admin: Drivers and Libraries', () => {
   test('adding mysql.generic from the catalog list installs it with no trust dialog, and it appears listed', async ({ page }) => {

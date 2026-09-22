@@ -38,17 +38,20 @@ public sealed class DriverCommandTests : IDisposable
         var text = (await File.ReadAllTextAsync(yamlPath)).Replace("\r\n", "\n");
         var lines = text.Split('\n');
 
-        // Byte-identical to the golden file modulo the id/displayName/library header lines.
+        // Byte-identical to the golden file modulo the id/displayName/library header lines. "library:"
+        // is the real NuGet package id, not the catalog shorthand ("mysql-connector") --from named it
+        // by — a library's id is always its package id, see
+        // follow-up-library-install-paths-disagree-on-the-resulting-library-id.md.
         Assert.Equal("id: my.mysql", lines[0]);
         Assert.Equal("displayName: my.mysql", lines[1]);
-        Assert.Equal("library: mysql-connector", lines[2]);
+        Assert.Equal("library: MySqlConnector", lines[2]);
 
         var body = string.Join('\n', lines.Skip(3));
         var goldenPath = Path.Combine(FindRepoRoot(), "tests", "DbDataSync.Cli.Tests", "Golden", "mysql.generic.driver.yaml.body");
         var golden = (await File.ReadAllTextAsync(goldenPath)).Replace("\r\n", "\n").TrimEnd('\n');
         Assert.Equal(golden, body.TrimEnd('\n'));
 
-        Assert.True(Directory.Exists(Path.Combine(_repoRoot, "libraries", "mysql-connector")));
+        Assert.True(Directory.Exists(Path.Combine(_repoRoot, "libraries", "MySqlConnector")));
     }
 
     [Fact]
@@ -68,7 +71,7 @@ public sealed class DriverCommandTests : IDisposable
 
         Assert.Equal(0, await RunAsync("install", "d2", "--library", "mysql-connector", "--version", "2.4.0"));
 
-        Assert.Contains("Reusing already-installed library 'mysql-connector'", _output.ToString());
+        Assert.Contains("Reusing already-installed library 'MySqlConnector'", _output.ToString());
     }
 
     private static string FindRepoRoot()
