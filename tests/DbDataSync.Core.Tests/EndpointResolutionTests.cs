@@ -125,6 +125,57 @@ public sealed class EndpointResolutionTests
         Assert.Equal("Orders", resolved.Table);
     }
 
+    /// <summary>An explicit "" at the mapping's own level is a real, deliberate answer — "no database
+    /// to name" — not a missing one, and resolves without throwing even though the replication's
+    /// endpoint has a real database to offer. Distinct from simply not setting it (which still
+    /// inherits, per <see cref="MappingWithNoEndpoint_InheritsTheReplications"/>).</summary>
+    [Fact]
+    public void MappingsOwnExplicitEmptyDatabase_ResolvesToEmpty_NotInherited()
+    {
+        var resolved = EndpointResolution.ResolveSource(
+            Task(Src, Tgt), new SourceTableSpec { Database = "", Table = "Orders" });
+
+        Assert.Equal("src-conn", resolved.ConnectionName);  // connection still inherits normally
+        Assert.Equal("", resolved.Database);                // database does not — "" wins outright
+    }
+
+    /// <summary>The replication's own endpoint can make the same deliberate "" answer, inherited by
+    /// every mapping that doesn't override it — the same shape a real database value already has.</summary>
+    [Fact]
+    public void EndpointsExplicitEmptyDatabase_IsInheritedByAMappingWithNoneOfItsOwn()
+    {
+        var task = Task(new EndpointRef { ConnectionName = "src-conn", Database = "" }, Tgt);
+
+        var resolved = EndpointResolution.ResolveSource(task, new SourceTableSpec { Table = "Orders" });
+
+        Assert.Equal("", resolved.Database);
+    }
+
+    /// <summary>Still a real value the mapping can override, same as any other inherited field.</summary>
+    [Fact]
+    public void AMappingsOwnRealDatabase_OverridesTheEndpointsExplicitEmptyOne()
+    {
+        var task = Task(new EndpointRef { ConnectionName = "src-conn", Database = "" }, Tgt);
+
+        var resolved = EndpointResolution.ResolveSource(
+            task, new SourceTableSpec { Database = "AppDb", Table = "Orders" });
+
+        Assert.Equal("AppDb", resolved.Database);
+    }
+
+    /// <summary>The escape hatch is database-only. An empty connection name still falls through to
+    /// "nothing configured" and throws, exactly as before — a connection is never optional.</summary>
+    [Fact]
+    public void AnExplicitEmptyConnectionName_IsNotTheSameEscapeHatch_StillThrows()
+    {
+        var task = Task(new EndpointRef { Database = "AppDb" }, Tgt);  // no source ConnectionName at all
+
+        var ex = Assert.Throws<ConfigValidationException>(() => EndpointResolution.ResolveSource(
+            task, new SourceTableSpec { ConnectionName = "", Table = "Orders" }));
+
+        Assert.Contains("connection", ex.Message);
+    }
+
     [Fact]
     public void Validate_ChecksEveryMappingSide()
     {

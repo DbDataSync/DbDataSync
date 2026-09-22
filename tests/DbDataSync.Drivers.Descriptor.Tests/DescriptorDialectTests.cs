@@ -204,4 +204,31 @@ public sealed class DescriptorDialectTests
 
         Assert.Contains("does not support switching database", ex.Message);
     }
+
+    /// <summary>The other half of the same fix: an empty database is "nothing to switch to" (see
+    /// <c>DbDataSync.Core.Config.TableRef.Database</c>'s own doc comment), not a request this engine
+    /// refuses — so it never reaches the <c>supportsChangeDatabase: false</c> check at all. Passes a
+    /// null connection deliberately: if this touched the connection in any way, it would throw a
+    /// NullReferenceException instead of completing.</summary>
+    [Fact]
+    public async Task UseDatabaseAsync_WithAnEmptyDatabase_NeverReachesTheUnsupportedCheck()
+    {
+        const string yaml = """
+            id: oracle.generic
+            displayName: Oracle (generic)
+            library: oracle-managed-data-access
+            dialect:
+              quoteIdentifier: doubleQuote
+              parameterPrefix: ":"
+              rowLimit: offsetFetch
+              catalog: informationSchema
+              supportsChangeDatabase: false
+            capabilities:
+              readers: [Watermark]
+              staging: [StagingTable]
+              writers: [DeleteInsert]
+            """;
+
+        await Dialect(yaml).UseDatabaseAsync(null!, "", CancellationToken.None);  // does not throw
+    }
 }

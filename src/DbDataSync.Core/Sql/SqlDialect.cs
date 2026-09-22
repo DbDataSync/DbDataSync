@@ -115,9 +115,22 @@ public abstract class SqlDialect
     /// universal: engines where a connection cannot change database (Oracle, where the schema is the
     /// unit) override this to validate-and-ignore rather than call
     /// <see cref="DbConnection.ChangeDatabase"/>, which they throw from.
+    /// <para>
+    /// An empty <paramref name="database"/> (<see cref="DbDataSync.Core.Config.TableRef.Database"/>'s own
+    /// doc comment — a real, resolved "nothing to switch to", not a missing value) always skips the switch, in every
+    /// override, checked before anything override-specific: there is nothing to ask the driver for, so
+    /// nothing is asked. This is a pure string check against config already in hand, deliberately not a
+    /// comparison against the driver's own live answer (<c>DbConnection.Database</c>) — a provider
+    /// whose "current database" property is itself unreliable (an arbitrary JDBC vendor's
+    /// <c>getCatalog()</c>, say) would make the check exactly as untrustworthy as the switch it exists
+    /// to avoid.
+    /// </para>
     /// </summary>
     public virtual Task UseDatabaseAsync(DbConnection connection, string database, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrEmpty(database))
+            return Task.CompletedTask;
+
         connection.ChangeDatabase(database);
         return Task.CompletedTask;
     }

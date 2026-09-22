@@ -43,10 +43,29 @@ public static class EndpointResolution
             ResolveTarget(task, target);
     }
 
-    /// <summary>Each field falls back independently, so a mapping can override just the database on
-    /// the replication's connection without having to restate the connection.</summary>
+    /// <summary>
+    /// Each field falls back independently, so a mapping can override just the database on the
+    /// replication's connection without having to restate the connection.
+    /// <para>
+    /// <c>field == "database"</c> only: an explicit <c>""</c> (not null — null still means "not set
+    /// here, check the next level") is a real, deliberate answer, not a missing one — see
+    /// <see cref="TableSpec.Database"/>'s own doc comment. Some engines have no separate database to
+    /// name (a JDBC connection whose URL already fixes one; Oracle, DuckDB) and this is how an operator
+    /// says so on purpose. Checked at the mapping's own level first, so an explicit <c>""</c> there is
+    /// never silently overridden by whatever the replication's endpoint says. <c>"connection"</c> never
+    /// gets this — a connection name is never optional.
+    /// </para>
+    /// </summary>
     private static string Resolve(string? own, string? inherited, string taskName, string side, string field)
     {
+        if (field == "database")
+        {
+            if (own == "")
+                return "";
+            if (string.IsNullOrWhiteSpace(own) && inherited == "")
+                return "";
+        }
+
         var value = string.IsNullOrWhiteSpace(own) ? inherited : own;
         if (string.IsNullOrWhiteSpace(value))
             throw new ConfigValidationException(

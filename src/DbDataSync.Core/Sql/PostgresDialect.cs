@@ -38,6 +38,12 @@ public sealed class PostgresDialect : SqlDialect
     /// </summary>
     public override Task UseDatabaseAsync(DbConnection connection, string database, CancellationToken cancellationToken)
     {
+        // An explicit "no database" answer (TableRef.Database's own doc comment) means nothing is being
+        // asked for — skip the check entirely rather than comparing against connection.Database, which
+        // would otherwise read as a mismatch every time.
+        if (string.IsNullOrEmpty(database))
+            return Task.CompletedTask;
+
         if (!string.Equals(connection.Database, database, StringComparison.Ordinal))
             throw new InvalidOperationException(
                 $"This connection is bound to database '{connection.Database}', but '{database}' was requested. " +

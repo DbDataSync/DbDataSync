@@ -7,6 +7,11 @@ namespace DbDataSync.Core.Config;
 public sealed class EndpointRef
 {
     public string? ConnectionName { get; set; }
+
+    /// <summary>Null means "not set here, a mapping's own <see cref="TableSpec.Database"/> or an
+    /// explicit <c>""</c> decides." <c>""</c> here is itself a real, deliberate answer — see
+    /// <see cref="TableSpec.Database"/>'s own doc comment — inherited by every mapping that doesn't
+    /// override it.</summary>
     public string? Database { get; set; }
 }
 
@@ -35,7 +40,20 @@ public sealed class TaskEndpoints
 public class TableSpec
 {
     public string? ConnectionName { get; set; }
+
+    /// <summary>
+    /// Null means "not set here, inherit the replication's endpoint (or its own explicit answer)."
+    /// An explicit <c>""</c> is different from null — it means "this mapping deliberately has no
+    /// separate database to name," and <see cref="EndpointResolution"/> honours it rather than treating
+    /// it as unset: a JDBC connection whose URL already fixes one database for its whole lifetime, or
+    /// any engine whose dialect has no real notion of switching (Oracle, DuckDB — see their own
+    /// <c>SqlDialect.UseDatabaseAsync</c> overrides), never needs a value here, and forcing one would be
+    /// naming a fact that isn't true rather than describing the connection. A resolved <see
+    /// cref="TableRef.Database"/> of <c>""</c> makes every <c>UseDatabaseAsync</c> call a no-op —
+    /// nothing is ever asked to switch, so nothing depends on whether the driver could.
+    /// </summary>
     public string? Database { get; set; }
+
     public string Schema { get; set; } = "dbo";
     public required string Table { get; set; }
 }
@@ -54,7 +72,13 @@ public sealed class SourceTableSpec : TableSpec
 public class TableRef
 {
     public required string ConnectionName { get; set; }
+
+    /// <summary><c>required</c> — always assigned — but <c>""</c> is a real, resolved value, not a
+    /// missing one: see <see cref="TableSpec.Database"/>'s own doc comment. Every
+    /// <c>SqlDialect.UseDatabaseAsync</c> override treats an empty database as "nothing to switch to,"
+    /// so this never reaches a driver as an actual request.</summary>
     public required string Database { get; set; }
+
     public string Schema { get; set; } = "dbo";
     public required string Table { get; set; }
 }

@@ -61,15 +61,24 @@ public sealed class DescriptorDialect : SqlDialect
     /// <summary>
     /// <c>SupportsChangeDatabase: false</c> makes this a config error rather than a runtime one that
     /// only surfaces the first time a mapping actually reads — <see cref="ConfigValidation"/>-adjacent
-    /// but stated here, since only the dialect knows whether its engine has the notion at all.
+    /// but stated here, since only the dialect knows whether its engine has the notion at all. Checked
+    /// only when a switch is actually being asked for: an empty <paramref name="database"/> (a
+    /// deliberate "nothing to switch to" — see <c>DbDataSync.Core.Config.TableRef.Database</c>'s own
+    /// doc comment) skips straight past it, the same as the base class's own check — this override
+    /// exists to refuse a *real* request this engine can't honour, not an absent one.
     /// </summary>
     public override Task UseDatabaseAsync(DbConnection connection, string database, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrEmpty(database))
+            return Task.CompletedTask;
+
         if (!_supportsChangeDatabase)
         {
             throw new InvalidOperationException(
                 $"This driver's engine does not support switching database at connect time ('{database}' " +
-                "was requested); every mapping must already point at the connection's own database.");
+                "was requested); every mapping must already point at the connection's own database — " +
+                "or, for a mapping that doesn't need one, leave TableSpec.Database empty rather than " +
+                "naming it.");
         }
 
         return base.UseDatabaseAsync(connection, database, cancellationToken);

@@ -26,7 +26,40 @@ public sealed class JdbcConnection : DbConnection
 
     public override string Database => JavaSqlConnection.getCatalog();
 
-    public override void ChangeDatabase(string databaseName) => JavaSqlConnection.setCatalog(databaseName);
+    /// <summary>
+    /// <c>java.sql.Connection.setCatalog</c> is only ever called here for a database an operator
+    /// actually named — <c>SqlDialect.UseDatabaseAsync</c>'s own empty-database check (see
+    /// <c>DbDataSync.Core.Config.TableRef.Database</c>'s doc comment) means this method is simply never
+    /// reached for a mapping that doesn't need a switch at all, so there is no dependency on
+    /// <see cref="Database"/> (<c>getCatalog()</c>) here to decide whether to call this.
+    /// <para>
+    /// The JDBC spec's own Javadoc for <c>setCatalog</c> says a driver that doesn't support catalogs
+    /// "will silently ignore this request" — guidance, not a guarantee every vendor's driver follows,
+    /// and this codebase's own premise is that the engine behind an arbitrary JDBC URL is not knowable
+    /// at design time. So a real <c>java.sql.SQLException</c> here (including
+    /// <c>SQLFeatureNotSupportedException</c>, which extends it) is translated into the same
+    /// actionable shape <c>DescriptorDialect.UseDatabaseAsync</c>'s <c>supportsChangeDatabase: false</c>
+    /// branch already gives an operator who declared the limitation up front, rather than a raw Java
+    /// exception surfacing mid-read where nothing expects one.
+    /// </para>
+    /// </summary>
+    public override void ChangeDatabase(string databaseName)
+    {
+        try
+        {
+            JavaSqlConnection.setCatalog(databaseName);
+        }
+        catch (java.sql.SQLException ex)
+        {
+            throw new InvalidOperationException(
+                $"This JDBC driver rejected switching to database/catalog '{databaseName}' " +
+                $"(java.sql.Connection.setCatalog threw: {ex.Message}). If every mapping on this " +
+                "connection already targets the same database as the connection's own JDBC URL, leave " +
+                "the mapping's Database empty instead of naming it explicitly — see TableSpec.Database's " +
+                "own doc comment. If mappings genuinely need different databases and this driver can't " +
+                "switch, configure a separate DbDataSync connection per database instead.", ex);
+        }
+    }
 
     // Not implemented: connection *testing* (phase 19) is out of scope for this reader spike (phase
     // 165V) and is the only thing that would need these. DatabaseMetaData.getURL()/
