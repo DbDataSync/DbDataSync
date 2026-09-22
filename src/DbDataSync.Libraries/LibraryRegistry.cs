@@ -116,46 +116,45 @@ public sealed class LibraryRegistry
     /// <see cref="DbProviderFactories.GetFactory(string)"/>, with a message that names the fix
     /// (<c>dbdatasync config library install</c>) instead of the BCL's generic "no factory registered".
     /// <para>
-    /// When <paramref name="id"/> isn't installed but is a <see cref="KnownLibraries"/> catalog entry
-    /// whose *other* id shape (catalog id vs. package id — see
-    /// <c>architecture/planning/todo/follow-up-library-install-paths-disagree-on-the-resulting-library-id.md</c>)
-    /// is installed, the message names that installed id instead of telling someone to install a library
-    /// they already have under a name they didn't expect.
+    /// A <see cref="KnownLibraries"/> entry has two different ids for the same library — a short catalog
+    /// id (<c>"mysql-connector"</c>) and the real NuGet package id (<c>"MySqlConnector"</c>); see
+    /// <see cref="LibraryCatalogEntry"/>. Which one an install ends up keyed by depends on which endpoint
+    /// installed it (see
+    /// <c>architecture/planning/todo/follow-up-library-install-paths-disagree-on-the-resulting-library-id.md</c>).
+    /// When <paramref name="id"/> isn't installed but names one of those two ids for an entry installed
+    /// under the other one, the message points at the installed id directly, as a "did you mean" — not
+    /// the generic "not installed", which reads identically to a genuine miss.
     /// </para>
     /// </summary>
     public DbProviderFactory GetFactory(string id)
     {
         if (!Installed.ContainsKey(id))
-        {
-            var installedAlias = FindInstalledAlias(id);
-            throw new InvalidOperationException(installedAlias is null
-                ? $"Library '{id}' is not installed. Install it with `dbdatasync config library install {id}`."
-                : $"Library '{id}' is not installed, but '{installedAlias}' is — the same package under its " +
-                  $"other id. Use '{installedAlias}' instead, or install '{id}' explicitly with " +
-                  $"`dbdatasync config library install {id}`.");
-        }
+            throw new InvalidOperationException(NotInstalledMessage(id));
 
         return DbProviderFactories.GetFactory(id);
     }
 
-    /// <summary>
-    /// Null unless <paramref name="id"/> matches a <see cref="KnownLibraries"/> entry's catalog id or
-    /// package id and the *other* shape of that same entry is actually installed — the one case worth
-    /// naming explicitly, since every other "not installed" is a plain miss with no better answer to give.
-    /// </summary>
-    private string? FindInstalledAlias(string id)
+    /// <summary>The plain "not installed" message, unless <paramref name="id"/> is a
+    /// <see cref="KnownLibraries"/> entry's catalog id or package id and the library is installed under
+    /// that entry's other id — the one case worth naming explicitly, since every other "not installed"
+    /// is a plain miss with no better answer to give.</summary>
+    private string NotInstalledMessage(string id)
     {
         var entry = KnownLibraries.TryGetById(id)
             ?? KnownLibraries.All.FirstOrDefault(e => string.Equals(e.PackageId, id, StringComparison.OrdinalIgnoreCase));
-        if (entry is null)
-            return null;
 
-        if (!string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase) && Installed.ContainsKey(entry.Id))
-            return entry.Id;
-        if (!string.Equals(entry.PackageId, id, StringComparison.OrdinalIgnoreCase) && Installed.ContainsKey(entry.PackageId))
-            return entry.PackageId;
+        if (entry is not null)
+        {
+            var installedId = string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase) ? entry.PackageId : entry.Id;
+            var installedIdKind = installedId == entry.PackageId ? "package id" : "catalog id";
 
-        return null;
+            if (Installed.ContainsKey(installedId))
+                return $"Library '{id}' not found. A library is installed under the {installedIdKind} " +
+                       $"'{installedId}'. Did you mean '{installedId}', or install '{id}' explicitly with " +
+                       $"`dbdatasync config library install {id}`?";
+        }
+
+        return $"Library '{id}' is not installed. Install it with `dbdatasync config library install {id}`.";
     }
 
     private static void ArmResolver(string libDir)

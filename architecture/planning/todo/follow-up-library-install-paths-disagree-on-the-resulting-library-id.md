@@ -45,33 +45,39 @@ The two id shapes still diverge — this doc's "what's true today" is unchanged.
 `LibraryRegistry.GetFactory` (the one place a driver actually gets built from an installed library,
 reached by both the CLI and `DriverDescriptorReader.BuildDriver` — which the driver-authoring API's
 `TryBuild` already unwraps into a clean 400) now recognizes the specific case where the id it was asked
-for isn't installed, but a `KnownLibraries` entry's *other* shape is:
+for isn't installed, but is a `KnownLibraries` entry's catalog id or package id and that same entry is
+installed under its other id. The message points at the installed id directly, as a "did you mean":
 
 ```csharp
-public DbProviderFactory GetFactory(string id)
+private string NotInstalledMessage(string id)
 {
-    if (!Installed.ContainsKey(id))
+    var entry = KnownLibraries.TryGetById(id)
+        ?? KnownLibraries.All.FirstOrDefault(e => string.Equals(e.PackageId, id, StringComparison.OrdinalIgnoreCase));
+
+    if (entry is not null)
     {
-        var installedAlias = FindInstalledAlias(id);
-        throw new InvalidOperationException(installedAlias is null
-            ? $"Library '{id}' is not installed. Install it with `dbdatasync config library install {id}`."
-            : $"Library '{id}' is not installed, but '{installedAlias}' is — the same package under its " +
-              $"other id. Use '{installedAlias}' instead, or install '{id}' explicitly with " +
-              $"`dbdatasync config library install {id}`.");
+        var installedId = string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase) ? entry.PackageId : entry.Id;
+        var installedIdKind = installedId == entry.PackageId ? "package id" : "catalog id";
+
+        if (Installed.ContainsKey(installedId))
+            return $"Library '{id}' not found. A library is installed under the {installedIdKind} " +
+                   $"'{installedId}'. Did you mean '{installedId}', or install '{id}' explicitly with " +
+                   $"`dbdatasync config library install {id}`?";
     }
 
-    return DbProviderFactories.GetFactory(id);
+    return $"Library '{id}' is not installed. Install it with `dbdatasync config library install {id}`.";
 }
 ```
 
 So a driver.yaml written with `library: mysql-connector` against a library actually installed as
-`MySqlConnector` (or the reverse) now fails with *"...but 'MySqlConnector' is — the same package under
-its other id. Use 'MySqlConnector' instead..."* instead of a bare "not installed", which used to look
-identical to genuinely not having the package at all. Covered by three new
-`LibraryLoadTests` cases (`GetFactory_ForACatalogId_WhenOnlyThePackageIdIsInstalled_NamesTheInstalledAlias`
-and its reverse, plus a "neither shape installed — plain message, no phantom alias" guard).
+`MySqlConnector` now fails with *"Library 'mysql-connector' not found. A library is installed under the
+package id 'MySqlConnector'. Did you mean 'MySqlConnector', or install 'mysql-connector' explicitly..."*
+instead of a bare "not installed", which used to look identical to genuinely not having the package at
+all. Covered by three new `LibraryLoadTests` cases
+(`GetFactory_ForACatalogId_WhenOnlyThePackageIdIsInstalled_NamesTheInstalledPackageId` and its reverse,
+plus a "neither id installed — plain message, no phantom hint" guard).
 
-Deliberately narrow: this only fires when the *other* shape of a **known catalog entry** is installed.
+Deliberately narrow: this only fires for a **known catalog entry** whose other identifier is installed.
 An unlisted package with two names nobody registered gets no hint — there's nothing to cross-reference.
 It also doesn't change either install path's behavior; `POST /api/libraries` still keys by package id and
 `from-catalog` still keys by catalog id. The suggested fix below is still the real one.
