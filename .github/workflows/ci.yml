@@ -2,19 +2,31 @@ name: CI
 
 on:
   push:
-    # Phase 156: dev/test/main, not main alone — see architecture/branching-and-releases.md. dev is
-    # where everyone's work actually lands; test is what the dev→test promotion workflow fast-forwards
-    # to on green CI; main is what a release is cut from. All three need this suite to actually mean
-    # anything at each stage, not just the last one.
-    branches: [dev, test, main]
+    # dev only. Phase 156 listed dev/test/main here, reasoning that each stage should mean something on
+    # its own — but nothing ever ran on test or main, because a push made with GITHUB_TOKEN triggers no
+    # workflow and both branches were only ever advanced by one. Putting the pipelines on a GitHub App
+    # token (architecture/branching-and-releases.md) made those pushes start firing, and the result was
+    # three full runs of a single commit: dev → test → main are fast-forwards, so the SHA — and with it
+    # the workflow file, since a push-triggered run reads the workflow from the pushed ref — is identical
+    # at every stage. Re-running it answers a question already answered.
+    #
+    # It also actively misleads. dev and test end up pointing at the same commit, so the promotion's run
+    # flips that commit's status back to in-progress and reads as dev's own green run having restarted.
+    #
+    # Nothing downstream wants the extra runs: promote-test.yml reacts to CI on dev, publish-snapshot.yml
+    # reacts to the promotion rather than to CI, and release.yml's green-CI gate queries by head_sha with
+    # no branch filter — so dev's run is the one it finds, for the very commit it is about to release.
+    branches: [dev]
     # Only so the package job below can trigger on the same tag push release.yml does — see its `if`.
     # This does not run the rest of the suite a second time: every other job explicitly skips a tag
-    # push, since release.yml's tag is pushed on top of a commit that already went through this suite on
-    # main (by way of test, by way of dev).
+    # push, since release.yml's tag is pushed on top of a commit that already went through this suite
+    # on dev.
     tags:
       - "release/v*"
   pull_request:
-    branches: [dev, test, main]
+    # dev is the only branch a pull request can still merge into — the ruleset on main and test blocks
+    # every ref update, PR merges included. Running the suite for a PR that cannot merge buys nothing.
+    branches: [dev]
 
 jobs:
   dotnet:

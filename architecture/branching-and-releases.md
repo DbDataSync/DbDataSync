@@ -173,7 +173,7 @@ Done in that order on 2026-09-21: release `2026.9.21.2347` pushed `main` through
 which is what proved the bypass, and `test` was locked afterwards.
 
 
-### A side effect: `test` and `main` now get their own CI runs
+### A side effect, since corrected: `test` and `main` briefly got their own CI runs
 
 "The mechanics" records, as a constraint, that **a push made with `GITHUB_TOKEN` triggers no other
 workflow** — which is why `test` never got a CI run of its own despite `ci.yml` listing it under
@@ -191,9 +191,18 @@ That is the configured intent finally happening, but it is not free: a commit tr
 and `publish-snapshot.yml` still reacts to the promotion rather than to CI — so the cost is the whole of
 the effect.
 
-Worth a deliberate decision rather than leaving it as an accident of the token change: either accept
-three runs as the price of each stage meaning something, or narrow `ci.yml`'s `push` branches and let
-the promotion's own green-CI requirement carry the guarantee it already carries.
+**Decided, same day: `ci.yml` now triggers on `dev` only.** Three runs of one commit answer a question
+already answered — `dev` → `test` → `main` are fast-forwards, so the SHA is identical at every stage, and
+so is the workflow file a push-triggered run reads from the pushed ref. The extra runs also actively
+mislead: `dev` and `test` end up on the same commit, so the promotion.s run flips that commit.s status
+back to in-progress and reads as `dev`.s own green run having restarted, which is how this surfaced.
+
+Nothing downstream lost anything. `promote-test.yml` reacts to CI on `dev`; `publish-snapshot.yml` reacts
+to the promotion rather than to CI; and `release.yml`.s green-CI gate queries `actions/runs?head_sha=…`
+with **no branch filter**, so `dev`.s run is the one it finds for the very commit it is about to release.
+The `pull_request` trigger narrowed to `dev` for the same reason — with the ruleset blocking PR merges
+into `main` and `test`, a pull request against either cannot merge, so running the suite for it buys
+nothing.
 
 ### Recovering if the bypass ever breaks
 
