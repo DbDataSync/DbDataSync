@@ -135,11 +135,16 @@ test.describe('Notes: the rich Markdown opt-in (phase 161)', () => {
 
     const row = page.getByTestId('admin-config-row-Notes:MarkdownRenderer')
     await expect(row).toBeVisible()
-    // Beside the control, always — not a confirmation after the fact.
-    await expect(page.getByTestId('admin-config-caution-Notes:MarkdownRenderer')).toContainText("other people's sessions")
     await expect(page.getByTestId('admin-config-running-Notes:MarkdownRenderer')).toBeVisible()
     await row.scrollIntoViewIfNeeded()
+
+    // Beside the control, always — not a confirmation after the fact. Collapsed to a flag in its own
+    // column; the full warning is a click away in a popup rather than a box under the row.
+    await page.getByTestId('admin-config-caution-Notes:MarkdownRenderer').click()
+    await expect(page.getByRole('dialog', { name: 'Caution for Notes:MarkdownRenderer' }))
+      .toContainText("other people's sessions")
     await page.screenshot({ path: path.join(screenshotsDir, '03-admin-config-caution.png') })
+    await page.getByTestId('admin-config-caution-close-Notes:MarkdownRenderer').click()
 
     // Phase 164 added two more: Auth:Network:Admin and Auth:Network:Viewer, both security-sensitive
     // network-trust fallbacks — this setting is no longer the only one that carries a caution.

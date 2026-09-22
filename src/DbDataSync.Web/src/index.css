@@ -889,13 +889,15 @@ select.select {
   font: 500 11px var(--ui); color: #7a5200;
   background: var(--warn-bg, #fff4d6); border: 1px solid var(--warn-edge, #e6cf94);
 }
-.config-caution {
-  display: flex; gap: 8px; align-items: flex-start; margin: 0 0 10px; padding: 8px 10px; max-width: 90ch;
-  white-space: normal; overflow: visible; text-overflow: clip;
-  font: 400 12px/1.5 var(--ui); color: var(--ink-2);
-  background: var(--warn-bg, #fff4d6); border: 1px solid var(--warn-edge, #e6cf94); border-radius: 4px;
+/* A row's caution, collapsed to a small flag in its own column — click opens the full text in a
+   `.modal` popup (see `CautionFlag`) rather than the full-width box this used to be. */
+.caution-flag {
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  width: 18px; height: 18px; padding: 0; flex: none;
+  font: 700 11px var(--ui); line-height: 1; color: #7a5200;
+  background: var(--warn-bg, #fff4d6); border: 1px solid var(--warn-edge, #e6cf94); border-radius: 50%;
 }
-.config-caution .mark { flex: none; font-weight: 700; color: #7a5200; }
+.caution-flag:hover { background: #f5e6bd; }
 
 /* ── Admin config: one table per key group (App, State, Auth, …) ─────────────── */
 
@@ -906,6 +908,17 @@ select.select {
 /* The `DbDataSync:Auth:*` reminder sits at the far end of the header, away from the group's name:
    it is there to be checked against `config set` or the docs, not read on the way past. */
 .config-groups .card-head .card-note { margin-left: auto; }
+
+/* A second-level heading inside a group's card (`Auth:Network:*` inside the Authentication card, etc.
+   — see `subgroupEntries`) — the rail's own active-item pairing (`.rail-item.active`), the only
+   "tinted background, accent-coloured text" combination this app already has, reused here rather than
+   inventing a new accent for what is otherwise just a subheading. */
+.config-subgroup-head {
+  background: var(--accent-tint); color: var(--accent);
+  font: 600 10px var(--ui); letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--card-inner-edge);
+}
 
 /* A key the file carries and something else outranks — a save here writes the file and changes
    nothing the process does. Warn-coloured rather than quiet, and `cursor: help` because the title

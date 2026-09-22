@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AdminTabs } from '../components/AdminTabs'
 import { AppShell } from '../components/AppShell'
@@ -10,9 +10,10 @@ import { useIsAdmin } from '../components/useIsAdmin'
 import { useAdminConfig, useRestartRequired, useSetAdminConfig, useSetAdminConfigSecret } from '../api/hooks'
 import type { AdminConfigEntry } from '../api/types'
 
-// Key, Source, Value, Running — Source sits right before Value (not last) since the two are read
-// together: "where did this come from" answers "can I trust it" before "what does it say".
-const COLUMNS = '1.3fr 1.3fr 1.6fr 1.3fr'
+// Key, Source, Value, Running, Caution — Source sits right before Value (not last) since the two are
+// read together: "where did this come from" answers "can I trust it" before "what does it say". Caution
+// is last and narrow: most rows have none, and it's a flag to open, not something read inline.
+const COLUMNS = '1.3fr 1.3fr 1.6fr 1.3fr 0.5fr'
 const STATE_CONNECTION_STRING_KEY = 'DbDataSync:State:ConnectionString'
 const NUMERIC = /^-?\d+(\.\d+)?$/
 
@@ -50,6 +51,25 @@ function groupByFirstFragment(entries: AdminConfigEntry[]): { group: string; lab
     else groups.push({ group, label: GROUP_NAMES[group] ?? group, entries: [entry] })
   }
   return groups
+}
+
+/**
+ * A second pass inside one group's own entries, clustering consecutive entries that share a *second*
+ * `:`-fragment (e.g. `Auth:Network:Admin` and `Auth:Network:Viewer` both fall under `Network`) — same
+ * "contiguous, no re-sorting" reasoning `groupByFirstFragment` already gives for the first level, one
+ * level deeper. A two-segment key (`State:DbPath`) has no subgroup (`null`) and renders as a bare row,
+ * same as before this existed — a group can freely mix flat keys and subgrouped ones (`State` does).
+ */
+function subgroupEntries(entries: AdminConfigEntry[]): { subgroup: string | null; entries: AdminConfigEntry[] }[] {
+  const chunks: { subgroup: string | null; entries: AdminConfigEntry[] }[] = []
+  for (const entry of entries) {
+    const segments = entry.key.replace(/^DbDataSync:/, '').split(':')
+    const subgroup = segments.length > 2 ? segments[1] : null
+    const current = chunks[chunks.length - 1]
+    if (current?.subgroup === subgroup) current.entries.push(entry)
+    else chunks.push({ subgroup, entries: [entry] })
+  }
+  return chunks
 }
 
 /** A value with its unit pill beside it, or just the value — a key can carry a unit
@@ -176,16 +196,25 @@ export function AdminConfigPage() {
                 <span className="card-note mono">DbDataSync:{group}:*</span>
               </div>
               <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 14 }}>
-                <span>Key</span><span>Source</span><span>Value</span><span>Running</span>
+                <span>Key</span><span>Source</span><span>Value</span><span>Running</span><span>Caution</span>
               </div>
-              {groupEntries.map((entry) => (
-                <Row
-                  key={entry.key}
-                  entry={entry}
-                  onSave={save}
-                  onSaveSecret={entry.key === STATE_CONNECTION_STRING_KEY ? saveSecret : undefined}
-                  busy={setValue.isPending || setSecret.isPending}
-                />
+              {subgroupEntries(groupEntries).map(({ subgroup, entries: subEntries }, i) => (
+                <Fragment key={subgroup ?? `_flat_${i}`}>
+                  {subgroup && (
+                    <div className="config-subgroup-head" data-testid={`admin-config-subgroup-${group}-${subgroup}`}>
+                      {subgroup}
+                    </div>
+                  )}
+                  {subEntries.map((entry) => (
+                    <Row
+                      key={entry.key}
+                      entry={entry}
+                      onSave={save}
+                      onSaveSecret={entry.key === STATE_CONNECTION_STRING_KEY ? saveSecret : undefined}
+                      busy={setValue.isPending || setSecret.isPending}
+                    />
+                  ))}
+                </Fragment>
               ))}
             </div>
           ))}
@@ -336,17 +365,57 @@ function Row({ entry, onSave, onSaveSecret, busy }: {
         <span className="faint" data-testid={`admin-config-running-${shortKey}`}>not set</span>
       )}
 
-      {entry.caution && (
-        // In both states, in the row of the setting it is about: what somebody deciding needs to read, not a confirmation
-        // after they have already chosen. Its own full-width line — the key column is too narrow to hold a warning without
-        // cutting it off, and a warning that is cut off is worse than none. The CLI prints the same text before it writes,
-        // and `setup` shows it under its checkbox.
-        <div className="config-caution" style={{ gridColumn: '1 / -1' }} data-testid={`admin-config-caution-${shortKey}`}>
-          <span className="mark">!</span>
-          <span>{entry.caution}</span>
+      {/* Its own narrow column rather than a full-width box under the row (what this used to be) — a
+          flag to open, not something read inline, so the row keeps the table's own rhythm. The CLI
+          prints the same text before it writes, and `setup` shows it under its checkbox. */}
+      {entry.caution ? <CautionFlag shortKey={shortKey} caution={entry.caution} /> : <span />}
+    </div>
+  )
+}
+
+/** A row's caution, collapsed to a small warn-colored flag — click opens the full text in a popup
+ * rather than a native `title` tooltip, which wraps a multi-sentence warning badly and reads slowly.
+ * Reuses `.modal-backdrop`/`.modal`, the same shell `LibraryFindPanel`'s `TrustInstallDialog` already
+ * built, rather than a new one. */
+function CautionFlag({ shortKey, caution }: { shortKey: string; caution: string }) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  return (
+    <>
+      <button
+        type="button"
+        className="caution-flag"
+        aria-label={`Caution for ${shortKey}`}
+        onClick={() => setOpen(true)}
+        data-testid={`admin-config-caution-${shortKey}`}
+      >
+        !
+      </button>
+      {open && (
+        <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false) }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label={`Caution for ${shortKey}`}>
+            <div className="card-head">
+              <span className="card-title">Caution — {shortKey}</span>
+            </div>
+            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <span className="hint">{caution}</span>
+              <div className="row" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-sm" onClick={() => setOpen(false)} data-testid={`admin-config-caution-close-${shortKey}`}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 
