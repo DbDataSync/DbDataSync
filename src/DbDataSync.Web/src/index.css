@@ -907,6 +907,18 @@ select.select {
    it is there to be checked against `config set` or the docs, not read on the way past. */
 .config-groups .card-head .card-note { margin-left: auto; }
 
+/* A key the file carries and something else outranks — a save here writes the file and changes
+   nothing the process does. Warn-coloured rather than quiet, and `cursor: help` because the title
+   carries what is actually winning and how to stop it. Sized to sit on a row beside the source
+   label without growing it. */
+.override-pill {
+  display: inline-flex; align-items: center; flex-shrink: 0; cursor: help;
+  padding: 1px 7px; border-radius: 999px;
+  font: 500 10px var(--ui); color: #7a5200;
+  white-space: nowrap;
+  background: var(--warn-bg, #fff4d6); border: 1px solid var(--warn-edge, #e6cf94);
+}
+
 /* ── Libraries: the find panel's known-library shortcuts ─────────────────────── */
 
 /* A class, not an inline `display: flex` on `.card-body` — that element's own rule sets

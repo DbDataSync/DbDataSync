@@ -72,7 +72,20 @@ So the order lives here, and is the one to work through:
 | 5 | **159K** — apply an update automatically, from the CLI and the web console | **follows 158K, which is done** (it executes 158K's `UpdatePlan` and reuses its `DbDataSync.Updates` library). **Built for Linux and the CLI; not yet verified on real hosts, and Windows is deliberately off** — see its Progress section for exactly what is and is not proven |
 | 6 | **163K** — the container image on GHCR, amd64 and arm64 | **implemented, not yet run in CI**: stays in `todo/` until `publish-image.yml` runs on a real release (it cannot before it reaches `main`), and until the arm64 image has been built on real arm hardware. Its own "First release checklist" has a manual step (make the package public) |
 
-Updated 2026-09-21 (latest): **165T is done** — unplanned, reported from use, and the bug in it is worth knowing
+Updated 2026-09-22 (latest): **165T's two follow-ups are done**, both reported against the commit that first
+fixed them. The Admin config screen now says when a key it calls "file"-sourced is **overridden by an
+environment variable or a command-line flag** — `DbDataSyncHost.InsertConfigFile` inserts the file provider
+immediately before the environment one, so both outrank it, and until now a save on such a key wrote the file,
+showed the new value back, raised the restart banner, and was ignored by the running process across that restart
+and every one after it. The same "didn't actually change anything" the phase's original bug produced, by a
+different route; `AdminConfigEntry.OverriddenBy`/`OverriddenValue` and a pill in the Source column. The check is
+positional (is there a provider at or after the environment one that supplies this key) rather than "who wins
+overall", because the file provider's snapshot is frozen at startup and is absent entirely from a process that
+started before the file existed — neither changes who outranks the file on the next start. Also `QuickAddChip`
+off `.btn-link.quiet`, whose hover colour is the destructive red, wrong for a "+ add" control. See
+`architecture/implementation/done/phase-165T-config-writes-that-missed-their-own-key.md`.
+
+Updated 2026-09-21: **165T is done** — unplanned, reported from use, and the bug in it is worth knowing
 about even if the screens it was reported against are not. `DbDataSyncConfigFile.SetValue` matched a key by the
 caller's own split between YAML section header and key line, but that split is invisible to `Read`, which flattens
 the file: `setup` and phase 164's migration write `DbDataSync:Auth:Network:` + `Admin`, while the Admin config

@@ -106,30 +106,59 @@ column beside an input leaves neither usable.
 - Does not prune the duplicate line an older build may have left in a file (see above).
 - Does not remove a section header left empty by `RemoveValue`, which it never did.
 - Does not touch `SetListValue`/`RemoveListValue`, which need block extents rather than a key line.
-- Leaves `QuickAddChip` on `.btn-link.quiet`, whose hover colour is the destructive red — arguably wrong
-  for a "+ add" control and more noticeable now they are a vertical list, but it is b555c21's call to
-  revisit, not a reported problem.
-- **Does not fix the Source column's blind spot**, which has the same "looks like nothing happened" shape
-  and is worth knowing about: `AdminConfigService.ToEntry` reports `source: "file"` whenever the file has
-  the key, but `DbDataSyncHost.InsertConfigFile` registers the file provider *before* the environment one,
-  so an environment variable or CLI flag setting the same key wins at runtime and the screen never says
-  so. A deployment that sets `DbDataSync__Auth__Network__Admin` in its environment would still see a save
-  appear to take and never take effect. Not touched here because `ToEntry`'s file-first read is deliberate
-  and documented (it is what makes an adopted key stop looking un-adopted); fixing it means reporting an
-  overriding provider *alongside* the file, not instead of it.
+- Does not stop an admin editing a key something else overrides (below). The file is still worth getting
+  right, and a deployment can drop the environment variable later; refusing the edit would be a guess at
+  which of the two the operator means to win.
+
+## The third thing with the same symptom: a save that could never take effect
+
+Written up here as a follow-up because it was found while fixing the first, and reported as not done
+before it was done.
+
+`AdminConfigService.ToEntry` reports `source: "file"` whenever the file carries the key — deliberately,
+and for a good reason its own comment gives: the `IConfiguration` provider list is frozen at startup, so
+inferring the source from it would leave a key this screen just wrote looking permanently un-adopted. But
+`DbDataSyncHost.InsertConfigFile` inserts the file provider *immediately before* the environment one, so
+the environment and the command line both outrank the file. A deployment setting
+`DbDataSync__Auth__Network__Admin` in its environment would see a save here write the file, the value come
+back changed, the restart banner appear — and the running process go on using the environment variable,
+across that restart and every one after it, with nothing on the screen ever saying why. The same "didn't
+actually change anything" as the file-writer bug, reached by a different route.
+
+`AdminConfigEntry` gains `OverriddenBy` and `OverriddenValue`, and the Source column shows an
+`overridden by environment variable` pill whose title names the winning value and what to do about it.
+`Source` still reads `file`, because the file is what an edit here writes; the pill answers whether that
+edit will take.
+
+The check is **positional, not "who wins overall"**: `OutranksTheFile` takes the environment provider's
+index as the boundary and asks whether anything from there on supplies the key. Asking
+`IConfigurationRoot` who wins would be wrong twice — the file provider's snapshot is frozen at startup
+and will not have a key written a moment ago, and it is absent entirely from a process that started
+before the file existed. Neither changes who would outrank the file on the next start, which is the
+question worth answering. Reported only for a key the file actually carries: for any other, `Source`
+already names whatever is winning, and a pill on every default-valued row would be noise.
+
+`QuickAddChip` also comes off `.btn-link.quiet`, whose hover colour is the destructive red — wrong for a
+"+ add" control, and much more visible now they are a vertical list. The `.quiet` variant itself is left
+alone: 25 other callers use it, and most of them really are destructive.
 
 ## Progress
 
 - `DbDataSyncConfigFile.SetValue`/`RemoveValue` rewritten around `FindKeyLines`; credential guard matched
   on the flattened key.
-- `AdminConfigPage.tsx`: `GROUP_NAMES` and a `label` on b555c21's grouping helper; one card per group.
-  Test IDs are unchanged, `admin-config-group-<group>` included — it moves from the band to the card.
-- `AdminLibrariesPage.tsx`: the find panel's inline layout styles replaced by classes.
-  `admin-libraries-known-sidebar` is unchanged. b555c21's nuget.org link on a search result is untouched.
-- `index.css`: `.config-groups`, `.find-layout`/`.find-main`/`.find-aside`; `.grid-group-head` removed.
+- `AdminConfigService`: `OutranksTheFile`, and `OverriddenBy`/`OverriddenValue` on `AdminConfigEntry`.
+- `AdminConfigPage.tsx`: `GROUP_NAMES` and a `label` on b555c21's grouping helper; one card per group;
+  the `.override-pill` in the Source cell. Test IDs are unchanged, `admin-config-group-<group>` included
+  — it moves from the band to the card — with `admin-config-overridden-<key>` added.
+- `AdminLibrariesPage.tsx`: the find panel's inline layout styles replaced by classes; `QuickAddChip` off
+  `.quiet`. `admin-libraries-known-sidebar` is unchanged, and b555c21's nuget.org link is untouched.
+- `index.css`: `.config-groups`, `.override-pill`, `.find-layout`/`.find-main`/`.find-aside`;
+  `.grid-group-head` removed.
 - Six new tests in `DbDataSyncConfigFileTests`: both section-split directions, the nested-mapping shape, a
   value containing a colon (the key-boundary scan has to stop before a URL's `//`), the credential guard
-  under both of its names, and `RemoveValue` across a split.
+  under both of its names, and `RemoveValue` across a split. Three in `AdminConfigServiceTests` for the
+  override reporting, including the two negative cases — nothing outranking, and a key the file does not
+  carry.
 
 ## Outcome
 

@@ -233,8 +233,27 @@ function Row({ entry, onSave, onSaveSecret, busy }: {
 
       {/* Read together with Value, right beside it — "where did this come from" answers "can I trust
           it" before "what does it say". */}
-      <span className="row" style={{ gap: 6 }}>
+      <span className="row wrap" style={{ gap: 6 }}>
         <span className="dim" data-testid={`admin-config-source-${shortKey}`}>{entry.source}</span>
+
+        {/* The file has this key and something outranks it, so a save here writes the file and changes
+            nothing the process does — before or after a restart. Said in the Source column rather than
+            as a caution under the row: it is an answer to "where does this value come from", and the
+            honest answer is "not from the file you are editing". */}
+        {entry.overriddenBy && (
+          <span
+            className="override-pill"
+            title={
+              `Set by ${entry.overriddenBy}, which outranks dbdatasync.config.yaml` +
+              (entry.overriddenValue ? `: ${entry.overriddenValue}` : '') +
+              '. Editing the value here writes the file, but this deployment will keep using the ' +
+              `${entry.overriddenBy} until that is unset.`
+            }
+            data-testid={`admin-config-overridden-${shortKey}`}
+          >
+            overridden by {entry.overriddenBy}
+          </span>
+        )}
 
         {entry.canAdopt && (
           <button

@@ -357,7 +357,7 @@ function QuickAddChip({ entry, onPick }: { entry: KnownLibrarySummary; onPick: (
   return (
     <button
       type="button"
-      className="btn-link quiet"
+      className="btn-link"
       title={entry.description}
       onClick={onPick}
       data-testid={`admin-libraries-chip-${entry.id}`}

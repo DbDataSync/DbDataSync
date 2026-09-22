@@ -349,6 +349,63 @@ public sealed class AdminConfigServiceTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A key the file carries *and* something outranks. The screen still calls it file-sourced, because
+    /// the file is what an edit here writes — but it has to say the edit will not take, or a save that
+    /// can never take effect looks exactly like one that did: the file is really written, the value
+    /// really does come back changed, and the process goes on ignoring it across every restart.
+    /// </summary>
+    [Fact]
+    public void AFileKeyACommandLineFlagAlsoSets_IsStillFileSourced_AndNamesWhatOutranksIt()
+    {
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Auth:Network:Admin", "disabled");
+        var builder = new ConfigurationBuilder();
+        builder.Add(new DbDataSyncConfigFileSource { InitialData = DbDataSyncConfigFile.Read(_repoRoot) });
+        builder.AddInMemoryCollection(new Dictionary<string, string?> { ["DbDataSync:App:RepoRoot"] = _repoRoot });
+        builder.AddEnvironmentVariables();
+        builder.AddCommandLine(["--DbDataSync:Auth:Network:Admin", "loopback"]);
+        var service = Build(builder.Build());
+
+        var entry = service.Get("DbDataSync:Auth:Network:Admin")!;
+
+        Assert.Equal("file", entry.Source);
+        Assert.Equal("disabled", entry.Value);
+        Assert.Equal("command line", entry.OverriddenBy);
+        Assert.Equal("loopback", entry.OverriddenValue);
+    }
+
+    /// <summary>The ordinary case — nothing outranks the file, and the screen says nothing. The
+    /// in-memory RepoRoot entry sits *before* the environment provider, exactly where appsettings.json
+    /// does, so it must not count as one.</summary>
+    [Fact]
+    public void AFileKeyNothingElseSets_ReportsNoOverride()
+    {
+        DbDataSyncConfigFile.SetValue(_repoRoot, "DbDataSync", "Auth:Network:Admin", "disabled");
+        var service = Build(ConfigurationWithFile(DbDataSyncConfigFile.Read(_repoRoot)));
+
+        var entry = service.Get("DbDataSync:Auth:Network:Admin")!;
+
+        Assert.Equal("file", entry.Source);
+        Assert.Null(entry.OverriddenBy);
+        Assert.Null(entry.OverriddenValue);
+    }
+
+    /// <summary>A key the file does not carry has nothing to be overridden: Source already names
+    /// whatever is winning, and a pill on every default-valued row would be noise.</summary>
+    [Fact]
+    public void AKeyTheFileDoesNotCarry_ReportsNoOverride_EvenWhenACommandLineFlagSetsIt()
+    {
+        var builder = new ConfigurationBuilder();
+        builder.AddEnvironmentVariables();
+        builder.AddCommandLine(["--DbDataSync:App:Url", "http://from-cli/"]);
+        var service = Build(builder.Build());
+
+        var entry = service.Get(UrlKey)!;
+
+        Assert.Equal("command line", entry.Source);
+        Assert.Null(entry.OverriddenBy);
+    }
+
     [Fact]
     public void ACommandLineSourcedKey_IsLabeledCommandLine()
     {

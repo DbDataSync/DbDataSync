@@ -302,9 +302,49 @@ public sealed class AdminConfigService(
         var defaultValue = DefaultValueFor(definition.Key);
         var canReset = editable && defaultValue is not null && !string.Equals(value, defaultValue, StringComparison.Ordinal);
 
+        // Only meaningful for a file-carried key: for any other, Source already names whatever is
+        // winning, and saying a key is "overridden" when the file has no opinion to override would be
+        // noise on every default-valued row.
+        var (overriddenBy, overriddenValue) = fileHasKey ? OutranksTheFile(definition.Key) : (null, null);
+        if (masked)
+            overriddenValue = null;
+
         return new AdminConfigEntry(
             definition.Key, value, runningValue, source, editable, canAdopt, canReset, defaultValue, masked,
-            definition.Description, definition.Unit, definition.Caution, definition.AllowedValues);
+            definition.Description, definition.Unit, definition.Caution, definition.AllowedValues,
+            overriddenBy, overriddenValue);
+    }
+
+    /// <summary>
+    /// The provider that beats <c>dbdatasync.config.yaml</c> for this key, and what it says — or
+    /// <c>(null, null)</c>, the normal case.
+    /// <para>
+    /// The boundary is the environment-variables provider, because that is exactly where
+    /// <c>DbDataSyncHost.InsertConfigFile</c> inserts the file: immediately *before* it. So everything
+    /// from there on outranks the file — today the environment and the command line — and everything
+    /// before it (appsettings.json) does not. Asked positionally rather than by "who wins overall",
+    /// which would give the wrong answer twice over: the file provider's own snapshot is frozen at
+    /// startup and will not have a key this screen wrote a moment ago, and the file provider is absent
+    /// entirely from a process that started before the file existed. Neither changes who would outrank
+    /// it on the next start, which is the question worth answering.
+    /// </para>
+    /// </summary>
+    private (string? Label, string? Value) OutranksTheFile(string key)
+    {
+        var providers = ((IConfigurationRoot)configuration).Providers.ToList();
+        var first = providers.FindIndex(p => p is EnvironmentVariablesConfigurationProvider);
+        if (first < 0)
+            return (null, null);
+
+        // Last one wins, the same way IConfigurationRoot resolves it.
+        (string? Label, string? Value) found = (null, null);
+        for (var i = first; i < providers.Count; i++)
+        {
+            if (providers[i].TryGet(key, out var value))
+                found = (LabelFor(providers[i]), value);
+        }
+
+        return found;
     }
 
     /// <summary>
@@ -458,10 +498,21 @@ public sealed class AdminConfigService(
 /// setting backed by a real C# enum, so the screen can render a dropdown/toggle instead of a free-text
 /// box. Null for a setting with no fixed set (a path, a group name, a count) or an open one
 /// (<c>State:Engine</c> — a custom dialect can be registered beyond the three built-ins).</param>
+/// <param name="OverriddenBy">
+/// The provider that outranks <c>dbdatasync.config.yaml</c> for this key and is therefore what the
+/// process will actually use — <c>"environment variable"</c> or <c>"command line"</c> — or null, the
+/// normal case, when nothing does. <see cref="Source"/> still says <c>"file"</c> whenever the file
+/// carries the key, because that is what this screen edits; this says whether editing it will change
+/// anything. Without it a save here looks exactly like a save that took: the file really is written,
+/// the value really does come back changed, and the running process goes on ignoring it across every
+/// restart, with nothing on the screen ever saying why.
+/// </param>
+/// <param name="OverriddenValue">What <see cref="OverriddenBy"/> says, so the screen can show what is
+/// winning rather than only that something is. Null whenever <see cref="OverriddenBy"/> is.</param>
 public sealed record AdminConfigEntry(
     string Key, string? Value, string? RunningValue, string Source, bool Editable, bool CanAdopt, bool CanReset,
     string? DefaultValue, bool Masked, string Description, string? Unit, string? Caution = null,
-    IReadOnlyList<string>? AllowedValues = null);
+    IReadOnlyList<string>? AllowedValues = null, string? OverriddenBy = null, string? OverriddenValue = null);
 
 /// <summary>A key <see cref="AdminConfigService.Writable"/> found: its full name, what it is for, the literal it falls back to
 /// (null when contextual), the warning to show wherever it is changed (null for most), and — for a
