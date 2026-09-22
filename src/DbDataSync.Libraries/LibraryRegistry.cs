@@ -140,8 +140,7 @@ public sealed class LibraryRegistry
     /// is a plain miss with no better answer to give.</summary>
     private string NotInstalledMessage(string id)
     {
-        var entry = KnownLibraries.TryGetById(id)
-            ?? KnownLibraries.All.FirstOrDefault(e => string.Equals(e.PackageId, id, StringComparison.OrdinalIgnoreCase));
+        var entry = KnownLibraries.TryGetByIdOrPackageId(id);
 
         if (entry is not null)
         {

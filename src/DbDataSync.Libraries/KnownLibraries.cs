@@ -105,4 +105,18 @@ public static class KnownLibraries
     /// as a literal package id instead (the pre-117 behaviour, still supported).</summary>
     public static LibraryCatalogEntry? TryGetById(string id) =>
         All.FirstOrDefault(e => string.Equals(e.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// <see cref="TryGetById"/>, falling back to a match on <see cref="LibraryCatalogEntry.PackageId"/>
+    /// — an installed library can be keyed by either shape (a catalog install now resolves to the
+    /// package id before installing; an older install, or one an operator named on the command line
+    /// directly, can still be keyed by the catalog id), and a caller asking "is this id a known
+    /// library, however it's keyed" needs both checked. Without this fallback, a caller that only
+    /// tries <see cref="TryGetById"/> silently stops recognizing a library the moment it's installed
+    /// under its package id instead of its catalog id — the exact regression this method exists to
+    /// stop from recurring a third time; see
+    /// architecture/planning/todo/follow-up-installed-catalog-libraries-stopped-showing-as-curated.md.
+    /// </summary>
+    public static LibraryCatalogEntry? TryGetByIdOrPackageId(string id) =>
+        TryGetById(id) ?? All.FirstOrDefault(e => string.Equals(e.PackageId, id, StringComparison.OrdinalIgnoreCase));
 }

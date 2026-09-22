@@ -10,7 +10,8 @@ public sealed record PackageRefSummary(string Id, string Version);
 /// <param name="UsedBy">Every descriptor driver (on disk, via <see cref="DriverDescriptorScanner"/>)
 /// whose <c>library:</c> names this id. A compiled plugin never appears here — its package restores
 /// privately, not through a shared library.</param>
-/// <param name="Curated">Whether this id matches a bundled <see cref="KnownLibraries"/> entry.</param>
+/// <param name="Curated">Whether this id matches a bundled <see cref="KnownLibraries"/> entry, by
+/// either its catalog id or its package id — an installed library can be keyed by either shape.</param>
 /// <param name="PendingRestore">Phase 121: true when <c>library.json</c> exists but <c>lib/</c> does
 /// not — an install that ran with no SDK available and no in-image catalog cache hit for it. Distinct
 /// from <paramref name="Resolves"/> being false: that also covers a library whose <c>lib/</c> is
@@ -37,7 +38,7 @@ public sealed class LibrariesService(LibraryRegistry libraryRegistry, ApiOptions
                 m.FactoryType,
                 Resolves(m.Id),
                 usedBy.GetValueOrDefault(m.Id, []),
-                KnownLibraries.TryGetById(m.Id) is not null,
+                KnownLibraries.TryGetByIdOrPackageId(m.Id) is not null,
                 !Directory.Exists(LibraryPaths.LibDir(LibraryPaths.LibraryDir(apiOptions.RepoRoot, m.Id)))))
             .ToList();
     }

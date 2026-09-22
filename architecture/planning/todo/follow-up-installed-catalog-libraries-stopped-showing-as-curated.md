@@ -127,3 +127,25 @@ investigation spent separating the real bug from its own echo.
   catalog-id shape, which is all today's coverage exercises.
 - `KnownLibraries.TryGetById` gains no new callers duplicating the `?? PackageId` fallback inline; both
   existing ones (`LibrariesService`, `LibraryRegistry`) go through one shared method.
+
+## Applied (2026-09-22)
+
+Added `KnownLibraries.TryGetByIdOrPackageId(string id)` (`TryGetById` first, falling back to a
+`PackageId` match) and pointed both existing ambiguous callers at it: `LibrariesService.cs:40`'s
+`Curated` computation (the actual bug), and `LibraryRegistry.NotInstalledMessage`'s inline `?? PackageId`
+fallback (now one implementation instead of two). Checked every other `KnownLibraries.TryGetById` call
+site first (`BuiltInDriverLibraries`, `ServeCommand`, `SetupSteps`, `LibraryCommand`,
+`DriverCommand.InstallDescriptorAsync`, `DriversController.InstallFromCatalog`) — each of those is
+resolving a literal catalog shorthand an operator typed or a fixed catalog id a `KnownDrivers` entry
+names by construction, never an arbitrary already-installed id, so none of them had this bug and none
+were changed.
+
+Also added `tests/DbDataSync.Libraries.Tests/KnownLibrariesTests.cs` (4 fast unit tests, no DB/SDK
+needed) pinning both shapes and the case-insensitive/no-match cases directly against the new method —
+closing the actual coverage gap this doc found: `LibrariesControllerTests`' existing `Curated` assertion
+never caught this because its fixture (`LibrariesAdminApiFactory.LibraryId = "mysql-connector"`) still
+installs under the pre-`9b6eb2c` catalog-id shape, so it never exercised the shape that broke.
+
+**Not applied:** the `describe.serial` / non-idempotent-retry masking problem this doc's own
+investigation ran into (three failures reported, only one real) — that's a Playwright/test-authoring
+question independent of this bug, still open above.
