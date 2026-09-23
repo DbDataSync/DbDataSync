@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useOutletContext, useParams } from 'react-router-dom'
 import { CodeEditor } from '../../components/CodeEditor'
 import { ErrorBanner } from '../../components/ErrorBanner'
@@ -128,6 +129,112 @@ function Statement({ statement }: { statement: PreviewStatement }) {
           testId={`preview-sql-${statement.title.slice(0, 24)}`}
         />
       )}
+
+      {statement.columnExpressions && statement.columnExpressions.length > 0 && (
+        <ColumnExpressionsDialog expressions={statement.columnExpressions} />
+      )}
     </div>
+  )
+}
+
+/**
+ * The generated-expression table, behind a popup rather than open on the page — a mapping with a
+ * hundred-plus columns made an inline list of "Column → expression" the loudest, least readable part
+ * of the whole preview. `.modal.diff` rather than `.modal.wide`: the same "a narrow box makes code
+ * unreadable" reasoning that width already exists for, and an expression can run considerably longer
+ * than a diff line.
+ */
+function ColumnExpressionsDialog({ expressions }: { expressions: { column: string; expression: string }[] }) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn-sm"
+        style={{ alignSelf: 'flex-start' }}
+        onClick={() => setOpen(true)}
+        data-testid="preview-column-expressions-open"
+      >
+        View {expressions.length} generated expression{expressions.length === 1 ? '' : 's'}
+      </button>
+
+      {open && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false) }}
+        >
+          <div
+            className="modal diff"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Generated column expressions"
+            data-testid="preview-column-expressions-dialog"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 16 }}>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="card-title">Generated column expressions</span>
+                <button type="button" className="btn btn-sm" onClick={() => setOpen(false)}>Close</button>
+              </div>
+              <div style={{ overflow: 'auto', maxHeight: '70vh', border: '1px solid var(--row-edge)', borderRadius: 4 }}>
+                <table className="preview-grid" style={{ borderCollapse: 'collapse', width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th
+                        style={{
+                          textAlign: 'left', padding: '5px 9px', whiteSpace: 'nowrap', width: '22%',
+                          font: '600 11.5px var(--ui)', color: 'var(--ink-4)',
+                          borderBottom: '1px solid var(--row-edge)', background: 'var(--sunken)',
+                        }}
+                      >
+                        Column
+                      </th>
+                      <th
+                        style={{
+                          textAlign: 'left', padding: '5px 9px', whiteSpace: 'nowrap',
+                          font: '600 11.5px var(--ui)', color: 'var(--ink-4)',
+                          borderBottom: '1px solid var(--row-edge)', background: 'var(--sunken)',
+                        }}
+                      >
+                        Expression
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expressions.map((e) => (
+                      <tr key={e.column}>
+                        <td
+                          style={{
+                            padding: '4px 9px', whiteSpace: 'nowrap', verticalAlign: 'top',
+                            font: '12px var(--mono)', borderBottom: '1px solid var(--row-edge)', color: 'var(--ink-2)',
+                          }}
+                        >
+                          {e.column}
+                        </td>
+                        <td
+                          style={{
+                            padding: '4px 9px', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                            font: '12px var(--mono)', borderBottom: '1px solid var(--row-edge)', color: 'var(--ink-2)',
+                          }}
+                        >
+                          {e.expression}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

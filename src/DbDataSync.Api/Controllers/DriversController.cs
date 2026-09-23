@@ -165,7 +165,8 @@ public sealed class DriversController(
                     new ConnectionStringKeysPreview(
                         jdbcKeys?.Host ?? "host", jdbcKeys?.Port ?? "port", jdbcKeys?.Database ?? "database",
                         jdbcKeys?.Username ?? "user", jdbcKeys?.Password ?? "password",
-                        jdbcKeys?.ConnectTimeout, jdbcKeys?.IntegratedSecurity)));
+                        jdbcKeys?.ConnectTimeout, jdbcKeys?.IntegratedSecurity)),
+            descriptor.TestQuery);
     }
 
     private static string FormatTypeMapEntry(TypeMapEntryYaml entry)
@@ -408,7 +409,7 @@ public sealed record DriverInterpretationPreview(
     string Id, string DisplayName, string Base,
     DialectPreview Dialect, IReadOnlyDictionary<string, string> TypeMap,
     IReadOnlyList<string> Readers, IReadOnlyList<string> Staging, IReadOnlyList<string> Writers,
-    JdbcPreview? Jdbc);
+    JdbcPreview? Jdbc, string? TestQuery);
 
 public sealed record DialectPreview(
     string QuoteIdentifier, string ParameterPrefix, string RowLimit, string Catalog,

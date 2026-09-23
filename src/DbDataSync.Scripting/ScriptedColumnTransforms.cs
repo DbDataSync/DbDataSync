@@ -26,13 +26,17 @@ public static class ScriptedColumnTransforms
     /// Returns <paramref name="columnMappings"/> unchanged when nothing is bound or nothing is
     /// generated, so the common case allocates nothing and the caller needs no branch.
     /// </summary>
+    /// <param name="log">Called once per column a script actually generated something for, with the
+    /// source column's name and the SQL generated for it — structured rather than a single pre-joined
+    /// line, so a caller with a hundred-plus columns to report (<c>PreviewService</c>'s own "Generated
+    /// column expressions" table) can lay them out as data instead of parsing one back out of text.</param>
     public static IReadOnlyList<ColumnMapping> Apply(
         IReadOnlyList<ColumnMapping> columnMappings,
         ISqlColumnExpression? expression,
         ScriptParameters parameters,
         IScriptDialect dialect,
         IReadOnlyList<ColumnMetadata>? columnMetadata = null,
-        Action<string>? log = null)
+        Action<string, string>? log = null)
     {
         if (expression is null || columnMappings.Count == 0)
             return columnMappings;
@@ -80,7 +84,7 @@ public static class ScriptedColumnTransforms
                 TargetColumn = mapping.TargetColumn,
                 Transform = generated,
             };
-            log?.Invoke($"{mapping.SourceColumn} → {generated}");
+            log?.Invoke(mapping.SourceColumn, generated);
         }
 
         return result ?? columnMappings;

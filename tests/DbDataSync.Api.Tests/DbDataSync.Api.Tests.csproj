@@ -36,6 +36,11 @@
          handle it — a sweep that silently covered fewer readers than it appeared to is the exact
          failure mode the file exists to prevent. -->
     <PackageReference Include="Npgsql" Version="9.0.3" />
+    <!-- JdbcTestQueryTests' own real-host-startup case: DbDataSync.Drivers.Jdbc excludes IKVM's
+         runtime/build/native assets (resolved from libraries/ikvm/lib/ via LibraryRegistry in a real
+         deployment) — a standalone `dotnet test` here needs the real IKVM assets locally too, the same
+         reason DbDataSync.Drivers.Jdbc.Tests carries this identical, un-excluded reference. -->
+    <PackageReference Include="IKVM" Version="8.16.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -47,6 +52,27 @@
     <!-- Reuses FixturePublisher (publishes tests/fixtures/DbDataSync.Drivers.LoaderTestFixture once)
          for CompiledDriverApiFactory, rather than duplicating that dotnet-publish shell-out here. -->
     <ProjectReference Include="..\DbDataSync.Drivers.Loader.Tests\DbDataSync.Drivers.Loader.Tests.csproj" />
+  </ItemGroup>
+
+  <!-- JdbcTestQueryApiFactory's own driver.yaml needs a real pgJDBC jar on disk before the host loads
+       it — the identical mechanism (and reasoning) as DbDataSync.Drivers.Jdbc.Tests' own copy, and kept
+       separate for the same reason that project's own comment gives for its un-excluded Npgsql
+       reference: this project's own real host-startup test shouldn't depend on a sibling test project's
+       build output existing at a guessed relative path. -->
+  <PropertyGroup>
+    <JdbcTestJarVersion>42.7.13</JdbcTestJarVersion>
+    <JdbcTestJarPath>$(BaseIntermediateOutputPath)jdbc-jars\postgresql-$(JdbcTestJarVersion).jar</JdbcTestJarPath>
+  </PropertyGroup>
+
+  <Target Name="DownloadJdbcTestJar" BeforeTargets="BeforeBuild" Condition="!Exists('$(JdbcTestJarPath)')">
+    <MakeDir Directories="$(BaseIntermediateOutputPath)jdbc-jars" />
+    <DownloadFile
+      SourceUrl="https://repo1.maven.org/maven2/org/postgresql/postgresql/$(JdbcTestJarVersion)/postgresql-$(JdbcTestJarVersion).jar"
+      DestinationFolder="$(BaseIntermediateOutputPath)jdbc-jars" />
+  </Target>
+
+  <ItemGroup>
+    <None Include="$(JdbcTestJarPath)" CopyToOutputDirectory="PreserveNewest" Link="postgresql.jar" Visible="false" />
   </ItemGroup>
 
 </Project>

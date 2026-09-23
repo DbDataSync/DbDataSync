@@ -42,9 +42,20 @@ public enum PreviewOrigin
 /// same thing as not showing it.
 /// </para>
 /// </param>
+/// <param name="ColumnExpressions">
+/// Per-column generated SQL from a bound <c>sqlColumnExpression</c> script — present only on the
+/// "Generated column expressions" statement, which carries no runnable <paramref name="Sql"/> of its
+/// own (each entry is a fragment substituted into the real read statement shown elsewhere, not a
+/// statement in itself). A table this wide is shown as a table rather than a line apiece: a mapping
+/// with a hundred-plus columns turned "one <see cref="PreviewStatement"/> per generated expression"
+/// into the loudest, least readable part of the whole preview.
+/// </param>
 public sealed record PreviewStatement(
     string Stage, string Title, string? Sql, PreviewOrigin Origin, string? Detail = null,
-    string? DeclaredParameters = null);
+    string? DeclaredParameters = null,
+    IReadOnlyList<GeneratedColumnExpression>? ColumnExpressions = null);
+
+public sealed record GeneratedColumnExpression(string Column, string Expression);
 
 /// <summary>
 /// Everything a pipeline component is given at run time, so that what it describes is built from the

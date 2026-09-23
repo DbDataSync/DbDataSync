@@ -533,6 +533,10 @@ export interface PreviewStatement {
    * a query itself.
    */
   declaredParameters: string | null
+  /** Per-column generated SQL from a bound sqlColumnExpression script — present only on the
+   * "Generated N column expression(s)" statement, shown as a table rather than one statement per
+   * column (a mapping with a hundred-plus columns made that the loudest part of the whole preview). */
+  columnExpressions?: { column: string; expression: string }[] | null
 }
 
 export interface PreviewReport {
@@ -862,6 +866,7 @@ export interface DriverInterpretationPreview {
   staging: string[]
   writers: string[]
   jdbc: JdbcPreview | null
+  testQuery: string | null
 }
 
 export interface DialectPreview {

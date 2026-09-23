@@ -190,25 +190,23 @@ public sealed class PreviewService(
             var resolved = scriptHost.ResolveBinding<ISqlColumnExpression>(
                 ScriptSlots.SqlColumnExpression, sourceConnection, task, mapping)!.Value;
 
-            var generated = new List<string>();
+            var generated = new List<GeneratedColumnExpression>();
             var result = ScriptedColumnTransforms.Apply(
                 mapping.ColumnMappings, resolved.Script, resolved.Parameters,
                 ScriptDialectAdapter.For(sourceDriver) ?? DialectlessScriptDialect.Instance,
-                sourceColumns, log: generated.Add);
+                sourceColumns, log: (column, expression) => generated.Add(new GeneratedColumnExpression(column, expression)));
 
-            foreach (var expression in generated)
-            {
-                statements.Add(new PreviewStatement(
-                    PreviewStages.SourceRead, $"Generated column expression: {expression}", null,
-                    PreviewOrigin.Script, $"Script '{binding.ScriptName}', bound on the {level.ToString().ToLowerInvariant()}."));
-            }
-
-            if (generated.Count == 0)
-            {
-                statements.Add(new PreviewStatement(
+            var detail = $"Script '{binding.ScriptName}', bound on the {level.ToString().ToLowerInvariant()}.";
+            statements.Add(generated.Count > 0
+                // One statement carrying every column, not one statement per column — a mapping with a
+                // hundred-plus columns used to turn this into the loudest, least readable part of the
+                // whole preview. See PreviewStatement.ColumnExpressions' own doc comment.
+                ? new PreviewStatement(
+                    PreviewStages.SourceRead, $"Generated {generated.Count} column expression(s)", null,
+                    PreviewOrigin.Script, detail, ColumnExpressions: generated)
+                : new PreviewStatement(
                     PreviewStages.SourceRead, "Column-expression script generated nothing for this mapping", null,
-                    PreviewOrigin.Script, $"Script '{binding.ScriptName}', bound on the {level.ToString().ToLowerInvariant()}."));
-            }
+                    PreviewOrigin.Script, detail));
 
             return result;
         }

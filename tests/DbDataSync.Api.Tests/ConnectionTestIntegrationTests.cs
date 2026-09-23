@@ -25,6 +25,9 @@ public sealed class ConnectionTestIntegrationTests(TestApiFactory factory) : ICl
 
     private sealed record Report(bool Succeeded, double ConnectMs, double ProbeMs, string? ServerVersion, string? Error);
     private sealed record Source(string Store, string SecretRef, string EnvironmentVariable, bool RequiresCredential);
+    private sealed record QueryPreviewResultDto(
+        string Source, List<string> Columns, List<List<string?>> Rows, bool Truncated, string? Error);
+    private sealed record ReportWithTestQuery(bool Succeeded, string? Error, QueryPreviewResultDto? TestQueryResult);
 
     private async Task<string> CreateConnectionAsync(int port)
     {
@@ -75,6 +78,35 @@ public sealed class ConnectionTestIntegrationTests(TestApiFactory factory) : ICl
         Assert.False(report!.Succeeded);
         Assert.False(string.IsNullOrWhiteSpace(report.Error));
         Assert.Null(report.ServerVersion);
+    }
+
+    [Fact]
+    public async Task Test_WithAnExplicitTestQuery_RunsItAndReturnsCappedResults()
+    {
+        var name = $"test-conn-{Guid.NewGuid():N}";
+        var response = await _client.PutAsJsonAsync($"/api/connections/{name}", new ConnectionInput
+        {
+            Name = name,
+            DriverType = DriverIds.MsSql,
+            Host = "localhost",
+            Port = 14330,
+            Database = "master",
+            AuthMode = AuthMode.SqlAuth,
+            UserId = "sa",
+            Password = "DbDataSync_Test_Pw1",
+            TestQuery = "SELECT 1 AS one, 2 AS two;",
+        }, JsonOptions);
+        response.EnsureSuccessStatusCode();
+
+        var testResponse = await _client.PostAsync($"/api/connections/{name}/test", null);
+        testResponse.EnsureSuccessStatusCode();
+        var report = await testResponse.Content.ReadFromJsonAsync<ReportWithTestQuery>(JsonOptions);
+
+        Assert.True(report!.Succeeded, report.Error);
+        Assert.NotNull(report.TestQueryResult);
+        Assert.Null(report.TestQueryResult!.Error);
+        Assert.Equal(["one", "two"], report.TestQueryResult.Columns);
+        Assert.Equal([["1", "2"]], report.TestQueryResult.Rows);
     }
 
     [Fact]

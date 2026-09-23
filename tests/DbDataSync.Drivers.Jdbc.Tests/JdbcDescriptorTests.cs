@@ -332,4 +332,70 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
         Assert.Contains(rows, r => (int)r["id"]! == 1 && (string)r["name"]! == "alice");
         Assert.Contains(rows, r => (int)r["id"]! == 2 && (string)r["name"]! == "bob");
     }
+
+    /// <summary>
+    /// A driver.yaml's own testQuery, round-tripped through real YAML text — not a directly-constructed
+    /// JdbcDriverSpec, which is what JdbcConnectionTests' own DefaultTestQuery test uses and which
+    /// skips YAML parsing entirely. Deliberately uses a `::` cast, the everyday punctuation a real
+    /// Postgres-flavoured test query would carry, to catch a YAML scalar being cut short or mis-parsed
+    /// by something a plain `SELECT 1` would never expose.
+    /// </summary>
+    [Fact]
+    public async Task ADriverYamlsOwnTestQuery_ParsesInFull_AndRunsOverARealJdbcConnection()
+    {
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"jdbc-testquery-descriptor-test-{Guid.NewGuid():N}");
+        var filesDir = Path.Combine(repoRoot, "files");
+        Directory.CreateDirectory(filesDir);
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "postgresql.jar"), Path.Combine(filesDir, "postgresql.jar"));
+
+        const string yaml = """
+            id: postgres-via-jdbc-testquery
+            displayName: Postgres (via JDBC)
+            library: ikvm
+            base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc
+            jdbc:
+              driverClass: org.postgresql.Driver
+              driverJarPaths: [postgresql.jar]
+            testQuery: SELECT 1::int AS one, current_database() AS db
+
+            dialect:
+              quoteIdentifier: doubleQuote
+              parameterPrefix: "@"
+              parameterNameIsBare: true
+              rowLimit: limitOffset
+            typeMap:
+              int4: Int32
+            capabilities:
+              readers: []
+              staging: []
+              writers: []
+            """;
+
+        var descriptor = DriverDescriptorReader.Deserialize(yaml);
+        Assert.Equal("SELECT 1::int AS one, current_database() AS db", descriptor.TestQuery);
+
+        var driver = DriverDescriptorReader.BuildDriver(descriptor, new LibraryRegistry(Path.GetTempPath()), repoRoot);
+        var tester = Assert.IsAssignableFrom<IConnectionTester>(driver);
+        Assert.Equal("SELECT 1::int AS one, current_database() AS db", tester.DefaultTestQuery);
+
+        var config = new ConnectionConfig
+        {
+            Name = "jdbc-testquery-descriptor-test",
+            DriverType = "postgres-via-jdbc-testquery",
+            ConnectionString = $"{JdbcTestDatabase.JdbcUrl}{db.DatabaseName}",
+            AuthMode = AuthMode.SqlAuth,
+            UserId = "dbdatasync",
+        };
+        await using var connection = driver.CreateConnection(config, "DbDataSync_Test_Pw1");
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = tester.DefaultTestQuery;
+        await using var reader = await cmd.ExecuteReaderAsync();
+
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(2, reader.FieldCount);
+        Assert.Equal("one", reader.GetName(0));
+        Assert.Equal(1, reader.GetInt32(0));
+    }
 }

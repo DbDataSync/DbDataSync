@@ -78,4 +78,35 @@ public sealed class JdbcConnectionTests(JdbcTestDatabase db) : IClassFixture<Jdb
         Assert.Contains("jdbcurl=", _connection.ConnectionString, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("jdbcdriver=", _connection.ConnectionString, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// A driver.yaml's own testQuery, run over a real JDBC connection exactly the way
+    /// ConnectionsController.Test/ScriptTestService.PreviewTestQueryAsync do — CreateTimedCommand,
+    /// ExecuteReaderAsync, ResultSetSchema — to isolate whether a JDBC-backed connection's test-query
+    /// results ever fail to surface at the ADO layer itself, separate from anything the API/registration
+    /// layer might be doing wrong above it.
+    /// </summary>
+    [Fact]
+    public void DefaultTestQuery_ReadsTheSpecsOwnTestQuery_NotTheGenericFallback()
+    {
+        var withQuery = new JdbcGenericDriver(new JdbcDriverSpec(
+            "jdbc-testquery-test", JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver",
+            [Path.Combine(AppContext.BaseDirectory, "postgresql.jar")],
+            Readers: [], Staging: [], Writers: [], TestQuery: "SELECT 1 AS one, 2 AS two"));
+
+        Assert.Equal("SELECT 1 AS one, 2 AS two", withQuery.DefaultTestQuery);
+    }
+
+    [Fact]
+    public async Task ATestQuery_RunsOverARealJdbcConnection_AndItsRowsAreReadableThroughTheAdoLayer()
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT 1 AS one, 2 AS two";
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(2, reader.FieldCount);
+        Assert.Equal("one", reader.GetName(0));
+        Assert.Equal("two", reader.GetName(1));
+    }
 }

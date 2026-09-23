@@ -1103,7 +1103,7 @@ public sealed class RunExecutor(
             binding.Value.Parameters,
             dialect,
             columnMetadata,
-            log: generated.Add);
+            log: (column, expression) => generated.Add($"{column} → {expression}"));
 
         if (generated.Count > 0)
             Log(runId, LogSeverity.Info,

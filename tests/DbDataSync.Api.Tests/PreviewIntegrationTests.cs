@@ -203,6 +203,17 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         });
 
         var preview = await GetPreviewAsync();
+
+        // One statement carrying every generated column, not one statement per column — the noisy shape
+        // this replaced. Origin/Detail still say where it came from; ColumnExpressions is the table a
+        // popup renders instead of a line per column.
+        var generatedStatement = Assert.Single(preview.Statements, s => s.Origin == "Script" && s.ColumnExpressions is { Count: > 0 });
+        Assert.Equal("Generated 1 column expression(s)", generatedStatement.Title);
+        Assert.Contains(scriptName, generatedStatement.Detail);
+        var entry = Assert.Single(generatedStatement.ColumnExpressions!);
+        Assert.Equal("Name", entry.Column);
+        Assert.Contains("HAS_METADATA:", entry.Expression);
+
         var read = Assert.Single(preview.Statements, s => s.Stage == "Source read" && s.Sql is not null);
         Assert.DoesNotContain("NO_METADATA", read.Sql!);
         // The preview shows the unevaluated expression — CONCAT('HAS_METADATA:', 'Name', ':', 'N') — not
@@ -815,8 +826,10 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         return names;
     }
 
+    private sealed record GeneratedColumnExpressionDto(string Column, string Expression);
     private sealed record PreviewStatementDto(
-        string Stage, string Title, string? Sql, string Origin, string? Detail, string? DeclaredParameters = null);
+        string Stage, string Title, string? Sql, string Origin, string? Detail, string? DeclaredParameters = null,
+        List<GeneratedColumnExpressionDto>? ColumnExpressions = null);
     private sealed record PreviewReportDto(List<PreviewStatementDto> Statements, List<string> Problems);
 
     private async Task<PreviewReportDto> GetPreviewAsync()
