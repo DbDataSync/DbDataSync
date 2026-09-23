@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace DbDataSync.Core.Config;
 
@@ -63,6 +65,27 @@ public sealed class ScriptConfig
     /// <inheritdoc cref="ReplicationTaskConfig.Enabled"/>
     [DefaultValue(true)]
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// SHA-256 of <see cref="EntryType"/> and <see cref="Code"/>-that-was (via <see cref="ScriptDefinition.Code"/>
+    /// at save time), computed once by <c>ConfigRepository.SaveScript</c> and written down here rather
+    /// than recomputed on every read.
+    /// <para>
+    /// This is what lets a long-lived process (the API's <c>ScriptHost</c>) tell "has this script's
+    /// compiled output changed" from a cheap read of this small manifest file alone — without opening
+    /// the code file beside it, let alone rehashing it, on every single pass of every scheduled
+    /// replication. Null for a script saved before this field existed; the cache falls back to treating
+    /// that one script as it always has until its next save fills this in.
+    /// </para>
+    /// </summary>
+    public string? ContentHash { get; set; }
+
+    /// <summary>The one place this hash is computed — see <see cref="ContentHash"/>'s own doc comment.
+    /// Used both there (by <c>ConfigRepository.SaveScript</c>) and by <c>ScriptCompiler</c>'s own
+    /// on-disk compiled-assembly cache, so the two caching layers can never disagree about what a given
+    /// hash means.</summary>
+    public static string ComputeHash(string code, string? entryType) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{entryType}\n{code}"))).ToLowerInvariant();
 }
 
 /// <summary>A script and its code, as one thing, for the API and the compiler.</summary>

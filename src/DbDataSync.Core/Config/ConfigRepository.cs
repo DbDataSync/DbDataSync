@@ -124,6 +124,10 @@ public sealed class ConfigRepository
     {
         ConfigValidation.ValidateName(script.Manifest.Name, nameof(script.Manifest.Name));
 
+        // Computed here, once, rather than on every later read — see ScriptConfig.ContentHash's own
+        // doc comment for why a long-lived process needs this written down instead of rehashed per use.
+        script.Manifest.ContentHash = ScriptConfig.ComputeHash(script.Code, script.Manifest.EntryType);
+
         var manifestPath = ConfigPaths.ScriptManifestFile(_configRoot, script.Manifest.Name);
         var codePath = ConfigPaths.ScriptCodeFile(_configRoot, script.Manifest.Name, script.Manifest.Language);
         Directory.CreateDirectory(ConfigPaths.ScriptsDir(_configRoot));
@@ -145,11 +149,7 @@ public sealed class ConfigRepository
 
     public ScriptDefinition LoadScript(string name)
     {
-        var manifestPath = ConfigPaths.ScriptManifestFile(_configRoot, name);
-        if (!File.Exists(manifestPath))
-            throw new FileNotFoundException($"Script '{name}' was not found.", manifestPath);
-
-        var manifest = YamlConfigSerializer.Deserialize<ScriptConfig>(ReadAllTextAllowingConcurrentReplace(manifestPath));
+        var manifest = LoadScriptManifest(name);
         var codePath = ConfigPaths.ScriptCodeFile(_configRoot, name, manifest.Language);
         return new ScriptDefinition
         {
@@ -158,6 +158,20 @@ public sealed class ConfigRepository
             // compile/validate with a message about the code rather than here with one about the file.
             Code = File.Exists(codePath) ? ReadAllTextAllowingConcurrentReplace(codePath) : "",
         };
+    }
+
+    /// <summary>
+    /// The manifest alone, without touching the code file beside it — the cheap half of
+    /// <see cref="LoadScript"/>. <c>ScriptHost</c>'s per-pass freshness check reads only this: a small
+    /// YAML file carrying <see cref="ScriptConfig.ContentHash"/>, not the code that hash describes.
+    /// </summary>
+    public ScriptConfig LoadScriptManifest(string name)
+    {
+        var manifestPath = ConfigPaths.ScriptManifestFile(_configRoot, name);
+        if (!File.Exists(manifestPath))
+            throw new FileNotFoundException($"Script '{name}' was not found.", manifestPath);
+
+        return YamlConfigSerializer.Deserialize<ScriptConfig>(ReadAllTextAllowingConcurrentReplace(manifestPath));
     }
 
     public IReadOnlyList<string> ListScripts() => ListFileNamesWithoutExtension(ConfigPaths.ScriptsDir(_configRoot));

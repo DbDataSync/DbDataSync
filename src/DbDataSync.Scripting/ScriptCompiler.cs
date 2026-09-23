@@ -1,7 +1,5 @@
 using System.Reflection;
 using System.Runtime.Loader;
-using System.Security.Cryptography;
-using System.Text;
 using DbDataSync.Core.Config;
 using DbDataSync.Scripting.Abstractions;
 using Microsoft.CodeAnalysis;
@@ -176,9 +174,10 @@ public sealed class ScriptCompiler(ScriptCacheDirectory cache)
     }
 
     /// <summary>Keyed on the entry type as well as the code, because changing which type is the entry
-    /// point changes what compiles to — without changing a byte of source.</summary>
-    internal static string HashOf(string code, string entryType) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{entryType}\n{code}"))).ToLowerInvariant();
+    /// point changes what compiles to — without changing a byte of source. Delegates to
+    /// <see cref="ScriptConfig.ComputeHash"/> so this on-disk compiled-assembly cache and
+    /// <c>ScriptHost</c>'s own in-memory one always agree on what a hash means.</summary>
+    internal static string HashOf(string code, string entryType) => ScriptConfig.ComputeHash(code, entryType);
 }
 
 public sealed record ScriptDiagnostic(int Line, int Column, string Message)
