@@ -130,8 +130,20 @@ public sealed class DescriptorDialectYaml
     /// the marker in the rendered SQL text themselves). True for a JDBC-backed engine: a JDBC
     /// <c>PreparedStatement</c> has only ordinal <c>?</c> placeholders, so the command layer itself does
     /// the name→position translation (matching <c>@name</c> markers) and needs the bare name to compare
-    /// against — see phase 165V's Finding 1, the exact bug this flag exists to avoid repeating for a
-    /// descriptor-driven JDBC engine.
+    /// against — see phase 165V's Finding 1.
+    /// <para>
+    /// **Ignored, not just defaulted, for a JDBC-backed <c>base</c>** — <c>JdbcGenericDriver.FromDescriptor</c>
+    /// forces this true regardless of what a <c>driver.yaml</c> sets, because it isn't a real per-driver
+    /// choice: <c>JdbcCommand</c>'s name→position translation always looks up the bare name, for every
+    /// JDBC vendor, unconditionally. Originally left as an opt-in, default-<c>false</c> flag an operator
+    /// had to remember to set — which produced exactly the bug this paragraph now prevents: an
+    /// unsegmented read binds no parameters and never touches this path, so a descriptor-driven JDBC
+    /// driver missing this looked correct until the first bulk load with a segmenting strategy bound a
+    /// range/list parameter and failed with "CommandText references parameter '@segMin' with no matching
+    /// entry in Parameters" — a confusing, several-layers-removed error for what was really a missing
+    /// one-line dialect setting. Still a real field (an ADO.NET-backed descriptor still reads it
+    /// normally); only the JDBC path no longer trusts it.
+    /// </para>
     /// </summary>
     public bool ParameterNameIsBare { get; set; }
 }

@@ -241,6 +241,11 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>, IConn
             ?? throw new NotSupportedException(
                 $"Driver '{descriptor.Id}': base 'JdbcGenericDriver' requires a jdbc block (driverClass, driverJarPaths).");
 
+        // Forced, not read as an operator setting — see DescriptorDialectYaml.ParameterNameIsBare's own
+        // doc comment. JdbcCommand's @name -> ordinal-? translation always needs the bare name; there is
+        // no vendor or descriptor for which false is correct here, so this is never left to a driver.yaml
+        // to get right (or silently get wrong until the first segmented bulk load binds a parameter).
+        descriptor.Dialect.ParameterNameIsBare = true;
         var dialect = new DescriptorDialect(descriptor.Dialect, descriptor.TypeMap);
         var catalog = DescriptorCatalogResolution.Resolve(
             descriptor.Id, descriptor.Dialect.Catalog, descriptor.MetadataQueries?.TableQuery,

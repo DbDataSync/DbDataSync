@@ -240,4 +240,96 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
         Assert.Equal("dbdatasync", preview.Properties["pguser"]);
         Assert.False(preview.Properties.ContainsKey("Host"));
     }
+
+    /// <summary>
+    /// Real bug report: "using a JDBC connector and a bulk load with a segmenting strategy is giving an
+    /// error saying that the minimum segment parameter is missing from the provided parameters." Root
+    /// cause, found via a live repro rather than guessed: <c>JdbcCommand</c>'s name -> ordinal-<c>?</c>
+    /// translation always looks up a <em>bare</em> parameter name, but <see cref="DescriptorDialect"/>
+    /// only renders one if the descriptor's own <c>parameterNameIsBare</c> is <c>true</c> — a flag every
+    /// test above sets explicitly, which is exactly why none of them caught this. An unsegmented read
+    /// binds no parameters and never reaches that code, so the gap is invisible until the first
+    /// segmenting bulk load binds a range parameter (<c>segMin</c>/<c>segMax</c>) and
+    /// <c>JdbcCommand.TranslateParameters</c> looks for the bare name against a <c>DbParameter</c> whose
+    /// <c>ParameterName</c> still carries the <c>@</c> sigil.
+    /// <para>
+    /// Fixed by forcing <c>ParameterNameIsBare</c> true in <see cref="JdbcGenericDriver.FromDescriptor"/>
+    /// regardless of what the yaml says — this descriptor sets it to <c>false</c> explicitly (not just
+    /// omits it) to prove the override, not just a better default, is what's under test.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ASegmentingRead_BindsItsRangeParameters_EvenWhenTheYamlGetsParameterNameIsBareWrong()
+    {
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"jdbc-descriptor-segment-test-{Guid.NewGuid():N}");
+        var filesDir = Path.Combine(repoRoot, "files");
+        Directory.CreateDirectory(filesDir);
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "postgresql.jar"), Path.Combine(filesDir, "postgresql.jar"));
+
+        const string yaml = """
+            id: postgres-via-jdbc-segmented
+            displayName: Postgres (via JDBC, segmented read)
+            library: ikvm
+            base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc
+            jdbc:
+              driverClass: org.postgresql.Driver
+              driverJarPaths: [postgresql.jar]
+            dialect:
+              quoteIdentifier: doubleQuote
+              parameterPrefix: "@"
+              parameterNameIsBare: false
+              rowLimit: limitOffset
+            typeMap:
+              int4: Int32
+              "varchar(n)": { kind: String, length: n, unicode: true }
+            capabilities:
+              readers: [Watermark, BatchReload]
+              staging: []
+              writers: []
+            """;
+
+        var descriptor = DriverDescriptorReader.Deserialize(yaml);
+        var libraries = new LibraryRegistry(Path.GetTempPath());
+        var driver = DriverDescriptorReader.BuildDriver(descriptor, libraries, repoRoot);
+
+        var config = new ConnectionConfig
+        {
+            Name = "jdbc-descriptor-segment-test",
+            DriverType = "postgres-via-jdbc-segmented",
+            ConnectionString = $"{JdbcTestDatabase.JdbcUrl}{db.DatabaseName}",
+            AuthMode = AuthMode.SqlAuth,
+            UserId = "dbdatasync",
+        };
+        await using var connection = driver.CreateConnection(config, "DbDataSync_Test_Pw1");
+        connection.Open();
+
+        var reader = (BatchReloadReader)driver.Readers.Single(r => r.Kind == GenericDriverKinds.BatchReload);
+        var source = new SourceTableRef { ConnectionName = "src", Database = db.DatabaseName, Schema = "public", Table = _tableName };
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "id", TargetColumn = "id" },
+            new() { SourceColumn = "name", TargetColumn = "name" },
+        };
+        var sourceColumns = new List<CachedColumn>
+        {
+            new("id", "int4", false, true, false),
+            new("name", "varchar", false, false, false),
+        };
+        // [1, 3) — both fixture rows (id 1 and 2) fall inside; RangeSegment is what an expanded
+        // AutoSegment bucket becomes, and is exactly what binds a segMin/segMax parameter pair.
+        var segment = new RangeSegment("id", "1", "3");
+        var options = new Dictionary<string, string> { [SegmentSerializer.SegmentOptionKey] = SegmentSerializer.Serialize(segment) };
+
+        var result = await reader.ReadChangesAsync(
+            connection, source, null, ReadIntent.InitialLoad, mappings, "descriptor-segment-test", sourceColumns,
+            options, CancellationToken.None);
+
+        var rows = new List<ChangeRow>();
+        await foreach (var row in result.Rows)
+            rows.Add(row);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => (int)r["id"]! == 1 && (string)r["name"]! == "alice");
+        Assert.Contains(rows, r => (int)r["id"]! == 2 && (string)r["name"]! == "bob");
+    }
 }
