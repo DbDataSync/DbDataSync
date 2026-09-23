@@ -112,3 +112,12 @@ case and never flashes.
   (181N) would show for the same file.
 - The connection's own name/host/port/etc. fields remain visible and editable while this banner is shown.
 - A connection whose driver loads fine shows no banner and behaves exactly as before this phase.
+
+## Closing note, 2026-09-23
+
+Never browser/Playwright-verified — reachable, in a real browser, only through a JDBC-backed
+driver.yaml, which `driver-authoring.spec.ts` deliberately never builds (no jar/`ikvm` fixture in this
+suite). Same root cause as every other JDBC-touching Playwright gap in this repo, tracked once in
+[`follow-up-jdbc-connection-failure-test-coverage-gaps.md`](../../planning/todo/follow-up-jdbc-connection-failure-test-coverage-gaps.md)
+rather than repeated per phase. Not a reason to leave this phase open — the phase itself (types, wiring,
+unit/API-level tests, `tsc -b`/build) is done; this is a named, tracked, bounded gap, not an unknown.

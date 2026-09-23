@@ -87,3 +87,12 @@ by splitting the leftover into its own `connectionStringKeysExtra` field (not em
 - A `driver.yaml` hand-authored with `connectionStringKeys.integratedSecurity` set (a key this form has no
   input for) still round-trips via `jdbcExtra`, confirming 178N's fallback still covers what 179N doesn't
   model.
+
+## Closing note, 2026-09-23
+
+Never browser/Playwright-verified — reachable, in a real browser, only through a JDBC-backed
+driver.yaml, which `driver-authoring.spec.ts` deliberately never builds (no jar/`ikvm` fixture in this
+suite). Same root cause as every other JDBC-touching Playwright gap in this repo, tracked once in
+[`follow-up-jdbc-connection-failure-test-coverage-gaps.md`](../../planning/todo/follow-up-jdbc-connection-failure-test-coverage-gaps.md)
+rather than repeated per phase. Not a reason to leave this phase open — the phase itself (types, wiring,
+unit/API-level tests, `tsc -b`/build) is done; this is a named, tracked, bounded gap, not an unknown.

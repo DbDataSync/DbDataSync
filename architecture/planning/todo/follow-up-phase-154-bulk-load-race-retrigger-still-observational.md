@@ -101,3 +101,22 @@ branch's assertions (`MappingStillLoading`, "still loading") are untouched, and
 `RunExecutorTests.ExecuteWorkerAsync_AManualTriggerWhileStillLoading_FailsCleanly_BeforeAnyConnectionIsOpened`
 still exists and still owns the deterministic proof of the property. **Not proven:** this can only be confirmed
 by CI not showing this test flip between "Expected: Failed / Actual: Succeeded" and green over several runs.
+
+## Recurrence, 2026-09-23 (CI run `35915250548`, job `107364984345`)
+
+The 2026-09-22 fix has not held. `ARaceBetweenAConcurrentReloadAndAMappingsOwnFirstPass_TheLoserFailsCleanly_AndSelfHeals`
+failed again, on a docs-only push (no product code changed by that commit):
+
+```
+Expected every run to succeed, but got:
+09664c27-9982-4a96-9f25-804ac52943e0: Failed — Mapping 'map-1' on 'bf-6ab30be25c1c4db08051ef4c7fc4cec9' is
+still loading — an initial load is in flight and its watermark is not durable yet. This pass will retry
+automatically once the load completes.
+```
+
+at `AssertAllSucceeded` (`BulkLoadIntegrationTests.cs:504`, called from line 272) — a different assertion
+branch than the one the 2026-09-22 fix touched (`map2StillLoading`'s two-outcome check): this one still
+asserts unconditional success and got the same "still loading" race outcome the fix already knows is a
+legitimate, not-a-bug result elsewhere in the same test. Not re-diagnosed or re-fixed in this pass — logged
+so it isn't lost, per this doc's own reason for existing. Still open; the race is real and evidently reaches
+more than the one call site already patched.

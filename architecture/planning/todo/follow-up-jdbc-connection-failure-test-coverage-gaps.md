@@ -71,7 +71,12 @@ browser-level proof — no fixture in this suite opens a real JDBC connection th
 isn't new to 177M — `driver-yaml-authoring-ui.md`'s own retrospective already named the identical gap for
 the JDBC *create* path ("the JDBC create path has no Playwright coverage — needs a real jar plus `ikvm`
 actually installed, neither set up in the test server"). Every JDBC-touching Playwright gap in this repo
-traces back to the same root cause, not three separate ones.
+traces back to the same root cause, not three separate ones — **including all of 179N-182N's own new UI**
+(the `urlTemplate`/connection-string-keys structured editor, the raw-YAML editor mode, the validate/echo
+tool, the broken-driver banner): every one of them is only reachable, in a real browser, through a
+JDBC-backed driver.yaml, and `driver-authoring.spec.ts` deliberately never builds one, for the identical
+reason named here. This doc is the single place that gap is tracked for every phase it touches
+(175M-177M, 179N-182N, and `driver-yaml-authoring-ui.md`'s own JDBC create path) — not restated per phase.
 
 **What's actually missing, concretely**: `playwright.config.ts`'s own scratch repo (what every Web.Tests
 spec's `webServer` runs against) never has `ikvm` installed as a library, and never has a real JDBC jar

@@ -1,18 +1,31 @@
-# Phase 163 — the container image, published to GitHub Container Registry for amd64 and arm64 (built and running in CI; the package is still private)
+# Phase 163 — the container image, published to GitHub Container Registry for amd64 and arm64
 
-**Status, corrected 2026-09-23** (this doc's own title/status line above was stale — checked directly
-against real GitHub state via `gh`, not assumed): `publish-image.yml` **has** run for real, repeatedly,
-across every release cut since (confirmed: releases `35818370642` 2026-09-23T04:26, `35790476802`
-2026-09-22T22:05, and others before them) — `image / build default (arm64)` and `image / build runtime
-(arm64)` both succeed on a native arm64 runner every time, not just amd64. `gh api
-/orgs/DbDataSync/packages/container/dbdatasync` confirms the package exists with **56 versions** as of
-2026-09-23T04:42. So "the workflow has never run" and the arm64 uncertainty in "Not verified" below are
-both resolved, positively — the one item from that section and the "First release checklist" still true is
-the single one named there from the start: **the package's visibility is still `"private"`**, confirmed
-by that same API call. Nobody has done the one manual step (GitHub → org Packages → `dbdatasync` → Package
-settings → Change visibility) yet, which is why `docker pull` still fails for anyone not already signed
-into the org — not a build or CI problem, an un-done checklist item. Stays in `todo/` for exactly that one
-remaining reason, not the ones this doc originally named.
+**Status: done, 2026-09-23.** Checked directly against real GitHub state via `gh`, not assumed:
+`publish-image.yml` has run for real, repeatedly, across every release cut since 2026-09-21 (confirmed:
+releases `35818370642` 2026-09-23T04:26, `35790476802` 2026-09-22T22:05, and others before them) —
+`image / build default (arm64)` and `image / build runtime (arm64)` both succeed on a native arm64 runner
+every time, not just amd64. `gh api /orgs/DbDataSync/packages/container/dbdatasync` confirms the package
+exists, with 56 versions as of 2026-09-23T04:42. Everything this phase built — the Dockerfile version
+stamping, the reusable workflow, the by-digest-push-then-smoke-test-then-tag pipeline, both architectures,
+both variants — is real and working, not merely designed.
+
+What's left is not this phase's own work: it's operational follow-up, each already its own doc, closeable
+independently of this one —
+
+- **The package is still private** — the one manual "First release checklist" step nobody has done yet, so
+  `docker pull` fails for anyone not signed into the org. See
+  `follow-up-phase-163-publish-image-does-not-check-the-package-is-publicly-pullable.md`.
+- **No cleanup** — 56 versions and growing, confirmed real, not hypothetical. See
+  `follow-up-phase-163-ghcr-versions-are-never-cleaned-up.md`.
+- **Runs as root** — `follow-up-phase-163-container-image-runs-as-root.md`.
+- **Docker Hub mirror** — deliberately deferred. `follow-up-phase-163-docker-hub-mirror.md`.
+- **Possible double build of the shared stage per architecture** — now has real per-job timing data to
+  check it against, not yet actually checked. `follow-up-phase-163-publish-image-builds-the-shared-stage-twice-per-architecture.md`.
+- **A running container's own update advice doesn't yet name the image to pull** —
+  `follow-up-phase-163-update-in-a-container-could-name-the-image-to-pull.md`.
+
+None of these six block calling the phase itself done — each is real, bounded, already tracked in its own
+doc, and can close on its own schedule.
 
 ## Why
 
@@ -72,18 +85,19 @@ drift (Hub pull limits, free-tier quotas) are not restated here.
   `download-artifact@v8`, `upload-artifact@v7`, `checkout@v7`) are the latest majors as of today, and their inputs were read from
   each `action.yml` rather than assumed.
 
-## Not verified
+## Verified for real, since (2026-09-23)
 
-- **The workflow has never run.** It cannot be dispatched until it is on `main`, i.e. until a release carries it, and a release
-  is public and irreversible, so it was not rehearsed with a throwaway trigger.
-- **arm64, anywhere.** No arm hardware here and no emulation registered; the arm image has never been built or started. What
-  supports it: the image already ships the arm64 natives (sqlite, libgit2, sodium), and the base images are multi-arch. What does
-  not yet: whether the catalog-cache step resolves DuckDB's arm64 package (`libduckdb.so`) on a native arm64 build. The smoke test
-  will say so on the first run; it can also be run by hand on an arm machine before any release (below).
-- **GHCR behaviour:** that the by-digest push, the provenance attestations and `imagetools create` compose exactly as they did
-  against a local registry; that `type=gha` caching works with these action versions.
-- **Package visibility.** A newly created GHCR package may be **private** until made public in its settings (once). GitHub offers
-  no API to do that; it is a manual step after the first publish. I am not certain whether it can be reverted afterwards.
+Everything this section originally listed as "not verified" has since run for real, on every release cut
+from 2026-09-21 onward — checked directly via `gh`, not assumed:
+
+- **The workflow runs, repeatedly, successfully.** Not a one-off: multiple real releases, every one green.
+- **arm64 builds and passes its smoke test, on a native arm64 runner, every time** — the DuckDB/`libduckdb.so`
+  question this section worried about was a non-issue in practice.
+- **GHCR behaviour is proven**: by-digest push, provenance attestations and `imagetools create` all compose
+  correctly against the real registry — 56 real, correctly-tagged versions exist.
+- **Package visibility really is the one open item this section correctly predicted** — confirmed `private`
+  via `gh api`, exactly as anticipated. See the follow-up doc linked above; GitHub still offers no API to
+  flip it, so it stays a manual, one-time step for whoever does it.
 
 ## First release checklist
 

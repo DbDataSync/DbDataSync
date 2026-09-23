@@ -70,9 +70,15 @@ So the order lives here, and is the one to work through:
 | 3 | **150** — the columnar decision, measured | split out of 038, which shipped the sink the question was waiting on. Needs a real server; its deliverable is numbers, not code |
 | 4 | **155** — `pgoutput`: logical decoding with nothing installed on the source | **gated on a product decision, not on engineering** — last deliberately, because if the answer is "managed Postgres" it should never be built at all. See the phase doc's own "Why this might not be worth building" |
 | 5 | **159K** — apply an update automatically, from the CLI and the web console | **follows 158K, which is done** (it executes 158K's `UpdatePlan` and reuses its `DbDataSync.Updates` library). **Built for Linux and the CLI; not yet verified on real hosts, and Windows is deliberately off** — see its Progress section for exactly what is and is not proven |
-| 6 | **163K** — the container image on GHCR, amd64 and arm64 | **built and running in CI, confirmed via real GitHub state 2026-09-23**: `publish-image.yml` has run on every release since, arm64 included on a native runner, both succeeding every time — 56 real image versions exist on GHCR. Stays in `todo/` for the one thing that's still actually true: the package is still **private** (its own "First release checklist" step 2, never done) |
 
-Updated 2026-09-22 (latest): **165T's two follow-ups are done**, both reported against the commit that first
+Updated 2026-09-23 (latest): **163K is done.** Confirmed via real GitHub state (`gh`, not assumed):
+`publish-image.yml` has run on every release since 2026-09-21, arm64 included on a native runner, every
+run succeeding — 56 real image versions exist on GHCR. What's left (the package is still private, no
+cleanup, runs as root, Docker Hub mirror, a possible double build, update-in-a-container's own advice) is
+six already-filed follow-up docs, none of which block calling this phase itself done — see
+`architecture/implementation/done/phase-163K-container-image-on-ghcr.md`.
+
+Updated 2026-09-22 (previously latest): **165T's two follow-ups are done**, both reported against the commit that first
 fixed them. The Admin config screen now says when a key it calls "file"-sourced is **overridden by an
 environment variable or a command-line flag** — `DbDataSyncHost.InsertConfigFile` inserts the file provider
 immediately before the environment one, so both outrank it, and until now a save on such a key wrote the file,
@@ -884,6 +890,37 @@ that let phase 134's items go unseen for a full session's worth of unrelated wor
 reason, not only while working on a new phase in the same area — and finding a stated follow-up that
 is still valid is the moment to extract it, the same as if it had just been written. Leaving it for
 whoever reads that doc next is how it gets missed again.
+
+## A remaining gap is grounds for a follow-up doc, never grounds to leave the phase open
+
+Adopted 2026-09-23, after the exact failure the section above already exists to prevent happened again,
+in a new shape. An agent auditing every doc in `todo/` for closure correctly found that several phases
+(177M, and separately 179N-182N) had real, nameable, bounded gaps — a specific rendering path with no
+browser test, a whole authoring surface with no Playwright coverage because no JDBC test fixture exists.
+It then used those gaps as the reason to leave the **whole phase** sitting in `todo/`, indefinitely,
+rather than doing what this file already told it to do: write the follow-up doc, name the gap in the
+phase's own retrospective, and `git mv` the phase to `done/` in the same pass. Half of the existing rule
+got followed (the gap got written down somewhere) and half didn't (the phase never closed) — which is a
+new, quieter version of the identical problem phase 134's own history names above: real information about
+outstanding work, sitting in a place this folder's own build-order and status conventions can't see it,
+because a `todo/` entry reads as "not done" to everyone downstream, not as "done except for this one
+tracked thing."
+
+**The test is not "does every edge case have dedicated automated coverage forever."** It is exactly what
+the Workflow section above already says: implemented, verified where called for, committed. A named,
+bounded gap — one specific untested rendering path, one specific environment nobody has run it against
+yet, one piece of coverage blocked on a fixture that doesn't exist — is precisely what a follow-up doc is
+*for*. It is never, by itself, a reason to withhold the `git mv`. If a session's own audit of the
+`todo/` folder finds a phase that is otherwise done except for such a gap, the correct output of that
+audit is **both** artifacts in the same pass: the follow-up doc *and* the phase moved to `done/` with a
+retrospective pointing at it — not a report recommending the phase "stay in todo/, pending" and stopping
+there. A recommendation to leave something in `todo/` for a reason a follow-up doc would fully capture is
+itself the bug this section exists to name.
+
+The same applies to a stale phase doc whose own status line already says "Built"/"Done" while the file
+still physically sits in `todo/` (found the same day: phases 167V through 182N, several genuinely
+complete, none moved) — that mismatch is exactly what a doc reader can no longer trust once it exists,
+and closing it is not optional cleanup, it's finishing the phase.
 
 Adopted 2026-09-14, for a problem this project ran into directly: a phase big enough to span more than
 one working session (a large rename, a schema change) used to mean either one session blocking for

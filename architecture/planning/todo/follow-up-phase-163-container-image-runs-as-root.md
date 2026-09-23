@@ -1,6 +1,6 @@
 # The published container image runs as root
 
-**Found** 2026-09-21, while verifying phase 163 (`architecture/implementation/todo/phase-163K-container-image-on-ghcr.md`). It was true before
+**Found** 2026-09-21, while verifying phase 163 (`architecture/implementation/done/phase-163K-container-image-on-ghcr.md`). It was true before
 the image was published; publishing it makes it something other people run.
 
 ## What is true

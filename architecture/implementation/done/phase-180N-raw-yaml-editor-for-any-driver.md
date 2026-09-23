@@ -83,3 +83,12 @@ risk automatically.
 - Editing in Raw mode and saving persists the literal text, unchanged by any structured re-derivation.
 - Switching Raw → Structured on a file that would lose information shows the confirm prompt; switching on
   one that round-trips cleanly does not.
+
+## Closing note, 2026-09-23
+
+Never browser/Playwright-verified — reachable, in a real browser, only through a JDBC-backed
+driver.yaml, which `driver-authoring.spec.ts` deliberately never builds (no jar/`ikvm` fixture in this
+suite). Same root cause as every other JDBC-touching Playwright gap in this repo, tracked once in
+[`follow-up-jdbc-connection-failure-test-coverage-gaps.md`](../../planning/todo/follow-up-jdbc-connection-failure-test-coverage-gaps.md)
+rather than repeated per phase. Not a reason to leave this phase open — the phase itself (types, wiring,
+unit/API-level tests, `tsc -b`/build) is done; this is a named, tracked, bounded gap, not an unknown.
