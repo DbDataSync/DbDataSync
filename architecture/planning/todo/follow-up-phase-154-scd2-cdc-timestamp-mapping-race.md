@@ -142,6 +142,29 @@ distinct mapping points) rather than betting a delay is long enough, on this run
 CI stays green on this class over several runs — that's still the thing to watch, and if `ScanUntilPastAsync` itself times out
 often, that's new information about the real granularity worth its own follow-up.
 
+## 2026-09-23: three more real recurrences in one day, two more fixes — still not closeable
+
+Checked directly against real CI run history (`gh run list`/`gh run view`), not assumed from commit messages:
+
+- **~05:18**, run before `7fca259`: `ScanUntilPastAsync`'s own 30s window was exceeded — a timeout, not the
+  identical-mapped-time bug this doc's fixes address — on an unrelated docs-only push. The very next push
+  (no code change) went green. Logged in the flake catalogue, not acted on here per its own commit message.
+- **17:40**, run `35896673883`: `APassWithDuplicateAndSingletonKeys_...` failed again —
+  `System.TimeoutException: cdc.lsn_time_mapping did not record a transaction ... CDC scan errors: 1 (last:
+  Another connection with session ID 79 is already running 'sp_replcmds' for Change Data Capture ...)`.
+- **18:24**, run `35901453430`: the identical test, identical failure shape, no `sp_replcmds` contention
+  logged this time (`CDC scan errors: 0`) but still no new mapping point within the 90s/777-attempt window.
+
+Two more fixes landed the same day, in order: `6572bd9` ("Widen `ScanUntilPastAsync`'s deadline and sharpen
+its diagnostics, not guess again") and `4916d9a` ("Stop `ScanUntilPastAsync` from hammering its own
+dependency every 100ms") — the second directly targets the `sp_replcmds` contention the 17:40 failure's own
+error message named: polling every 100ms was itself part of what was contending for the capture job's lock.
+
+**Since `4916d9a`**: 2 consecutive green `dotnet-integration` runs (`35904228990`, `35907644383`), confirmed
+via `gh run view`, not assumed. Real progress, not yet this doc's own "several consecutive runs" bar —
+three distinct failure shapes surfaced in one day is exactly the reason not to call this closed on two
+green runs. Stays open; next recurrence (or its continued absence) is the thing to watch.
+
 ## `ScanUntilPastAsync` itself timed out (2026-09-23, run `35854242228`) — widened, not re-guessed
 
 `ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid` failed with `ScanUntilPastAsync`'s own

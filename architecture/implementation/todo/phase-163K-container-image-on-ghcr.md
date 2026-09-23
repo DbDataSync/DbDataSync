@@ -1,8 +1,18 @@
-# Phase 163 — the container image, published to GitHub Container Registry for amd64 and arm64 (implemented; not yet run in CI)
+# Phase 163 — the container image, published to GitHub Container Registry for amd64 and arm64 (built and running in CI; the package is still private)
 
-**Status**: built and verified everywhere it can be without GitHub. It stays in `todo/` — as phases 127 and 158 did — until the
-one thing it cannot prove alone happens: `publish-image.yml` running for real, on a release, on both a native amd64 and a native
-arm64 runner. See "Not verified" and "First release checklist."
+**Status, corrected 2026-09-23** (this doc's own title/status line above was stale — checked directly
+against real GitHub state via `gh`, not assumed): `publish-image.yml` **has** run for real, repeatedly,
+across every release cut since (confirmed: releases `35818370642` 2026-09-23T04:26, `35790476802`
+2026-09-22T22:05, and others before them) — `image / build default (arm64)` and `image / build runtime
+(arm64)` both succeed on a native arm64 runner every time, not just amd64. `gh api
+/orgs/DbDataSync/packages/container/dbdatasync` confirms the package exists with **56 versions** as of
+2026-09-23T04:42. So "the workflow has never run" and the arm64 uncertainty in "Not verified" below are
+both resolved, positively — the one item from that section and the "First release checklist" still true is
+the single one named there from the start: **the package's visibility is still `"private"`**, confirmed
+by that same API call. Nobody has done the one manual step (GitHub → org Packages → `dbdatasync` → Package
+settings → Change visibility) yet, which is why `docker pull` still fails for anyone not already signed
+into the org — not a build or CI problem, an un-done checklist item. Stays in `todo/` for exactly that one
+remaining reason, not the ones this doc originally named.
 
 ## Why
 

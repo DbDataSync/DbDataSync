@@ -36,3 +36,21 @@ unlike Postgres/MsSql/MySql/Oracle's own compiled drivers.
   hand-written path is retired, do these move to constructing one through `DriverDescriptorReader.BuildDriver`
   instead (closer to how an operator would actually reach it), or stay as a lower-level unit check
   regardless of which path ships?
+
+## Resolved, 2026-09-23 — there was never a real dual-path choice to make
+
+Checked directly: `JdbcDialect.Instance`/`JdbcCatalog.Instance` (hand-constructed) are used **only** by
+`DbDataSync.Drivers.Jdbc.Tests` — every one of `JdbcReaderParityTests`, `JdbcCatalogTests`,
+`JdbcConnectionTests`, `JdbcWriterParityTests`, `JdbcUrlTemplateTests`, `JdbcMultipleJarsTests`,
+`JdbcChangeDatabaseTests`, `JdbcSqlExceptionTests` — as deliberate low-level unit scaffolding. No
+production registration path (`KnownDrivers`, `DriverLoader`, the driver-authoring UI phases 178N-182N)
+ever hand-constructs a `JdbcGenericDriver`; the only way an operator can actually stand one up is a
+`driver.yaml` with `base: JdbcGenericDriver`, through the descriptor path phase 168V built. `JdbcCatalog`
+itself isn't even a competing mechanism — it's the descriptor path's own default catalog
+(`JdbcGenericDriver.FromDescriptor`'s `@default: JdbcCatalog.Instance`), reused, not duplicated.
+
+So this doc's own question answers itself: the hand-written path was never a second, competing way to
+*ship* a JDBC engine — it's test scaffolding that happens to construct the same types the descriptor path
+also uses internally. Nothing to retire (there's no operator-facing path to retire), and the tests stay
+exactly as they are (a lower-level check, deliberately below the descriptor layer, per their own original
+design) — this doc's last open question, resolved in its "stay" branch.

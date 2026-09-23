@@ -20,3 +20,13 @@
 - **Provenance attestations** are on (buildx default for `push-by-digest` outputs). They make every per-arch digest an index with an
   `unknown/unknown` entry; `create-tags.sh` tolerates that (tested), but a future change to how attestations are attached could change what
   `imagetools inspect --format` returns. `tools/docker/test-create-tags.sh` is the check to re-run when the action versions move.
+
+## No longer purely theoretical, 2026-09-23
+
+This doc's own premise ("nothing has run yet, so none of this is measured") is now out of date — the
+workflow has run repeatedly on real releases (see `phase-163K`'s corrected status). Real per-job timings
+exist to check this against (e.g. one real run: `build default (amd64)` 13m30s, `build runtime (arm64)`
+7m11s, `build default (arm64)` 12m22s, `build runtime (amd64)` 7m59s), but actually confirming whether the
+shared stage is being rebuilt redundantly needs comparing BuildKit's own cache-hit/miss logs across the two
+per-architecture builds of the same variant — not done here, just flagging that the data to check this
+against now exists where it didn't before.

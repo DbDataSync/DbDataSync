@@ -1,7 +1,7 @@
 # Phase 172V — JDBC write support: transactions are the only real blocker
 
 **Status**: Built. See Retrospective.
-**Plan reference**: `architecture/planning/todo/follow-up-phase-168-hand-written-jdbc-path-vs-descriptor.md`
+**Plan reference**: `architecture/planning/done/follow-up-phase-168-hand-written-jdbc-path-vs-descriptor.md`
 (open question 4 there — "how much writer symmetry to preserve" — this phase answers it directly),
 `architecture/implementation/done/phase-165V-jdbc-reader-spike-ikvm-postgres.md` (the "reader first, a
 writer stays possible" decision this phase carries out the second half of).

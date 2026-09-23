@@ -31,3 +31,13 @@ no-op check that would catch a later flip back to private.
   tested — nothing has been published yet.
 - Whether a package created by a workflow in a repository that is public defaults to public for that organisation is a GitHub setting
   I have not checked; if it does, this check is a pure safety net.
+
+## Confirmed real, 2026-09-23
+
+Not a hypothetical any more. `gh api /orgs/DbDataSync/packages/container/dbdatasync` against the real
+package: `"visibility":"private"`, `"version_count":56` — real releases have been publishing to it since
+2026-09-21 and nobody has done the one manual step yet. This is now the single concrete blocker on an
+operator actually being able to `docker pull` a released image at all (`docs/install.md`'s own instructions
+fail for anyone not signed into the org). The check this doc proposes hasn't been built either — worth
+doing both: flip the package public once, and add the check so a future accidental re-privatization is
+caught loudly instead of silently breaking every install.

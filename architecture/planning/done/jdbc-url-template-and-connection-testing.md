@@ -322,7 +322,7 @@ mechanics, then the shared backend surface, then the frontend that shows it:
   `JdbcDriverSpec`/`JdbcGenericDriver`/`JdbcProviderFactory`/`JdbcConnection` sections.
 - `architecture/implementation/done/phase-176M-connection-test-preview-and-diagnostics-backend.md` — this
   doc's connection-preview and exception-handling sections.
-- `architecture/implementation/todo/phase-177M-connection-test-preview-frontend.md` — surfacing 176M's new
+- `architecture/implementation/done/phase-177M-connection-test-preview-frontend.md` — surfacing 176M's new
   fields in the web console.
 
 ## Closed out, 2026-09-23

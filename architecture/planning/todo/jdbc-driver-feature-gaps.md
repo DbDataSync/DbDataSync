@@ -103,7 +103,7 @@ unused, since phase 165V.
 
 ## Retiring the hand-written `JdbcDialect`/`JdbcCatalog` path
 
-Already its own doc: `architecture/planning/todo/follow-up-phase-168-hand-written-jdbc-path-vs-descriptor.md`.
+Already its own doc: `architecture/planning/done/follow-up-phase-168-hand-written-jdbc-path-vs-descriptor.md`.
 Not duplicated here — flagged only so this survey doesn't look like it missed it.
 
 ## No change-tracking strategy comes free (not a gap to close — a permanent characteristic)

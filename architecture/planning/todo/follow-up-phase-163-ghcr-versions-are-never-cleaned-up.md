@@ -29,3 +29,11 @@ finding a version is hard, or if the repository ever goes private (then storage 
   the same way. That argues for A only.
 - Deleting a version that is a *member* of a still-tagged index would break that index: any cleanup has to treat an index's children as
   referenced, not untagged. The API does not obviously do that for you — verify against a scratch package before running on the real one.
+
+## Confirmed real, 2026-09-23
+
+`gh api /orgs/DbDataSync/packages/container/dbdatasync` shows **56 versions** already, accumulated since the
+package's creation on 2026-09-21 — every release and its multi-arch/multi-variant builds add several. This
+is no longer a theoretical future problem; it's actively growing today with no cleanup at all. Worth
+prioritizing accordingly once the package is public (see the sibling visibility follow-up) — a private
+package accumulating cruft costs nothing anyone can see yet, but a public one will.
