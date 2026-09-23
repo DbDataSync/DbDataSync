@@ -67,6 +67,7 @@ it names now has a doc with a diagnosed cause and a fix shape:
 | Event Log write denial | [Event Log](follow-up-event-log-tests-guard-registration-but-not-the-write.md) | guard the write; skip unelevated | write guarded; the unelevated-skip policy question is explicitly left open |
 | `UpdateConfirmationServiceTests` deadline | — | **done** (`c66b834`) | done |
 | `RunnerStateEndpointTests` empty logs | [GetLogs](follow-up-getlogs-flush-does-not-guarantee-read-your-writes.md) | serialize `LogWriter.Flush` | applied |
+| `MsSqlChangeTrackingConsistencyTests.ConcurrentDeletes…` deadlock (new, 2026-09-23) | [CI-is-red catalogue](follow-up-ci-is-red-on-most-pushes-from-unrelated-flaky-tests.md)'s own new entry | not a retry — `SET DEADLOCK_PRIORITY LOW` on the test's own background delete loop, so SQL Server's deadlock monitor always kills that disposable session instead of the reader under test; the loop already treated any `SqlException` as "done, nothing to report," so this makes an already-handled outcome the only one that can happen | applied, unproven over multiple CI runs |
 
 Every row now has a fix in place — see each doc's own "Applied" section for what changed and what's still
 unproven. What closes this doc per its own "How to verify when closed" is what hasn't happened yet: several

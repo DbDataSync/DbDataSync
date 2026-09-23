@@ -81,10 +81,23 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
         ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = _tableName,
     };
 
-    /// <summary>Deletes in batches for as long as the reader is streaming, on its own connection.</summary>
+    /// <summary>
+    /// Deletes in batches for as long as the reader is streaming, on its own connection.
+    /// <para>
+    /// <c>SET DEADLOCK_PRIORITY LOW</c> makes this session always the one SQL Server's deadlock monitor
+    /// kills when this loop and the reader's own scan genuinely deadlock against each other — a real,
+    /// structural resolution of which side is expendable, not a retry or a sleep. This loop is disposable
+    /// background load with nowhere else to report a failure; the reader is the thing under test, and the
+    /// catch below already treats any <see cref="SqlException"/> here (deadlock victim or otherwise) as
+    /// "done, nothing to report" — so being the side that's always chosen just turns an occasional
+    /// test-crashing race (the reader could be picked instead, with no equivalent catch around it) into
+    /// the outcome this method was already written to handle silently every time.
+    /// </para>
+    /// </summary>
     private async Task DeleteConcurrentlyAsync(CancellationToken cancellationToken)
     {
         await using var deleter = db.OpenConnection();
+        await ExecuteAsync(deleter, "SET DEADLOCK_PRIORITY LOW;");
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -93,7 +106,8 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
             }
             catch (SqlException)
             {
-                return; // the table ran dry or the test finished; nothing to report
+                return; // the table ran dry, this session was the deadlock victim, or the test finished —
+                        // nothing here needs reporting; see this method's own doc comment.
             }
         }
     }
