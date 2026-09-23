@@ -741,6 +741,15 @@ export interface ConnectionTestReport {
    * or the driver has no required library), or the test itself failed.
    */
   libraryWarning: string | null
+  /** Phase 176M: the resolved ADO.NET-shaped connection string actually attempted, redacted server-side
+   * — populated for a driver that implements the connection-preview capability (every generic/descriptor
+   * driver today), null for one that doesn't (every hand-written built-in: MsSql/Postgres/MySql/Oracle). */
+  resolvedConnectionString: string | null
+  /** The resolved JDBC URL, redacted — null for a non-JDBC driver. */
+  jdbcUri: string | null
+  /** Whatever reached the driver outside the connection string/JDBC URL (JDBC's own property bag), each
+   * value redacted — empty or absent for every non-JDBC driver today. */
+  outsideProperties: Record<string, string> | null
 }
 
 /** Phase 109j item 4's result — a real, connection-scoped check run by a spawned child process, so it

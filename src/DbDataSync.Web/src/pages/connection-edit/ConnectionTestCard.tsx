@@ -66,7 +66,51 @@ function TestResult({ report }: { report: ConnectionTestReport }) {
           {report.libraryWarning}
         </span>
       )}
+      <ResolvedConnectionDetails report={report} />
     </div>
+  )
+}
+
+/**
+ * Phase 177M: what phase 176M's `PreviewConnection` actually resolved and attempted — most valuable on
+ * a failed test, exactly when `report.error` is already shown above. A `<details>` disclosure, not a new
+ * always-open block: this is diagnostic detail, not the headline reachable/unreachable status the card
+ * leads with, and this page has no existing collapsible pattern of its own to match instead.
+ */
+function ResolvedConnectionDetails({ report }: { report: ConnectionTestReport }) {
+  if (!report.resolvedConnectionString) return null
+  const properties = report.outsideProperties ? Object.entries(report.outsideProperties) : []
+
+  return (
+    <details data-testid="connection-resolved-details">
+      <summary className="dim" style={{ cursor: 'pointer' }}>What was actually resolved and attempted</summary>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+        <div>
+          <div className="card-note">Connection string</div>
+          <span className="mono" style={{ fontSize: 11.5, wordBreak: 'break-all' }} data-testid="connection-resolved-string">
+            {report.resolvedConnectionString}
+          </span>
+        </div>
+        {report.jdbcUri && (
+          <div>
+            <div className="card-note">JDBC URI</div>
+            <span className="mono" style={{ fontSize: 11.5, wordBreak: 'break-all' }} data-testid="connection-resolved-jdbc-uri">
+              {report.jdbcUri}
+            </span>
+          </div>
+        )}
+        {properties.length > 0 && (
+          <div>
+            <div className="card-note">Properties</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }} data-testid="connection-resolved-properties">
+              {properties.map(([key, value]) => (
+                <span key={key} className="mono" style={{ fontSize: 11.5 }}>{key}={value}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
   )
 }
 

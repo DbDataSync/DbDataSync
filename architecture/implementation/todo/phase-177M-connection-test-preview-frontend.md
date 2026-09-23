@@ -1,6 +1,12 @@
 # Phase 177M — Show the resolved connection string and JDBC URI in the console
 
-**Status**: Not started — design only.
+**Status**: Done, 2026-09-22. Types extended, `ConnectionTestCard` gained the disclosure, verified in a
+real browser against a real MySQL server through `mysql.generic` (the only preview-capable driver
+reachable in this test environment — every hand-written built-in doesn't implement
+`IConnectionPreviewer`), redaction confirmed rendering, graceful absence confirmed for a non-preview
+driver (MsSql, via the full `golden-path.spec.ts` run). The JDBC-specific case (`jdbcUri` populated, a
+rejected-URL failure) has no browser-level proof — no fixture in this suite opens a real JDBC connection
+through the console, the same gap phases 175M/176M already named.
 **Plan reference**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md` (full
 rationale). **Depends on phase 176M** — this phase only renders fields `ConnectionTestReport` doesn't carry
 yet.
@@ -42,14 +48,37 @@ whole point of adding them server-side was for an operator to see what actually 
   flow, if one exists — check `tests/` for existing connection-test E2E coverage before deciding whether a
   new spec or an extended assertion is the right shape.
 
+## What changed from the design, found building it
+
+- **No existing collapsible pattern to reuse** — checked, per the design's own instruction, before
+  picking one: `connection-edit/` has exactly one component file (`ConnectionTestCard.tsx` itself) and
+  this app has zero existing `<details>` usage anywhere. Used a plain native `<details>`/`<summary>` —
+  the design's own named fallback, not a new bespoke toggle component.
+- **`ConnectionsPage.tsx` confirmed unchanged, not assumed** — its `Reachability` component
+  (`ConnectionsPage.tsx:84`) renders only a dot plus "reachable · Nms"/"unreachable", never
+  `report.error` or anything richer, so the design's own conditional ("unless it already renders more
+  than a pass/fail summary") resolved to no change there.
+- **No existing E2E coverage of the "Last test" card allowed simple extension** — checked; the closest
+  candidate (`golden-path.spec.ts`'s test 13) only ever exercises MsSql, which doesn't implement
+  `IConnectionPreviewer` at all, so extending it could only prove graceful absence, not the fields
+  actually rendering. Added a new, self-contained spec (`connection-test-preview.spec.ts`) instead — it
+  installs `mysql.generic` itself (doesn't depend on `admin-drivers-libraries.spec.ts` having already run
+  in the same invocation) and tests a real connection against the real MySQL container
+  (`docker-compose.yml`, port 13306) to get a driver that actually implements the preview capability.
+
 ## How to verify
 
 - A failed test against a connection whose URL the driver rejects (phase 175M's `acceptsURL` check) shows
-  the resolved connection string/JDBC URI in the card, not just the bare error string — confirming the
-  diagnostic value this whole design chain exists to deliver actually reaches an operator's screen.
+  the resolved connection string/JDBC URI in the card, not just the bare error string — **not covered**:
+  needs a real JDBC connection through the console, which has no fixture in this test suite (same gap
+  phases 175M/176M already named).
 - The redacted marker (not the real password) is what renders, confirmed against a connection using
-  `AuthMode.SqlAuth` with a real credential configured.
-- `outsideProperties` renders nothing (no empty section, no stray heading) when the map is empty or absent,
-  for every non-JDBC driver's test result.
-- Run this against a real instance in a browser before calling it done — this is a UI change, and the task
-  guidance is explicit that type-checking/build passing is not the same as confirming the feature works.
+  `AuthMode.SqlAuth` with a real credential configured — `connection-test-preview.spec.ts`, against a real
+  MySQL server, screenshot at `screenshots/connection-test-preview/resolved-connection-details.png`.
+- `outsideProperties` renders nothing (no empty section, no stray heading) when the map is empty or absent
+  — same spec asserts `connection-resolved-jdbc-uri`/`connection-resolved-properties` have zero count for
+  the MySQL (non-JDBC) case; the whole disclosure itself renders nothing for a non-preview driver
+  (MsSql), confirmed via the full `golden-path.spec.ts` run (45/45 passed) and its own `16-connection-test.png`.
+- Run this against a real instance in a browser before calling it done — done: both the new spec and the
+  full `golden-path.spec.ts` ran against the real webServer + real database containers, not just
+  type-checked.
