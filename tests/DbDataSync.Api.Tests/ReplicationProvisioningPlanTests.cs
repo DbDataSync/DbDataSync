@@ -5,7 +5,10 @@ using DbDataSync.Api.Auth;
 using DbDataSync.Api.Services;
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
+using DbDataSync.Core.Sql;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Generic;
+using DbDataSync.Drivers.MsSql;
 using LibGit2Sharp;
 using Microsoft.AspNetCore.Http;
 using Xunit;
@@ -481,14 +484,14 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
     // touches `currentUser` even when it does exercise that path (nothing to rename, nothing to cache).
     // `CreateServiceWithSideEffects` below is the one test that needs those effects to actually happen.
     private ProvisioningService CreateService(FakeConnectionFactory factory) =>
-        new(_config, factory, currentUser: null!, new MappingColumnReader(new UnusedColumnCatalog()));
+        new(_config, factory, currentUser: null!, new MappingColumnReader(new UnusedColumnCatalog()), new DriverRegistry());
 
     private ProvisioningService CreateServiceWithSideEffects(FakeConnectionFactory factory) =>
         new(_config, factory,
             new CurrentUser(
                 new HttpContextAccessor(), new AuthOptions(),
                 new PasskeyOptions { RelyingPartyId = "localhost", RelyingPartyName = "DbDataSync", Origins = new HashSet<string>() }),
-            new MappingColumnReader(new FakeColumnCatalog()));
+            new MappingColumnReader(new FakeColumnCatalog()), new DriverRegistry());
 
     private sealed class UnusedColumnCatalog : IColumnCatalog
     {
@@ -524,9 +527,12 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
     /// only the plan(s) it cares about. <see cref="DriverIds.MsSql"/> throughout — never
     /// exercised for its real behaviour here, only so <c>ResolveDialect</c> and the column-building
     /// helpers <see cref="DbDataSync.Api.Services.ProvisioningService"/> already runs for real have a
-    /// dialect to translate through.</summary>
+    /// dialect to translate through. <see cref="IDialectProvider"/> for the same reason
+    /// <c>GenericDriverBase</c> implements it on every real driver — <c>ResolveDialect</c> resolves
+    /// through that interface now, not a driver-type string switch, so a fake standing in for "a real
+    /// driver" has to look like one on this point too.</summary>
     private sealed class FakeProvisioningDriver(Func<ProvisioningRequest, ProvisioningPlan> planFactory)
-        : IDriver, IProvisioner
+        : IDriver, IProvisioner, IDialectProvider
     {
         private static readonly IReadOnlyList<ColumnMetadata> DefaultColumns =
             [new ColumnMetadata("Id", "int", false, true, false)];
@@ -535,6 +541,7 @@ public sealed class ReplicationProvisioningPlanTests : IDisposable
         public IReadOnlyList<IChangeReader> Readers { get; } = [];
         public IReadOnlyList<IStagingProvider> StagingProviders { get; } = [];
         public IReadOnlyList<IChangeWriter> Writers { get; } = [];
+        public SqlDialect Dialect => MsSqlDialect.Instance;
 
         public IReadOnlyList<string> SupportedActions { get; } =
         [

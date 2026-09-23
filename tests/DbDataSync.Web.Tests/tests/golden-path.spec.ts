@@ -139,6 +139,35 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await expect(page.getByTestId('script-binding-rowTransform')).toBeVisible()
   })
 
+  test('04c - the pipeline is configured deliberately, not trusted from an un-reviewed default', async ({ page }) => {
+    // A new replication has no endpoints yet at creation, so it starts on the generic, engine-neutral
+    // Kinds every driver can offer with no extra configuration (BatchReload/StagingTable/DeleteInsert —
+    // see ReplicationsPage's own comment) rather than a driver-specific guess. That default is meant to
+    // be reviewed and changed here, exactly like a real operator setting up a real MsSql-to-MsSql
+    // incremental sync would — the rest of this suite (Change Tracking's own snapshot-isolation option,
+    // an upsert-only vs. reconciling writer) exercises real MsSql-specific behaviour on purpose, so it
+    // is chosen explicitly rather than relied on by accident.
+    await page.goto(`/replications/${REPLICATION_NAME}`)
+    await page.getByTestId('tab-overview').click()
+    await page.getByTestId('overview-tab-pipeline').click()
+
+    await expect(page.getByTestId('reader-kind-select')).toHaveValue('BatchReload', { timeout: 15_000 })
+    await page.getByTestId('reader-kind-select').selectOption('MsSqlChangeTracking')
+
+    await page.getByTestId('stage-writer').click()
+    await expect(page.getByTestId('writer-kind-select')).toHaveValue('DeleteInsert')
+    await page.getByTestId('writer-kind-select').selectOption('MsSqlMerge')
+
+    await page.getByTestId('save-settings-button').click()
+
+    await page.reload()
+    await page.getByTestId('tab-overview').click()
+    await page.getByTestId('overview-tab-pipeline').click()
+    await expect(page.getByTestId('reader-kind-select')).toHaveValue('MsSqlChangeTracking', { timeout: 15_000 })
+    await page.getByTestId('stage-writer').click()
+    await expect(page.getByTestId('writer-kind-select')).toHaveValue('MsSqlMerge')
+  })
+
   test('05 - add a table mapping that inherits the replication\'s endpoints', async ({ page }) => {
     await page.goto(`/replications/${REPLICATION_NAME}`)
     await page.getByTestId('tab-mappings').click()
@@ -254,9 +283,12 @@ test.describe.serial('golden path: define, configure, and run a replication end-
     await page.getByTestId('bulk-load-button').click()
     await expect(page.getByTestId('bulk-load-form')).toBeVisible()
 
-    // The Kind pickers are populated from the live capabilities endpoint, and default by capability:
-    // a reader that can be scoped to a segment, and a writer that reconciles rather than only upserts.
-    await expect(page.getByTestId('bulk-load-reader-select')).toHaveValue('MsSqlBatchReload', { timeout: 20_000 })
+    // The reader defaults to what the replication's own bulk-load config already says (BatchReload,
+    // its own un-reviewed default — see 04c) rather than re-guessing a Kind from capability every time
+    // this dialog opens, which used to silently override an operator's own saved choice. The writer has
+    // no saved default to prefer (bulkLoad.writer is null until an operator sets one), so it still
+    // falls back to a capability guess: one that reconciles rather than only upserts.
+    await expect(page.getByTestId('bulk-load-reader-select')).toHaveValue('BatchReload', { timeout: 20_000 })
     await expect(page.getByTestId('bulk-load-writer-select')).toHaveValue('MsSqlMergeReconcile', { timeout: 20_000 })
     // Its own query (useTableMappings), not the capabilities one the two above share — on a loaded
     // CI runner it can land after the default 5s even when the Kind pickers are already populated.

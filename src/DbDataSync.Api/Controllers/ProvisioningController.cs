@@ -30,6 +30,16 @@ public sealed class ProvisioningController(ProvisioningService provisioningServi
         {
             return BadRequest(new { error = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // Same allowance as inferred-column-types/inferred-natural-key beside it — a source column
+            // that isn't there yet, or (before this catch existed) a driver ResolveDialect doesn't
+            // recognize, is "nothing to plan from" while a mapping is being set up, not a broken server.
+            // This action is the one every mapping-editor screen calls in the background for its
+            // Provisioning tab badge count, so a driver this unhandled left every tab on a JDBC- or
+            // MySQL-sourced mapping showing a bare 500 in the console, not just the Setup card itself.
+            return NotFound(new { error = ex.Message });
+        }
     }
 
     /// <summary>What each source column would become on the target — the column mapping editor's
@@ -113,6 +123,12 @@ public sealed class ProvisioningController(ProvisioningService provisioningServi
         catch (ConfigValidationException ex)
         {
             return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Re-plans first (see this controller's own doc comment) — the same InvalidOperationException
+            // GetPlans can throw is just as reachable here, for the same reasons.
+            return NotFound(new { error = ex.Message });
         }
     }
 }

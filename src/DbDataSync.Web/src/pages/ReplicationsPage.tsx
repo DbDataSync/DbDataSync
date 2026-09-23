@@ -4,7 +4,7 @@ import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import {
-  useDefaultCapabilities,
+  useConnections,
   useReplication,
   useReplicationLag,
   useReplications,
@@ -67,7 +67,7 @@ function ReplicationRow({ name, onOpen }: { name: string; onOpen: () => void }) 
 
 export function ReplicationsPage() {
   const { data: names, isLoading, error } = useReplications()
-  const { data: capabilities } = useDefaultCapabilities()
+  const { data: connections } = useConnections()
   const upsert = useUpsertReplication()
   const navigate = useNavigate()
 
@@ -77,14 +77,25 @@ export function ReplicationsPage() {
   const [frequencySeconds, setFrequencySeconds] = useState(60)
   const [cronExpression, setCronExpression] = useState('0 * * * *')
 
-  // The pipeline a new replication starts with comes from the driver's own advertised Kinds — see
-  // phase 010. Until a connection exists there is no driver to ask.
-  const defaults = capabilities && {
-    reader: capabilities.readers[0]?.kind,
-    cache: capabilities.stagingProviders[0]?.kind,
-    writer: capabilities.writers[0]?.kind,
-  }
-  const canCreate = !!defaults?.reader && !!defaults.cache && !!defaults.writer
+  // The generic, engine-neutral Kinds every driver in this system can offer with zero extra
+  // configuration — the same reasoning `bulkLoad.reader` below already uses ("the server's own
+  // default... a new replication has no reason to want anything else yet"), applied here too rather
+  // than derived from any particular connection's capabilities, because a brand-new replication has
+  // no endpoints yet (`endpoints` is set to `null`/`null` below; a source/target is chosen afterward
+  // on the replication's own Overview tab). This used to ask the *system's first connection, of any
+  // driver* for its capabilities and stamp whichever reader/staging/writer Kind happened to be first
+  // in that unrelated driver's own list — so a JDBC-sourced replication could be created already
+  // configured for an MsSql-specific reader (e.g. "MsSqlChangeTracking") just because some MsSql
+  // connection elsewhere in the system happened to sort first, with nothing about the choice tied to
+  // what this replication would actually use.
+  // `Watermark` was tried and rejected here, not assumed safe: it requires a `watermarkColumn` option
+  // this form has no way to supply, so a real run against the un-reviewed default would fail outright
+  // rather than just reload the whole table. `BatchReload`/`StagingTable`/`DeleteInsert` need no
+  // per-stage options at all — the same property that already made `BatchReload` the right choice for
+  // `bulkLoad.reader` below. A default an operator is expected to review and change on the Overview
+  // tab (the hint text right below says so) should fail safely if they don't, not fail loudly.
+  const defaults = { reader: 'BatchReload', cache: 'StagingTable', writer: 'DeleteInsert' }
+  const canCreate = (connections?.length ?? 0) > 0
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -99,9 +110,9 @@ export function ReplicationsPage() {
         ? { mode, frequencySeconds, cronExpression: null }
         : { mode, frequencySeconds: null, cronExpression },
       changeProcessing: {
-        reader: { kind: defaults!.reader!, options: {} },
-        cache: { kind: defaults!.cache!, options: {} },
-        writer: { kind: defaults!.writer!, options: {} },
+        reader: { kind: defaults.reader, options: {} },
+        cache: { kind: defaults.cache, options: {} },
+        writer: { kind: defaults.writer, options: {} },
         degreeOfParallelism: 4,
         bulkLoadDegreeOfParallelism: 4,
       },
@@ -203,13 +214,13 @@ export function ReplicationsPage() {
 
                 {canCreate ? (
                   <span className="hint">
-                    Pipeline defaults to <span className="mono">{defaults!.reader}</span> →{' '}
-                    <span className="mono">{defaults!.cache}</span> → <span className="mono">{defaults!.writer}</span>,
-                    adjustable on the replication's Overview.
+                    Pipeline defaults to <span className="mono">{defaults.reader}</span> →{' '}
+                    <span className="mono">{defaults.cache}</span> → <span className="mono">{defaults.writer}</span>,
+                    adjustable on the replication's Overview once a source and target are chosen there.
                   </span>
                 ) : (
                   <p className="field-error" data-testid="no-capabilities-warning">
-                    Add a connection first — which readers, staging providers and writers are available comes from its driver.
+                    Add a connection first — a replication needs somewhere to eventually point its source and target.
                   </p>
                 )}
 

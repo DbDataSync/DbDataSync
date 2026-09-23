@@ -3,12 +3,13 @@ import { ErrorBanner } from '../../components/ErrorBanner'
 import { Field } from '../../components/Field'
 import {
   useBulkLoad,
+  useCapabilities,
   useReplication,
-  useReplicationCapabilities,
   useSegmentingPreview,
   useTableMapping,
   useTableMappings,
 } from '../../api/hooks'
+import { resolveSide } from '../../api/resolveEndpoint'
 import type { BatchReloadSegment, SegmentMode } from '../../api/types'
 import { RECONCILE_ONLY_KINDS, runsAgainstAConnection } from '../../api/types'
 import { readerNotes } from '../../api/readerNotes'
@@ -27,7 +28,6 @@ export function BulkLoadForm({ replicationName, onQueued, onClose }: {
   onClose: () => void
 }) {
   const { data: mappingNames } = useTableMappings(replicationName)
-  const capabilities = useReplicationCapabilities(replicationName)
   const bulkLoad = useBulkLoad(replicationName)
   const { data: replication } = useReplication(replicationName)
 
@@ -44,23 +44,57 @@ export function BulkLoadForm({ replicationName, onQueued, onClose }: {
   const [cacheKind, setCacheKind] = useState<string | null>(null)
   const [writerKind, setWriterKind] = useState<string | null>(null)
 
+  const selectedMapping = mappingName ?? mappingNames?.[0] ?? ''
+  const { data: mapping } = useTableMapping(replicationName, selectedMapping || undefined)
+
+  // Each side's own driver, not the replication's *first* mapping's — a reader Kind is the selected
+  // mapping's own source's question, staging and the writer are its target's, the same split
+  // MappingPipelineCard already uses for a mapping's regular pipeline. Found as a real bug (not
+  // assumed): this used to be useReplicationCapabilities(replicationName), which is keyed to
+  // whichever mapping happens to be first in the replication — so a bulk load against a JDBC-sourced
+  // mapping could see an unrelated MsSql-sourced mapping's reader capabilities instead, if that one
+  // happened to sort first, and default itself into a reader the actual selected mapping's driver
+  // never offered ("MsSqlBatchReload" surfacing for a JDBC connector with no MsSql driver in sight).
+  const resolvedSource = mapping ? resolveSide(replication?.endpoints.source ?? null, mapping.sources[0]) : null
+  const resolvedTarget = mapping ? resolveSide(replication?.endpoints.target ?? null, mapping.targets[0]) : null
+  const sourceCapabilities = useCapabilities(resolvedSource?.connectionName || undefined)
+  const targetCapabilities = useCapabilities(resolvedTarget?.connectionName || undefined)
+  const capabilities = {
+    readers: sourceCapabilities.data?.readers ?? [],
+    stagingProviders: targetCapabilities.data?.stagingProviders ?? [],
+    writers: targetCapabilities.data?.writers ?? [],
+    error: sourceCapabilities.error ?? targetCapabilities.error,
+  }
+
   // KeyReconcile/KeyReconcileDelete (phase 124) exist only for a delete-diff sweep — that action has
   // its own trigger, not a Kind an operator picks here.
   const availableReaders = capabilities.readers.filter((r) => !RECONCILE_ONLY_KINDS.has(r.kind))
   const availableWriters = capabilities.writers.filter((w) => !RECONCILE_ONLY_KINDS.has(w.kind))
 
-  // Defaults are picked by capability, not by name: a reload needs a reader that can be scoped to a
-  // segment and a writer that removes rows the source no longer has.
-  const selectedMapping = mappingName ?? mappingNames?.[0] ?? ''
+  // The mapping's own override, or the replication's own bulk-load default — whichever an operator
+  // actually configured — wins over a freshly-guessed capability default, and only when it is: (a)
+  // unset, or (b) no longer valid for the now-correctly-scoped driver above (a real, if rare,
+  // possibility if a mapping's source connection changes to a different engine after the override was
+  // saved). Found as a real bug (not assumed): before this, the reader Kind an operator explicitly
+  // saved for a mapping's bulk loads was never read here at all — this dialog re-guessed a Kind from
+  // capabilities on every open, silently overriding a deliberate choice with "whichever reader
+  // supports segmentation" every single time.
+  const savedReaderKind = mapping?.bulkLoadReaderOverride?.kind ?? replication?.bulkLoad.reader.kind
+  const effectiveReaderKind = savedReaderKind && availableReaders.some((r) => r.kind === savedReaderKind)
+    ? savedReaderKind
+    : undefined
+
+  // Defaults are picked by capability, not by name, only once there is no saved choice to honour: a
+  // reload needs a reader that can be scoped to a segment and a writer that removes rows the source no
+  // longer has.
   const selectedReader =
-    readerKind ?? (availableReaders.find((r) => r.supportsSegmentation) ?? availableReaders[0])?.kind ?? ''
+    readerKind ?? effectiveReaderKind ?? (availableReaders.find((r) => r.supportsSegmentation) ?? availableReaders[0])?.kind ?? ''
   const selectedCache = cacheKind ?? capabilities.stagingProviders[0]?.kind ?? ''
   const selectedWriter =
     writerKind ?? (availableWriters.find((w) => w.supportsReconciliation) ?? availableWriters[0])?.kind ?? ''
 
   const writer = availableWriters.find((w) => w.kind === selectedWriter)
   const strategies = replication?.segmentingStrategies ?? []
-  const { data: mapping } = useTableMapping(replicationName, selectedMapping || undefined)
 
   // Pre-fill from the mapping's stored default whenever the chosen mapping changes. Only the first
   // entry drives the form's mode controls — the form edits one segment, while a stored default may

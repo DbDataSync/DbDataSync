@@ -5,8 +5,6 @@ using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Generic;
-using DbDataSync.Drivers.MsSql;
-using DbDataSync.Drivers.Postgres;
 using DbDataSync.Core.Sql;
 
 namespace DbDataSync.Api.Services;
@@ -25,7 +23,7 @@ namespace DbDataSync.Api.Services;
 /// </summary>
 public sealed class ProvisioningService(
     ConfigRepository configRepository, IConnectionFactory connections, CurrentUser currentUser,
-    MappingColumnReader columnReader)
+    MappingColumnReader columnReader, DriverRegistry driverRegistry)
 {
     public async Task<ProvisioningPlanReport> GetPlansAsync(
         string replicationName, string mappingName, CancellationToken cancellationToken)
@@ -530,8 +528,9 @@ public sealed class ProvisioningService(
             await sourceConnection.DisposeAsync();
         }
 
-        var sourceDialect = ResolveDialect(sourceDriver.DriverType);
-        var targetDialect = ResolveDialect(configRepository.LoadConnection(target.ConnectionName).DriverType);
+        var sourceDialect = ResolveDialect(sourceDriver);
+        var targetDialect = ResolveDialect(
+            driverRegistry.Get(configRepository.LoadConnection(target.ConnectionName).DriverType));
 
         return [.. sourceColumns.Select(column => Infer(sourceDialect, targetDialect, column))];
     }
@@ -683,7 +682,7 @@ public sealed class ProvisioningService(
             return Unsupported(ProvisioningActions.CreateTargetTable, targetDriver.DriverType);
 
         var (columns, identityWarnings) = ProvisioningColumnBuilder.Build(
-            ResolveDialect(sourceDriver.DriverType), sourceColumns, mapping.ColumnMappings);
+            ResolveDialect(sourceDriver), sourceColumns, mapping.ColumnMappings);
 
         // Extended with whatever the configured writer needs beyond the mapped columns — a snapshot's
         // marker, an SCD Type 2 target's version key and validity range. The same list the create and
@@ -788,16 +787,18 @@ public sealed class ProvisioningService(
     private static ProvisioningPlan Unsupported(string action, string driverType) =>
         new(action, ProvisioningState.Unknown, [], [$"The '{driverType}' driver does not support provisioning."]);
 
-    /// <summary>Same shape as <c>DbDataSync.TaskRunner.RunExecutor.ResolveDialect</c> — the one place
-    /// this layer needs a concrete <see cref="SqlDialect"/> for an engine it isn't otherwise driving,
-    /// to translate the *source's* native column types into canonical form.</summary>
-    private static SqlDialect ResolveDialect(string driverType) => driverType switch
-    {
-        DriverIds.MsSql => MsSqlDialect.Instance,
-        DriverIds.Postgres => PostgresDialect.Instance,
-        DriverIds.DuckDb => DuckDbDialect.Instance,
-        _ => throw new InvalidOperationException($"No SqlDialect is registered for driver type '{driverType}'."),
-    };
+    /// <summary>
+    /// Was a hardcoded per-engine switch here — MsSql/Postgres/DuckDb only, so it threw for MySQL,
+    /// Oracle, and any descriptor/YAML-based driver (a JDBC connector included) the moment a mapping
+    /// editor opened, regardless of anything the operator had configured. <c>RunExecutor.ResolveDialect</c>
+    /// generalized via <see cref="IDialectProvider"/> at phase 29 specifically so a new driver never
+    /// has to be remembered here; this one was never migrated to match, and MsSql-only setups never
+    /// noticed because they never exercised any other branch. Same shape as
+    /// <c>DbDataSync.TaskRunner.RunExecutor.ResolveDialect</c> now, not just documented to match it.
+    /// </summary>
+    private static SqlDialect ResolveDialect(IDriver driver) =>
+        (driver as IDialectProvider)?.Dialect
+        ?? throw new InvalidOperationException($"The '{driver.DriverType}' driver does not name a SQL dialect.");
 }
 
 public sealed record ProvisioningPlanReport(ProvisioningPlan Source, ProvisioningPlan Target);

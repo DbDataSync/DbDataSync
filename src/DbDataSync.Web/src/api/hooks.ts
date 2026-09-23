@@ -410,21 +410,17 @@ export function useReplicationCapabilities(replicationName: string | undefined) 
   }
 }
 
-/**
- * Capabilities to offer before a replication exists to resolve them against — creating one, where
- * there are no table mappings and so no connections of its own yet. Uses the first configured
- * connection: with one registered driver that is the same answer, and it is a far better default than
- * a list of Kind strings compiled into this app, which would be a guess about the server's drivers.
- */
 // A by-driver-type capabilities hook lived here from phase 42 until phase 50, for the connection
 // form's declared settings. Those now come from POST /api/drivers/{type}/connection-parameters, which
 // is the same question asked with the values that decide the answer — so nothing in this app asks the
 // valueless version any more. The endpoint stays; a hook with no caller does not.
-
-export function useDefaultCapabilities() {
-  const { data: connections } = useConnections()
-  return useCapabilities(connections?.[0]?.name)
-}
+//
+// useDefaultCapabilities (a new replication's pipeline defaults, resolved from "the system's first
+// connection" regardless of driver) lived here too, from phase 010 until it was found to be the cause
+// of a real bug: a JDBC-sourced replication could be created already stamped with an MsSql-specific
+// reader Kind just because some unrelated MsSql connection happened to sort first system-wide.
+// ReplicationsPage now defaults to the generic, engine-neutral Kinds every driver can offer instead —
+// see that page's own comment.
 
 export function useDatabases(connectionName: string | undefined) {
   return useQuery({
