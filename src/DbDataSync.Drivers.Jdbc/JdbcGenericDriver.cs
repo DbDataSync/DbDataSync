@@ -40,6 +40,17 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>, IConn
     public JdbcGenericDriver(JdbcDriverSpec spec)
         : base(spec, spec.ValueBinder ?? new GenericValueBinder(spec.Dialect, new JdbcProviderFactoryHandle()))
     {
+        // Phase 178N: eager, not discovered later as a silently-unsubstituted token in the assembled
+        // URL — see follow-up-jdbc-url-template-password-placeholder-validation.md. Fires for both a
+        // driver.yaml-built spec and a directly-constructed one (every existing test fixture); there is
+        // no path to a working JdbcGenericDriver that skips this constructor.
+        if (spec.UrlTemplate?.Contains("{password}") == true)
+        {
+            throw new NotSupportedException(
+                $"'{spec.Id}': UrlTemplate contains a {{password}} placeholder, which is never substituted " +
+                "— a credential is always sent as a JDBC property, never placed in the URL. Remove the " +
+                "placeholder; the password is added automatically.");
+        }
         JdbcProviderFactory.FromJarPaths(spec.DriverJarPaths, spec.DriverClass);
     }
 
@@ -237,6 +248,14 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>, IConn
 
         var jarPaths = jdbc.DriverJarPaths.Select(name => FilesPaths.FilePath(repoRoot, name)).ToList();
 
+        // null (not a fresh GenericConnectionStringKeys()) when the yaml omits the block — that's what
+        // keeps DefaultConnectionStringKeys (this class's own JDBC-flavoured spellings) the effective
+        // default, per this field's own doc comment. Passing a fresh ADO.NET-defaulted instance instead
+        // would silently apply the wrong key spellings to every JDBC descriptor that doesn't override.
+        var keys = jdbc.ConnectionStringKeys is { } k
+            ? new GenericConnectionStringKeys(k.Host, k.Port, k.Database, k.Username, k.Password, k.ConnectTimeout, k.IntegratedSecurity)
+            : null;
+
         return new JdbcGenericDriver(new JdbcDriverSpec(
             descriptor.Id,
             dialect,
@@ -246,6 +265,8 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>, IConn
             Readers: descriptor.Capabilities.Readers,
             Staging: descriptor.Capabilities.Staging,
             Writers: descriptor.Capabilities.Writers,
+            UrlTemplate: jdbc.UrlTemplate,
+            ConnectionStringKeys: keys,
             DisplayName: descriptor.DisplayName));
     }
 }

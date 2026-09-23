@@ -1,5 +1,14 @@
 # Follow-up: `UrlTemplate`/`ConnectionStringKeys` are unreachable from any `driver.yaml` today — no schema, and the web editor would lose them if there were
 
+**Status: fixed (2026-09-23), phase 178N.** Both parts implemented as suggested: `JdbcDescriptorYaml`
+gained `UrlTemplate`/`ConnectionStringKeys`, `JdbcGenericDriver.FromDescriptor` reads and passes them
+(the `null`-not-`GenericConnectionStringKeys()` fallback preserved exactly as this doc specifies), and
+`driverYamlAssembly.ts` gained `jdbcExtra` so a hand-authored `urlTemplate`/`connectionStringKeys` block
+round-trips through an edit-and-save cycle. Proven end to end against the real Postgres container via
+`JdbcDescriptorTests.ADriverYamlsUrlTemplateAndConnectionStringKeys_ReachTheBuiltDriver` (through
+`PreviewConnection`, not a live connect) and a web unit test round-tripping the block through an unrelated
+field edit. See `phase-178N-jdbc-descriptor-schema-for-url-template-and-keys.md`.
+
 Phase 175M built `JdbcDriverSpec.UrlTemplate`/`ConnectionStringKeys` and the unification logic that uses
 them — but checked, not assumed, while scoping this follow-up: **nothing in this repo can actually set
 either field from a `driver.yaml`.** The mechanism only exists reachable from direct C# construction

@@ -1,6 +1,7 @@
 # Phase 178N: make `UrlTemplate`/`ConnectionStringKeys` reachable from a `driver.yaml`, and close the `{password}` gap
 
-**Status: todo.** First of five phases for the JDBC/driver-editing UI round requested 2026-09-23 —
+**Status: done (2026-09-23).** First of five phases for the JDBC/driver-editing UI round requested
+2026-09-23 —
 prerequisite plumbing for 179N (the URL template editor) and 181N (validate/echo). Implements
 [`follow-up-jdbc-url-template-unreachable-from-driver-yaml.md`](../../planning/todo/follow-up-jdbc-url-template-unreachable-from-driver-yaml.md)
 in full (both its parts) and

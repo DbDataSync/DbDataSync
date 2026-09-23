@@ -54,6 +54,41 @@ describe('assembleDriverYaml / parseDriverYaml', () => {
     expect(parsed.driverJarPaths).toEqual(['ojdbc8.jar', 'oraclepki.jar', 'osdt_cert.jar', 'osdt_core.jar'])
   })
 
+  it('round-trips a hand-authored urlTemplate/connectionStringKeys through jdbcExtra (phase 178N)', () => {
+    // Before 178N, editing any other field on this driver and saving would silently strip both — see
+    // follow-up-jdbc-url-template-unreachable-from-driver-yaml.md part 2.
+    const loaded = parseDriverYaml([
+      'id: postgres-via-jdbc',
+      'displayName: Postgres (via JDBC)',
+      'library: ikvm',
+      'base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc',
+      'jdbc:',
+      '  driverClass: org.postgresql.Driver',
+      '  driverJarPaths: [postgresql-42.7.13.jar]',
+      '  urlTemplate: "jdbc:postgresql://{host}:{port}/{database}"',
+      '  connectionStringKeys:',
+      '    username: user',
+      'dialect:',
+      '  quoteIdentifier: doubleQuote',
+      'capabilities:',
+      '  readers: [Watermark]',
+      '  staging: []',
+      '  writers: []',
+    ].join('\n'))
+
+    // Edit an unrelated field, matching what an operator renaming the display name would do.
+    const edited = { ...loaded, displayName: 'Postgres (renamed)' }
+    const reparsed = parseDriverYaml(assembleDriverYaml(edited))
+
+    expect(reparsed.displayName).toBe('Postgres (renamed)')
+    expect(reparsed.jdbcExtra).toContain('urlTemplate: "jdbc:postgresql://{host}:{port}/{database}"')
+    expect(reparsed.jdbcExtra).toContain('connectionStringKeys:')
+    expect(reparsed.jdbcExtra).toContain('username: user')
+    // The two structured lines never end up duplicated inside jdbcExtra.
+    expect(reparsed.jdbcExtra).not.toContain('driverClass:')
+    expect(reparsed.jdbcExtra).not.toContain('driverJarPaths:')
+  })
+
   it('keeps the raw body distinct from the structured capabilities block it sits beside', () => {
     // The real risk this splitter has to get right: dialect/typeMap live between the jdbc block and
     // capabilities in the assembled document, and must not accidentally swallow (or be swallowed by)

@@ -1,5 +1,10 @@
 # Follow-up: block a `{password}` placeholder in a JDBC URL template instead of silently ignoring it
 
+**Status: fixed (2026-09-23), phase 178N.** Implemented exactly as suggested — the eager check in
+`JdbcGenericDriver`'s constructor, before `JdbcProviderFactory.FromJarPaths`. Covered by
+`JdbcUrlTemplateTests.Constructor_WithAPasswordPlaceholderInTheTemplate_ThrowsNotSupported`, no live
+connection needed, as this doc predicted.
+
 Open question `jdbc-url-template-and-connection-testing.md` raised and left open — phases 174M-177M
 shipped everything else that design covers, this one piece never got picked up. Documented to fix later,
 not fixed here.

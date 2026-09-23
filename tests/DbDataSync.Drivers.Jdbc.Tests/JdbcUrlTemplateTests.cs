@@ -127,6 +127,21 @@ public sealed class JdbcUrlTemplateTests(JdbcTestDatabase db) : IClassFixture<Jd
         Assert.Contains("jdbc-no-url-source", ex.Message);
     }
 
+    /// <summary>Phase 178N. A template author writing <c>{password}</c> by symmetry with
+    /// <c>{host}</c>/<c>{port}</c>/<c>{database}</c>/<c>{username}</c> gets a hard error at construction
+    /// time, not a URL with a stray unsubstituted token that fails downstream with a confusing message —
+    /// see follow-up-jdbc-url-template-password-placeholder-validation.md. No live connection needed:
+    /// the constructor throws before anything network-facing happens.</summary>
+    [Fact]
+    public void Constructor_WithAPasswordPlaceholderInTheTemplate_ThrowsNotSupported()
+    {
+        var ex = Assert.Throws<NotSupportedException>(
+            () => NewDriver("jdbc-password-in-template", "jdbc:postgresql://{host}:{port}/{database}?pw={password}"));
+
+        Assert.Contains("jdbc-password-in-template", ex.Message);
+        Assert.Contains("{password}", ex.Message);
+    }
+
     /// <summary>The regression phase 175M's own "Bug that started this" section describes: before this
     /// fix, a URL the driver doesn't recognize produced a connection that opened "successfully" with a
     /// null underlying java.sql.Connection, then failed on the next command with a flatly misleading

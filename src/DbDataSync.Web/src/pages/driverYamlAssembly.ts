@@ -68,13 +68,29 @@ export interface ParsedDriverYaml {
   writers: string[]
   /** dialect + typeMap + metadataQueries, verbatim — everything not in `STRUCTURED_KEYS`. */
   rawBody: string
+  /**
+   * Phase 178N. Whatever the `jdbc:` block's own lines were, verbatim, minus the ones the structured
+   * fields above already own (`driverClass`/`driverJarPaths`) — a hand-authored `urlTemplate` or
+   * `connectionStringKeys` block round-trips through an edit-and-save cycle unchanged even though
+   * neither has a structured field yet. See follow-up-jdbc-url-template-unreachable-from-driver-yaml.md
+   * part 2 — before this, saving any other field on a JDBC driver silently stripped both.
+   */
+  jdbcExtra: string
 }
+
+const JDBC_OWNED_KEYS = /^\s*(driverClass|driverJarPaths):/
 
 export function parseDriverYaml(yaml: string): ParsedDriverYaml {
   const blocks = splitTopLevelBlocks(yaml)
   const byKey = new Map(blocks.map((b) => [b.key, b.block]))
   const isJdbc = byKey.has('base') && (byKey.get('base') ?? '').includes('JdbcGenericDriver')
   const jdbcBlock = byKey.get('jdbc') ?? ''
+  // The block's own first line is `jdbc:` itself (see splitTopLevelBlocks) — never part of "extra".
+  const jdbcExtra = jdbcBlock
+    .split('\n')
+    .slice(1)
+    .filter((line) => !JDBC_OWNED_KEYS.test(line))
+    .join('\n')
 
   return {
     id: scalarValue(yaml, 'id') ?? '',
@@ -87,6 +103,7 @@ export function parseDriverYaml(yaml: string): ParsedDriverYaml {
     staging: listValue(byKey.get('capabilities') ?? '', 'staging'),
     writers: listValue(byKey.get('capabilities') ?? '', 'writers'),
     rawBody: blocks.filter((b) => !STRUCTURED_KEYS.has(b.key)).map((b) => b.block).join('\n').trim(),
+    jdbcExtra,
   }
 }
 
@@ -140,6 +157,7 @@ export function assembleDriverYaml(form: {
   staging: string[]
   writers: string[]
   rawBody: string
+  jdbcExtra?: string
 }): string {
   const lines: string[] = [
     `id: ${form.id}`,
@@ -152,6 +170,7 @@ export function assembleDriverYaml(form: {
     lines.push('jdbc:')
     lines.push(`  driverClass: ${form.driverClass}`)
     lines.push(`  driverJarPaths: [${form.driverJarPaths.join(', ')}]`)
+    if (form.jdbcExtra) lines.push(form.jdbcExtra)
   }
 
   lines.push(form.rawBody)

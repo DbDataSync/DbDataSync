@@ -23,11 +23,12 @@ interface FormState {
   staging: string[]
   writers: string[]
   rawBody: string
+  jdbcExtra: string
 }
 
 const EMPTY: FormState = {
   id: '', displayName: '', base: 'adonet', library: '', driverClass: '', driverJarPaths: [],
-  readers: [], staging: [], writers: [], rawBody: RAW_BODY_SKELETON,
+  readers: [], staging: [], writers: [], rawBody: RAW_BODY_SKELETON, jdbcExtra: '',
 }
 
 /**

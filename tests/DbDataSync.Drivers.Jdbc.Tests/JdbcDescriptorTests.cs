@@ -121,4 +121,60 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
         Assert.Contains(rows, r => (int)r["id"]! == 1 && (string)r["name"]! == "alice");
         Assert.Contains(rows, r => (int)r["id"]! == 2 && (string)r["name"]! == "bob");
     }
+
+    /// <summary>
+    /// Phase 178N: before this, a driver.yaml's own <c>jdbc.urlTemplate</c>/<c>connectionStringKeys</c>
+    /// were parsed by YamlDotNet but never read by <see cref="JdbcGenericDriver.FromDescriptor"/> — see
+    /// follow-up-jdbc-url-template-unreachable-from-driver-yaml.md part 1. Proven end to end through
+    /// <see cref="IConnectionPreviewer.PreviewConnection"/> rather than a live connect: the resolved JDBC
+    /// URI shows the template actually placed {host}/{port} and the overridden username key, which only
+    /// happens if the descriptor's values reached <see cref="JdbcDriverSpec"/>, not the class's
+    /// hardcoded defaults.
+    /// </summary>
+    [Fact]
+    public void ADriverYamlsUrlTemplateAndConnectionStringKeys_ReachTheBuiltDriver()
+    {
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"jdbc-descriptor-url-template-test-{Guid.NewGuid():N}");
+        var filesDir = Path.Combine(repoRoot, "files");
+        Directory.CreateDirectory(filesDir);
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "postgresql.jar"), Path.Combine(filesDir, "postgresql.jar"));
+
+        const string yaml = """
+            id: postgres-via-jdbc-templated
+            displayName: Postgres (via JDBC, templated)
+            library: ikvm
+            base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc
+            jdbc:
+              driverClass: org.postgresql.Driver
+              driverJarPaths: [postgresql.jar]
+              urlTemplate: "jdbc:postgresql://{host}:{port}/{database}"
+              connectionStringKeys:
+                username: pguser
+            dialect:
+              quoteIdentifier: doubleQuote
+              parameterPrefix: "@"
+              parameterNameIsBare: true
+              rowLimit: limitOffset
+            capabilities:
+              readers: [Watermark]
+              staging: []
+              writers: []
+            """;
+
+        var descriptor = DriverDescriptorReader.Deserialize(yaml);
+        var libraries = new LibraryRegistry(Path.GetTempPath());
+        var driver = (IConnectionPreviewer)DriverDescriptorReader.BuildDriver(descriptor, libraries, repoRoot);
+
+        var config = new ConnectionConfig
+        {
+            Name = "jdbc-descriptor-url-template-test", DriverType = "postgres-via-jdbc-templated",
+            Host = "localhost", Port = 15432, Database = db.DatabaseName,
+            AuthMode = AuthMode.SqlAuth, UserId = "dbdatasync",
+        };
+
+        var preview = driver.PreviewConnection(config);
+
+        Assert.Equal("jdbc:postgresql://localhost:15432/" + db.DatabaseName, preview.JdbcUri);
+        Assert.Equal("dbdatasync", preview.Properties["pguser"]);
+    }
 }

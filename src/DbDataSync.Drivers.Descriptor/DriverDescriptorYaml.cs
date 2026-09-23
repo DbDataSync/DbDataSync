@@ -62,6 +62,21 @@ public sealed class JdbcDescriptorYaml
     // concrete too. Found live (YamlException: "No node deserializer was able to deserialize..."), not
     // assumed from the other class's own precedent alone.
     public required List<string> DriverJarPaths { get; set; }
+
+    /// <summary>Phase 178N — e.g. <c>"jdbc:postgresql://{host}:{port}/{database}"</c>. Omitted means a
+    /// connection must supply the whole JDBC URL itself via <c>ConnectionString</c> (the pre-178N
+    /// contract); see <c>JdbcGenericDriver.BuildUnifiedJdbcUrlAndProperties</c>'s own doc comment for how
+    /// the four supported placeholders are resolved. Never write <c>{password}</c> here — it is never
+    /// substituted, and <c>JdbcGenericDriver</c>'s constructor rejects a template that contains it.</summary>
+    public string? UrlTemplate { get; set; }
+
+    /// <summary>Phase 178N. Same type the ADO.NET side's <see cref="DescriptorDialectYaml.ConnectionStringKeys"/>
+    /// already uses, not a JDBC-specific copy — but omitted here means
+    /// <c>JdbcGenericDriver.DefaultConnectionStringKeys</c> (the literal <c>host</c>/<c>port</c>/
+    /// <c>database</c>/<c>user</c>/<c>password</c> spellings a real JDBC driver reads), not that ADO.NET
+    /// type's own <c>Host</c>/<c>User Id</c>/… defaults, which would be the wrong spelling for a JDBC
+    /// property bag.</summary>
+    public DescriptorConnectionStringKeysYaml? ConnectionStringKeys { get; set; }
 }
 
 /// <param name="QuoteIdentifier">backtick | doubleQuote | bracket</param>
