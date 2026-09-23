@@ -46,29 +46,119 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>
     /// JDBC-via-IKVM engine needs IKVM itself, regardless of which vendor's jar it loads.</summary>
     public string? RequiredLibraryId => "ikvm";
 
+    /// <summary>Phase 175M's default key spellings when a spec doesn't supply its own
+    /// <see cref="JdbcDriverSpec.ConnectionStringKeys"/> — the literal <c>java.util.Properties</c> names
+    /// a real JDBC driver reads, not <see cref="GenericConnectionStringKeys"/>'s own ADO.NET-flavoured
+    /// defaults (<c>Host</c>/<c>User Id</c>/…), which would be the wrong spelling here.</summary>
+    public static readonly GenericConnectionStringKeys DefaultConnectionStringKeys =
+        new(Host: "host", Port: "port", Database: "database", Username: "user", Password: "password");
+
+    /// <summary>
+    /// Phase 175M. Unifies like <see cref="GenericDriver.CreateConnection"/> does — one scratch
+    /// <see cref="DbConnectionStringBuilder"/>, <see cref="ConnectionConfig.Host"/>/
+    /// <see cref="ConnectionConfig.Database"/>/<see cref="ConnectionConfig.Port"/>/the
+    /// <see cref="AuthMode"/> branch, all via <see cref="JdbcDriverSpec.ConnectionStringKeys"/> — before
+    /// anything JDBC-specific happens (unlike <see cref="GenericDriver"/>, this deliberately skips
+    /// seeding the scratch builder from <see cref="ConnectionConfig.ConnectionString"/>/its own connect-
+    /// timeout unification — see the two comments inline for why, both specific to JDBC's shape). Only
+    /// once that's fully populated are host/port/database/username pulled back out **by key name**,
+    /// never by parsing a JDBC URL and never read straight off <c>connection.Host</c>/<c>Port</c> (those
+    /// may be unset under connection-string addressing).
+    /// <para>
+    /// Each of those four can be placed into <see cref="JdbcDriverSpec.UrlTemplate"/>, or falls back to a
+    /// JDBC property under its own key if the template doesn't reference it — a resolved value is never
+    /// silently discarded because a template happened not to mention it. <c>Password</c> is the one
+    /// exception: always a property, never template-eligible, matching the "credential never in the URL"
+    /// rule <see cref="ConnectionConfig.ConnectionString"/>'s own doc comment documents.
+    /// </para>
+    /// <para>
+    /// A hand-pasted, complete JDBC URL (the pre-175M contract) has no <c>{placeholder}</c> tokens in it
+    /// at all, so every resolved value falls back to a property automatically — the same outcome as
+    /// today for an operator who already types the whole URL, not a behavior change for them.
+    /// </para>
+    /// </summary>
     public override DbConnection CreateConnection(ConnectionConfig connection, string? credential)
     {
-        var jdbcUrl = connection.ConnectionString
-            ?? throw new InvalidOperationException(
-                "JdbcGenericDriver requires ConnectionConfig.ConnectionString to carry the JDBC URL " +
-                "(AddressMode.connectionString) — Host/Port addressing has no URL template for this driver.");
+        var keys = Spec.ConnectionStringKeys ?? DefaultConnectionStringKeys;
 
-        var builder = new JdbcConnectionStringBuilder { JdbcDriver = Spec.DriverClass, JdbcUrl = jdbcUrl };
+        // Unlike GenericDriver's own ConnectionString (a real ADO.NET key=value string an operator can
+        // seed the builder from), a JDBC ConnectionString is the URL itself — not that shape at all, and
+        // never fed into this scratch builder. It's used below, directly, as urlText. Connect-timeout
+        // unification is skipped for the same reason: GenericDriver's own
+        // ConnectionTimeouts.AddressCarriesOwnConnectTimeout parses ConnectionString as ADO.NET
+        // key=value pairs to check whether the operator already set one there — meaningless (and liable
+        // to misparse) against a JDBC URL, and nothing below ever reads a resolved connect-timeout back
+        // out anyway, so there is nothing here worth mirroring.
+        var unified = new DbConnectionStringBuilder();
+        unified[keys.Host] = connection.Host;
+        unified[keys.Database] = connection.Database;
 
-        foreach (var (key, value) in connection.Properties)
-            builder[key] = value;
+        if (connection.Port is int port && keys.Port is not null)
+            unified[keys.Port] = port;
 
-        if (connection.AuthMode == AuthMode.SqlAuth)
+        string? password = null;
+        if (connection.AuthMode == AuthMode.None)
         {
-            builder["user"] = connection.UserId
+            // Whatever the URL/template or the environment provides. DbDataSync adds nothing.
+        }
+        else if (connection.AuthMode == AuthMode.IntegratedAuth)
+        {
+            if (keys.IntegratedSecurity is not null)
+            {
+                unified[keys.IntegratedSecurity] = true;
+            }
+            else
+            {
+                unified[keys.Username] = connection.UserId
+                    ?? throw new InvalidOperationException($"UserId is required even for IntegratedAuth on '{Spec.Id}'.");
+            }
+        }
+        else
+        {
+            unified[keys.Username] = connection.UserId
                 ?? throw new InvalidOperationException("UserId is required for SqlAuth connections.");
-            // Never in the URL — see ConnectionConfig.ConnectionString's own doc comment and the
-            // planning doc's connection-model table.
-            builder["password"] = credential
+            password = credential
                 ?? throw new InvalidOperationException("A resolved credential is required for SqlAuth connections.");
         }
 
-        return new JdbcConnection { ConnectionString = builder.ConnectionString }.WithCommandTimeout(connection);
+        string? Resolved(string key) => unified.ContainsKey(key) ? Convert.ToString(unified[key]) : null;
+        var host = Resolved(keys.Host);
+        var portText = keys.Port is not null ? Resolved(keys.Port) : null;
+        var database = Resolved(keys.Database);
+        var username = Resolved(keys.Username);
+
+        var urlText = connection.ConnectionString ?? Spec.UrlTemplate
+            ?? throw new InvalidOperationException(
+                $"'{Spec.Id}': no ConnectionString and no UrlTemplate — nothing to build a JDBC URL from.");
+
+        var props = new java.util.Properties();
+        string PlaceOrFallback(string url, string placeholder, string? value, string propertyKey)
+        {
+            if (value is null) return url;
+            var token = "{" + placeholder + "}";
+            if (url.Contains(token)) return url.Replace(token, value);
+            props.setProperty(propertyKey, value);
+            return url;
+        }
+
+        var jdbcUrl = urlText;
+        jdbcUrl = PlaceOrFallback(jdbcUrl, "host", host, keys.Host);
+        if (keys.Port is not null) jdbcUrl = PlaceOrFallback(jdbcUrl, "port", portText, keys.Port);
+        jdbcUrl = PlaceOrFallback(jdbcUrl, "database", database, keys.Database);
+        jdbcUrl = PlaceOrFallback(jdbcUrl, "username", username, keys.Username);
+        if (password is not null) props.setProperty(keys.Password, password);
+
+        // The arbitrary-property passthrough this driver already had before 175M — a JDBC-specific
+        // tuning flag or SSL setting an operator set directly, orthogonal to host/port/database/username
+        // unification above. Applied last, so it can't be silently overridden by anything derived above
+        // (nothing above writes these same keys unless an operator's own key collides with one of
+        // keys.Host/Port/Database/Username/Password, in which case this — the operator's own explicit,
+        // most specific setting — wins, same precedence GenericDriver's own Properties pass keeps).
+        foreach (var (key, value) in connection.Properties)
+            props.setProperty(key, value);
+
+        var connectionString = JdbcConnectionStringBuilder.CreateConnectionString(Spec.DriverClass, jdbcUrl, props);
+        return new JdbcConnection { ConnectionString = connectionString }.WithCommandTimeout(connection);
     }
 
     public override Task<IReadOnlyList<string>> ListDatabasesAsync(DbConnection connection, CancellationToken cancellationToken) =>

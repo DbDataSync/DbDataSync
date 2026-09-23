@@ -1,6 +1,11 @@
 # Phase 175M — JDBC URL templating, host/port/database/user placement, and connect-time validation
 
-**Status**: Not started — design only.
+**Status**: Done, 2026-09-22. All four pieces shipped — `JdbcDriverSpec`'s two new fields, the unified
+`JdbcGenericDriver.CreateConnection`, `JdbcProviderFactory.GetJdbcConnection`'s `acceptsURL`/null check,
+`JdbcConnection.Open()`'s soft `isValid` check. Two real corrections found building it, not part of the
+design above — see "What changed from the design" below. All 16 pre-existing
+`DbDataSync.Drivers.Jdbc.Tests` pass unchanged (the literal-URL contract is a true regression check, not
+just claimed to be one), plus 4 new tests, plus a full solution build.
 **Plan reference**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md` (full
 rationale, design discussion, and code sketches — this phase doc scopes exactly the driver-layer slice of
 it). **Depends on phase 174M** landing first — every file this phase touches (`JdbcConnection.cs`,
@@ -123,6 +128,41 @@ happened.
   mechanism exist and work from a hand-authored `driver.yaml`.
 - Does not attempt a second real JDBC vendor descriptor to prove the template shape generalizes past
   Postgres — named as an open question in the planning doc, deliberately out of scope here.
+
+## What changed from the design, found building it
+
+- **The scratch unification builder does not seed itself from `ConnectionConfig.ConnectionString`, and
+  skips connect-timeout unification entirely.** The design's own "unify exactly like `GenericDriver`
+  does" prose (and its code sketch) implicitly carries over `GenericDriver.CreateConnection`'s
+  `builder.ConnectionString = connection.ConnectionString` seeding step and its
+  `ConnectionTimeouts.AddressCarriesOwnConnectTimeout(connection, keys.ConnectTimeout)` check. Both
+  assume `ConnectionConfig.ConnectionString` is an ADO.NET-shaped `key=value;key=value` string — true for
+  `GenericDriver`, false for `JdbcGenericDriver`: there, `ConnectionString` (when set) *is the whole JDBC
+  URL itself* (`jdbc:postgresql://host:port/db`), not that shape at all. Feeding it into a plain
+  `DbConnectionStringBuilder.ConnectionString` setter (or a fresh one inside
+  `AddressCarriesOwnConnectTimeout`) would try to parse a JDBC URL as semicolon-delimited pairs — wrong,
+  and not what either call is actually for here. Caught before it shipped, not after: traced through what
+  each step would receive on a real JDBC connection before running anything. Connect-timeout unification
+  specifically is also simply dead code for JDBC even set aside the misparse risk — nothing in this phase
+  (or 176M's design) ever reads a resolved connect-timeout back out into the URL or properties, so there
+  was nothing worth mirroring structurally at the cost of a real bug.
+- **`JdbcDriverSpec` has no `DefaultDatabase` field.** `GenericDriverSpec.DefaultDatabase` is required and
+  `GenericDriver.CreateConnection` always falls back to it (`connection.Database ?? Spec.DefaultDatabase`)
+  — the planning doc's "mirrors GenericDriver exactly" prose implies the same for JDBC, but phase 175M's
+  own "What changes" section lists exactly two new `JdbcDriverSpec` fields (`UrlTemplate`,
+  `ConnectionStringKeys`), not three, and neither planning doc nor this phase doc's own code sketch
+  defines a JDBC default-database concept. Implemented as designed-and-scoped: `Database` is
+  `connection.Database` directly, nullable, no forced default — a `{database}` placeholder simply doesn't
+  substitute when it's null, same as any other unset field. Worth a real decision later if a JDBC engine
+  needs one; not invented here to fill a gap the shipped field list didn't leave open.
+- **`isValid`'s two negative branches (returns `false`; throws `SQLException`) have no new automated
+  test** — see `JdbcUrlTemplateTests`'s own class doc comment for why: both need a `java.sql.Connection`
+  that reports one of those outcomes on demand, and pgJDBC (the only driver this test project loads)
+  implements `isValid` normally and reports a genuinely open connection as valid. Mocking
+  `java.sql.Connection` over IKVM interop has no precedent in this test project and wasn't worth
+  introducing for two branches; the happy path (`isValid` returning `true` on every real connection this
+  suite already opens) is proven not to break `Open()` by all 20 tests passing, which is real coverage,
+  just not proof of the two branches this doesn't reach.
 
 ## How to verify
 

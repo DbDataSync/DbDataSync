@@ -119,6 +119,14 @@ public sealed class JdbcConnection : DbConnection
             "ReadUncommitted/ReadCommitted/RepeatableRead/Serializable are the only levels JDBC expresses."),
     };
 
+    /// <summary>
+    /// Phase 175M. Not <see cref="DbDataSync.Core.Sql.ConnectionTimeouts.DefaultConnectSeconds"/> reused
+    /// — <c>isValid</c>'s own <c>timeout</c> parameter means "0 = block with no limit" per the JDBC spec
+    /// (not "skip the check"), and it pays its own round trip on top of the connect that already
+    /// happened, so reusing the full connect timeout would double worst-case latency for no reason.
+    /// </summary>
+    private const int JdbcValidateTimeoutSeconds = 5;
+
     public override void Open()
     {
         if (_connection != null)
@@ -135,6 +143,22 @@ public sealed class JdbcConnection : DbConnection
             ?? throw new InvalidOperationException("The connection string must set JdbcUrl.");
         JavaSqlDriver = factory.JdbcDriver;
         _connection = factory.GetJdbcConnection(jdbcUrl, builder.GetProperties());
+
+        // Soft — not every vendor driver implements isValid reliably, and this codebase already hit the
+        // "unconditionally trusting a JDBC optional feature" trap once, in ServerVersion/DataSource (see
+        // their own phase-171V doc comment above): a NotImplementedException that wasn't a DbException
+        // broke every JDBC connection test until it shipped. A java.sql.SQLException here means "can't
+        // tell," not "connection is bad" — acceptsURL plus the null check GetJdbcConnection already did
+        // is the real gate; this is an extra signal when a driver actually supports it, not a substitute.
+        try
+        {
+            if (!_connection.isValid(JdbcValidateTimeoutSeconds))
+                throw new InvalidOperationException($"The JDBC driver reported the new connection to '{jdbcUrl}' as invalid.");
+        }
+        catch (java.sql.SQLException)
+        {
+            // Inconclusive, not fatal — see the comment above.
+        }
 
         // Credential no longer readable back out via ConnectionString once it's done its job — the same
         // posture SqlConnection's own default (Persist Security Info=false) takes, and the reason to take

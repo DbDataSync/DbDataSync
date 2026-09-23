@@ -60,8 +60,24 @@ internal sealed class JdbcProviderFactory : DbProviderFactory
 
     public java.sql.Driver JdbcDriver => _driver.Value;
 
-    public java.sql.Connection GetJdbcConnection(string url, java.util.Properties? properties = null) =>
-        JdbcDriver.connect(url, properties ?? new java.util.Properties());
+    /// <summary>
+    /// Phase 175M. The JDBC spec allows <c>Driver.connect(url, info)</c> to return <c>null</c> rather
+    /// than throw when the driver doesn't recognize the URL — expected behavior when
+    /// <c>DriverManager.getConnection</c> is trying several registered drivers in turn, silently wrong
+    /// here, since exactly one driver (<see cref="JdbcDriver"/>) is ever asked. Before this fix, a
+    /// rejected URL produced a connection whose <c>_connection</c> field was <c>null</c> with no error at
+    /// all — <see cref="JdbcConnection.Open"/> returned normally, and the next command hit a flatly
+    /// misleading <c>"Connection is closed."</c>, with no trace of the real problem (a URL the driver
+    /// never accepted). <c>acceptsURL</c> is checked first so the failure names the actual URL rather
+    /// than only reporting the symptom of <c>connect</c>'s own null.
+    /// </summary>
+    public java.sql.Connection GetJdbcConnection(string url, java.util.Properties? properties = null)
+    {
+        if (!JdbcDriver.acceptsURL(url))
+            throw new InvalidOperationException($"Driver '{_driverClass}' does not accept URL '{url}'.");
+        return JdbcDriver.connect(url, properties ?? new java.util.Properties())
+            ?? throw new InvalidOperationException($"Driver '{_driverClass}' returned no connection for URL '{url}'.");
+    }
 
     public override DbConnectionStringBuilder CreateConnectionStringBuilder() =>
         new JdbcConnectionStringBuilder { JdbcDriver = _driverClass };
