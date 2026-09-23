@@ -27,7 +27,7 @@ public static class HistorizedStatement
         var columns = string.Join(", ", [.. mapped, dialect.QuoteIdentifier(HistorizedColumns.SnapshotAt)]);
         var selected = string.Join(", ", [.. mapped, dialect.ParameterReference("snapshotAt")]);
 
-        return $"INSERT INTO {quotedTarget} ({columns})\nSELECT {selected}\nFROM {staging};";
+        return $"INSERT INTO {quotedTarget} ({columns})\nSELECT {selected}\nFROM {staging}";
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ public static class HistorizedStatement
                 SELECT 1 FROM {staging} s
                 WHERE {join}
                   AND {changedPredicate}
-              );
+              )
             """;
     }
 
@@ -176,7 +176,7 @@ public static class HistorizedStatement
               AND NOT EXISTS (
                 SELECT 1 FROM {quotedTarget} t
                 WHERE {openMatch} AND t.{isCurrent} = {dialect.TrueLiteral}
-              );
+              )
             """;
     }
 
@@ -197,7 +197,7 @@ public static class HistorizedStatement
             SELECT {columns}
             FROM {staging}
             GROUP BY {columns}
-            HAVING COUNT(*) > 1;
+            HAVING COUNT(*) > 1
             """;
     }
 
@@ -391,7 +391,7 @@ public static class HistorizedStatement
               AND EXISTS (
                 SELECT 1 FROM {BoundaryCte} b
                 WHERE {firstBoundary}
-              );
+              )
             """;
     }
 
@@ -450,7 +450,7 @@ public static class HistorizedStatement
             INSERT INTO {quotedTarget} ({columns})
             SELECT {selected}
             FROM {BoundaryCte} b
-            WHERE b.__DS_Opens = 1;
+            WHERE b.__DS_Opens = 1
             """;
     }
 

@@ -19,7 +19,7 @@ public static class WatermarkStatement
         var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
         return
             $"SELECT MAX({dialect.QuoteIdentifier(watermarkColumn)}) FROM " +
-            $"{dialect.QualifyTable(schema, table)}{filterClause};";
+            $"{dialect.QualifyTable(schema, table)}{filterClause}";
     }
 
     /// <summary>
@@ -64,7 +64,7 @@ public static class WatermarkStatement
         return $"""
             SELECT {limitPrefix}{projection}{position} FROM {dialect.QualifyTable(schema, table)}
             WHERE {predicate}{userFilter}
-            ORDER BY {quotedColumn}{limitSuffix};
+            ORDER BY {quotedColumn}{limitSuffix}
             """;
     }
 }

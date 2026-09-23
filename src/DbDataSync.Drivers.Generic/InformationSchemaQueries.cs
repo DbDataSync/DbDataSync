@@ -28,7 +28,7 @@ public sealed class InformationSchemaQueries(SqlDialect dialect) : IDescriptorCa
             SELECT table_schema, table_name
             FROM information_schema.tables
             WHERE table_type = 'BASE TABLE'
-            ORDER BY table_schema, table_name;
+            ORDER BY table_schema, table_name
             """;
 
         var results = new List<TableMetadata>();
@@ -48,7 +48,7 @@ public sealed class InformationSchemaQueries(SqlDialect dialect) : IDescriptorCa
             SELECT column_name, data_type, character_maximum_length, numeric_precision, numeric_scale, is_nullable
             FROM information_schema.columns
             WHERE table_schema = {dialect.ParameterReference("schema")} AND table_name = {dialect.ParameterReference("table")}
-            ORDER BY ordinal_position;
+            ORDER BY ordinal_position
             """;
         cmd.AddParameter(dialect.ParameterName("schema"), schema);
         cmd.AddParameter(dialect.ParameterName("table"), table);
@@ -83,7 +83,7 @@ public sealed class InformationSchemaQueries(SqlDialect dialect) : IDescriptorCa
              AND k.table_name = c.table_name
             WHERE c.constraint_type = 'PRIMARY KEY'
               AND c.table_schema = {dialect.ParameterReference("schema")}
-              AND c.table_name = {dialect.ParameterReference("table")};
+              AND c.table_name = {dialect.ParameterReference("table")}
             """;
         cmd.AddParameter(dialect.ParameterName("schema"), schema);
         cmd.AddParameter(dialect.ParameterName("table"), table);

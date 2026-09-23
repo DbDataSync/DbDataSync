@@ -65,7 +65,7 @@ public sealed class KeyReconcileStatementTests
         Assert.Equal(
             """
             SELECT [Id] FROM [dbo].[Orders]
-            WHERE [Id] >= @segMin AND [Id] < @segMax AND (Region = 'EU');
+            WHERE [Id] >= @segMin AND [Id] < @segMax AND (Region = 'EU')
             """,
             KeyReconcileStatement.BuildRead(
                 BracketDialect.Instance, "dbo", "Orders",
@@ -80,7 +80,7 @@ public sealed class KeyReconcileStatementTests
         var projection = SourceProjection.Render(BracketDialect.Instance, keyMappings);
 
         Assert.Equal(
-            "SELECT [Id], [Region] FROM [dbo].[Orders]\nWHERE 1 = 1;",
+            "SELECT [Id], [Region] FROM [dbo].[Orders]\nWHERE 1 = 1",
             KeyReconcileStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "1 = 1", null, projection));
     }
 
@@ -88,7 +88,7 @@ public sealed class KeyReconcileStatementTests
     public void Range_AppliesTheFilter()
     {
         Assert.Equal(
-            "SELECT MIN([Id]), MAX([Id]) FROM [dbo].[Orders] WHERE Region = 'EU';",
+            "SELECT MIN([Id]), MAX([Id]) FROM [dbo].[Orders] WHERE Region = 'EU'",
             KeyReconcileStatement.BuildRange(BracketDialect.Instance, "dbo", "Orders", "Id", "Region = 'EU'"));
     }
 
@@ -96,7 +96,7 @@ public sealed class KeyReconcileStatementTests
     public void Count_ScopesToTheSegment()
     {
         Assert.Equal(
-            "SELECT COUNT(*) FROM [dbo].[Orders] WHERE [Id] >= @segMin AND [Id] < @segMax;",
+            "SELECT COUNT(*) FROM [dbo].[Orders] WHERE [Id] >= @segMin AND [Id] < @segMax",
             KeyReconcileDeleteStatement.BuildCount("[dbo].[Orders]", "[Id] >= @segMin AND [Id] < @segMax"));
     }
 
@@ -107,7 +107,7 @@ public sealed class KeyReconcileStatementTests
             """
             DELETE FROM [dbo].[Orders]
             WHERE [Id] >= @segMin AND [Id] < @segMax
-              AND NOT EXISTS (SELECT 1 FROM [dbo].[DS_STG_x] s WHERE s.[Id] = [dbo].[Orders].[Id]);
+              AND NOT EXISTS (SELECT 1 FROM [dbo].[DS_STG_x] s WHERE s.[Id] = [dbo].[Orders].[Id])
             """,
             KeyReconcileDeleteStatement.BuildDelete(
                 BracketDialect.Instance, "[dbo].[Orders]", "[Id] >= @segMin AND [Id] < @segMax",
@@ -141,7 +141,7 @@ public sealed class KeyReconcileScd2CloseStatementTests
     public void Count_ScopesToTheSegment_AndOnlyOpenRows()
     {
         Assert.Equal(
-            "SELECT COUNT(*) FROM [dbo].[Orders] WHERE [DS_IsCurrent] = TRUE AND [Id] >= @segMin AND [Id] < @segMax;",
+            "SELECT COUNT(*) FROM [dbo].[Orders] WHERE [DS_IsCurrent] = TRUE AND [Id] >= @segMin AND [Id] < @segMax",
             KeyReconcileScd2CloseStatement.BuildCount(
                 BracketDialect.Instance, "[dbo].[Orders]", "[Id] >= @segMin AND [Id] < @segMax"));
     }
@@ -156,7 +156,7 @@ public sealed class KeyReconcileScd2CloseStatementTests
                 [DS_IsCurrent] = FALSE
             WHERE [DS_IsCurrent] = TRUE
               AND [Id] >= @segMin AND [Id] < @segMax
-              AND NOT EXISTS (SELECT 1 FROM [dbo].[DS_STG_x] s WHERE s.[Id] = [dbo].[Orders].[Id]);
+              AND NOT EXISTS (SELECT 1 FROM [dbo].[DS_STG_x] s WHERE s.[Id] = [dbo].[Orders].[Id])
             """,
             KeyReconcileScd2CloseStatement.BuildClose(
                 BracketDialect.Instance, "[dbo].[Orders]", "[Id] >= @segMin AND [Id] < @segMax",

@@ -12,6 +12,6 @@ public sealed class PostgresRenameColumnTests
     {
         var sql = PostgresDialect.Instance.RenderRenameColumn("\"public\".\"orders\"", "cust_id", "customer_id");
 
-        Assert.Equal("ALTER TABLE \"public\".\"orders\" RENAME COLUMN \"cust_id\" TO \"customer_id\";", sql);
+        Assert.Equal("ALTER TABLE \"public\".\"orders\" RENAME COLUMN \"cust_id\" TO \"customer_id\"", sql);
     }
 }

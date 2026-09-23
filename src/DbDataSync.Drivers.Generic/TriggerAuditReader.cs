@@ -182,7 +182,7 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
                     PreviewStages.SourceRead,
                     "Full load — no shadow-table position stored yet, so the next pass reads every row",
                     SourceProjection.Render(dialect, request.ColumnMappings) is var projection
-                        ? $"SELECT {projection} FROM {dialect.QualifyTable(request.Source.Schema, request.Source.Table)};"
+                        ? $"SELECT {projection} FROM {dialect.QualifyTable(request.Source.Schema, request.Source.Table)}"
                         : null,
                     PreviewOrigin.BuiltIn),
             ];

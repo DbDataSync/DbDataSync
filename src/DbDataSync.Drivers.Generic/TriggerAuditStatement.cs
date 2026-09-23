@@ -42,7 +42,7 @@ public static class TriggerAuditStatement
 
     public static string BuildMaxSequence(SqlDialect dialect, string schema, string table) =>
         $"SELECT MAX({dialect.QuoteIdentifier(SequenceColumn)}) " +
-        $"FROM {dialect.QualifyTable(schema, ShadowTableName(table))};";
+        $"FROM {dialect.QualifyTable(schema, ShadowTableName(table))}";
 
     /// <summary>
     /// The oldest surviving sequence — what pruning left, not what the table once held. The reader's
@@ -52,7 +52,7 @@ public static class TriggerAuditStatement
     /// </summary>
     public static string BuildMinSequence(SqlDialect dialect, string schema, string table) =>
         $"SELECT MIN({dialect.QuoteIdentifier(SequenceColumn)}) " +
-        $"FROM {dialect.QualifyTable(schema, ShadowTableName(table))};";
+        $"FROM {dialect.QualifyTable(schema, ShadowTableName(table))}";
 
     /// <summary>
     /// The incremental read.
@@ -131,7 +131,7 @@ public static class TriggerAuditStatement
                 GROUP BY {keyList}
             ) latest ON c.{seq} = latest.{seq}
             LEFT JOIN {baseTable} base ON {joinToBase}
-            ORDER BY c.{seq};
+            ORDER BY c.{seq}
             """;
     }
 
@@ -143,5 +143,5 @@ public static class TriggerAuditStatement
     /// </summary>
     public static string BuildPrune(SqlDialect dialect, string schema, string table) =>
         $"DELETE FROM {dialect.QualifyTable(schema, ShadowTableName(table))} " +
-        $"WHERE {dialect.QuoteIdentifier(SequenceColumn)} <= {dialect.ParameterReference("throughSequence")};";
+        $"WHERE {dialect.QuoteIdentifier(SequenceColumn)} <= {dialect.ParameterReference("throughSequence")}";
 }

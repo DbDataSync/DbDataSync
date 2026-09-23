@@ -198,7 +198,7 @@ public abstract class SqlDialect
     /// this is a hook rather than a format string.</summary>
     /// <param name="rowValueTuples">Each already rendered as <c>(@p0_0, @p0_1, …)</c>.</param>
     public virtual string RenderMultiRowInsert(string qualifiedTable, string columnList, IReadOnlyList<string> rowValueTuples) =>
-        $"INSERT INTO {qualifiedTable} ({columnList}) VALUES {string.Join(", ", rowValueTuples)};";
+        $"INSERT INTO {qualifiedTable} ({columnList}) VALUES {string.Join(", ", rowValueTuples)}";
 
     /// <summary>Drops a table if it is there. <c>IF EXISTS</c> is not universal (Oracle needs a PL/SQL
     /// block around the drop), so the whole statement is the hook.</summary>
@@ -221,7 +221,7 @@ public abstract class SqlDialect
     /// </para>
     /// </summary>
     public virtual string RenderAddColumn(string qualifiedTable, string column, string type) =>
-        $"ALTER TABLE {qualifiedTable} ADD COLUMN {QuoteIdentifier(column)} {type} NULL;";
+        $"ALTER TABLE {qualifiedTable} ADD COLUMN {QuoteIdentifier(column)} {type} NULL";
 
     /// <summary>
     /// Change an existing column's type, or null when this engine cannot express the change as a
@@ -229,7 +229,7 @@ public abstract class SqlDialect
     /// rather than emitting something that might silently truncate.
     /// </summary>
     public virtual string? RenderAlterColumnType(string qualifiedTable, string column, string type) =>
-        $"ALTER TABLE {qualifiedTable} ALTER COLUMN {QuoteIdentifier(column)} TYPE {type};";
+        $"ALTER TABLE {qualifiedTable} ALTER COLUMN {QuoteIdentifier(column)} TYPE {type}";
 
     /// <summary>
     /// Rename an existing column, keeping its type and its data.
@@ -241,7 +241,7 @@ public abstract class SqlDialect
     /// </para>
     /// </summary>
     public virtual string RenderRenameColumn(string qualifiedTable, string from, string to) =>
-        $"ALTER TABLE {qualifiedTable} RENAME COLUMN {QuoteIdentifier(from)} TO {QuoteIdentifier(to)};";
+        $"ALTER TABLE {qualifiedTable} RENAME COLUMN {QuoteIdentifier(from)} TO {QuoteIdentifier(to)}";
 
     /// <summary>
     /// An expression rendered as text, for building a composite value out of columns of mixed type.
@@ -299,10 +299,10 @@ public abstract class SqlDialect
     public virtual string? RenderDeclarations(IReadOnlyList<PreviewParameter> parameters) => null;
 
     public virtual string RenderSampleSelect(string qualifiedTable, int rows) =>
-        $"SELECT * FROM {qualifiedTable} LIMIT {rows};";
+        $"SELECT * FROM {qualifiedTable} LIMIT {rows}";
 
     public virtual string RenderDropTableIfExists(string qualifiedTable) =>
-        $"DROP TABLE IF EXISTS {qualifiedTable};";
+        $"DROP TABLE IF EXISTS {qualifiedTable}";
 
     /// <summary>
     /// How a column's type divides into buckets for auto-segmentation. The default covers the type

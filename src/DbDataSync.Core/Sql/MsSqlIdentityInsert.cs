@@ -44,7 +44,7 @@ public static class MsSqlIdentityInsert
     {
         using var cmd = connection.CreateTimedCommand();
         cmd.Transaction = transaction;
-        cmd.CommandText = $"SET IDENTITY_INSERT {quotedTarget} {(on ? "ON" : "OFF")};";
+        cmd.CommandText = $"SET IDENTITY_INSERT {quotedTarget} {(on ? "ON" : "OFF")}";
         await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 }

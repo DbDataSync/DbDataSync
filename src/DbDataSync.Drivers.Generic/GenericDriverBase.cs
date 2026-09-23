@@ -172,7 +172,7 @@ public abstract class GenericDriverBase<TSpec>(TSpec spec, ISegmentValueBinder b
         try
         {
             using var cmd = connection.CreateTimedCommand();
-            cmd.CommandText = "SELECT 1;";
+            cmd.CommandText = "SELECT 1";
             await cmd.ExecuteScalarAsync(cancellationToken);
             return new ConnectionTestResult(true, Stopwatch.GetElapsedTime(started), connection.ServerVersion, null);
         }

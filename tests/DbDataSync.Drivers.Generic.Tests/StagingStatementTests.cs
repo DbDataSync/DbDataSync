@@ -19,7 +19,7 @@ public sealed class StagingStatementTests
         Assert.Equal(
             "CREATE TABLE [dbo].[DS_STG_x] ([Id] int NULL, [Name] nvarchar(50) NULL, " +
             "[__Operation] CHAR(1) NOT NULL, " +
-            "[__Ordinal] BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY);",
+            "[__Ordinal] BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY)",
             StagingStatement.BuildCreate(BracketDialect.Instance, "[dbo].[DS_STG_x]", ["Id", "Name"], Types));
     }
 
@@ -51,7 +51,7 @@ public sealed class StagingStatementTests
     {
         Assert.Equal(
             "INSERT INTO t ([Id], [Name], [__Operation]) VALUES " +
-            "(@s0_0, @s0_1, @s0_2), (@s1_0, @s1_1, @s1_2);",
+            "(@s0_0, @s0_1, @s0_2), (@s1_0, @s1_1, @s1_2)",
             StagingStatement.BuildInsert(BracketDialect.Instance, "t", ["Id", "Name"], rowCount: 2));
     }
 
@@ -59,7 +59,7 @@ public sealed class StagingStatementTests
     public void Insert_FollowsTheDialectForQuotingAndPlaceholders()
     {
         Assert.Equal(
-            "INSERT INTO t (\"Id\", \"__Operation\") VALUES (:s0_0, :s0_1);",
+            "INSERT INTO t (\"Id\", \"__Operation\") VALUES (:s0_0, :s0_1)",
             StagingStatement.BuildInsert(ColonDialect.Instance, "t", ["Id"], rowCount: 1));
     }
 
@@ -102,7 +102,7 @@ public sealed class StagingStatementTests
             "CREATE TABLE [dbo].[DS_STG_x] ([Id] int NULL, [Name] nvarchar(50) NULL, " +
             "[__DS_ChangeOrdering] VARCHAR(64) NULL, [__DS_ChangedAtUtc] DATETIME2 NULL, " +
             "[__Operation] CHAR(1) NOT NULL, " +
-            "[__Ordinal] BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY);",
+            "[__Ordinal] BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY)",
             sql);
     }
 
@@ -125,7 +125,7 @@ public sealed class StagingStatementTests
 
         Assert.Equal(
             "INSERT INTO t ([Id], [__DS_ChangeOrdering], [__DS_ChangedAtUtc], [__Operation]) VALUES " +
-            "(@s0_0, @s0_1, @s0_2, @s0_3);",
+            "(@s0_0, @s0_1, @s0_2, @s0_3)",
             sql);
     }
 

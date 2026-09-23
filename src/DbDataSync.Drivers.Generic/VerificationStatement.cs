@@ -123,7 +123,7 @@ public static class VerificationStatement
             sql += $" GROUP BY {expressions} ORDER BY {expressions}";
         }
 
-        return sql + ";";
+        return sql;
     }
 
     /// <summary>

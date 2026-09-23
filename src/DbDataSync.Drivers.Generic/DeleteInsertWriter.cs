@@ -150,7 +150,7 @@ public sealed class DeleteInsertWriter(SqlDialect dialect, ITableCatalog catalog
 public static class DeleteInsertStatement
 {
     public static string BuildDelete(string quotedTarget, string scopePredicate) =>
-        $"DELETE FROM {quotedTarget} WHERE {scopePredicate};";
+        $"DELETE FROM {quotedTarget} WHERE {scopePredicate}";
 
     public const string AfterOrdinalParameter = "afterOrdinal";
     public const string UpToOrdinalParameter = "upToOrdinal";
@@ -177,7 +177,7 @@ public static class DeleteInsertStatement
         return $"""
             {dialect.RenderInsertInto(quotedTarget, insertColumnList, overrideGenerated)}
             SELECT {insertColumnList} FROM {stagingLocation}
-            WHERE {dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} <> 'D'{bound};
+            WHERE {dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} <> 'D'{bound}
             """;
     }
 }

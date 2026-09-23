@@ -123,7 +123,7 @@ public sealed class KeyReconcileDeleteWriter(SqlDialect dialect, ITableCatalog c
 public static class KeyReconcileDeleteStatement
 {
     public static string BuildCount(string quotedTarget, string scopePredicate) =>
-        $"SELECT COUNT(*) FROM {quotedTarget} WHERE {scopePredicate};";
+        $"SELECT COUNT(*) FROM {quotedTarget} WHERE {scopePredicate}";
 
     /// <summary>
     /// A correlated <c>NOT EXISTS</c>, not a tuple <c>NOT IN</c> — the portable form across every
@@ -140,7 +140,7 @@ public static class KeyReconcileDeleteStatement
         return $"""
             DELETE FROM {quotedTarget}
             WHERE {scopePredicate}
-              AND NOT EXISTS (SELECT 1 FROM {stagingLocation} s WHERE {join});
+              AND NOT EXISTS (SELECT 1 FROM {stagingLocation} s WHERE {join})
             """;
     }
 }

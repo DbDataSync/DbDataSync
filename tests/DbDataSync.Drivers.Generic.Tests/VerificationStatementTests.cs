@@ -26,7 +26,7 @@ public sealed class VerificationStatementTests
     {
         var sql = VerificationStatement.BuildRowCount(Dialect, "dbo", "Orders", [], filter: null);
 
-        Assert.Equal("""SELECT COUNT(*) AS "__rows" FROM "dbo"."Orders";""", sql);
+        Assert.Equal("""SELECT COUNT(*) AS "__rows" FROM "dbo"."Orders" """.TrimEnd(), sql);
     }
 
     /// <summary>
@@ -42,7 +42,7 @@ public sealed class VerificationStatementTests
         var sql = VerificationStatement.BuildRowCount(Dialect, "dbo", "Orders", columns, filter: null);
 
         Assert.Equal(
-            """SELECT "Region" AS "Region", COUNT(*) AS "__rows" FROM "dbo"."Orders" GROUP BY "Region" ORDER BY "Region";""",
+            """SELECT "Region" AS "Region", COUNT(*) AS "__rows" FROM "dbo"."Orders" GROUP BY "Region" ORDER BY "Region" """.TrimEnd(),
             sql);
     }
 
@@ -110,7 +110,7 @@ public sealed class VerificationStatementTests
         var sql = VerificationStatement.BuildSum(Dialect, "dbo", "Orders", groupBy, measures, filter: null);
 
         Assert.Equal(
-            """SELECT "region" AS "Region", SUM("amt") AS "Amount" FROM "dbo"."Orders" GROUP BY "region" ORDER BY "region";""",
+            """SELECT "region" AS "Region", SUM("amt") AS "Amount" FROM "dbo"."Orders" GROUP BY "region" ORDER BY "region" """.TrimEnd(),
             sql);
     }
 

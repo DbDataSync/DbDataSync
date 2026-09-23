@@ -30,7 +30,7 @@ public sealed class Scd2WriterTests
     public void FindDuplicateKeys_GroupsByTheNaturalKeyAndKeepsOnlyThoseWithMoreThanOneRow()
     {
         Assert.Equal(
-            "SELECT [Id]\nFROM #staging\nGROUP BY [Id]\nHAVING COUNT(*) > 1;",
+            "SELECT [Id]\nFROM #staging\nGROUP BY [Id]\nHAVING COUNT(*) > 1",
             HistorizedStatement.BuildFindDuplicateKeys(BracketDialect.Instance, "#staging", ["Id"]));
     }
 
@@ -239,7 +239,7 @@ public sealed class Scd2WriterTests
 
         Assert.Contains("WHERE m.__DS_Opens = 1 OR m.__DS_Op = 'D'", sql);
         Assert.Contains("CASE WHEN d.__DS_Op <> 'D' AND", sql);
-        Assert.Contains("WHERE b.__DS_Opens = 1;", sql);
+        Assert.Contains("WHERE b.__DS_Opens = 1", sql);
     }
 
     /// <summary>

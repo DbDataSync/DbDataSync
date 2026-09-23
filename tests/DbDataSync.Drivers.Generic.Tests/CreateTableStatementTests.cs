@@ -26,7 +26,7 @@ public sealed class CreateTableStatementTests
                 [Id] int NOT NULL,
                 [Name] varchar(50) NULL,
                 PRIMARY KEY ([Id])
-            );
+            )
             """.ReplaceLineEndings("\n").TrimEnd(),
             CreateTableStatement.Build(BracketDialect.Instance, "[dbo].[Orders]", columns));
     }
@@ -76,7 +76,7 @@ public sealed class CreateTableStatementTests
             CREATE TABLE t (
                 "Id" int4 NOT NULL,
                 PRIMARY KEY ("Id")
-            );
+            )
             """.ReplaceLineEndings("\n").TrimEnd(),
             CreateTableStatement.Build(ColonDialect.Instance, "t", columns));
     }

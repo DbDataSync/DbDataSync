@@ -191,7 +191,7 @@ public static class BatchReloadStatement
         var userFilter = string.IsNullOrWhiteSpace(filter) ? "" : $" AND ({filter})";
         return $"""
             SELECT {projection} FROM {dialect.QualifyTable(schema, table)}
-            WHERE {scopePredicate}{userFilter};
+            WHERE {scopePredicate}{userFilter}
             """;
     }
 
@@ -200,6 +200,6 @@ public static class BatchReloadStatement
     {
         var quoted = dialect.QuoteIdentifier(column);
         var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
-        return $"SELECT MIN({quoted}), MAX({quoted}) FROM {dialect.QualifyTable(schema, table)}{filterClause};";
+        return $"SELECT MIN({quoted}), MAX({quoted}) FROM {dialect.QualifyTable(schema, table)}{filterClause}";
     }
 }

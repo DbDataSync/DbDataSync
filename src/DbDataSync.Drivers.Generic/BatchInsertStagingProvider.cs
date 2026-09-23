@@ -273,7 +273,7 @@ public static class StagingStatement
         }
         return $"CREATE TABLE {qualifiedTable} ({string.Join(", ", defs)}, " +
                $"{dialect.QuoteIdentifier(BatchInsertStagingProvider.OperationColumn)} {dialect.OperationMarkerColumnType} NOT NULL, " +
-               $"{dialect.RenderStagingOrdinalColumn(BatchInsertStagingProvider.OrdinalColumn)});";
+               $"{dialect.RenderStagingOrdinalColumn(BatchInsertStagingProvider.OrdinalColumn)})";
     }
 
     public static string BuildInsert(

@@ -103,7 +103,7 @@ public sealed class OracleDialect : SqlDialect
             INSERT INTO {qualifiedTable} ({columnList})
             SELECT * FROM (
                 {string.Join("\n    UNION ALL ", rows)}
-            );
+            )
             """;
     }
 

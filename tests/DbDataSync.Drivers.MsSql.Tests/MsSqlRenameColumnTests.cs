@@ -15,7 +15,7 @@ public sealed class MsSqlRenameColumnTests
     {
         var sql = MsSqlDialect.Instance.RenderRenameColumn("[dbo].[Orders]", "CustId", "CustomerId");
 
-        Assert.Equal("EXEC sp_rename N'[dbo].[Orders].[CustId]', N'CustomerId', 'COLUMN';", sql);
+        Assert.Equal("EXEC sp_rename N'[dbo].[Orders].[CustId]', N'CustomerId', 'COLUMN'", sql);
     }
 
     /// <summary>A quote in an identifier would otherwise end the literal early and leave the rest of

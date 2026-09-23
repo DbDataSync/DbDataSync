@@ -53,12 +53,12 @@ public sealed class MsSqlDialect : SqlDialect
     /// <see cref="CanonicalTypeKind.Unmappable"/>: nothing here guesses a rendering for them.</summary>
     /// <summary>SQL Server's ADD takes no COLUMN keyword.</summary>
     public override string RenderAddColumn(string qualifiedTable, string column, string type) =>
-        $"ALTER TABLE {qualifiedTable} ADD {QuoteIdentifier(column)} {type} NULL;";
+        $"ALTER TABLE {qualifiedTable} ADD {QuoteIdentifier(column)} {type} NULL";
 
     /// <summary>SQL Server spells the type change ALTER COLUMN &lt;name&gt; &lt;type&gt;, with no TYPE
     /// keyword.</summary>
     public override string? RenderAlterColumnType(string qualifiedTable, string column, string type) =>
-        $"ALTER TABLE {qualifiedTable} ALTER COLUMN {QuoteIdentifier(column)} {type} NULL;";
+        $"ALTER TABLE {qualifiedTable} ALTER COLUMN {QuoteIdentifier(column)} {type} NULL";
 
     /// <summary>
     /// SQL Server has no <c>ALTER TABLE … RENAME COLUMN</c>; the rename is a stored procedure whose
@@ -67,7 +67,7 @@ public sealed class MsSqlDialect : SqlDialect
     /// literally called <c>dbo.T.NewName</c>.
     /// </summary>
     public override string RenderRenameColumn(string qualifiedTable, string from, string to) =>
-        $"EXEC sp_rename N'{Literal($"{qualifiedTable}.{QuoteIdentifier(from)}")}', N'{Literal(to)}', 'COLUMN';";
+        $"EXEC sp_rename N'{Literal($"{qualifiedTable}.{QuoteIdentifier(from)}")}', N'{Literal(to)}', 'COLUMN'";
 
     private static string Literal(string value) => value.Replace("'", "''");
 
@@ -86,7 +86,7 @@ public sealed class MsSqlDialect : SqlDialect
 
     /// <summary>SQL Server has no LIMIT.</summary>
     public override string RenderSampleSelect(string qualifiedTable, int rows) =>
-        $"SELECT TOP ({rows}) * FROM {qualifiedTable};";
+        $"SELECT TOP ({rows}) * FROM {qualifiedTable}";
 
     /// <summary>Plain <c>DECLARE @name type = literal;</c>, one per line — valid on its own ahead of
     /// any batch, which is what makes pasting this block followed by the statement it belongs to just

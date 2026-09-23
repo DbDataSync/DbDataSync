@@ -75,7 +75,7 @@ public sealed class MySqlDialect : SqlDialect
     /// redefines the whole column, so leaving nullability unstated here would let a bare column
     /// definition's own default decide it instead of this method's own explicit answer.</summary>
     public override string? RenderAlterColumnType(string qualifiedTable, string column, string type) =>
-        $"ALTER TABLE {qualifiedTable} MODIFY COLUMN {QuoteIdentifier(column)} {type} NULL;";
+        $"ALTER TABLE {qualifiedTable} MODIFY COLUMN {QuoteIdentifier(column)} {type} NULL";
 
     /// <summary>MySQL user variables share the exact <c>@name</c> syntax <see cref="ParameterReference"/>
     /// already uses for bind parameters, and are untyped — a plain <c>SET @p = value;</c> per parameter,

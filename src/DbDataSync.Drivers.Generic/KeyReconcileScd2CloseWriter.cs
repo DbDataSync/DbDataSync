@@ -131,7 +131,7 @@ public static class KeyReconcileScd2CloseStatement
     // Only open rows are eligible to close — a row already closed by an earlier pass was never a
     // candidate, so it must not count toward the guard's denominator.
     public static string BuildCount(SqlDialect dialect, string quotedTarget, string scopePredicate) =>
-        $"SELECT COUNT(*) FROM {quotedTarget} WHERE {dialect.QuoteIdentifier(HistorizedColumns.IsCurrent)} = {dialect.TrueLiteral} AND {scopePredicate};";
+        $"SELECT COUNT(*) FROM {quotedTarget} WHERE {dialect.QuoteIdentifier(HistorizedColumns.IsCurrent)} = {dialect.TrueLiteral} AND {scopePredicate}";
 
     /// <summary>
     /// The same correlated <c>NOT EXISTS</c> <see cref="KeyReconcileDeleteStatement.BuildDelete"/> uses,
@@ -155,7 +155,7 @@ public static class KeyReconcileScd2CloseStatement
                 {isCurrent} = {dialect.FalseLiteral}
             WHERE {isCurrent} = {dialect.TrueLiteral}
               AND {scopePredicate}
-              AND NOT EXISTS (SELECT 1 FROM {stagingLocation} s WHERE {join});
+              AND NOT EXISTS (SELECT 1 FROM {stagingLocation} s WHERE {join})
             """;
     }
 }

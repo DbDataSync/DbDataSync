@@ -12,7 +12,7 @@ public sealed class PipelineStatementTests
         Assert.Equal(
             """
             SELECT * FROM [dbo].[Orders]
-            WHERE [OrderId] >= @segMin AND [OrderId] < @segMax AND (Region = 'EU');
+            WHERE [OrderId] >= @segMin AND [OrderId] < @segMax AND (Region = 'EU')
             """,
             BatchReloadStatement.BuildRead(
                 BracketDialect.Instance, "dbo", "Orders",
@@ -25,7 +25,7 @@ public sealed class PipelineStatementTests
         Assert.Equal(
             """
             SELECT * FROM [dbo].[Orders]
-            WHERE 1 = 1;
+            WHERE 1 = 1
             """,
             BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null));
     }
@@ -34,7 +34,7 @@ public sealed class PipelineStatementTests
     public void Range_AppliesTheFilterSoAutoBucketsCoverOnlyTheMappedSubset()
     {
         Assert.Equal(
-            "SELECT MIN([OrderId]), MAX([OrderId]) FROM [dbo].[Orders] WHERE Region = 'EU';",
+            "SELECT MIN([OrderId]), MAX([OrderId]) FROM [dbo].[Orders] WHERE Region = 'EU'",
             BatchReloadStatement.BuildRange(BracketDialect.Instance, "dbo", "Orders", "OrderId", "Region = 'EU'"));
     }
 
@@ -42,7 +42,7 @@ public sealed class PipelineStatementTests
     public void Delete_ScopesToTheSegmentRatherThanTheWholeTable()
     {
         Assert.Equal(
-            "DELETE FROM [dbo].[Orders] WHERE [OrderId] >= @segMin AND [OrderId] < @segMax;",
+            "DELETE FROM [dbo].[Orders] WHERE [OrderId] >= @segMin AND [OrderId] < @segMax",
             DeleteInsertStatement.BuildDelete("[dbo].[Orders]", "[OrderId] >= @segMin AND [OrderId] < @segMax"));
     }
 
@@ -55,7 +55,7 @@ public sealed class PipelineStatementTests
             """
             INSERT INTO [dbo].[Orders] ([Id], [Name])
             SELECT [Id], [Name] FROM [dbo].[DS_STG_x]
-            WHERE [__Operation] <> 'D';
+            WHERE [__Operation] <> 'D'
             """,
             DeleteInsertStatement.BuildInsert(BracketDialect.Instance, "[dbo].[Orders]", "[Id], [Name]", "[dbo].[DS_STG_x]"));
     }
@@ -76,7 +76,7 @@ public sealed class PipelineStatementTests
             SELECT [Id], [Name] FROM [dbo].[DS_STG_x]
             WHERE [__Operation] <> 'D'
               AND [__Ordinal] > @afterOrdinal
-              AND [__Ordinal] <= @upToOrdinal;
+              AND [__Ordinal] <= @upToOrdinal
             """,
             DeleteInsertStatement.BuildInsert(
                 BracketDialect.Instance, "[dbo].[Orders]", "[Id], [Name]", "[dbo].[DS_STG_x]",
