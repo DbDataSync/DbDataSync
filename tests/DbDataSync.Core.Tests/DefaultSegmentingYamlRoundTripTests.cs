@@ -63,7 +63,7 @@ public sealed class DefaultSegmentingYamlRoundTripTests : IDisposable
             new RangeSegment("Id", "1", "100"),
             new RangeSegment("OrderDate", "2024-03-01", "2024-04-01", "2024-03"),
             new AutoSegment("Id", 8),
-            new CustomSegment("year-month"),
+            new CustomSegment("year-month", "OrderDate"),
         ];
 
         Assert.Equal(every, RoundTrip(every));

@@ -35,7 +35,7 @@ const KINDS: { kind: SegmentingStrategyKind; label: string; hint: string }[] = [
 /** The slot a segmenting script implements (see ScriptSlots.SegmentingStrategy). */
 const SEGMENTING_SLOT = 'segmentingStrategy'
 
-const COLUMNS = '1.1fr .7fr 1.3fr 120px'
+const COLUMNS = '1.4fr 1fr 120px'
 
 /** The four columns every kind has to return — stated once, and offered as the starting point. */
 const STARTER_SQL = `-- Every kind returns the same four columns. \`selected\` may be omitted, in
@@ -49,7 +49,7 @@ FROM generate_series(
     DATE '2024-01-01', DATE '2025-01-01', INTERVAL 1 MONTH) AS t(m);`
 
 function blank(): SegmentingStrategyConfig {
-  return { name: '', kind: 'DuckDb', sql: STARTER_SQL, scriptName: null, column: '', parameters: {} }
+  return { name: '', kind: 'DuckDb', sql: STARTER_SQL, scriptName: null, parameters: {} }
 }
 
 /**
@@ -106,7 +106,7 @@ export function SegmentingStrategiesCard({ replicationName, strategies, onChange
       </div>
 
       <div className="grid-head" style={{ gridTemplateColumns: COLUMNS, gap: 10, height: 29 }}>
-        <span>Name</span><span>Kind</span><span>Over column</span><span />
+        <span>Name</span><span>Kind</span><span />
       </div>
 
       {strategies.length === 0 && <div className="empty">No strategies defined.</div>}
@@ -115,7 +115,6 @@ export function SegmentingStrategiesCard({ replicationName, strategies, onChange
         <div key={i} className="grid-row" style={{ gridTemplateColumns: COLUMNS, gap: 10 }}>
           <span className="name">{strategy.name}</span>
           <span className="dim">{KINDS.find((k) => k.kind === strategy.kind)?.label ?? strategy.kind}</span>
-          <span className="dim mono">{strategy.column || '—'}</span>
           <span className="row" style={{ gap: 10, justifySelf: 'end' }}>
             <button
               type="button"
@@ -170,6 +169,11 @@ function StrategyEditor({ replicationName, draft, setDraft, onCancel, onCommit, 
   const [testMapping, setTestMapping] = useState<string | null>(null)
   const mapping = testMapping ?? mappings?.[0] ?? null
 
+  // Scratch state for the Test button only — never part of the strategy being edited. The column is a
+  // property of the *table* being tested against, not of the strategy, so it lives here rather than on
+  // `draft`; see SegmentingStrategyConfig's own comment for why.
+  const [testColumn, setTestColumn] = useState('')
+
   const set = (patch: Partial<SegmentingStrategyConfig>) => setDraft({ ...draft, ...patch })
 
   const script = scripts?.find((s) => s.manifest.name === draft.scriptName)?.manifest
@@ -202,15 +206,6 @@ function StrategyEditor({ replicationName, draft, setDraft, onCancel, onCommit, 
             {KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}
           </select>
         </Field>
-        <Field label="Over column">
-          <input
-            className="input mono"
-            value={draft.column ?? ''}
-            onChange={(e) => set({ column: e.target.value })}
-            placeholder="OrderDate"
-            data-testid="strategy-column-input"
-          />
-        </Field>
       </div>
 
       {kind && <span className="hint">{kind.hint}</span>}
@@ -221,15 +216,6 @@ function StrategyEditor({ replicationName, draft, setDraft, onCancel, onCommit, 
         <span className="hint warn" data-testid="strategy-connection-note">
           This strategy queries the {draft.kind === 'TargetSql' ? 'target' : 'source'} database, and
           will do so again on every scheduled reload that uses it — not only when it is tested here.
-        </span>
-      )}
-
-      {/* The column is required for every kind and is not inferable: the query returns bounds, not
-          the thing they bound. */}
-      {!draft.column?.trim() && (
-        <span className="hint">
-          Every kind needs the column its ranges are over. The query returns bounds; only you know
-          which of the source's columns they bound.
         </span>
       )}
 
@@ -274,14 +260,29 @@ function StrategyEditor({ replicationName, draft, setDraft, onCancel, onCommit, 
         </Field>
       )}
 
+      {/* The column is required for every kind but Script, and is not inferable: the query returns
+          bounds, not the thing they bound — and it is a property of the table being tested against,
+          not of the strategy, so it is asked for here rather than stored on `draft`. */}
+      {draft.kind !== 'Script' && (
+        <Field label="Column to test against">
+          <input
+            className="input mono"
+            value={testColumn}
+            onChange={(e) => setTestColumn(e.target.value)}
+            placeholder="OrderDate"
+            data-testid="strategy-test-column-input"
+          />
+        </Field>
+      )}
+
       <div className="row" style={{ gap: 10 }}>
         {/* Testing before saving is the point: an operator should find out a query is malformed while
             writing it, not the next time a scheduled reload silently does nothing. */}
         <button
           type="button"
           className="btn btn-sm"
-          disabled={!mapping || test.isPending || !draft.column?.trim()}
-          onClick={() => mapping && test.mutate({ mappingName: mapping, strategy: draft })}
+          disabled={!mapping || test.isPending || (draft.kind !== 'Script' && !testColumn.trim())}
+          onClick={() => mapping && test.mutate({ mappingName: mapping, strategy: draft, column: testColumn || null })}
           data-testid="test-strategy-button"
         >
           {test.isPending ? 'Running…' : 'Test'}
@@ -311,7 +312,7 @@ function StrategyEditor({ replicationName, draft, setDraft, onCancel, onCommit, 
         <button
           type="button"
           className="btn btn-sm btn-primary"
-          disabled={!draft.name.trim() || !draft.column?.trim()}
+          disabled={!draft.name.trim()}
           onClick={onCommit}
           data-testid="commit-strategy-button"
         >

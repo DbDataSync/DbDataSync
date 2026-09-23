@@ -1088,21 +1088,26 @@ export type BatchReloadSegment =
   /**
    * A reference to a named strategy, expanded server-side into its *selected* candidates every time
    * it runs — never a frozen list, or a strategy tracking "the last three months" would stop moving.
+   *
+   * `column` travels with the reference, not with the strategy: a strategy's query returns bounds, not
+   * the thing they bound, and which column those bounds are over is a property of *this* table — two
+   * mappings referencing the same strategy by name can each name a different column. Required for
+   * every kind except Script, which already knows its own column.
    */
-  | { mode: 'custom'; strategyName: string }
+  | { mode: 'custom'; strategyName: string; column?: string | null }
 
 export type SegmentingStrategyKind = 'DuckDb' | 'SourceSql' | 'TargetSql' | 'Script'
 
 /**
  * A named way of dividing a table for reload, defined on the replication and referenced by name.
- * Every kind returns the same four columns: label, range_start, range_end and selected.
+ * Every kind returns the same four columns: label, range_start, range_end and selected. Carries no
+ * column of its own — see the `custom` segment mode's own comment for why.
  */
 export interface SegmentingStrategyConfig {
   name: string
   kind: SegmentingStrategyKind
   sql?: string | null
   scriptName?: string | null
-  column?: string | null
   parameters?: Record<string, string>
 }
 

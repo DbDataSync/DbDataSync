@@ -52,7 +52,7 @@ public sealed class CustomSegmentExpansion(SegmentingStrategyRunner runner)
                     $"Table mapping '{mapping.Name}' segments with strategy '{custom.StrategyName}', which " +
                     $"replication '{task.Name}' does not define.");
 
-            var candidates = await RunAsync(strategy, task, mapping, connections, cancellationToken);
+            var candidates = await RunAsync(strategy, custom.Column, task, mapping, connections, cancellationToken);
             expanded.AddRange(candidates.Where(c => c.Selected).Select(c => c.Segment));
         }
 
@@ -63,14 +63,16 @@ public sealed class CustomSegmentExpansion(SegmentingStrategyRunner runner)
     /// operator has said which of them to run.</summary>
     public async Task<IReadOnlyList<SegmentCandidate>> ProposeAsync(
         SegmentingStrategyConfig strategy,
+        string? column,
         ReplicationTaskConfig task,
         TableMappingConfig mapping,
         SegmentingConnections connections,
         CancellationToken cancellationToken) =>
-        await RunAsync(strategy, task, mapping, connections, cancellationToken);
+        await RunAsync(strategy, column, task, mapping, connections, cancellationToken);
 
     private async Task<IReadOnlyList<SegmentCandidate>> RunAsync(
         SegmentingStrategyConfig strategy,
+        string? column,
         ReplicationTaskConfig task,
         TableMappingConfig mapping,
         SegmentingConnections connections,
@@ -89,7 +91,7 @@ public sealed class CustomSegmentExpansion(SegmentingStrategyRunner runner)
             connections.SourceDialectOrNull,
             new ScriptParameters(strategy.Parameters));
 
-        return await runner.RunAsync(strategy, context, connections.Source, connections.Target, cancellationToken);
+        return await runner.RunAsync(strategy, column, context, connections.Source, connections.Target, cancellationToken);
     }
 }
 

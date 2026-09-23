@@ -38,7 +38,7 @@ export function DefaultSegmentingCard({ segments, strategies, onChange }: {
     if (next === 'none') onChange([])
     else if (next === 'full') setSingle({ mode: 'full' })
     else if (next === 'auto') setSingle({ mode: 'auto', column: '', bucketCount: 4 })
-    else if (next === 'custom') setSingle({ mode: 'custom', strategyName: strategies[0]?.name ?? '' })
+    else if (next === 'custom') setSingle({ mode: 'custom', strategyName: strategies[0]?.name ?? '', column: '' })
     else if (next === 'static') onChange([{ mode: 'range', column: '', rangeMin: '', rangeMax: '' }])
   }
 
@@ -100,13 +100,25 @@ export function DefaultSegmentingCard({ segments, strategies, onChange }: {
               <select
                 className="select"
                 value={single.strategyName}
-                onChange={(e) => setSingle({ mode: 'custom', strategyName: e.target.value })}
+                onChange={(e) => setSingle({ ...single, mode: 'custom', strategyName: e.target.value })}
                 data-testid="default-segmenting-strategy"
               >
                 <option value="">Pick a strategy…</option>
                 {strategies.map((s) => <option key={s.name} value={s.name}>{s.name} — {s.kind}</option>)}
               </select>
             </Field>
+
+            {strategy?.kind !== 'Script' && (
+              <Field label="Column">
+                <input
+                  className="input"
+                  value={single.column ?? ''}
+                  onChange={(e) => setSingle({ ...single, column: e.target.value })}
+                  placeholder="OrderDate"
+                  data-testid="default-segmenting-custom-column"
+                />
+              </Field>
+            )}
 
             {strategies.length === 0 && (
               <span className="hint" data-testid="default-segmenting-no-strategies">

@@ -11,16 +11,16 @@ public sealed class SegmentingStrategyRunnerTests
 {
     private static readonly SegmentingStrategyRunner Runner = new(null!);
 
-    private static SegmentingStrategyConfig DuckDb(string sql, string column = "OrderDate") => new()
+    private static SegmentingStrategyConfig DuckDb(string sql) => new()
     {
         Name = "year-month",
         Kind = SegmentingStrategyKind.DuckDb,
-        Column = column,
         Sql = sql,
     };
 
-    private static Task<IReadOnlyList<Abstractions.SegmentCandidate>> RunAsync(SegmentingStrategyConfig strategy) =>
-        Runner.RunAsync(strategy, null!, null, null, CancellationToken.None);
+    private static Task<IReadOnlyList<Abstractions.SegmentCandidate>> RunAsync(
+        SegmentingStrategyConfig strategy, string? column = "OrderDate") =>
+        Runner.RunAsync(strategy, column, null!, null, null, CancellationToken.None);
 
     /// <summary>The worked example from the plan doc, run for real.</summary>
     [Fact]
@@ -97,9 +97,9 @@ public sealed class SegmentingStrategyRunnerTests
     [Fact]
     public async Task AStrategyWithNoColumn_SaysWhatItIsMissing()
     {
-        var strategy = DuckDb("SELECT 1", column: "");
+        var strategy = DuckDb("SELECT 1");
 
-        var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(strategy));
+        var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(strategy, column: ""));
 
         Assert.Contains("which column its ranges are over", problem.Message);
     }
@@ -111,11 +111,10 @@ public sealed class SegmentingStrategyRunnerTests
         {
             Name = "s",
             Kind = SegmentingStrategyKind.SourceSql,
-            Column = "Id",
             Sql = "SELECT 1",
         };
 
-        var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(strategy));
+        var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(strategy, "Id"));
 
         Assert.Contains("no source connection is available", problem.Message);
     }
@@ -139,7 +138,7 @@ public sealed class SegmentingStrategyRunnerTests
     {
         // The claim the whole default rests on: previewing a DuckDB strategy is safe because there is
         // nothing for it to touch. Passing nulls for both connections proves it never asks.
-        var candidates = await RunAsync(DuckDb("SELECT 'a' AS label, 1 AS range_start, 2 AS range_end", "Id"));
+        var candidates = await RunAsync(DuckDb("SELECT 'a' AS label, 1 AS range_start, 2 AS range_end"), "Id");
 
         Assert.Single(candidates);
     }

@@ -95,6 +95,7 @@ export function BulkLoadForm({ replicationName, onQueued, onClose }: {
       setBucketCount(stored.bucketCount)
     } else if (stored.mode === 'custom') {
       setStrategyName(stored.strategyName)
+      setColumn(stored.column ?? '')
     }
     // Keyed on which mapping this is, and nothing else. `defaultSegmenting` is a fresh array on every
     // refetch, so depending on it meant any background refetch — an invalidation from somewhere else
@@ -108,6 +109,7 @@ export function BulkLoadForm({ replicationName, onQueued, onClose }: {
     replicationName,
     selectedMapping,
     mode === 'custom' ? strategyName : null,
+    mode === 'custom' ? column || null : null,
   )
   const candidates = preview.data?.candidates ?? []
 
@@ -178,9 +180,15 @@ export function BulkLoadForm({ replicationName, onQueued, onClose }: {
           </select>
         </Field>
 
-        {mode !== 'full' && mode !== 'custom' && (
+        {mode !== 'full' && (
           <Field label="Source column">
-            <input className="input" required value={column} onChange={(e) => setColumn(e.target.value)} data-testid="bulk-load-column-input" />
+            <input
+              className="input"
+              required={mode !== 'custom'}
+              value={column}
+              onChange={(e) => setColumn(e.target.value)}
+              data-testid="bulk-load-column-input"
+            />
           </Field>
         )}
         {mode === 'list' && (

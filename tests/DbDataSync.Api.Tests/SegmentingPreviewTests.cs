@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DbDataSync.Api.Models;
 using DbDataSync.Core.Config;
 
 namespace DbDataSync.Api.Tests;
@@ -69,7 +70,6 @@ public sealed class SegmentingPreviewTests(TestApiFactory factory) : IClassFixtu
     {
         Name = name,
         Kind = SegmentingStrategyKind.DuckDb,
-        Column = "OrderDate",
         Sql = sql ?? MonthsSql,
     };
 
@@ -79,7 +79,7 @@ public sealed class SegmentingPreviewTests(TestApiFactory factory) : IClassFixtu
         var (replication, mapping) = await CreateAsync(Months());
 
         var response = await _client.GetFromJsonAsync<PreviewResponse>(
-            $"/api/replications/{replication}/mappings/{mapping}/segmenting/by-month/preview", JsonOptions);
+            $"/api/replications/{replication}/mappings/{mapping}/segmenting/by-month/preview?column=OrderDate", JsonOptions);
 
         Assert.Equal(["2024-01", "2024-02", "2024-03"], response!.Candidates.Select(c => c.Label));
         Assert.All(response.Candidates, c => Assert.True(c.Selected));
@@ -96,7 +96,7 @@ public sealed class SegmentingPreviewTests(TestApiFactory factory) : IClassFixtu
 
         var response = await _client.PostAsJsonAsync(
             $"/api/replications/{replication}/mappings/{mapping}/segmenting/preview",
-            Months("never-saved"), JsonOptions);
+            new TestSegmentingStrategyRequest(Months("never-saved"), "OrderDate"), JsonOptions);
         response.EnsureSuccessStatusCode();
 
         var preview = await response.Content.ReadFromJsonAsync<PreviewResponse>(JsonOptions);
@@ -116,10 +116,10 @@ public sealed class SegmentingPreviewTests(TestApiFactory factory) : IClassFixtu
         var (replication, mapping) = await CreateAsync(Months());
 
         var saved = await _client.GetFromJsonAsync<PreviewResponse>(
-            $"/api/replications/{replication}/mappings/{mapping}/segmenting/by-month/preview", JsonOptions);
+            $"/api/replications/{replication}/mappings/{mapping}/segmenting/by-month/preview?column=OrderDate", JsonOptions);
         var unsaved = await (await _client.PostAsJsonAsync(
             $"/api/replications/{replication}/mappings/{mapping}/segmenting/preview",
-            Months(), JsonOptions)).Content.ReadFromJsonAsync<PreviewResponse>(JsonOptions);
+            new TestSegmentingStrategyRequest(Months(), "OrderDate"), JsonOptions)).Content.ReadFromJsonAsync<PreviewResponse>(JsonOptions);
 
         Assert.Equal(saved!.Candidates, unsaved!.Candidates);
     }
@@ -135,7 +135,7 @@ public sealed class SegmentingPreviewTests(TestApiFactory factory) : IClassFixtu
 
         var response = await _client.PostAsJsonAsync(
             $"/api/replications/{replication}/mappings/{mapping}/segmenting/preview",
-            Months(sql: "SELECT this is not sql"), JsonOptions);
+            new TestSegmentingStrategyRequest(Months(sql: "SELECT this is not sql"), "OrderDate"), JsonOptions);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.False(string.IsNullOrWhiteSpace(await response.Content.ReadAsStringAsync()));
@@ -150,7 +150,7 @@ public sealed class SegmentingPreviewTests(TestApiFactory factory) : IClassFixtu
 
         var response = await _client.PostAsJsonAsync(
             $"/api/replications/{replication}/mappings/{mapping}/segmenting/preview",
-            Months(sql: "SELECT 1 AS something_else"), JsonOptions);
+            new TestSegmentingStrategyRequest(Months(sql: "SELECT 1 AS something_else"), "OrderDate"), JsonOptions);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -162,7 +162,7 @@ public sealed class SegmentingPreviewTests(TestApiFactory factory) : IClassFixtu
 
         var response = await _client.PostAsJsonAsync(
             $"/api/replications/{replication}/mappings/no-such-mapping/segmenting/preview",
-            Months(), JsonOptions);
+            new TestSegmentingStrategyRequest(Months(), "OrderDate"), JsonOptions);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }

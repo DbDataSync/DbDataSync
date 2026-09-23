@@ -608,22 +608,26 @@ export const api = {
      * What a segmenting strategy proposes for this mapping right now. Every candidate, selected or
      * not — the checklist is a proposal to disagree with, not an announcement.
      */
-    previewSegmenting: (replicationName: string, mappingName: string, strategyName: string) =>
+    previewSegmenting: (
+      replicationName: string, mappingName: string, strategyName: string, column: string | null,
+    ) =>
       request<{ candidates: SegmentCandidate[] }>(
         `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}` +
-          `/segmenting/${encodeURIComponent(strategyName)}/preview`,
+          `/segmenting/${encodeURIComponent(strategyName)}/preview` +
+          (column ? `?column=${encodeURIComponent(column)}` : ''),
       ),
     /**
      * The same preview, for a strategy that has not been saved — the editor's Test button. A POST
-     * only because the strategy travels in the body; it writes nothing.
+     * only because the strategy travels in the body; it writes nothing. `column` is scratch state the
+     * editor collects for the test only — never part of the strategy itself, see its own comment.
      */
     previewUnsavedSegmenting: (
-      replicationName: string, mappingName: string, strategy: SegmentingStrategyConfig,
+      replicationName: string, mappingName: string, strategy: SegmentingStrategyConfig, column: string | null,
     ) =>
       request<{ candidates: SegmentCandidate[] }>(
         `/api/replications/${encodeURIComponent(replicationName)}/mappings/${encodeURIComponent(mappingName)}` +
           `/segmenting/preview`,
-        { method: 'POST', body: JSON.stringify(strategy) },
+        { method: 'POST', body: JSON.stringify({ strategy, column }) },
       ),
     bulkLoad: (replicationName: string, mappingName: string, body: BulkLoadRequest) =>
       request<TriggerResponse>(

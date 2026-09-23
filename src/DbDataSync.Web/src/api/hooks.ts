@@ -876,8 +876,10 @@ export function usePreviewQuery() {
 
 export function useTestSegmentingStrategy(replicationName: string) {
   return useMutation({
-    mutationFn: ({ mappingName, strategy }: { mappingName: string; strategy: SegmentingStrategyConfig }) =>
-      api.runs.previewUnsavedSegmenting(replicationName, mappingName, strategy),
+    mutationFn: ({ mappingName, strategy, column }: {
+      mappingName: string; strategy: SegmentingStrategyConfig; column: string | null
+    }) =>
+      api.runs.previewUnsavedSegmenting(replicationName, mappingName, strategy, column),
   })
 }
 
@@ -885,10 +887,13 @@ export function useSegmentingPreview(
   replicationName: string,
   mappingName: string,
   strategyName: string | null,
+  column: string | null,
 ) {
   return useQuery({
-    queryKey: ['replications', replicationName, 'table-mappings', mappingName, 'segmenting', strategyName] as const,
-    queryFn: () => api.runs.previewSegmenting(replicationName, mappingName, strategyName!),
+    queryKey: [
+      'replications', replicationName, 'table-mappings', mappingName, 'segmenting', strategyName, column,
+    ] as const,
+    queryFn: () => api.runs.previewSegmenting(replicationName, mappingName, strategyName!, column),
     enabled: Boolean(replicationName && mappingName && strategyName),
     // A strategy that computes from "today" has to be re-run rather than served from cache — the
     // whole reason its default is a reference and not a frozen list.

@@ -46,6 +46,14 @@ public enum SegmentingStrategyKind
 /// the convention <see cref="RangeSegment"/> already uses everywhere else, so a strategy's output
 /// tiles a value space without gaps or overlaps the same way an <c>Auto</c> expansion does.
 /// </para>
+/// <para>
+/// **Carries no column.** A strategy's query returns bounds, not the thing they bound, and which
+/// column those bounds apply to is a property of the *table* a mapping is dividing, not of the query
+/// itself — one strategy named "monthly-buckets" is meant to be reused by mappings whose date columns
+/// are spelled completely differently. That column travels with the reference instead — see
+/// <see cref="CustomSegment.Column"/> — so two mappings referencing the same strategy by name can each
+/// supply their own.
+/// </para>
 /// </summary>
 public sealed class SegmentingStrategyConfig
 {
@@ -68,16 +76,6 @@ public sealed class SegmentingStrategyConfig
     /// <summary>The script implementing <c>ISegmentingStrategy</c>, for
     /// <see cref="SegmentingStrategyKind.Script"/>.</summary>
     public string? ScriptName { get; set; }
-
-    /// <summary>
-    /// Which column the produced ranges are over.
-    /// <para>
-    /// Required for every kind, and not inferable from the query: the SQL returns bounds, not the
-    /// thing they bound. A DuckDB strategy generating month boundaries has no idea which of the
-    /// source's date columns it is generating them for — only the operator does.
-    /// </para>
-    /// </summary>
-    public string? Column { get; set; }
 
     /// <summary>What the binding supplies for a script's declared parameters (phase 42).</summary>
     public Dictionary<string, string> Parameters { get; set; } = new();

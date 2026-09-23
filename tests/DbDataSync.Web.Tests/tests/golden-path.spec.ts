@@ -1974,7 +1974,6 @@ public sealed class Shout : IValueColumnExpression
 
     await page.getByTestId('add-strategy-button').click()
     await page.getByTestId('strategy-name-input').fill('by-id-band')
-    await page.getByTestId('strategy-column-input').fill('Id')
 
     // DuckDb is the default, and the one worth reaching for first: it opens no connection at all, so
     // there is no warning to show.
@@ -1984,6 +1983,11 @@ public sealed class Shout : IValueColumnExpression
     await setCode(page, 'strategy-sql-editor',
       "SELECT * FROM (VALUES ('low', '1', '5', TRUE), ('high', '5', '1000', TRUE)) " +
       't(label, range_start, range_end, selected);')
+
+    // The column is scratch state for the Test button, not part of the strategy — it is the mapping's
+    // to supply, not the strategy's, so two mappings could reuse this same strategy over two different
+    // columns.
+    await page.getByTestId('strategy-test-column-input').fill('Id')
 
     // Tested before it is saved — the whole point. An operator finds out a query is malformed while
     // writing it, not the next time a scheduled reload silently does nothing.
@@ -2012,7 +2016,6 @@ public sealed class Shout : IValueColumnExpression
     await page.reload()
     await expect(page.getByTestId('segmenting-strategies')).toContainText('by-id-band', { timeout: 20_000 })
     await page.getByTestId('edit-strategy-by-id-band').click()
-    await expect(page.getByTestId('strategy-column-input')).toHaveValue('Id')
     await expect(page.getByTestId('strategy-kind-select')).toHaveValue('DuckDb')
     await page.getByTestId('cancel-strategy-button').click()
 
@@ -2035,6 +2038,9 @@ public sealed class Shout : IValueColumnExpression
     await expect(page.getByTestId('bulk-load-mode-select')).toBeVisible({ timeout: 20_000 })
     await page.getByTestId('bulk-load-mode-select').selectOption('custom')
     await page.getByTestId('bulk-load-strategy-select').selectOption('by-id-band')
+    // The column is the mapping's to supply now, not the strategy's — this is the ad-hoc equivalent of
+    // the saved default's own Column field.
+    await page.getByTestId('bulk-load-column-input').fill('Id')
 
     await expect(page.getByTestId('bulk-load-candidate-0')).toBeVisible({ timeout: 20_000 })
     await expect(page.getByTestId('bulk-load-candidate-1')).toBeVisible()

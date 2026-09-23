@@ -29,12 +29,12 @@ public sealed class SegmentingStrategyRunner(ScriptHost scriptHost)
     /// </summary>
     public async Task<IReadOnlyList<SegmentCandidate>> RunAsync(
         SegmentingStrategyConfig strategy,
+        string? column,
         SegmentingContext context,
         DbConnection? sourceConnection,
         DbConnection? targetConnection,
         CancellationToken cancellationToken)
     {
-        var column = strategy.Column;
         if (string.IsNullOrWhiteSpace(column) && strategy.Kind != SegmentingStrategyKind.Script)
             throw new InvalidOperationException(
                 $"Segmenting strategy '{strategy.Name}' does not say which column its ranges are over. " +

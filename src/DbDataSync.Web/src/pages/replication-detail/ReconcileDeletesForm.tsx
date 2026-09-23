@@ -85,6 +85,7 @@ export function ReconcileDeletesForm({ replicationName, onQueued, onClose }: {
       setBucketCount(stored.bucketCount)
     } else if (stored.mode === 'custom') {
       setStrategyName(stored.strategyName)
+      setColumn(stored.column ?? '')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapping?.name])
@@ -94,6 +95,7 @@ export function ReconcileDeletesForm({ replicationName, onQueued, onClose }: {
     replicationName,
     selectedMapping,
     mode === 'custom' ? strategyName : null,
+    mode === 'custom' ? column || null : null,
   )
   const candidates = preview.data?.candidates ?? []
 
@@ -164,9 +166,15 @@ export function ReconcileDeletesForm({ replicationName, onQueued, onClose }: {
           </select>
         </Field>
 
-        {mode !== 'full' && mode !== 'custom' && (
+        {mode !== 'full' && (
           <Field label="Source column">
-            <input className="input" required value={column} onChange={(e) => setColumn(e.target.value)} data-testid="reconcile-column-input" />
+            <input
+              className="input"
+              required={mode !== 'custom'}
+              value={column}
+              onChange={(e) => setColumn(e.target.value)}
+              data-testid="reconcile-column-input"
+            />
           </Field>
         )}
         {mode === 'list' && (

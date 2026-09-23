@@ -123,9 +123,10 @@ public sealed class RunsController(
     /// </summary>
     [HttpGet("replications/{name}/mappings/{mappingName}/segmenting/{strategyName}/preview")]
     public async Task<IActionResult> PreviewSegmenting(
-        string name, string mappingName, string strategyName, CancellationToken cancellationToken)
+        string name, string mappingName, string strategyName, [FromQuery] string? column,
+        CancellationToken cancellationToken)
     {
-        var result = await segmentingPreview.PreviewAsync(name, mappingName, strategyName, cancellationToken);
+        var result = await segmentingPreview.PreviewAsync(name, mappingName, strategyName, column, cancellationToken);
         if (result.NotFound)
             return NotFound(new { error = "Replication, table mapping or segmenting strategy not found." });
 
@@ -150,10 +151,11 @@ public sealed class RunsController(
     /// </summary>
     [HttpPost("replications/{name}/mappings/{mappingName}/segmenting/preview")]
     public async Task<IActionResult> PreviewUnsavedSegmenting(
-        string name, string mappingName, [FromBody] SegmentingStrategyConfig strategy,
+        string name, string mappingName, [FromBody] TestSegmentingStrategyRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await segmentingPreview.PreviewAsync(name, mappingName, strategy, cancellationToken);
+        var result = await segmentingPreview.PreviewAsync(
+            name, mappingName, request.Strategy, request.Column, cancellationToken);
         if (result.NotFound)
             return NotFound(new { error = "Replication or table mapping not found." });
 

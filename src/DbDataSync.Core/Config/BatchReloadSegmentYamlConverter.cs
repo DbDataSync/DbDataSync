@@ -85,7 +85,7 @@ public sealed class BatchReloadSegmentYamlConverter : IYamlTypeConverter
                 int.TryParse(Required("bucketCount"), out var buckets)
                     ? buckets
                     : throw new YamlException("An 'auto' segment's 'bucketCount' must be a number.")),
-            "custom" => new CustomSegment(Required("strategyName")),
+            "custom" => new CustomSegment(Required("strategyName"), scalars.GetValueOrDefault("column")),
             null => throw new YamlException("A segment is missing its 'mode'."),
             _ => throw new YamlException(
                 $"Unknown segment mode '{mode}' (expected full, list, range, auto or custom)."),
@@ -131,6 +131,8 @@ public sealed class BatchReloadSegmentYamlConverter : IYamlTypeConverter
             case CustomSegment custom:
                 Pair(emitter, "mode", "custom");
                 Pair(emitter, "strategyName", custom.StrategyName);
+                if (custom.Column is not null)
+                    Pair(emitter, "column", custom.Column);
                 break;
 
             default:

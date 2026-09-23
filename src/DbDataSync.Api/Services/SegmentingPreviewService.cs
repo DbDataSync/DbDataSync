@@ -30,9 +30,13 @@ public sealed class SegmentingPreviewService(
     DriverConnectionFactory connections,
     CustomSegmentExpansion customSegments)
 {
-    /// <summary>Previews a strategy the replication has already saved, by name.</summary>
+    /// <summary>Previews a strategy the replication has already saved, by name — <paramref name="column"/>
+    /// comes from whatever mapping-level reference triggered this (a saved <c>CustomSegment</c>, or an
+    /// ad-hoc Bulk Load/reconcile-deletes pick), never from the strategy itself; see
+    /// <see cref="SegmentingStrategyConfig"/>'s own doc comment for why.</summary>
     public async Task<SegmentingPreviewResult> PreviewAsync(
-        string replicationName, string mappingName, string strategyName, CancellationToken cancellationToken)
+        string replicationName, string mappingName, string strategyName, string? column,
+        CancellationToken cancellationToken)
     {
         ReplicationTaskConfig task;
         TableMappingConfig mapping;
@@ -51,7 +55,7 @@ public sealed class SegmentingPreviewService(
         if (strategy is null)
             return new SegmentingPreviewResult(null, null, NotFound: true);
 
-        return await RunAsync(task, mapping, mappingName, strategy, cancellationToken);
+        return await RunAsync(task, mapping, mappingName, strategy, column, cancellationToken);
     }
 
     /// <summary>
@@ -69,7 +73,7 @@ public sealed class SegmentingPreviewService(
     /// </para>
     /// </summary>
     public async Task<SegmentingPreviewResult> PreviewAsync(
-        string replicationName, string mappingName, SegmentingStrategyConfig strategy,
+        string replicationName, string mappingName, SegmentingStrategyConfig strategy, string? column,
         CancellationToken cancellationToken)
     {
         ReplicationTaskConfig task;
@@ -84,12 +88,12 @@ public sealed class SegmentingPreviewService(
             return new SegmentingPreviewResult(null, null, NotFound: true);
         }
 
-        return await RunAsync(task, mapping, mappingName, strategy, cancellationToken);
+        return await RunAsync(task, mapping, mappingName, strategy, column, cancellationToken);
     }
 
     private async Task<SegmentingPreviewResult> RunAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, string mappingName,
-        SegmentingStrategyConfig strategy, CancellationToken cancellationToken)
+        SegmentingStrategyConfig strategy, string? column, CancellationToken cancellationToken)
     {
         if (mapping.Sources.Count != 1 || mapping.Targets.Count != 1)
             return new SegmentingPreviewResult(
@@ -98,8 +102,8 @@ public sealed class SegmentingPreviewService(
         try
         {
             var candidates = strategy.RunsAgainstAConnection
-                ? await WithConnectionsAsync(task, mapping, strategy, cancellationToken)
-                : await customSegments.ProposeAsync(strategy, task, mapping, new SegmentingConnections(), cancellationToken);
+                ? await WithConnectionsAsync(task, mapping, strategy, column, cancellationToken)
+                : await customSegments.ProposeAsync(strategy, column, task, mapping, new SegmentingConnections(), cancellationToken);
 
             return new SegmentingPreviewResult(
                 [.. candidates.Select(c => new SegmentCandidateDto(c.Label, c.Segment, c.Selected))], null);
@@ -114,7 +118,7 @@ public sealed class SegmentingPreviewService(
 
     private async Task<IReadOnlyList<Scripting.Abstractions.SegmentCandidate>> WithConnectionsAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, SegmentingStrategyConfig strategy,
-        CancellationToken cancellationToken)
+        string? column, CancellationToken cancellationToken)
     {
         var source = EndpointResolution.ResolveSource(task, mapping.Sources[0]);
         var target = EndpointResolution.ResolveTarget(task, mapping.Targets[0]);
@@ -126,7 +130,7 @@ public sealed class SegmentingPreviewService(
             await using (targetConnection)
             {
                 return await customSegments.ProposeAsync(
-                    strategy, task, mapping,
+                    strategy, column, task, mapping,
                     new SegmentingConnections(sourceConnection, targetConnection), cancellationToken);
             }
         }

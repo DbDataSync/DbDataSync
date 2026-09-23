@@ -101,9 +101,19 @@ public sealed record AutoSegment(string Column, int BucketCount) : BatchReloadSe
 /// re-evaluated against today every time it runs, not baked in on the day somebody configured it.
 /// </para>
 /// </summary>
-public sealed record CustomSegment(string StrategyName) : BatchReloadSegment
+/// <param name="Column">
+/// Which column the strategy's ranges are over, on *this* table — not a property of the named
+/// strategy itself (see <see cref="SegmentingStrategyConfig"/>'s own doc comment for why), so two
+/// mappings referencing the same strategy by name can each name a different column.
+/// <para>
+/// Required for every <see cref="SegmentingStrategyKind"/> except <see cref="SegmentingStrategyKind.Script"/>
+/// — a script already knows its own column (or generates <see cref="RangeSegment"/>s that need none),
+/// the same exemption <c>SegmentingStrategyRunner</c> enforced when this lived on the strategy.
+/// </para>
+/// </param>
+public sealed record CustomSegment(string StrategyName, string? Column = null) : BatchReloadSegment
 {
-    public override string Describe() => $"custom/{StrategyName}";
+    public override string Describe() => Column is null ? $"custom/{StrategyName}" : $"custom/{StrategyName} over {Column}";
 }
 
 /// <summary>
