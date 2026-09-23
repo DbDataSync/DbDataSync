@@ -1,5 +1,17 @@
 # JDBC URL templating, connect-time validation, and connection-test diagnostics
 
+**Status, 2026-09-22**: implemented — all four phase docs done (174M-177M). Two real corrections surfaced
+building it that this design didn't anticipate, both documented in their own phase docs, not here:
+175M found the scratch unification builder can't seed itself from a JDBC `ConnectionString` the way
+`GenericDriver`'s does (it's a URL, not a `key=value` string) and dropped connect-timeout unification for
+the same reason; 176M found the design's own single-shared-`Diagnostics`-class sketch doesn't compile
+where `GenericDriverBase.TestAsync` lives (no IKVM visibility, can't gain any without a dependency cycle),
+and that even isolated correctly, touching `java.sql.SQLException` inline inside a try/catch is a real
+bug — the JIT resolves a method's referenced types before its own try/catch runs, so a caught-looking
+type-load failure for a type used inside that method's own try block wasn't actually catchable there.
+Found by the existing integration suite (an ordinary MsSql closed-port test), not hypothesized: as
+designed, this would have broken Test Connection for every driver, not just JDBC's.
+
 Design closing three related gaps found while chasing a real "Connection is closed." report during a
 JDBC connection test: the message was misleading because nothing in the JDBC path validates that a
 connection actually opened, `JdbcDriverSpec` has no URL-template mechanism (`jdbc-driver-feature-gaps.md`'s
@@ -262,10 +274,15 @@ host/port/database/URL shape, chained messages — stays intact.
   `;databaseName=`) should be tried against this template mechanism before it's considered proven generally.
 - Should a template author be actively blocked (at descriptor-load time) from writing a `{password}`
   placeholder, rather than just having it silently never matched? Leaning yes — a hard validation error is
-  more honest than a template that looks like it supports it but never will.
+  more honest than a template that looks like it supports it but never will. **Still open as implemented**
+  — 175M's `PlaceOrFallback` is simply never called for password, so a `{password}` token in a template
+  today just sits there unsubstituted rather than being rejected; no descriptor-load-time validation was
+  added.
 - `OutsideProperties` is always empty for a plain `GenericDriver` today (nothing routes through it) — worth
   confirming that's fine to leave as "always empty, not removed" rather than making it JDBC-only, since a
   future ADO.NET driver with its own out-of-connection-string properties could reuse the same field.
+  **Confirmed, as implemented** — 176M kept it exactly this shape (`GenericDriver.PreviewConnection`
+  always returns an empty dictionary), per this note's own reasoning.
 
 ## Cross-references
 
