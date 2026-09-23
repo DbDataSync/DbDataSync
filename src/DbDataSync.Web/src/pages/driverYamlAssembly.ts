@@ -54,7 +54,61 @@ function listValue(yaml: string, key: string): string[] {
   return match[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
 }
 
+/** The indented lines under a bare `key:` block header inside `text` (the header itself excluded) —
+ * `connectionStringKeys:` nested inside a `jdbc:` block, in the same "starts at some indent, matches
+ * key:" spirit `splitTopLevelBlocks` already uses for the top level. Empty string if `key` isn't
+ * present as a block header (a scalar `key: value` line doesn't match — the trailing `\s*$` requires
+ * nothing after the colon). */
+function nestedBlock(text: string, key: string): string {
+  const lines = text.split('\n')
+  const headerIndex = lines.findIndex((l) => new RegExp(`^\\s*${key}:\\s*$`).test(l))
+  if (headerIndex === -1) return ''
+  const headerIndent = /^\s*/.exec(lines[headerIndex])![0].length
+  const body: string[] = []
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '') { body.push(line); continue }
+    if (/^\s*/.exec(line)![0].length <= headerIndent) break
+    body.push(line)
+  }
+  return body.join('\n')
+}
+
+/** `text` with the entire `key:` block (header line plus its indented body) removed — the complement
+ * of `nestedBlock`, for splicing a nested block back out of a larger passage (`jdbcExtra`'s own use:
+ * `connectionStringKeys` now has a structured field, so it must not also appear in the raw leftovers). */
+function withoutNestedBlock(text: string, key: string): string {
+  const lines = text.split('\n')
+  const headerIndex = lines.findIndex((l) => new RegExp(`^\\s*${key}:\\s*$`).test(l))
+  if (headerIndex === -1) return text
+  const headerIndent = /^\s*/.exec(lines[headerIndex])![0].length
+  let end = headerIndex + 1
+  while (end < lines.length) {
+    const line = lines[end]
+    if (line.trim() === '') { end++; continue }
+    if (/^\s*/.exec(line)![0].length <= headerIndent) break
+    end++
+  }
+  return [...lines.slice(0, headerIndex), ...lines.slice(end)].join('\n')
+}
+
 export type Base = 'adonet' | 'jdbc'
+
+/** Phase 179N. Blank means "use `JdbcGenericDriver.DefaultConnectionStringKeys`" for every field except
+ * `integratedSecurity`, which has no default key at all (unset unless an operator sets one) — this form
+ * has no field for it, so it only ever survives via `jdbcExtra`. */
+export interface JdbcConnectionStringKeysForm {
+  host: string
+  port: string
+  database: string
+  username: string
+  password: string
+  connectTimeout: string
+}
+
+const EMPTY_CONNECTION_STRING_KEYS: JdbcConnectionStringKeysForm = {
+  host: '', port: '', database: '', username: '', password: '', connectTimeout: '',
+}
 
 export interface ParsedDriverYaml {
   id: string
@@ -68,27 +122,53 @@ export interface ParsedDriverYaml {
   writers: string[]
   /** dialect + typeMap + metadataQueries, verbatim — everything not in `STRUCTURED_KEYS`. */
   rawBody: string
+  /** Phase 179N — the JDBC `UrlTemplate`, e.g. `jdbc:postgresql://{host}:{port}/{database}`. Empty
+   * means "no template set" (the pre-178N contract: `ConnectionConfig.ConnectionString` must carry the
+   * whole URL). */
+  urlTemplate: string
+  /** Phase 179N — per-field overrides of `JdbcGenericDriver.DefaultConnectionStringKeys`. */
+  connectionStringKeys: JdbcConnectionStringKeysForm
+  /**
+   * Phase 179N — lines from the `connectionStringKeys:` block that aren't one of this form's six known
+   * keys (`integratedSecurity` is the only real example today — see `JdbcConnectionStringKeysForm`'s own
+   * doc comment). Kept separate from `jdbcExtra` (rather than embedding a second `connectionStringKeys:`
+   * header inside it) specifically so `assembleDriverYaml` can merge these lines with the structured
+   * fields' own under **one** header — two separate `connectionStringKeys:` blocks in the same `jdbc:`
+   * map would be a real, duplicate-key correctness bug the moment both are populated at once (a
+   * structured `username` plus a hand-authored `integratedSecurity`, say).
+   */
+  connectionStringKeysExtra: string
   /**
    * Phase 178N. Whatever the `jdbc:` block's own lines were, verbatim, minus the ones the structured
-   * fields above already own (`driverClass`/`driverJarPaths`) — a hand-authored `urlTemplate` or
-   * `connectionStringKeys` block round-trips through an edit-and-save cycle unchanged even though
-   * neither has a structured field yet. See follow-up-jdbc-url-template-unreachable-from-driver-yaml.md
-   * part 2 — before this, saving any other field on a JDBC driver silently stripped both.
+   * fields above already own (`driverClass`/`driverJarPaths`/`urlTemplate`, and the whole
+   * `connectionStringKeys:` block — see `connectionStringKeysExtra` for what survives of that one) — a
+   * hand-authored key this form still has no field for at all round-trips through an edit-and-save cycle
+   * unchanged. See follow-up-jdbc-url-template-unreachable-from-driver-yaml.md part 2 — before this,
+   * saving any other field on a JDBC driver silently stripped everything not already structured.
    */
   jdbcExtra: string
 }
 
-const JDBC_OWNED_KEYS = /^\s*(driverClass|driverJarPaths):/
+const JDBC_OWNED_KEYS = /^\s*(driverClass|driverJarPaths|urlTemplate):/
+const KNOWN_CONNECTION_STRING_KEYS = /^\s*(host|port|database|username|password|connectTimeout):/
 
 export function parseDriverYaml(yaml: string): ParsedDriverYaml {
   const blocks = splitTopLevelBlocks(yaml)
   const byKey = new Map(blocks.map((b) => [b.key, b.block]))
   const isJdbc = byKey.has('base') && (byKey.get('base') ?? '').includes('JdbcGenericDriver')
   const jdbcBlock = byKey.get('jdbc') ?? ''
-  // The block's own first line is `jdbc:` itself (see splitTopLevelBlocks) — never part of "extra".
-  const jdbcExtra = jdbcBlock
+  const connectionStringKeysBlock = nestedBlock(jdbcBlock, 'connectionStringKeys')
+  const connectionStringKeysExtra = connectionStringKeysBlock
     .split('\n')
-    .slice(1)
+    .filter((line) => line.trim() !== '' && !KNOWN_CONNECTION_STRING_KEYS.test(line))
+    .join('\n')
+
+  // The block's own first line is `jdbc:` itself (see splitTopLevelBlocks) — never part of "extra".
+  // connectionStringKeys is removed as a whole block (it's multi-line and now has its own structured
+  // field, plus connectionStringKeysExtra above for whatever that doesn't cover), then the remaining
+  // single-line owned keys are filtered out.
+  const jdbcExtra = withoutNestedBlock(jdbcBlock.split('\n').slice(1).join('\n'), 'connectionStringKeys')
+    .split('\n')
     .filter((line) => !JDBC_OWNED_KEYS.test(line))
     .join('\n')
 
@@ -103,6 +183,18 @@ export function parseDriverYaml(yaml: string): ParsedDriverYaml {
     staging: listValue(byKey.get('capabilities') ?? '', 'staging'),
     writers: listValue(byKey.get('capabilities') ?? '', 'writers'),
     rawBody: blocks.filter((b) => !STRUCTURED_KEYS.has(b.key)).map((b) => b.block).join('\n').trim(),
+    urlTemplate: scalarValue(jdbcBlock, 'urlTemplate') ?? '',
+    connectionStringKeys: connectionStringKeysBlock
+      ? {
+          host: scalarValue(connectionStringKeysBlock, 'host') ?? '',
+          port: scalarValue(connectionStringKeysBlock, 'port') ?? '',
+          database: scalarValue(connectionStringKeysBlock, 'database') ?? '',
+          username: scalarValue(connectionStringKeysBlock, 'username') ?? '',
+          password: scalarValue(connectionStringKeysBlock, 'password') ?? '',
+          connectTimeout: scalarValue(connectionStringKeysBlock, 'connectTimeout') ?? '',
+        }
+      : EMPTY_CONNECTION_STRING_KEYS,
+    connectionStringKeysExtra,
     jdbcExtra,
   }
 }
@@ -157,6 +249,9 @@ export function assembleDriverYaml(form: {
   staging: string[]
   writers: string[]
   rawBody: string
+  urlTemplate?: string
+  connectionStringKeys?: JdbcConnectionStringKeysForm
+  connectionStringKeysExtra?: string
   jdbcExtra?: string
 }): string {
   const lines: string[] = [
@@ -170,6 +265,24 @@ export function assembleDriverYaml(form: {
     lines.push('jdbc:')
     lines.push(`  driverClass: ${form.driverClass}`)
     lines.push(`  driverJarPaths: [${form.driverJarPaths.join(', ')}]`)
+    // Emitted only for a value the operator actually typed — a blank field must stay omitted, not
+    // become `host: ""` (a real, different value from "not set": it would send an empty JDBC property
+    // key, not "apply JdbcGenericDriver's own default").
+    if (form.urlTemplate) lines.push(`  urlTemplate: "${form.urlTemplate}"`)
+    // Structured fields and connectionStringKeysExtra's own leftover lines (a key this form has no
+    // input for, e.g. integratedSecurity) merge under **one** connectionStringKeys: header — never two,
+    // which would be a duplicate YAML key the moment both are populated at once.
+    const structuredKeyLines = form.connectionStringKeys
+      ? (Object.entries(form.connectionStringKeys) as [string, string][])
+          .filter(([, value]) => value)
+          .map(([key, value]) => `    ${key}: ${value}`)
+      : []
+    const extraKeyLines = (form.connectionStringKeysExtra ?? '').split('\n').filter((line) => line.trim() !== '')
+    const keyLines = [...structuredKeyLines, ...extraKeyLines]
+    if (keyLines.length > 0) {
+      lines.push('  connectionStringKeys:')
+      lines.push(...keyLines)
+    }
     if (form.jdbcExtra) lines.push(form.jdbcExtra)
   }
 

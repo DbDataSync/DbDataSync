@@ -10,7 +10,10 @@ import { LibraryFindPanel } from '../components/LibraryFindPanel'
 import {
   useCreateDriver, useDriverYaml, useFiles, useKnownDriverKinds, useLibraries, useUpdateDriverYaml,
 } from '../api/hooks'
-import { assembleDriverYaml, parseDriverYaml, RAW_BODY_SKELETON, type Base } from './driverYamlAssembly'
+import {
+  assembleDriverYaml, parseDriverYaml, RAW_BODY_SKELETON,
+  type Base, type JdbcConnectionStringKeysForm,
+} from './driverYamlAssembly'
 
 interface FormState {
   id: string
@@ -23,12 +26,29 @@ interface FormState {
   staging: string[]
   writers: string[]
   rawBody: string
+  urlTemplate: string
+  connectionStringKeys: JdbcConnectionStringKeysForm
+  connectionStringKeysExtra: string
   jdbcExtra: string
+}
+
+const EMPTY_CONNECTION_STRING_KEYS: JdbcConnectionStringKeysForm = {
+  host: '', port: '', database: '', username: '', password: '', connectTimeout: '',
 }
 
 const EMPTY: FormState = {
   id: '', displayName: '', base: 'adonet', library: '', driverClass: '', driverJarPaths: [],
-  readers: [], staging: [], writers: [], rawBody: RAW_BODY_SKELETON, jdbcExtra: '',
+  readers: [], staging: [], writers: [], rawBody: RAW_BODY_SKELETON,
+  urlTemplate: '', connectionStringKeys: EMPTY_CONNECTION_STRING_KEYS, connectionStringKeysExtra: '', jdbcExtra: '',
+}
+
+/** `JdbcGenericDriver.DefaultConnectionStringKeys` — shown as placeholder text on each connection-string
+ * key field so "blank means this" is visible rather than assumed. `port`/`connectTimeout` have no JDBC
+ * default key of their own (`JdbcDriverSpec.ConnectionStringKeys`' own doc comment), so their placeholder
+ * says so rather than showing a spelling that doesn't exist. */
+const JDBC_DEFAULT_KEYS: Record<keyof JdbcConnectionStringKeysForm, string> = {
+  host: 'host', port: 'not set', database: 'database', username: 'user', password: 'password',
+  connectTimeout: 'not set',
 }
 
 /**
@@ -216,6 +236,41 @@ export function DriverEditPage() {
                 <FileUploadPanel
                   onUploaded={(names) => setForm({ ...form, driverJarPaths: [...form.driverJarPaths, ...names] })}
                 />
+                <Field label="URL template">
+                  <input
+                    type="text"
+                    className="input mono"
+                    placeholder="jdbc:postgresql://{host}:{port}/{database}"
+                    value={form.urlTemplate}
+                    onChange={(e) => setForm({ ...form, urlTemplate: e.target.value })}
+                    data-testid="driver-edit-url-template"
+                  />
+                  <span className="hint">
+                    {'{host}'} {'{port}'} {'{database}'} {'{username}'} — each is placed if present in the
+                    template, or sent as a connection property otherwise. Never {'{password}'} — a
+                    credential is always sent as a property, added automatically.
+                  </span>
+                </Field>
+                <details data-testid="driver-edit-connection-string-keys">
+                  <summary className="dim" style={{ cursor: 'pointer' }}>Connection-string keys (advanced)</summary>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                    {(Object.keys(EMPTY_CONNECTION_STRING_KEYS) as (keyof JdbcConnectionStringKeysForm)[]).map((key) => (
+                      <Field key={key} label={key}>
+                        <input
+                          type="text"
+                          className="input mono"
+                          placeholder={JDBC_DEFAULT_KEYS[key]}
+                          value={form.connectionStringKeys[key]}
+                          onChange={(e) => setForm({
+                            ...form,
+                            connectionStringKeys: { ...form.connectionStringKeys, [key]: e.target.value },
+                          })}
+                          data-testid={`driver-edit-connection-string-key-${key}`}
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                </details>
               </div>
             )}
 

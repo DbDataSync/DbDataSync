@@ -1,6 +1,7 @@
 # Phase 179N: a structured editor for `UrlTemplate`/`ConnectionStringKeys` in the JDBC driver form
 
-**Status: todo.** Second of five phases for the JDBC/driver-editing UI round requested 2026-09-23 — the
+**Status: done (2026-09-23).** Second of five phases for the JDBC/driver-editing UI round requested
+2026-09-23 — the
 **first priority** of the round. Builds on 178N (the schema has to exist and round-trip before an editor
 for it means anything). Closes the "whether `urlTemplate` deserves a real field" open question the
 [url-template-and-connection-testing design](../../planning/todo/jdbc-url-template-and-connection-testing.md)
@@ -66,6 +67,16 @@ message, not a raw 500 or a silent failure.
   the existing structured form, not the alternate editing modes.
 - Per-vendor template proving (Oracle's `@//host:port/service`, SQL Server's `;databaseName=`) — the
   design doc's own open question, unrelated to whether the *editor* for the mechanism exists.
+
+## Applied — one real deviation from the design above
+
+The doc's own "narrow `jdbcExtra`'s skip-list" plan turned out to be one step short: a hand-authored
+`connectionStringKeys.integratedSecurity` (a key with no structured field) and a structured field
+(`username`, say) being set **at the same time** would have produced two `connectionStringKeys:` blocks
+in the assembled YAML — a real duplicate-key bug, found while writing the test for it, not assumed. Fixed
+by splitting the leftover into its own `connectionStringKeysExtra` field (not embedded in `jdbcExtra`), so
+`assembleDriverYaml` merges structured fields and unmodeled ones under **one** header. Covered by
+`driverYamlAssembly.test.ts`'s "coexist under a single header" test.
 
 ## How to verify when closed
 

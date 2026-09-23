@@ -54,9 +54,83 @@ describe('assembleDriverYaml / parseDriverYaml', () => {
     expect(parsed.driverJarPaths).toEqual(['ojdbc8.jar', 'oraclepki.jar', 'osdt_cert.jar', 'osdt_core.jar'])
   })
 
-  it('round-trips a hand-authored urlTemplate/connectionStringKeys through jdbcExtra (phase 178N)', () => {
-    // Before 178N, editing any other field on this driver and saving would silently strip both — see
-    // follow-up-jdbc-url-template-unreachable-from-driver-yaml.md part 2.
+  it('round-trips a structured urlTemplate/connectionStringKeys (phase 179N)', () => {
+    const form = {
+      id: 'postgres-via-jdbc', displayName: 'Postgres (via JDBC)', base: 'jdbc' as const,
+      library: '', driverClass: 'org.postgresql.Driver', driverJarPaths: ['postgresql-42.7.13.jar'],
+      readers: ['Watermark'], staging: [], writers: [],
+      rawBody: RAW_BODY_SKELETON,
+      urlTemplate: 'jdbc:postgresql://{host}:{port}/{database}',
+      connectionStringKeys: { host: '', port: '', database: '', username: 'pguser', password: '', connectTimeout: '' },
+    }
+
+    const parsed = parseDriverYaml(assembleDriverYaml(form))
+
+    expect(parsed.urlTemplate).toBe('jdbc:postgresql://{host}:{port}/{database}')
+    expect(parsed.connectionStringKeys.username).toBe('pguser')
+    // A blank field never becomes a real, different value ("" is not "unset").
+    expect(parsed.connectionStringKeys.host).toBe('')
+  })
+
+  it('omits urlTemplate/connectionStringKeys entirely when unset, not as blank lines', () => {
+    const form = {
+      id: 'x', displayName: 'X', base: 'jdbc' as const,
+      library: '', driverClass: 'org.postgresql.Driver', driverJarPaths: ['a.jar'],
+      readers: [], staging: [], writers: [],
+      rawBody: RAW_BODY_SKELETON,
+      urlTemplate: '',
+      connectionStringKeys: { host: '', port: '', database: '', username: '', password: '', connectTimeout: '' },
+    }
+
+    const yaml = assembleDriverYaml(form)
+
+    expect(yaml).not.toContain('urlTemplate')
+    expect(yaml).not.toContain('connectionStringKeys')
+  })
+
+  it('a structured connectionStringKeys value and a hand-authored one coexist under a single header', () => {
+    // The real risk this design has to get right: username (structured) and integratedSecurity (no
+    // field for it) both set at once must merge into ONE connectionStringKeys: block, not two — two
+    // would be a duplicate YAML key.
+    const loaded = parseDriverYaml([
+      'id: x', 'displayName: X', 'library: ikvm',
+      'base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc',
+      'jdbc:',
+      '  driverClass: org.postgresql.Driver',
+      '  driverJarPaths: [a.jar]',
+      '  urlTemplate: "jdbc:postgresql://{host}:{port}/{database}"',
+      '  connectionStringKeys:',
+      '    username: pguser',
+      '    integratedSecurity: ssl',
+      'capabilities:',
+      '  readers: []', '  staging: []', '  writers: []',
+    ].join('\n'))
+
+    expect(loaded.urlTemplate).toBe('jdbc:postgresql://{host}:{port}/{database}')
+    expect(loaded.connectionStringKeys.username).toBe('pguser')
+    // No structured field for integratedSecurity — it survives only via connectionStringKeysExtra.
+    expect(loaded.connectionStringKeysExtra).toContain('integratedSecurity: ssl')
+    expect(loaded.jdbcExtra).not.toContain('integratedSecurity')
+    expect(loaded.jdbcExtra).not.toContain('connectionStringKeys')
+
+    const reassembled = assembleDriverYaml(loaded)
+    expect(reassembled).toContain('urlTemplate: "jdbc:postgresql://{host}:{port}/{database}"')
+    expect(reassembled).toContain('username: pguser')
+    expect(reassembled).toContain('integratedSecurity: ssl')
+    // Exactly one connectionStringKeys: header even though both sources contributed to it.
+    expect(reassembled.match(/connectionStringKeys:/g)?.length).toBe(1)
+
+    // And it still round-trips cleanly a second time.
+    const reparsed = parseDriverYaml(reassembled)
+    expect(reparsed.connectionStringKeys.username).toBe('pguser')
+    expect(reparsed.connectionStringKeysExtra).toContain('integratedSecurity: ssl')
+  })
+
+  it('preserves an edit to an unrelated field without disturbing urlTemplate/connectionStringKeys (phase 178N/179N)', () => {
+    // Before 178N, editing any other field on this driver and saving would silently strip both —
+    // see follow-up-jdbc-url-template-unreachable-from-driver-yaml.md part 2. Now that 179N gives both
+    // real structured fields, this proves the same guarantee holds through the structured path, not
+    // just jdbcExtra.
     const loaded = parseDriverYaml([
       'id: postgres-via-jdbc',
       'displayName: Postgres (via JDBC)',
@@ -76,17 +150,16 @@ describe('assembleDriverYaml / parseDriverYaml', () => {
       '  writers: []',
     ].join('\n'))
 
+    expect(loaded.urlTemplate).toBe('jdbc:postgresql://{host}:{port}/{database}')
+    expect(loaded.connectionStringKeys.username).toBe('user')
+
     // Edit an unrelated field, matching what an operator renaming the display name would do.
     const edited = { ...loaded, displayName: 'Postgres (renamed)' }
     const reparsed = parseDriverYaml(assembleDriverYaml(edited))
 
     expect(reparsed.displayName).toBe('Postgres (renamed)')
-    expect(reparsed.jdbcExtra).toContain('urlTemplate: "jdbc:postgresql://{host}:{port}/{database}"')
-    expect(reparsed.jdbcExtra).toContain('connectionStringKeys:')
-    expect(reparsed.jdbcExtra).toContain('username: user')
-    // The two structured lines never end up duplicated inside jdbcExtra.
-    expect(reparsed.jdbcExtra).not.toContain('driverClass:')
-    expect(reparsed.jdbcExtra).not.toContain('driverJarPaths:')
+    expect(reparsed.urlTemplate).toBe('jdbc:postgresql://{host}:{port}/{database}')
+    expect(reparsed.connectionStringKeys.username).toBe('user')
   })
 
   it('keeps the raw body distinct from the structured capabilities block it sits beside', () => {
