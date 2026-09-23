@@ -824,6 +824,61 @@ export interface DriverYaml {
   yaml: string
 }
 
+/** Phase 182N — `GET /api/drivers/{id}/status`. `error` is present exactly when `registered` is false. */
+export interface DriverStatusResult {
+  registered: boolean
+  error: string | null
+}
+
+/** Phase 181N — `POST /api/drivers/validate`'s own echo: what a `driver.yaml` actually resolves to,
+ * built straight from the parsed descriptor (never a live `IDriver`/spec). `interpreted` is present
+ * whenever the yaml at least parsed, even if the later build step failed — "here's what I understood
+ * before I hit a problem" survives a build failure, not just a clean parse. */
+export interface DriverValidationResult {
+  valid: boolean
+  error: string | null
+  interpreted: DriverInterpretationPreview | null
+}
+
+export interface DriverInterpretationPreview {
+  id: string
+  displayName: string
+  base: 'adonet' | 'jdbc'
+  dialect: DialectPreview
+  typeMap: Record<string, string>
+  readers: string[]
+  staging: string[]
+  writers: string[]
+  jdbc: JdbcPreview | null
+}
+
+export interface DialectPreview {
+  quoteIdentifier: string
+  parameterPrefix: string
+  rowLimit: string
+  catalog: string
+  defaultDatabase: string
+  defaultPort: number | null
+  connectionStringKeys: ConnectionStringKeysPreview
+}
+
+export interface ConnectionStringKeysPreview {
+  host: string
+  port: string | null
+  database: string
+  username: string
+  password: string
+  connectTimeout: string | null
+  integratedSecurity: string | null
+}
+
+export interface JdbcPreview {
+  driverClass: string
+  driverJarPaths: string[]
+  urlTemplate: string | null
+  connectionStringKeys: ConnectionStringKeysPreview
+}
+
 /** One entry from `GET /api/drivers` — every driver currently registered: built-in, added from a
  * `driver.yaml` descriptor (phase 109d), or a compiled plugin (phase 109e). */
 export interface DriverSummary {

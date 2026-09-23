@@ -19,7 +19,9 @@ import type {
   CredentialSource,
   DriverCapabilities,
   DriverKindsSummary,
+  DriverStatusResult,
   DriverSummary,
+  DriverValidationResult,
   DriverYaml,
   FileSummary,
   FromCatalogResult,
@@ -500,6 +502,9 @@ export const api = {
     knownKinds: () => request<DriverKindsSummary>('/api/known-driver-kinds'),
     /** The driver-authoring form's own load-for-editing — the raw file. */
     getYaml: (id: string) => request<DriverYaml>(`/api/drivers/${encodeURIComponent(id)}/yaml`),
+    /** Phase 182N — why a driver isn't registered, for `ConnectionEditPage`'s own broken-driver banner.
+     * Cheap: only called for an id that isn't already in `list()`'s own result. */
+    status: (id: string) => request<DriverStatusResult>(`/api/drivers/${encodeURIComponent(id)}/status`),
     /** Create: validated entirely server-side before anything is written — a 400 carries the real
      * parse/build error, a 409 means the id already exists. */
     create: (yaml: string) =>
@@ -508,6 +513,10 @@ export const api = {
      * supported here (400 otherwise). */
     updateYaml: (id: string, yaml: string) =>
       request<DriverYaml>(`/api/drivers/${encodeURIComponent(id)}/yaml`, { method: 'PUT', body: JSON.stringify({ yaml }) }),
+    /** Phase 181N — validate-and-echo, entirely in memory, never writing to disk. Viewer-reachable,
+     * unlike `create`/`updateYaml`, matching every other endpoint the driver/connection editors call. */
+    validate: (yaml: string) =>
+      request<DriverValidationResult>('/api/drivers/validate', { method: 'POST', body: JSON.stringify({ yaml }) }),
   },
   preview: {
     get: (replicationName: string, mappingName: string) =>

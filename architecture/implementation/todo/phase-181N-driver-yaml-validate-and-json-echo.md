@@ -1,6 +1,7 @@
 # Phase 181N: a validate-and-echo tool — show the JSON a `driver.yaml` actually resolves to, plus errors
 
-**Status: todo.** Fourth of five phases for the JDBC/driver-editing UI round requested 2026-09-23. Builds
+**Status: done (2026-09-23).** Fourth of five phases for the JDBC/driver-editing UI round requested
+2026-09-23. Builds
 on 178N (JDBC fields worth echoing back must exist first) and pairs naturally with 180N (raw mode has no
 structured-field errors to lean on, so this is its main feedback loop) — sequenced after both for that
 reason, though it also improves 179N's structured mode (the operator can confirm a template placed a
@@ -104,6 +105,26 @@ to `/api/drivers/validate`.
 - Making `ConnectionsController.Test`'s real connection test call through this same preview — that's a
   different, already-shipped thing (`ConnectionTestCard`'s `ResolvedConnectionDetails`, 177M); this tool
   is for the driver descriptor itself, before any connection exists to test.
+
+## Applied — a real phase 178N bug found building this, not assumed
+
+Writing the test that asserts an **unmodified** `connectionStringKeys` field (the `host` key, not
+overridden) exposed a real production bug in phase 178N's own schema: `JdbcDescriptorYaml.ConnectionStringKeys`
+had reused `DescriptorConnectionStringKeysYaml` (the ADO.NET dialect's own type) verbatim. That type's
+C# properties carry non-nullable, ADO.NET-flavoured defaults (`Host = "Host"`, `Password = "Password"`,
+etc.) — so a yaml overriding *only one* field (`username`, say — exactly the shape phase 179N's own form
+writes for a single-field override) deserialized with every other field already populated at its ADO.NET
+default rather than left unset, silently applying the wrong key spelling to properties like `host`/
+`password` the operator never touched.
+
+Fixed at the schema level: a new `JdbcConnectionStringKeysYaml` type with every field genuinely nullable
+and no default, so `JdbcGenericDriver.FromDescriptor` can fall back to `DefaultConnectionStringKeys`
+per field rather than per block. Covered by a new regression test,
+`JdbcDescriptorTests.APartialConnectionStringKeysOverride_LeavesUnmodeledFieldsAtJdbcsOwnDefaults`,
+against the real Postgres container — a template with no placeholders forces the fallback-to-property
+path to actually run for every field, which is what exposes the bug (a template that places `{host}`
+directly, as phase 178N's own original test did, never consults the key spelling for `host` at all and
+would never have caught this).
 
 ## How to verify when closed
 

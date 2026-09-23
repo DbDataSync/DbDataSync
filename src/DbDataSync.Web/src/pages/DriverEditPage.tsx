@@ -9,11 +9,13 @@ import { FileUploadPanel } from '../components/FileUploadPanel'
 import { LibraryFindPanel } from '../components/LibraryFindPanel'
 import {
   useCreateDriver, useDriverYaml, useFiles, useKnownDriverKinds, useLibraries, useUpdateDriverYaml,
+  useValidateDriverYaml,
 } from '../api/hooks'
 import {
   assembleDriverYaml, parseDriverYaml, roundTripsCleanly, RAW_BODY_SKELETON,
   type Base, type JdbcConnectionStringKeysForm,
 } from './driverYamlAssembly'
+import type { DriverValidationResult } from '../api/types'
 
 interface FormState {
   id: string
@@ -70,6 +72,7 @@ export function DriverEditPage() {
   const { data: files } = useFiles()
   const create = useCreateDriver()
   const update = useUpdateDriverYaml()
+  const validate = useValidateDriverYaml()
 
   const [form, setForm] = useState<FormState>(EMPTY)
   const [saveError, setSaveError] = useState<unknown>(null)
@@ -196,6 +199,12 @@ export function DriverEditPage() {
                   {saving ? 'Saving…' : 'Save'}
                 </button>
               </div>
+              <ValidatePanel
+                pending={validate.isPending}
+                result={validate.data}
+                error={validate.error}
+                onValidate={() => validate.mutate(rawText)}
+              />
             </div>
           </div>
         ) : (
@@ -389,6 +398,12 @@ export function DriverEditPage() {
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </div>
+            <ValidatePanel
+              pending={validate.isPending}
+              result={validate.data}
+              error={validate.error}
+              onValidate={() => validate.mutate(assembleDriverYaml(form))}
+            />
           </div>
         </div>
         )}
@@ -425,6 +440,56 @@ function InstallLibraryDialog({ installedIds, onInstalled, onCancel }: {
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Phase 181N. On-demand, not live-as-you-type (see phase doc's own "not run automatically" reasoning) —
+ * one button that validates exactly what Save would currently send, in either editor mode. Shown in both
+ * Structured and Raw mode, the same panel, just fed a different `onValidate` — the point of the tool is
+ * least useful for the structured form (which already has its own field-level checks) and most useful for
+ * raw mode, which has none, so one shared component matters more than either caller.
+ */
+function ValidatePanel({ pending, result, error, onValidate }: {
+  pending: boolean
+  result: DriverValidationResult | undefined
+  error: Error | null
+  onValidate: () => void
+}) {
+  return (
+    <details data-testid="driver-edit-validate-panel">
+      <summary className="dim" style={{ cursor: 'pointer' }}>Validate</summary>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className="btn btn-chrome"
+            disabled={pending}
+            onClick={onValidate}
+            data-testid="driver-edit-validate-button"
+          >
+            {pending ? 'Validating…' : 'Validate'}
+          </button>
+        </div>
+        {error && <span className="hint" style={{ color: 'var(--danger)' }}>{error.message}</span>}
+        {result && (
+          <>
+            <span
+              className="hint"
+              style={{ color: result.valid ? 'var(--ok)' : 'var(--danger)' }}
+              data-testid="driver-edit-validate-result"
+            >
+              {result.valid ? 'Valid' : result.error}
+            </span>
+            {result.interpreted && (
+              <pre className="mono" style={{ margin: 0, overflow: 'auto', maxHeight: 320 }} data-testid="driver-edit-validate-json">
+                {JSON.stringify(result.interpreted, null, 2)}
+              </pre>
+            )}
+          </>
+        )}
+      </div>
+    </details>
   )
 }
 

@@ -1,7 +1,11 @@
 # Phase 178N: make `UrlTemplate`/`ConnectionStringKeys` reachable from a `driver.yaml`, and close the `{password}` gap
 
-**Status: done (2026-09-23).** First of five phases for the JDBC/driver-editing UI round requested
-2026-09-23 —
+**Status: done (2026-09-23), with one correction from phase 181N.** This doc's own §1 said to reuse
+`DescriptorConnectionStringKeysYaml` "verbatim... not a JDBC-specific copy" — that turned out to be wrong:
+that type's non-nullable ADO.NET-flavoured C# defaults leak into a *partial* JDBC override. Replaced with
+a dedicated `JdbcConnectionStringKeysYaml` (all-nullable fields). See phase 181N's own "Applied" section
+for the full story and the regression test. First of five phases for the JDBC/driver-editing UI round
+requested 2026-09-23 —
 prerequisite plumbing for 179N (the URL template editor) and 181N (validate/echo). Implements
 [`follow-up-jdbc-url-template-unreachable-from-driver-yaml.md`](../../planning/todo/follow-up-jdbc-url-template-unreachable-from-driver-yaml.md)
 in full (both its parts) and

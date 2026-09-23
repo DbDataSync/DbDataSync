@@ -85,6 +85,101 @@ public sealed class DriversController(
     }
 
     /// <summary>
+    /// Phase 182N — lets <c>ConnectionEditPage</c> tell an operator *why* a connection's driver isn't
+    /// registered, instead of the parameter form just silently rendering empty. Only called for a
+    /// driver id that isn't already in <see cref="DriverRegistry.All"/> — cheap (one directory, one file
+    /// read) and reruns the identical <see cref="TryBuild"/> <see cref="Create"/>/<see cref="UpdateYaml"/>/
+    /// <see cref="Validate"/> already share, so the message an operator sees here matches what they'd see
+    /// fixing it through the driver editor, not a third, differently-worded version of the same fact.
+    /// <c>Viewer</c>, matching every other endpoint <c>ConnectionEditPage</c> already calls.
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpGet("{id}/status")]
+    public ActionResult<DriverStatusResult> Status(string id)
+    {
+        if (driverRegistry.TryGet(id, out _))
+            return Ok(new DriverStatusResult(true, null));
+
+        var yamlPath = Path.Combine(apiOptions.RepoRoot, "drivers", id, DriverLoader.DescriptorFileName);
+        if (!System.IO.File.Exists(yamlPath))
+            return Ok(new DriverStatusResult(false, $"No driver.yaml exists for '{id}'."));
+
+        var (_, _, error) = TryBuild(System.IO.File.ReadAllText(yamlPath));
+        return Ok(new DriverStatusResult(false, error ?? $"'{id}' failed to register for an unrecorded reason — check the server log."));
+    }
+
+    /// <summary>
+    /// Phase 181N — the driver-authoring form's own "Validate" tool: the identical in-memory
+    /// parse-then-build <see cref="TryBuild"/> does for <see cref="Create"/>/<see cref="UpdateYaml"/>,
+    /// but standalone and never writing to disk, so it works for a brand-new unsaved id too. Returns an
+    /// echo of what the descriptor actually resolved to (<see cref="Preview"/>) alongside any error —
+    /// <see cref="TryBuild"/> already returns the parsed descriptor even when the later *build* step
+    /// fails (a missing library, a bad <c>base</c> type, phase 178N's own <c>{password}</c> rejection),
+    /// so "here's what I understood before I hit a problem" survives a build failure, not just a parse
+    /// one. Built from <see cref="DriverDescriptorYaml"/> directly rather than reflecting the live
+    /// <see cref="IDriver"/>/spec — reflecting a JDBC spec from this project would need a compile-time
+    /// reference to <c>DbDataSync.Drivers.Jdbc</c>'s <c>java.sql</c>-aware types, exactly what this
+    /// session's own IKVM architecture correction moved out of <c>DbDataSync.Api</c> for good.
+    /// </summary>
+    [Authorize(Policies.Viewer)]
+    [HttpPost("validate")]
+    public ActionResult<DriverValidationResult> Validate([FromBody] DriverYamlRequest body)
+    {
+        var (_, descriptor, error) = TryBuild(body.Yaml);
+        return Ok(new DriverValidationResult(error is null, error, descriptor is null ? null : Preview(descriptor)));
+    }
+
+    /// <summary>See <see cref="Validate"/>'s own doc comment for why this reads the descriptor, not the
+    /// built driver. <c>Catalog</c> mirrors <see cref="DescriptorCatalogResolution.Resolve"/>'s own
+    /// choice without calling it — calling it would need a real <see cref="IDescriptorCatalog"/> default
+    /// per kind (JDBC's own lives in the project this method must not reference), and the only thing
+    /// worth showing here is the label, not a working instance.</summary>
+    private static DriverInterpretationPreview Preview(DriverDescriptorYaml descriptor)
+    {
+        var isJdbc = descriptor.Base?.Contains("JdbcGenericDriver", StringComparison.Ordinal) == true;
+        var keys = descriptor.Dialect.ConnectionStringKeys;
+
+        var catalog = descriptor.Dialect.Catalog switch
+        {
+            null or "default" => isJdbc ? "java.sql.DatabaseMetaData" : "information_schema",
+            "query" => "query",
+            var other => other,
+        };
+
+        var jdbcKeys = descriptor.Jdbc?.ConnectionStringKeys;
+        return new DriverInterpretationPreview(
+            descriptor.Id, descriptor.DisplayName, isJdbc ? "jdbc" : "adonet",
+            new DialectPreview(
+                descriptor.Dialect.QuoteIdentifier, descriptor.Dialect.ParameterPrefix, descriptor.Dialect.RowLimit,
+                catalog, descriptor.Dialect.DefaultDatabase, descriptor.Dialect.DefaultPort,
+                new ConnectionStringKeysPreview(
+                    keys?.Host ?? "Host", keys?.Port ?? "Port", keys?.Database ?? "Database",
+                    keys?.Username ?? "User Id", keys?.Password ?? "Password",
+                    keys?.ConnectTimeout ?? "Connect Timeout", keys?.IntegratedSecurity)),
+            descriptor.TypeMap.ToDictionary(e => e.Key, e => FormatTypeMapEntry(e.Value)),
+            descriptor.Capabilities.Readers, descriptor.Capabilities.Staging, descriptor.Capabilities.Writers,
+            descriptor.Jdbc is null
+                ? null
+                : new JdbcPreview(
+                    descriptor.Jdbc.DriverClass, descriptor.Jdbc.DriverJarPaths, descriptor.Jdbc.UrlTemplate,
+                    new ConnectionStringKeysPreview(
+                        jdbcKeys?.Host ?? "host", jdbcKeys?.Port ?? "port", jdbcKeys?.Database ?? "database",
+                        jdbcKeys?.Username ?? "user", jdbcKeys?.Password ?? "password",
+                        jdbcKeys?.ConnectTimeout, jdbcKeys?.IntegratedSecurity)));
+    }
+
+    private static string FormatTypeMapEntry(TypeMapEntryYaml entry)
+    {
+        var parts = new List<string>();
+        if (entry.Precision is not null) parts.Add($"precision={entry.Precision}");
+        if (entry.Scale is not null) parts.Add($"scale={entry.Scale}");
+        if (entry.Length is not null) parts.Add($"length={entry.Length}");
+        if (entry.Max) parts.Add("max=true");
+        if (entry.Unicode) parts.Add("unicode=true");
+        return parts.Count == 0 ? entry.Kind : $"{entry.Kind}({string.Join(", ", parts)})";
+    }
+
+    /// <summary>
     /// The driver-authoring form's own "create": validates entirely in memory before ever touching
     /// disk — parse, then the identical <see cref="DriverDescriptorReader.BuildDriver"/> round-trip
     /// <see cref="InstallFromCatalog"/> uses, but *before* writing rather than after, so a failure never
@@ -300,3 +395,34 @@ public sealed record DriverKindsSummary(
 public sealed record DriverYamlRequest(string Yaml);
 
 public sealed record DriverYamlResponse(string Yaml);
+
+/// <summary>Phase 182N. <see cref="Error"/> is null exactly when <see cref="Registered"/> is true.</summary>
+public sealed record DriverStatusResult(bool Registered, string? Error);
+
+/// <summary>Phase 181N. <see cref="Interpreted"/> is non-null whenever the yaml at least parsed, even if
+/// the later build step failed — see <see cref="DriversController.Validate"/>'s own doc comment for why
+/// that's worth keeping rather than only echoing back a clean success.</summary>
+public sealed record DriverValidationResult(bool Valid, string? Error, DriverInterpretationPreview? Interpreted);
+
+public sealed record DriverInterpretationPreview(
+    string Id, string DisplayName, string Base,
+    DialectPreview Dialect, IReadOnlyDictionary<string, string> TypeMap,
+    IReadOnlyList<string> Readers, IReadOnlyList<string> Staging, IReadOnlyList<string> Writers,
+    JdbcPreview? Jdbc);
+
+public sealed record DialectPreview(
+    string QuoteIdentifier, string ParameterPrefix, string RowLimit, string Catalog,
+    string DefaultDatabase, int? DefaultPort, ConnectionStringKeysPreview ConnectionStringKeys);
+
+public sealed record ConnectionStringKeysPreview(
+    string Host, string? Port, string Database, string Username, string Password,
+    string? ConnectTimeout, string? IntegratedSecurity);
+
+/// <param name="ConnectionStringKeys">JDBC's own resolved defaults (<c>host</c>/<c>port</c>/<c>database</c>/
+/// <c>user</c>/<c>password</c>, <see cref="ConnectTimeout"/>/<see cref="IntegratedSecurity"/> unset unless
+/// the yaml sets one — <c>JdbcGenericDriver.DefaultConnectionStringKeys</c> has no default key for either)
+/// shown resolved when the yaml didn't override them, so "what key does this template actually place
+/// {host} under" never requires reading source.</param>
+public sealed record JdbcPreview(
+    string DriverClass, IReadOnlyList<string> DriverJarPaths, string? UrlTemplate,
+    ConnectionStringKeysPreview ConnectionStringKeys);

@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Field } from '../components/Field'
 import { ParameterForm } from '../components/ParameterForm'
-import { useCapabilities, useConnectionParameters, useConnections, useDeleteConnection, useDrivers, useTestConnection, useUpsertConnection, useValidateLibrary } from '../api/hooks'
+import {
+  useCapabilities, useConnectionParameters, useConnections, useDeleteConnection, useDriverStatus, useDrivers,
+  useTestConnection, useUpsertConnection, useValidateLibrary,
+} from '../api/hooks'
 import { ConnectionTestCard } from './connection-edit/ConnectionTestCard'
 import { ScriptBindingsCard } from '../components/ScriptBindings'
 import type { AuthMode, ConnectionInput, DriverType, ParameterDescriptor } from '../api/types'
@@ -126,6 +129,15 @@ export function ConnectionEditPage() {
   // DriverCapabilities.supportsLibraryValidation's own doc comment).
   const canValidateLibrary = !isNew && capabilities.data?.supportsLibraryValidation === true
   const [draft, setDraft] = useState<ConnectionInput | null>(isNew ? { ...empty } : null)
+
+  // Phase 182N: a connection's driverType can name a driver whose driver.yaml failed to load (never
+  // registered — see DriverLoader.LoadDescriptorDrivers' own "logged and skipped" contract). `drivers`
+  // undefined means "not loaded yet", not "not registered" — treated as registered so the banner below
+  // never flashes on a normal page load. useDriverStatus is only asked once that's actually true, so a
+  // healthy connection costs no extra request.
+  const driversLoaded = drivers !== undefined
+  const driverRegistered = isNew || !draft || !driversLoaded || drivers!.some((d) => d.id === draft.driverType)
+  const driverStatus = useDriverStatus(!driverRegistered && draft ? draft.driverType : undefined)
 
   const values = draft ? toValues(draft) : {}
 
@@ -308,15 +320,29 @@ export function ConnectionEditPage() {
                   </select>
                 </Field>
 
+                {!driverRegistered && (
+                  <div className="banner error" role="alert" data-testid="connection-driver-broken-banner">
+                    <span className="mark">!</span>
+                    <span>
+                      This connection's driver <code>{draft.driverType}</code> failed to load
+                      {driverStatus.data?.error ? <>: {driverStatus.data.error}</> : driverStatus.isPending ? '…' : '.'}{' '}
+                      Fix it in the <Link to={`/drivers/${encodeURIComponent(draft.driverType)}/edit`}>driver editor</Link>.
+                    </span>
+                  </div>
+                )}
+
                 {/* Everything else — addressing, database, authentication, and the driver's own
                     settings — is declared, laid out and made conditional by the driver. This screen
-                    holds no rule about what depends on what. */}
-                <ParameterForm
-                  parameters={declaredParameters}
-                  values={{ ...values, password: draft.password ?? '' }}
-                  onChange={applyValues}
-                  testIdPrefix="connection-parameters"
-                />
+                    holds no rule about what depends on what. Skipped while the driver is broken: there
+                    are no declared parameters to show, and rendering an empty form is worse than none. */}
+                {driverRegistered && (
+                  <ParameterForm
+                    parameters={declaredParameters}
+                    values={{ ...values, password: draft.password ?? '' }}
+                    onChange={applyValues}
+                    testIdPrefix="connection-parameters"
+                  />
+                )}
               </div>
             </div>
 

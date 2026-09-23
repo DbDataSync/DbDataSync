@@ -1,6 +1,7 @@
 # Phase 182N: tell the operator when a connection's driver failed to load, instead of a silently empty form
 
-**Status: todo.** Fifth and last of five phases for the JDBC/driver-editing UI round requested 2026-09-23.
+**Status: done (2026-09-23).** Fifth and last of five phases for the JDBC/driver-editing UI round
+requested 2026-09-23.
 
 ## What happens today, traced through the actual code
 
@@ -91,6 +92,16 @@ library) are the ones with nothing to show.
   saving already re-registers it live (`driverRegistry.Register(driver!)` in both, `DriversController.cs:110,142`)
   — this phase doesn't need to add anything for that case, it already works once the operator *can* find
   and fix the file, which is what 178N-181N + this phase's link exist to make possible.
+
+## Applied — one simplification from the design above
+
+Item 1 ("surface the existing error") and item 2 ("a real reason") were designed as two separate steps,
+cheapest first. Implemented as one: once `GET /api/drivers/{id}/status` exists, showing its richer,
+already-consistent-with-the-driver-editor message supersedes showing the bare "No driver is registered
+for 'X'" from `useConnectionParameters` — displaying both would just be two differently-worded messages
+for the same fact. The banner only renders once `useDrivers()` has confirmed the driver truly isn't
+registered (never on a normal page load before that list arrives), so it costs nothing for the common
+case and never flashes.
 
 ## How to verify when closed
 

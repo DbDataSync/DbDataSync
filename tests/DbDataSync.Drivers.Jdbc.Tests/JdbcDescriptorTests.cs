@@ -177,4 +177,67 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
         Assert.Equal("jdbc:postgresql://localhost:15432/" + db.DatabaseName, preview.JdbcUri);
         Assert.Equal("dbdatasync", preview.Properties["pguser"]);
     }
+
+    /// <summary>
+    /// Regression: found while building phase 181N's validate/echo tool, not assumed. The first cut of
+    /// phase 178N reused <c>DescriptorConnectionStringKeysYaml</c> (the ADO.NET dialect's own type)
+    /// verbatim for the JDBC side too — that type's properties carry non-nullable, ADO.NET-flavoured C#
+    /// defaults (<c>Host = "Host"</c>, etc.), so a yaml overriding only <em>one</em> field silently
+    /// deserialized every other field at its ADO.NET default rather than leaving it unset. A template
+    /// with no <c>{host}</c> token forces the fallback-to-property path to actually run for <c>host</c>,
+    /// which is what exposes it — the sibling test above never does, because its template places
+    /// <c>{host}</c> directly and never consults <c>keys.Host</c> as a property key at all.
+    /// </summary>
+    [Fact]
+    public void APartialConnectionStringKeysOverride_LeavesUnmodeledFieldsAtJdbcsOwnDefaults()
+    {
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"jdbc-descriptor-partial-keys-test-{Guid.NewGuid():N}");
+        var filesDir = Path.Combine(repoRoot, "files");
+        Directory.CreateDirectory(filesDir);
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "postgresql.jar"), Path.Combine(filesDir, "postgresql.jar"));
+
+        const string yaml = """
+            id: postgres-via-jdbc-partial-keys
+            displayName: Postgres (via JDBC, partial key override)
+            library: ikvm
+            base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc
+            jdbc:
+              driverClass: org.postgresql.Driver
+              driverJarPaths: [postgresql.jar]
+              urlTemplate: "jdbc:postgresql:///"
+              connectionStringKeys:
+                username: pguser
+            dialect:
+              quoteIdentifier: doubleQuote
+              parameterPrefix: "@"
+              parameterNameIsBare: true
+              rowLimit: limitOffset
+            capabilities:
+              readers: [Watermark]
+              staging: []
+              writers: []
+            """;
+
+        var descriptor = DriverDescriptorReader.Deserialize(yaml);
+        var libraries = new LibraryRegistry(Path.GetTempPath());
+        var driver = (IConnectionPreviewer)DriverDescriptorReader.BuildDriver(descriptor, libraries, repoRoot);
+
+        var config = new ConnectionConfig
+        {
+            Name = "jdbc-descriptor-partial-keys-test", DriverType = "postgres-via-jdbc-partial-keys",
+            Host = "localhost", Port = 15432, Database = db.DatabaseName,
+            AuthMode = AuthMode.SqlAuth, UserId = "dbdatasync",
+        };
+
+        var preview = driver.PreviewConnection(config);
+
+        // The template has no {host}/{port}/{database} tokens, so all three fall back to properties —
+        // under JDBC's own default key spellings, not the ADO.NET ones a naive reuse of
+        // DescriptorConnectionStringKeysYaml would have silently applied to everything except username.
+        Assert.Equal("localhost", preview.Properties["host"]);
+        Assert.Equal("15432", preview.Properties["port"]);
+        Assert.Equal(db.DatabaseName, preview.Properties["database"]);
+        Assert.Equal("dbdatasync", preview.Properties["pguser"]);
+        Assert.False(preview.Properties.ContainsKey("Host"));
+    }
 }

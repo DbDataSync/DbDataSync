@@ -16,6 +16,7 @@ const keys = {
   drivers: ['drivers'] as const,
   knownDriverKinds: ['known-driver-kinds'] as const,
   driverYaml: (id: string) => ['drivers', id, 'yaml'] as const,
+  driverStatus: (id: string) => ['drivers', id, 'status'] as const,
   libraries: ['libraries'] as const,
   files: ['files'] as const,
   knownLibraries: ['known-libraries'] as const,
@@ -178,6 +179,27 @@ export function useUpdateDriverYaml() {
       queryClient.invalidateQueries({ queryKey: keys.restartRequired })
     },
   })
+}
+
+/**
+ * Phase 182N. Only worth asking when a connection's driver isn't already in `useDrivers()`'s list — see
+ * `ConnectionEditPage`'s own call site. `staleTime: Infinity` matches `useCapabilities`' own reasoning:
+ * whether a driver is registered doesn't change within one running API process.
+ */
+export function useDriverStatus(driverType: string | undefined) {
+  return useQuery({
+    queryKey: keys.driverStatus(driverType ?? ''),
+    queryFn: () => api.drivers.status(driverType!),
+    enabled: !!driverType,
+    staleTime: Infinity,
+  })
+}
+
+/** Phase 181N — validate-and-echo, on demand (not on every keystroke — see DriverEditPage's own "Validate"
+ * button). A mutation, not a query: it's explicitly triggered, matching `useTestConnection`'s own shape,
+ * and its result should never be treated as cached data to invalidate/refetch. */
+export function useValidateDriverYaml() {
+  return useMutation({ mutationFn: (yaml: string) => api.drivers.validate(yaml) })
 }
 
 /** Every installed library (phase 118's admin Libraries screen). Same call `useDrivers` already makes

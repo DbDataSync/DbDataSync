@@ -70,13 +70,31 @@ public sealed class JdbcDescriptorYaml
     /// substituted, and <c>JdbcGenericDriver</c>'s constructor rejects a template that contains it.</summary>
     public string? UrlTemplate { get; set; }
 
-    /// <summary>Phase 178N. Same type the ADO.NET side's <see cref="DescriptorDialectYaml.ConnectionStringKeys"/>
-    /// already uses, not a JDBC-specific copy — but omitted here means
-    /// <c>JdbcGenericDriver.DefaultConnectionStringKeys</c> (the literal <c>host</c>/<c>port</c>/
-    /// <c>database</c>/<c>user</c>/<c>password</c> spellings a real JDBC driver reads), not that ADO.NET
-    /// type's own <c>Host</c>/<c>User Id</c>/… defaults, which would be the wrong spelling for a JDBC
-    /// property bag.</summary>
-    public DescriptorConnectionStringKeysYaml? ConnectionStringKeys { get; set; }
+    /// <summary>Phase 178N. **Not** <see cref="DescriptorConnectionStringKeysYaml"/> — that type was tried
+    /// first and found wrong here (not assumed): its properties carry non-nullable, ADO.NET-flavoured C#
+    /// defaults (<c>Host = "Host"</c>, etc.), so a *partial* override — a yaml setting only
+    /// <c>username</c>, the exact shape phase 179N's own form writes for a single-field override — would
+    /// deserialize with every other field already populated at its ADO.NET default rather than left
+    /// unset, silently applying the wrong key spelling to the ones the operator never touched. Every
+    /// field of <see cref="JdbcConnectionStringKeysYaml"/> is genuinely nullable with no default, so
+    /// <c>JdbcGenericDriver.FromDescriptor</c> can tell "not set" from "set to that string" per field and
+    /// fall back to <c>JdbcGenericDriver.DefaultConnectionStringKeys</c> (<c>host</c>/<c>port</c>/
+    /// <c>database</c>/<c>user</c>/<c>password</c>) one field at a time.</summary>
+    public JdbcConnectionStringKeysYaml? ConnectionStringKeys { get; set; }
+}
+
+/// <summary>See <see cref="JdbcDescriptorYaml.ConnectionStringKeys"/>'s own doc comment for why this
+/// isn't <see cref="DescriptorConnectionStringKeysYaml"/> — every field here is nullable with no default,
+/// on purpose.</summary>
+public sealed class JdbcConnectionStringKeysYaml
+{
+    public string? Host { get; set; }
+    public string? Port { get; set; }
+    public string? Database { get; set; }
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+    public string? ConnectTimeout { get; set; }
+    public string? IntegratedSecurity { get; set; }
 }
 
 /// <param name="QuoteIdentifier">backtick | doubleQuote | bracket</param>

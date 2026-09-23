@@ -248,12 +248,21 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>, IConn
 
         var jarPaths = jdbc.DriverJarPaths.Select(name => FilesPaths.FilePath(repoRoot, name)).ToList();
 
-        // null (not a fresh GenericConnectionStringKeys()) when the yaml omits the block — that's what
-        // keeps DefaultConnectionStringKeys (this class's own JDBC-flavoured spellings) the effective
-        // default, per this field's own doc comment. Passing a fresh ADO.NET-defaulted instance instead
-        // would silently apply the wrong key spellings to every JDBC descriptor that doesn't override.
+        // Per-field fallback to DefaultConnectionStringKeys, not "block present or not" — a yaml
+        // overriding only one field (username, say — exactly what a single-field edit through the web
+        // console's own connection-string-keys form writes) must not silently apply an ADO.NET-flavoured
+        // spelling to the other five just because JdbcConnectionStringKeysYaml's own type is now
+        // involved. See that type's own doc comment for the bug this replaced (found via a validate-
+        // endpoint test asserting the *unmodified* fields, not assumed).
         var keys = jdbc.ConnectionStringKeys is { } k
-            ? new GenericConnectionStringKeys(k.Host, k.Port, k.Database, k.Username, k.Password, k.ConnectTimeout, k.IntegratedSecurity)
+            ? new GenericConnectionStringKeys(
+                k.Host ?? DefaultConnectionStringKeys.Host,
+                k.Port ?? DefaultConnectionStringKeys.Port,
+                k.Database ?? DefaultConnectionStringKeys.Database,
+                k.Username ?? DefaultConnectionStringKeys.Username,
+                k.Password ?? DefaultConnectionStringKeys.Password,
+                k.ConnectTimeout ?? DefaultConnectionStringKeys.ConnectTimeout,
+                k.IntegratedSecurity ?? DefaultConnectionStringKeys.IntegratedSecurity)
             : null;
 
         return new JdbcGenericDriver(new JdbcDriverSpec(
