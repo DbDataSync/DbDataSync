@@ -146,19 +146,24 @@ public abstract class GenericDriverBase<TSpec>(TSpec spec, ISegmentValueBinder b
     /// portable across every engine either kind could plausibly stand up against.</summary>
     /// <remarks>
     /// Phase 176M widened this from <c>catch (DbException ex)</c> — a raw <c>java.sql.SQLException</c>
-    /// (JDBC's own exception type, not a <see cref="DbException"/> subtype) escaped this catch entirely
-    /// before, becoming an unhandled 500 at the API layer instead of a reported <c>Succeeded: false</c>.
-    /// <see cref="OperationCanceledException"/> stays excluded deliberately — a cancelled test request is
-    /// not a "connection failed" answer, and conflating the two would misreport what happened.
+    /// escaping <em>past</em> JDBC's own ADO.NET boundary used to reach here uncaught, becoming an
+    /// unhandled 500 at the API layer instead of a reported <c>Succeeded: false</c>. That escape is now
+    /// fixed at its actual source (<c>JdbcCommand</c>'s execute methods and <c>JdbcDataReader.Read</c>
+    /// translate every <c>java.sql.SQLException</c> into <c>Jdbc.Ado.JdbcSqlException</c>, a plain
+    /// <see cref="DbException"/> subtype, before it ever leaves <c>DbDataSync.Drivers.Jdbc</c>) — this
+    /// catch stays widened anyway as a general safety net for any *other* provider's non-<see cref="DbException"/>
+    /// failure, not because JDBC specifically still needs it. <see cref="OperationCanceledException"/>
+    /// stays excluded deliberately — a cancelled test request is not a "connection failed" answer, and
+    /// conflating the two would misreport what happened.
     /// <para>
     /// <c>ex.ToString()</c>, not <c>ex.Message</c> — this project has no compile-time visibility into
-    /// <c>java.sql.SQLException</c> (that would mean depending on <c>DbDataSync.Drivers.Jdbc</c>, which
-    /// itself depends on this project — a cycle), so it can't give a JDBC-specific exception the same
-    /// <c>SQLState</c>/<c>ErrorCode</c>/chained-message enrichment <c>DbDataSync.Api</c>'s own
-    /// <c>ConnectionsController.Test</c> path gives one (that layer already references
-    /// <c>DbDataSync.Drivers.Jdbc</c>, so it can). <c>ToString()</c> at least keeps an inner exception's
-    /// own message, which a wrapped <see cref="InvalidOperationException"/> (as every phase-175M
-    /// connect-time validation throws) would otherwise lose.
+    /// <c>DbDataSync.Drivers.Jdbc</c> (would mean depending on it, which itself depends on this project —
+    /// a cycle) and doesn't need any: by the time a JDBC failure reaches here it is already a plain
+    /// <c>DbException</c> whose own <c>Message</c> already carries the <c>SQLState</c>/<c>ErrorCode</c>/
+    /// chained-message detail (built once, at the translation site) — <c>ToString()</c> is just the
+    /// ordinary, provider-agnostic choice that also keeps an inner exception's own message, which a
+    /// wrapped <see cref="InvalidOperationException"/> (as every phase-175M connect-time validation
+    /// throws) would otherwise lose.
     /// </para>
     /// </remarks>
     public async Task<ConnectionTestResult> TestAsync(DbConnection connection, CancellationToken cancellationToken)

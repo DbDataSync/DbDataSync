@@ -70,13 +70,28 @@ internal sealed class JdbcProviderFactory : DbProviderFactory
     /// misleading <c>"Connection is closed."</c>, with no trace of the real problem (a URL the driver
     /// never accepted). <c>acceptsURL</c> is checked first so the failure names the actual URL rather
     /// than only reporting the symptom of <c>connect</c>'s own null.
+    /// <para>
+    /// Phase 176M (corrected): <c>connect()</c> itself can also throw a real <c>java.sql.SQLException</c>
+    /// — a genuine auth or connectivity failure at the JDBC-protocol level, not merely an unrecognized
+    /// URL. Translated to <see cref="JdbcSqlException"/> right here, at the source, rather than left to
+    /// leak out as a raw Java exception for some caller two or three frames up to worry about — see that
+    /// type's own doc comment for why this is the only place in this codebase a live
+    /// <c>java.sql.SQLException</c> is allowed to exist at all.
+    /// </para>
     /// </summary>
     public java.sql.Connection GetJdbcConnection(string url, java.util.Properties? properties = null)
     {
-        if (!JdbcDriver.acceptsURL(url))
-            throw new InvalidOperationException($"Driver '{_driverClass}' does not accept URL '{url}'.");
-        return JdbcDriver.connect(url, properties ?? new java.util.Properties())
-            ?? throw new InvalidOperationException($"Driver '{_driverClass}' returned no connection for URL '{url}'.");
+        try
+        {
+            if (!JdbcDriver.acceptsURL(url))
+                throw new InvalidOperationException($"Driver '{_driverClass}' does not accept URL '{url}'.");
+            return JdbcDriver.connect(url, properties ?? new java.util.Properties())
+                ?? throw new InvalidOperationException($"Driver '{_driverClass}' returned no connection for URL '{url}'.");
+        }
+        catch (java.sql.SQLException ex)
+        {
+            throw JdbcSqlException.FromJava(ex);
+        }
     }
 
     public override DbConnectionStringBuilder CreateConnectionStringBuilder() =>

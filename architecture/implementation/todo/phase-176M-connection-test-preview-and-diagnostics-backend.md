@@ -2,11 +2,20 @@
 
 **Status**: Done, 2026-09-22. `ConnectionPreview`/`IConnectionPreviewer` (new, `DbDataSync.Drivers.Abstractions`),
 implemented by both `GenericDriver` and `JdbcGenericDriver`; `ConnectionTestReport`'s three new fields;
-both catches widened; `ConnectionDiagnostics.Describe`/`Redact` (`DbDataSync.Api`). Real, load-bearing
-corrections found building it, not part of the design above — see "What changed from the design" below,
-especially the IKVM one: the design as written would have taken down **every** driver's Test Connection,
-not just JDBC's, the first time it hit an ordinary failure. Caught by the existing integration suite, not
-invented as a hypothetical — see that section for how.
+both catches widened.
+
+**Corrected the same day, on review.** The first version of this phase put java.sql-aware exception
+translation in `DbDataSync.Api` (`ConnectionDiagnostics.Describe` pattern-matching `java.sql.SQLException`
+directly, wrapped in a `FileNotFoundException`-catching guard once that was found to crash every driver's
+Test Connection, not just JDBC's — see the old text this replaced, preserved in git history at
+`b781ac6`). That was a real architecture mistake, not a style choice, flagged on review: *no* project
+outside `DbDataSync.Drivers.Jdbc` should ever need to know `java.sql` types exist at all. The actual fix —
+what "What changed from the design" now describes — moves the translation to where it belongs: every
+`java.sql.SQLException` a JDBC call can throw is caught and translated into `JdbcSqlException` (a plain
+`DbException` subtype, `Ado/JdbcSqlException.cs`) at the point it's thrown, inside
+`DbDataSync.Drivers.Jdbc` itself. `ConnectionDiagnostics` in `DbDataSync.Api` now touches zero `java.sql`
+types — no guard, no isolated-method JIT workaround, none needed, because there's nothing left to guard
+against.
 **Plan reference**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md` (full
 rationale and code sketches). **Depends on phase 175M** — `JdbcGenericDriver`'s side of
 `PreviewConnection` reuses the unification logic 175M builds, and `GenericDriver.CreateConnection`
@@ -134,34 +143,37 @@ diagnostic in the first place. Redact the one specific known-sensitive substring
 
 ## What changed from the design, found building it
 
-- **`Diagnostics` can't live where the design's own code sketch implies (one shared class both
-  `GenericDriverBase.TestAsync` and `ConnectionsController.Test` call identically).** `Describe` touches
-  `java.sql.SQLException` by name, which needs a compile-time reference to IKVM's Java surface.
-  `GenericDriverBase.TestAsync` lives in `DbDataSync.Drivers.Generic`, which has no such reference and
-  can't gain one — that would mean depending on `DbDataSync.Drivers.Jdbc`, which itself depends on
-  `DbDataSync.Drivers.Generic`, a cycle. Resolved by *not* sharing one class: `GenericDriverBase.TestAsync`'s
-  own catch widened to "everything except cancellation" and now returns `ex.ToString()` directly (no
-  java.sql-aware enrichment — it structurally can't have any), while the full `ConnectionDiagnostics`
-  class (`Describe`/`Redact`, java.sql-aware) lives in `DbDataSync.Api`, the one layer that already
-  references `DbDataSync.Drivers.Jdbc` (to host the driver at all) and so can actually see that type. A
-  JDBC probe failure inside `TestAsync` itself (as opposed to a JDBC *connect* failure, caught in the
-  controller) gets the plainer `ex.ToString()` treatment as a result — a real, accepted scope reduction,
-  not an oversight.
-- **Even with that split, the design's own literal code sketch (`if (ex is java.sql.SQLException sql)`
-  inline inside a try/catch) is a real bug, not a style choice — found by the existing integration
-  suite, not invented.** `ConnectionTestIntegrationTests.Test_AgainstAClosedPort_ReportsFailureRatherThanThrowing`
-  (an ordinary MsSql closed-port test, no JDBC driver anywhere in that process) started failing with an
-  unhandled `FileNotFoundException` for `IKVM.Java` the moment `Describe`'s widened catch first ran. Root
-  cause: the JIT resolves every type a method's IL references while compiling that *whole method*, before
-  any of its own try/catch executes — so a type-load failure for a type referenced inside a method's own
-  try block still isn't catchable by that same try/catch. Confirmed directly: the inline version, wrapped
-  in the exact catch clause the fix ended up using, reproduced the identical unhandled exception. Fixed by
-  moving the `java.sql.SQLException` touch into its own private method (`TryDescribeSqlException`), called
-  from inside `Describe`'s try — because *that* method's JIT compilation is deferred to its first call,
-  which happens inside the try, the resulting load failure is a call-site exception the surrounding catch
-  genuinely sees. This means the *design's* own sketch, if implemented literally, would have broken Test
-  Connection for **every** driver — not a JDBC-only edge case — the first time any connection failed for
-  an ordinary reason in a process that had never touched IKVM.
+- **The design's own implicit placement — one shared `Diagnostics` class, pattern-matching
+  `java.sql.SQLException` directly, called identically from `GenericDriverBase.TestAsync` and
+  `ConnectionsController.Test` — is architecturally wrong, not just inconvenient for
+  `GenericDriverBase.TestAsync` to reach.** `GenericDriverBase.TestAsync` lives in
+  `DbDataSync.Drivers.Generic`, which has no compile-time visibility into `java.sql.SQLException` and
+  can't gain any (would mean depending on `DbDataSync.Drivers.Jdbc`, which itself depends on
+  `DbDataSync.Drivers.Generic` — a cycle) — that part of the original finding stood. But the fix shipped
+  first (putting the java.sql-aware half in `DbDataSync.Api`, the layer that *does* transitively reference
+  `DbDataSync.Drivers.Jdbc`) was itself wrong: it made an incidental transitive reference load-bearing for
+  a raw Java exception type nothing about `DbDataSync.Api`'s own job requires it to know exists, and it
+  put shared, provider-agnostic diagnostic code in the position of having to defend itself against IKVM.Java
+  not being loaded — real complexity (a `FileNotFoundException`-catching guard, a JIT-compilation-order
+  workaround splitting `Describe` into two methods) that only existed because the translation was happening
+  in the wrong project. Caught on review, not by a test: no shared, non-JDBC-aware code should ever need
+  to know `java.sql` types exist, full stop.
+- **The actual fix: `java.sql.SQLException` never leaves `DbDataSync.Drivers.Jdbc` at all.** New
+  `JdbcSqlException` (`Ado/JdbcSqlException.cs`) — a plain `System.Data.Common.DbException` subtype
+  carrying `SqlState`/`ErrorCode`/message as `string`/`int` `JdbcSqlError` records, zero `java.sql` types
+  in its own public signature. Every real `java.sql` call that can throw one is wrapped and translated at
+  the point of the call, inside this project (the one place a live `java.sql.SQLException` is now ever
+  allowed to exist): `JdbcProviderFactory.GetJdbcConnection` (`acceptsURL`/`connect`), `JdbcCommand.ExecuteNonQuery`/
+  `ExecuteDbDataReader`/`Cancel`, `JdbcDataReader.Read`/its value-reading path. `GenericDriverBase.TestAsync`'s
+  catch stays widened (a real, independently-useful safety net for any provider's non-`DbException`
+  failure) but now needs no java.sql awareness at all: a JDBC failure already arrives as an ordinary
+  `DbException`, so `ex.ToString()` already carries the full `SqlState`/`ErrorCode`/chain detail —
+  `JdbcSqlException`'s own constructor builds that into its `Message` once, at the translation site.
+  `ConnectionDiagnostics` in `DbDataSync.Api` shrank to `Describe(ex) => ex is JdbcSqlException jdbc ?
+  jdbc.Message : ex.ToString()` — a plain type check against a type with no IKVM dependency in its
+  signature, no guard, nothing that can fail to load, because `JdbcSqlException` is only ever constructed
+  from a *live* `java.sql.SQLException` (meaning IKVM is necessarily already loaded whenever that
+  construction happens) and never inspected as a Java type again after.
 - **`GenericDriver.PreviewConnection`'s `Properties` is a fresh empty `Dictionary<string, string>` per
   call**, not a cached singleton — cheap enough (always empty) that this wasn't worth optimizing away, and
   keeps the record's own field genuinely a real, per-call value rather than one shared mutable instance an
@@ -170,25 +182,31 @@ diagnostic in the first place. Redact the one specific known-sensitive substring
 ## How to verify
 
 - A successful test against a real connection returns a populated `ResolvedConnectionString` with the real
-  password replaced by the redaction marker, not omitted — proven at the driver level (not yet wired
-  through a live API-level test — see below) by `GenericDriverTests.PreviewConnection_MasksTheCredential_AndNeverTouchesTheNetwork`
-  (a real Postgres fixture) and `JdbcUrlTemplateTests.PreviewConnection_MasksTheCredential_AndReportsTheResolvedJdbcUri`.
+  password replaced by the redaction marker, not omitted:
+  `GenericDriverTests.PreviewConnection_MasksTheCredential_AndNeverTouchesTheNetwork` (a real Postgres
+  fixture) and `JdbcUrlTemplateTests.PreviewConnection_MasksTheCredential_AndReportsTheResolvedJdbcUri`.
 - A failing test — driven by an `InvalidOperationException` (phase 175M's own checks) and an ordinary
   exception — returns `Succeeded: false` with a populated `Error`, never an unhandled 500:
-  `ConnectionTestIntegrationTests`'s existing closed-port test (unchanged assertions, now exercising the
-  widened catch) plus the two new `ConnectionDiagnosticsTests.Describe_*` tests. **Not covered**: a raw
-  unwrapped `java.sql.SQLException` specifically, end to end through the API — no fixture in this test
-  suite opens a real JDBC connection through `DbDataSync.Api` (same gap phase 175M's own doc already
-  names for `isValid`). The non-JDBC path this bug actually broke *is* covered, which is what the real
-  incident needed.
+  `ConnectionTestIntegrationTests`'s existing closed-port test (the regression proof: it's the test that
+  caught the original architecture mistake, and still passes against the corrected one) plus
+  `ConnectionDiagnosticsTests.Describe_*`.
 - A cancelled test request does not produce a `Succeeded: false` report:
   `GenericDriverTests.TestAsync_WithAnAlreadyCancelledToken_PropagatesCancellation_InsteadOfReportingFailure`.
 - `Redact` leaves every part of a message untouched except the literal secret substring, including a
   message containing the secret more than once and a call with multiple distinct secrets:
   `ConnectionDiagnosticsTests.Redact_*`.
-- `Diagnostics.Describe` against a chained `java.sql.SQLException` — **not covered**, for the same reason
-  as the API-level JDBC gap above: this test project has no IKVM.Java loaded to construct one, and
-  fabricating that instance without a real JDBC driver behind it isn't practical over IKVM interop (no
-  precedent anywhere in this codebase for mocking a `java.sql.*` type). What *is* covered, and is the more
-  load-bearing property: `Describe` doesn't throw when IKVM.Java is absent, which is the actual failure
-  this phase's own build surfaced.
+- A real, chained `java.sql.SQLException` translates to `JdbcSqlException` with the right `SqlState`/chain
+  — **now covered**, against genuinely bad SQL run through the real Postgres fixture, not a hand-built
+  exception: `JdbcSqlExceptionTests.ExecuteNonQuery_WithInvalidSql_ThrowsJdbcSqlException_NotARawJavaException`
+  (Postgres SQLState `42601`, syntax error) and `ExecuteReaderAsync_WithInvalidSql_ThrowsJdbcSqlException`
+  (`42P01`, undefined table). `ConnectionDiagnostics.Describe`'s own chain/SQLState/ErrorCode formatting —
+  also now covered, trivially, with a hand-built `JdbcSqlException` (no IKVM needed at all, since the type
+  itself carries none):
+  `ConnectionDiagnosticsTests.Describe_AJdbcSqlException_IncludesEveryChainedErrorsSqlStateAndErrorCode`.
+  Both were undocumented gaps in this doc's first version, closed by the same fix that corrected the
+  architecture — not a coincidence: the old design made this untestable without a live IKVM-loaded
+  process; the corrected one makes it trivial.
+- `isValid`'s two negative branches (phase 175M) — still not covered, for the reason already given there:
+  needs a `java.sql.Connection` that reports `false`/throws on demand, a different problem than the one
+  this correction solved (that needs mocking a live Java object's *behavior*, not just translating an
+  exception it already threw).

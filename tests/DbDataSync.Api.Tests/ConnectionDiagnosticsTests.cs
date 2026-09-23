@@ -1,17 +1,20 @@
 using DbDataSync.Api.Services;
+using DbDataSync.Drivers.Jdbc.Ado;
 using Xunit;
 
 namespace DbDataSync.Api.Tests;
 
 /// <summary>
-/// Phase 176M's <see cref="ConnectionDiagnostics"/> — the piece <see cref="ConnectionTestIntegrationTests"/>'s
-/// own closed-port test already proves doesn't crash the widened catch in
-/// <c>ConnectionsController.Test</c> for an ordinary (non-JDBC) exception. These tests cover
-/// <c>Describe</c>'s non-java.sql path directly, plus <c>Redact</c> in isolation — not the
-/// <c>java.sql.SQLException</c>-aware branch, which needs IKVM.Java actually loaded in the process (this
-/// test project doesn't load it, the same reason <c>Describe</c> itself has to guard against that
-/// assembly being absent — see its own doc comment) and so isn't covered here; a real JDBC connection
-/// failure exercising that branch has no fixture in this test project today.
+/// Phase 176M's <see cref="ConnectionDiagnostics"/>, corrected after a real incident:
+/// <see cref="ConnectionTestIntegrationTests"/>'s own closed-port test caught an unhandled
+/// <see cref="FileNotFoundException"/> for <c>IKVM.Java</c> from an earlier version of <c>Describe</c>
+/// that pattern-matched <c>java.sql.SQLException</c> directly, in this very project, for an ordinary
+/// MsSql failure that had nothing to do with JDBC. Fixed by moving all <c>java.sql</c> translation into
+/// <c>DbDataSync.Drivers.Jdbc</c> itself (<see cref="JdbcSqlException"/>, a plain
+/// <see cref="System.Data.Common.DbException"/> subtype) — <c>Describe</c> now touches no <c>java.sql</c>
+/// type anywhere, so both branches below are testable directly, with no IKVM.Java load required, no
+/// guard needed, and no gap: constructing a <see cref="JdbcSqlException"/> needs nothing but plain
+/// <see cref="JdbcSqlError"/> records.
 /// </summary>
 public sealed class ConnectionDiagnosticsTests
 {
@@ -29,18 +32,36 @@ public sealed class ConnectionDiagnosticsTests
         Assert.Contains("the real problem", described);
     }
 
-    /// <summary>The regression this project's own <c>ConnectionTestIntegrationTests.Test_AgainstAClosedPort_ReportsFailureRatherThanThrowing</c>
-    /// caught for real: <c>Describe</c> must not throw just because IKVM.Java isn't loaded in this
-    /// process (no JDBC driver has ever been used here) — every ordinary .NET exception has to come back
-    /// as a string, not propagate a FileNotFoundException for an assembly the caller never asked about.</summary>
+    /// <summary>The exact case the FileNotFoundException incident was about: an ordinary, non-JDBC
+    /// failure must come back as a plain string with no dependency on IKVM.Java being loaded — provable
+    /// directly now, since <c>Describe</c> has no code path that could ever touch it.</summary>
     [Fact]
-    public void Describe_WithNoJdbcDriverEverLoaded_DoesNotThrowForIkvmBeingAbsent()
+    public void Describe_AnOrdinaryException_NeverTouchesJdbcTypes()
     {
         var ex = new TimeoutException("connection timed out");
 
         var described = ConnectionDiagnostics.Describe(ex);
 
         Assert.Contains("connection timed out", described);
+    }
+
+    /// <summary>The branch the incident's own fix exists for: a JDBC-originated failure — by the time it
+    /// reaches this class, always a plain <see cref="JdbcSqlException"/>, never a live <c>java.sql</c>
+    /// object — still gets its SQLState/ErrorCode/chained-message detail, built once at the JDBC-side
+    /// translation site (<see cref="JdbcSqlException"/>'s own constructor) and just read back here.</summary>
+    [Fact]
+    public void Describe_AJdbcSqlException_IncludesEveryChainedErrorsSqlStateAndErrorCode()
+    {
+        var chained = new JdbcSqlException([
+            new JdbcSqlError("duplicate key value violates unique constraint", "23505", 0),
+            new JdbcSqlError("Detail: Key (id)=(1) already exists.", "23505", 0),
+        ]);
+
+        var described = ConnectionDiagnostics.Describe(chained);
+
+        Assert.Contains("duplicate key value violates unique constraint", described);
+        Assert.Contains("Detail: Key (id)=(1) already exists.", described);
+        Assert.Contains("SQLState=23505", described);
     }
 
     [Fact]

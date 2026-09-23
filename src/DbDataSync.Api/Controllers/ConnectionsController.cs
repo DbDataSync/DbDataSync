@@ -131,10 +131,14 @@ public sealed class ConnectionsController(
     /// Phase 176M: the catch below widened from an allowlist (<see cref="DbException"/>/
     /// <see cref="InvalidOperationException"/>/<see cref="SocketException"/>) to everything except
     /// <see cref="OperationCanceledException"/> — a raw <c>java.sql.SQLException</c> isn't a
-    /// <see cref="DbException"/> subtype and escaped the old allowlist entirely, becoming an unhandled
-    /// 500 that directly contradicted this method's own "not as a 500" promise above. Both the success
-    /// and failure paths now also fold in <see cref="IConnectionPreviewer.PreviewConnection"/>'s output
-    /// (when the driver implements it) — most valuable on failure, since seeing what was actually
+    /// <see cref="DbException"/> subtype and used to escape the old allowlist entirely here, becoming an
+    /// unhandled 500 that directly contradicted this method's own "not as a 500" promise above. That
+    /// specific escape is now fixed at its source instead (<c>DbDataSync.Drivers.Jdbc</c> translates every
+    /// <c>java.sql.SQLException</c> into <c>Jdbc.Ado.JdbcSqlException</c>, a plain <see cref="DbException"/>,
+    /// before it ever leaves that project) — the widened catch stays regardless, as a general safety net
+    /// for any provider's non-<see cref="DbException"/> failure, JDBC included but not JDBC-only. Both the
+    /// success and failure paths also fold in <see cref="IConnectionPreviewer.PreviewConnection"/>'s
+    /// output (when the driver implements it) — most valuable on failure, since seeing what was actually
     /// resolved and attempted is the diagnostic value an operator needs precisely then.
     /// </para>
     /// </summary>

@@ -85,7 +85,21 @@ internal sealed class JdbcDataReader : DbDataReader
 
     public override int FieldCount => _fields.Length;
     public override bool NextResult() => false;
-    public override bool Read() => ResultSet.next();
+    /// <summary>Phase 176M (corrected): <c>ResultSet.next()</c> can throw <c>java.sql.SQLException</c>
+    /// mid-stream (a dropped connection, a server-side error surfacing lazily) — translated to
+    /// <see cref="JdbcSqlException"/> here, the same boundary discipline <c>JdbcCommand</c>'s execute
+    /// methods use, so nothing downstream of this reader ever sees a raw Java exception.</summary>
+    public override bool Read()
+    {
+        try
+        {
+            return ResultSet.next();
+        }
+        catch (java.sql.SQLException ex)
+        {
+            throw JdbcSqlException.FromJava(ex);
+        }
+    }
     public override string GetName(int i) => _fields[i];
     public override int GetOrdinal(string name) => Array.IndexOf(_fields, name);
     public override bool IsDBNull(int i) => GetValue(i) == DBNull.Value;
@@ -170,7 +184,23 @@ internal sealed class JdbcDataReader : DbDataReader
             _ => typeof(object),
         };
 
+    /// <summary>Phase 176M (corrected): wrapped the same way <see cref="Read"/> is — this is the value
+    /// path <c>GetValue</c>/<c>this[i]</c>/<c>GetValues</c> (what every reader in this repo actually
+    /// calls, per this file's own header comment) run through, so it's the other real boundary a raw
+    /// <c>java.sql.SQLException</c> could otherwise cross.</summary>
     private object JdbcResultToClrObject(int i)
+    {
+        try
+        {
+            return JdbcResultToClrObjectUnsafe(i);
+        }
+        catch (java.sql.SQLException ex)
+        {
+            throw JdbcSqlException.FromJava(ex);
+        }
+    }
+
+    private object JdbcResultToClrObjectUnsafe(int i)
     {
         var type = _jdbcTypes[i];
         var columnIndex = i + 1;

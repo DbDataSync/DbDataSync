@@ -2,15 +2,23 @@
 
 **Status, 2026-09-22**: implemented — all four phase docs done (174M-177M). Two real corrections surfaced
 building it that this design didn't anticipate, both documented in their own phase docs, not here:
+
 175M found the scratch unification builder can't seed itself from a JDBC `ConnectionString` the way
 `GenericDriver`'s does (it's a URL, not a `key=value` string) and dropped connect-timeout unification for
-the same reason; 176M found the design's own single-shared-`Diagnostics`-class sketch doesn't compile
-where `GenericDriverBase.TestAsync` lives (no IKVM visibility, can't gain any without a dependency cycle),
-and that even isolated correctly, touching `java.sql.SQLException` inline inside a try/catch is a real
-bug — the JIT resolves a method's referenced types before its own try/catch runs, so a caught-looking
-type-load failure for a type used inside that method's own try block wasn't actually catchable there.
-Found by the existing integration suite (an ordinary MsSql closed-port test), not hypothesized: as
-designed, this would have broken Test Connection for every driver, not just JDBC's.
+the same reason.
+
+176M's correction had two rounds. The design's own implicit placement — one shared `Diagnostics` class,
+pattern-matching `java.sql.SQLException` directly, called from both `GenericDriverBase.TestAsync` and
+`ConnectionsController.Test` — doesn't compile where `TestAsync` lives (no IKVM visibility, can't gain any
+without a dependency cycle). The *first* fix for that (java.sql-aware code in `DbDataSync.Api`, guarded
+against IKVM.Java not being loaded) was itself architecturally wrong, caught on review: no shared,
+non-JDBC-aware code should need to know `java.sql` types exist at all, guard or no guard. That guard's own
+JIT-ordering subtlety was real too (found by an ordinary MsSql closed-port test, not hypothesized — as
+designed, it would have broken Test Connection for every driver, not just JDBC's), but fixing the guard
+would have papered over the actual mistake. The real fix moves translation to where it belongs: every
+`java.sql.SQLException` a JDBC call can throw is caught and turned into `JdbcSqlException` (a plain
+`DbException` subtype, no `java.sql` type anywhere in its own signature) inside `DbDataSync.Drivers.Jdbc`
+itself, at the point each one is thrown. Nothing outside that project touches `java.sql` again.
 
 Design closing three related gaps found while chasing a real "Connection is closed." report during a
 JDBC connection test: the message was misleading because nothing in the JDBC path validates that a

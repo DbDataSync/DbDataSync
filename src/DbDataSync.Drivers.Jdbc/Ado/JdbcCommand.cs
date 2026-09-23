@@ -67,16 +67,42 @@ internal sealed partial class JdbcCommand : DbCommand
 
     public override void Prepare() { /* every execution already prepares when it has parameters to bind */ }
 
-    public override void Cancel() => _openStatement?.cancel();
+    public override void Cancel()
+    {
+        try
+        {
+            _openStatement?.cancel();
+        }
+        catch (java.sql.SQLException ex)
+        {
+            throw JdbcSqlException.FromJava(ex);
+        }
+    }
 
+    /// <summary>Phase 176M (corrected): every real <c>java.sql.Statement</c>/<c>PreparedStatement</c>
+    /// call this class makes — here, <see cref="ExecuteDbDataReader"/>, and <see cref="OpenStatement"/>'s
+    /// own <c>createStatement</c>/<c>prepareStatement</c>/bind calls — can throw a real
+    /// <c>java.sql.SQLException</c>. Translated to <see cref="JdbcSqlException"/> at this boundary so a
+    /// raw Java exception never reaches <see cref="System.Data.Common.DbCommand"/>'s own ADO.NET-contract
+    /// callers (every reader/writer in <c>DbDataSync.Drivers.Generic</c> expects a
+    /// <see cref="System.Data.Common.DbException"/>-shaped failure, the same as every other provider in
+    /// this repo already gives them) — see <see cref="JdbcSqlException"/>'s own doc comment for why this
+    /// has to happen here, in this project, not downstream.</summary>
     public override int ExecuteNonQuery()
     {
-        var (statement, sql) = OpenStatement();
-        return statement switch
+        try
         {
-            java.sql.PreparedStatement prepared => prepared.executeUpdate(),
-            _ => statement.executeUpdate(sql),
-        };
+            var (statement, sql) = OpenStatement();
+            return statement switch
+            {
+                java.sql.PreparedStatement prepared => prepared.executeUpdate(),
+                _ => statement.executeUpdate(sql),
+            };
+        }
+        catch (java.sql.SQLException ex)
+        {
+            throw JdbcSqlException.FromJava(ex);
+        }
     }
 
     protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
@@ -88,20 +114,27 @@ internal sealed partial class JdbcCommand : DbCommand
             || behavior.HasFlag(CommandBehavior.SequentialAccess))
             throw new NotImplementedException("Unsupported behavior: SchemaOnly, KeyInfo, SequentialAccess.");
 
-        var (statement, sql) = OpenStatement();
-        if (behavior.HasFlag(CommandBehavior.SingleRow))
-            statement.setMaxRows(1);
-
-        var resultSet = statement switch
+        try
         {
-            java.sql.PreparedStatement prepared => prepared.executeQuery(),
-            _ => statement.executeQuery(CommandType switch
+            var (statement, sql) = OpenStatement();
+            if (behavior.HasFlag(CommandBehavior.SingleRow))
+                statement.setMaxRows(1);
+
+            var resultSet = statement switch
             {
-                CommandType.TableDirect => $"select * from {sql}",
-                _ => sql,
-            }),
-        };
-        return new JdbcDataReader(resultSet);
+                java.sql.PreparedStatement prepared => prepared.executeQuery(),
+                _ => statement.executeQuery(CommandType switch
+                {
+                    CommandType.TableDirect => $"select * from {sql}",
+                    _ => sql,
+                }),
+            };
+            return new JdbcDataReader(resultSet);
+        }
+        catch (java.sql.SQLException ex)
+        {
+            throw JdbcSqlException.FromJava(ex);
+        }
     }
 
     public override object? ExecuteScalar()
