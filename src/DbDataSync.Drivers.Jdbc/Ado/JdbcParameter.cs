@@ -3,7 +3,7 @@ using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 
-namespace DbDataSync.Drivers.Jdbc.Imported;
+namespace DbDataSync.Drivers.Jdbc.Ado;
 
 // New for phase 165V — the imported ClrKernel provider never had parameter support (JdbcCommand's
 // DbParameterCollection/CreateDbParameter both threw). A plain, storage-only DbParameter: JdbcCommand

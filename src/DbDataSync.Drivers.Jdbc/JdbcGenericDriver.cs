@@ -4,7 +4,7 @@ using DbDataSync.Core.Sql;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.Generic;
-using DbDataSync.Drivers.Jdbc.Imported;
+using DbDataSync.Drivers.Jdbc.Ado;
 using DbDataSync.Libraries;
 
 namespace DbDataSync.Drivers.Jdbc;

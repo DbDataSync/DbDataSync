@@ -4,7 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace DbDataSync.Drivers.Jdbc.Imported;
+namespace DbDataSync.Drivers.Jdbc.Ado;
 
 // Adapted from ClrKernel.Database.Provider.Jdbc (Apache-2.0, github.com/ClrKernel/ClrKernel,
 // src/ClrKernel.Database.Provider.Jdbc/JdbcCommand.cs) — phase 165V. The imported original executed

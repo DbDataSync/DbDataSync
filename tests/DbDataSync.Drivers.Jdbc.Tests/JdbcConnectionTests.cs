@@ -1,7 +1,7 @@
 using DbDataSync.Core.Config;
 using DbDataSync.Core.Sql;
 using DbDataSync.Drivers.Generic;
-using DbDataSync.Drivers.Jdbc.Imported;
+using DbDataSync.Drivers.Jdbc.Ado;
 
 namespace DbDataSync.Drivers.Jdbc.Tests;
 

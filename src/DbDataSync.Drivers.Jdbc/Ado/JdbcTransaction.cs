@@ -1,7 +1,7 @@
 using System.Data;
 using System.Data.Common;
 
-namespace DbDataSync.Drivers.Jdbc.Imported;
+namespace DbDataSync.Drivers.Jdbc.Ado;
 
 /// <summary>
 /// Phase 172V. Thin — <c>java.sql.Connection</c> already carries every bit of the real transaction state

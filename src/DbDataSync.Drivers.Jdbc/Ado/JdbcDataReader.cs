@@ -3,7 +3,7 @@ using System.Data;
 using System.Data.Common;
 using JdbcTypes = java.sql.Types;
 
-namespace DbDataSync.Drivers.Jdbc.Imported;
+namespace DbDataSync.Drivers.Jdbc.Ado;
 
 // Adapted from ClrKernel.Database.Provider.Jdbc (Apache-2.0, github.com/ClrKernel/ClrKernel,
 // src/ClrKernel.Database.Provider.Jdbc/JdbcDataReader.cs) — phase 165V. Adapts a java.sql.ResultSet to

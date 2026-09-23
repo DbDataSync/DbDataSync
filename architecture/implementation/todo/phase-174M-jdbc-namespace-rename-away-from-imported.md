@@ -1,6 +1,12 @@
 # Phase 174M — Rename `Jdbc.Imported` to `Jdbc.Ado`
 
-**Status**: Not started — design only.
+**Status**: Done, 2026-09-22. Pure rename as scoped — `git mv Imported/ Ado/`, namespace/using updated in
+all 11 affected files (7 in the folder, `JdbcGenericDriver.cs`, `JdbcCatalog.cs`,
+`JdbcConnectionTests.cs`, `JdbcChangeDatabaseTests.cs`), full solution build clean, all 16
+`DbDataSync.Drivers.Jdbc.Tests` pass unchanged. No stray references left anywhere in `.cs`/`.csproj` (repo-
+wide grep, not just `src/`). Historical `architecture/implementation/done/phase-165V-*.md` and still-open
+`phase-171V`/`phase-172V` docs still say "Imported" — left alone, they're records of what was true when
+written, not live references.
 **Plan reference**: none — a naming cleanup raised directly in conversation while designing
 `architecture/planning/todo/jdbc-url-template-and-connection-testing.md`, split out as its own phase
 because it touches every file phase 175M also needs to touch and should land first, cleanly, on its own.

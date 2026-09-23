@@ -1,6 +1,6 @@
 using System.Data.Common;
 
-namespace DbDataSync.Drivers.Jdbc.Imported;
+namespace DbDataSync.Drivers.Jdbc.Ado;
 
 // Ported as-is from ClrKernel.Database.Provider.Jdbc (Apache-2.0, github.com/ClrKernel/ClrKernel,
 // src/ClrKernel.Database.Provider.Jdbc/JdbcConnectionStringBuilder.cs) — phase 165V. Reserves
