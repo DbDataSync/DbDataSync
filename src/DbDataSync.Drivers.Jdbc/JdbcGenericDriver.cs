@@ -26,7 +26,7 @@ namespace DbDataSync.Drivers.Jdbc;
 /// are a real reason to write one, a JDBC parameter's "native" type *is* the generic <see
 /// cref="System.Data.DbType"/>/<see cref="CanonicalType"/> pair <c>GenericValueBinder</c> already binds
 /// through — there is no richer JDBC-specific enum to lose precision against. <see cref="JdbcCommand"/>
-/// (in <c>Imported/</c>) is what turns that generic <see cref="System.Data.DbType"/> into the right
+/// (in <c>Ado/</c>) is what turns that generic <see cref="System.Data.DbType"/> into the right
 /// <c>PreparedStatement.setXxx</c> call.
 /// </para>
 /// </summary>
@@ -131,7 +131,7 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>
 /// <summary>
 /// <see cref="GenericValueBinder"/> needs a <see cref="DbProviderFactory"/> only to call
 /// <see cref="DbProviderFactory.CreateParameter"/> — this is that, without exposing the real
-/// <c>JdbcProviderFactory</c> (which is <c>internal</c> to <c>Imported/</c> and keyed by driver class,
+/// <c>JdbcProviderFactory</c> (which is <c>internal</c> to <c>Ado/</c> and keyed by driver class,
 /// not a singleton) outside this project.
 /// </summary>
 internal sealed class JdbcProviderFactoryHandle : DbProviderFactory

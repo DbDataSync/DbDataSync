@@ -14,7 +14,7 @@ namespace DbDataSync.Drivers.Jdbc.Tests;
 /// native path, one through <see cref="JdbcGenericDriver"/>'s <c>java.sql.Connection</c> — and asserts the
 /// two targets end up identical. Every writer component (<see cref="BatchInsertStagingProvider"/>,
 /// <see cref="DeleteInsertWriter"/>) is <c>DbDataSync.Drivers.Generic</c>'s own, unchanged — this phase's
-/// entire scope was making <see cref="Imported.JdbcConnection.BeginDbTransaction"/> real, so what these
+/// entire scope was making <see cref="Ado.JdbcConnection.BeginDbTransaction"/> real, so what these
 /// tests actually pin is that a real <c>java.sql.Connection</c> transaction round-trips through it
 /// correctly, not any new SQL-generation logic.
 /// </summary>

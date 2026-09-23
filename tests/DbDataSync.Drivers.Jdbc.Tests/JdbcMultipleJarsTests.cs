@@ -10,7 +10,7 @@ namespace DbDataSync.Drivers.Jdbc.Tests;
 /// fixture — two small jars with a real class-to-class dependency between them — needs <c>javac</c>/
 /// <c>jar</c>, unavailable in this environment; its own named fallback is used instead: a second,
 /// genuinely distinct real jar (<c>commons-logging</c>, contributing nothing pgJDBC needs) listed
-/// alongside pgJDBC's own jar, proving <see cref="Imported.JdbcProviderFactory.FromJarPaths"/>'s combined
+/// alongside pgJDBC's own jar, proving <see cref="Ado.JdbcProviderFactory.FromJarPaths"/>'s combined
 /// classpath actually spans multiple files rather than merely tolerating a list of one repeated entry.
 /// </summary>
 [Trait("Category", "Integration")]
