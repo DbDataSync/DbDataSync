@@ -238,6 +238,8 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         }
     }
 
+    public string? DefaultTestQuery => "SELECT @@VERSION;";
+
     public IReadOnlyList<string> SupportedActions => MsSqlProvisioner.SupportedActions;
 
     public Task<ProvisioningPlan> PlanAsync(DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken) =>

@@ -281,7 +281,8 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>, IConn
             Writers: descriptor.Capabilities.Writers,
             UrlTemplate: jdbc.UrlTemplate,
             ConnectionStringKeys: keys,
-            DisplayName: descriptor.DisplayName));
+            DisplayName: descriptor.DisplayName,
+            TestQuery: descriptor.TestQuery));
     }
 }
 

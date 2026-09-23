@@ -214,6 +214,9 @@ export const RAW_BODY_SKELETON = `dialect:
   # catalog: query                    # uncomment (+ a metadataQueries block) if information_schema
                                        # doesn't fit this engine
 
+# testQuery: SELECT 1                 # shown, capped at 5 columns/20 rows, when a connection using this
+                                       # driver is tested. Omit to fall back to SELECT 1.
+
 # Native type name (with its (p,s) args) -> canonical. Anything unlisted -> Unmappable, which
 # provisioning reports as unsupported rather than guessing a rendering. Edit the native names on the
 # left for the engine this driver is actually for — these are MySQL's, as a worked example.

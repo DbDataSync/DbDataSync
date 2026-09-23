@@ -45,6 +45,16 @@ public sealed class DriverDescriptorYaml
 
     /// <summary>Required when <see cref="Base"/> names a JDBC-backed driver. Ignored otherwise.</summary>
     public JdbcDescriptorYaml? Jdbc { get; set; }
+
+    /// <summary>
+    /// The query a "Test Connection" run executes to show a small sample of live data — distinct from
+    /// the driver's own reachability probe (always a fixed, permission-free round trip; see
+    /// <c>GenericDriverBase.TestAsync</c>'s own <c>SELECT 1</c>). Null falls back to
+    /// <c>GenericDriverBase&lt;TSpec&gt;.DefaultTestQuery</c>'s own default (<c>SELECT 1</c>) — a
+    /// connection can still set its own <c>ConnectionConfig.TestQuery</c> to override this per
+    /// connection rather than per driver.
+    /// </summary>
+    public string? TestQuery { get; set; }
 }
 
 /// <param name="DriverClass">The JDBC driver's fully-qualified Java class name —

@@ -10,7 +10,7 @@ namespace DbDataSync.Drivers.Generic.Tests;
 internal sealed record FakeGenericDriverSpec(
     string Id, DbDataSync.Core.Sql.SqlDialect Dialect, IDescriptorCatalog Catalog,
     IReadOnlyList<string> Readers, IReadOnlyList<string> Staging, IReadOnlyList<string> Writers,
-    ISegmentValueBinder? ValueBinder = null, string? DisplayName = null) : IGenericDriverSpec;
+    ISegmentValueBinder? ValueBinder = null, string? DisplayName = null, string? TestQuery = null) : IGenericDriverSpec;
 
 /// <summary>The thinnest possible <see cref="GenericDriverBase{TSpec}"/> — connection-related members
 /// are never exercised by these tests, which only construct the driver to see what its own

@@ -1,4 +1,5 @@
 import { Field } from '../../components/Field'
+import { PreviewGrid } from '../../components/PreviewGrid'
 import { useCredentialSource } from '../../api/hooks'
 import type { ConnectionTestReport, LibraryValidationReport } from '../../api/types'
 
@@ -65,6 +66,12 @@ function TestResult({ report }: { report: ConnectionTestReport }) {
         <span style={{ color: 'var(--warning, #a66a00)', lineHeight: 1.5 }} data-testid="connection-library-warning">
           {report.libraryWarning}
         </span>
+      )}
+      {report.testQueryResult && (
+        <div style={{ borderTop: '1px solid #eee', paddingTop: 10, marginTop: 4 }}>
+          <div className="card-note" style={{ marginBottom: 6 }}>Test query</div>
+          <PreviewGrid result={report.testQueryResult} testId="connection-test-query-result" />
+        </div>
       )}
       <ResolvedConnectionDetails report={report} />
     </div>

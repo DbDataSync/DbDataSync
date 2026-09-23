@@ -75,6 +75,7 @@ public sealed class ConfigRepository
             Properties = input.Properties,
             Scripts = input.Scripts,
             Hooks = input.Hooks,
+            TestQuery = input.TestQuery,
         };
 
         ValidateHooks(config.Hooks);

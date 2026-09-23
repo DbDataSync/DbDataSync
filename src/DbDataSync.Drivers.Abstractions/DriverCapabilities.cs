@@ -26,7 +26,12 @@ public sealed record DriverCapabilities(
     /// which has neither registered, and for every descriptor-driven driver, which has no
     /// <see cref="IDriver.RequiredLibraryId"/> at all). Same "hide an action that could never work"
     /// posture as <see cref="SupportsConnectionTest"/>.</summary>
-    bool SupportsLibraryValidation = false);
+    bool SupportsLibraryValidation = false,
+    /// <summary>This driver's own <see cref="IConnectionTester.DefaultTestQuery"/> — what a new
+    /// connection's test-query field pre-fills from, before an operator overrides it. Null for a driver
+    /// with no sample query of its own (including one that isn't an <see cref="IConnectionTester"/> at
+    /// all).</summary>
+    string? DefaultTestQuery = null);
 // Connection parameters used to be a field here. They moved out in phase 50, when they stopped being
 // a fixed list: what a connection takes now depends on what it has been given so far — Host is not a
 // setting once the operator picks connection-string addressing — and an answer that depends on values

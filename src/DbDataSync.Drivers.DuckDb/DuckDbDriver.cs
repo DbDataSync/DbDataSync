@@ -125,4 +125,6 @@ public sealed class DuckDbDriver : IDriver, IConnectionTester, IDialectProvider
             return new ConnectionTestResult(false, Stopwatch.GetElapsedTime(started), null, ex.Message);
         }
     }
+
+    public string? DefaultTestQuery => "SELECT version();";
 }

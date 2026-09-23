@@ -187,6 +187,7 @@ public sealed class ConnectionsController(
             // so a successful Test Connection is the natural place to mention it. Only on success: a
             // connection that can't even connect has a more pressing problem than a library warning.
             string? libraryWarning = null;
+            QueryPreviewResult? testQueryResult = null;
             if (result.Succeeded)
             {
                 var compatibility = DriverLibraryCompatibility.Check(driver, libraryRegistry, apiOptions.RepoRoot);
@@ -197,11 +198,20 @@ public sealed class ConnectionsController(
                         $"{compatibility.MissingMembers.Count} member(s) this driver uses — " +
                         "Validate library for a full check.";
                 }
+
+                // The connection's own override, falling back to the driver's default sample query —
+                // same as ConnectionsController's own capabilities response works out DefaultTestQuery.
+                // Only attempted once reachability is already proven: a connection that can't even
+                // connect has nothing this would add, and running it here would just report the same
+                // failure a second time under a different label.
+                var testQuery = connection.TestQuery ?? tester.DefaultTestQuery;
+                if (!string.IsNullOrWhiteSpace(testQuery))
+                    testQueryResult = await testService.PreviewTestQueryAsync(open, name, testQuery, cancellationToken);
             }
 
             return Ok(BuildTestReport(
                 result.Succeeded, connectMs, result.RoundTrip.TotalMilliseconds, result.ServerVersion,
-                result.Error, libraryWarning, preview, credential));
+                result.Error, libraryWarning, preview, credential, testQueryResult));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -212,7 +222,7 @@ public sealed class ConnectionsController(
             // PreviewConnection fails OpenAsync for the identical reason, right after.
             return Ok(BuildTestReport(
                 succeeded: false, Stopwatch.GetElapsedTime(started).TotalMilliseconds, probeMs: 0, serverVersion: null,
-                ConnectionDiagnostics.Describe(ex), libraryWarning: null, preview: null, credential));
+                ConnectionDiagnostics.Describe(ex), libraryWarning: null, preview: null, credential, testQueryResult: null));
         }
         finally
         {
@@ -230,14 +240,15 @@ public sealed class ConnectionsController(
     /// </summary>
     private static ConnectionTestReport BuildTestReport(
         bool succeeded, double connectMs, double probeMs, string? serverVersion, string? error,
-        string? libraryWarning, ConnectionPreview? preview, string? credential) =>
+        string? libraryWarning, ConnectionPreview? preview, string? credential, QueryPreviewResult? testQueryResult) =>
         new(
             succeeded, connectMs, probeMs, serverVersion,
             error is null ? null : ConnectionDiagnostics.Redact(error, credential),
             libraryWarning,
             preview is null ? null : ConnectionDiagnostics.Redact(preview.ConnectionString, credential),
             preview?.JdbcUri is null ? null : ConnectionDiagnostics.Redact(preview.JdbcUri, credential),
-            preview?.Properties.ToDictionary(kv => kv.Key, kv => ConnectionDiagnostics.Redact(kv.Value, credential)));
+            preview?.Properties.ToDictionary(kv => kv.Key, kv => ConnectionDiagnostics.Redact(kv.Value, credential)),
+            testQueryResult);
 
     /// <summary>
     /// Phase 109j item 4: the deep, connection-scoped check — spawns
@@ -385,12 +396,20 @@ public sealed class ConnectionsController(
 /// <param name="OutsideProperties">Whatever reached the driver outside <paramref name="ResolvedConnectionString"/>/
 /// <paramref name="JdbcUri"/> (JDBC's own <c>java.util.Properties</c> bag), each value redacted — always
 /// empty for a plain ADO.NET driver today.</param>
+/// <param name="TestQueryResult">
+/// The connection's test query — its own <see cref="ConnectionConfig.TestQuery"/>, or the driver's
+/// default — run and capped at 5 columns/20 rows for display, once <paramref name="Succeeded"/> is
+/// true and a test query exists. Null when there's no test query to run, and also when the driver
+/// itself has none registered (<see cref="DriverCapabilities.DefaultTestQuery"/> is null) and the
+/// connection sets no override.
+/// </param>
 public sealed record ConnectionTestReport(
     bool Succeeded, double ConnectMs, double ProbeMs, string? ServerVersion, string? Error,
     string? LibraryWarning = null,
     string? ResolvedConnectionString = null,
     string? JdbcUri = null,
-    IReadOnlyDictionary<string, string>? OutsideProperties = null);
+    IReadOnlyDictionary<string, string>? OutsideProperties = null,
+    QueryPreviewResult? TestQueryResult = null);
 
 public sealed record CredentialSource(string Store, string SecretRef, string EnvironmentVariable, bool RequiresCredential);
 

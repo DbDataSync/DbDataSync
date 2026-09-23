@@ -167,6 +167,8 @@ public sealed class OracleDriver : IDriver, IConnectionTester, IDialectProvider,
         }
     }
 
+    public string? DefaultTestQuery => "SELECT banner FROM v$version WHERE banner LIKE 'Oracle%' FETCH FIRST 1 ROWS ONLY";
+
     public IReadOnlyList<string> SupportedActions => OracleProvisioner.SupportedActions;
 
     public Task<ProvisioningPlan> PlanAsync(DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken) =>

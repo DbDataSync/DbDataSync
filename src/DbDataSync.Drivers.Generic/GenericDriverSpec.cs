@@ -54,6 +54,7 @@ public sealed record GenericConnectionStringKeys(
 /// <param name="DisplayName">What an operator sees in the connection editor's engine picker
 /// (<c>GET /api/drivers</c>, phase 109d) — a descriptor's own <c>displayName</c>. Null falls back to
 /// <see cref="Id"/>, same as every built-in driver's <see cref="IDriver.DisplayName"/> default.</param>
+/// <param name="TestQuery">A descriptor's own <c>testQuery</c> — see <see cref="IGenericDriverSpec.TestQuery"/>.</param>
 public sealed record GenericDriverSpec(
     string Id,
     SqlDialect Dialect,
@@ -66,7 +67,8 @@ public sealed record GenericDriverSpec(
     string DefaultDatabase,
     int? DefaultPort = null,
     ISegmentValueBinder? ValueBinder = null,
-    string? DisplayName = null) : IGenericDriverSpec
+    string? DisplayName = null,
+    string? TestQuery = null) : IGenericDriverSpec
 {
     /// <summary>The common shape: every generic Kind, <c>information_schema</c> catalog, default
     /// connection-string keys. What most descriptor-shaped engines want; override individual

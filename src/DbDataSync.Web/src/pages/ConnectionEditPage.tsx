@@ -96,6 +96,10 @@ const empty: ConnectionInput = {
   // Null rather than 30/1800: a new connection has not chosen a timeout, and writing today's default
   // into it would freeze it there if the default ever moves.
   connectTimeoutSeconds: null, commandTimeoutSeconds: null, properties: {},
+  // Null, not the driver's default query copied in — a new connection has not overridden anything yet,
+  // and copying the default here would mean every connection's saved config repeats the same string
+  // instead of falling back to it. The field's own placeholder shows what runs if this stays blank.
+  testQuery: null,
 }
 
 /**
@@ -186,6 +190,7 @@ export function ConnectionEditPage() {
       password: '',
       properties: { ...existing.properties },
       scripts: structuredClone(existing.scripts ?? {}),
+      testQuery: existing.testQuery ?? null,
     }
     setDraft(seeded)
     // Seeded together, so the first answer is computed from this connection's real values and a
@@ -342,6 +347,24 @@ export function ConnectionEditPage() {
                     onChange={applyValues}
                     testIdPrefix="connection-parameters"
                   />
+                )}
+
+                {/* The query a "Test Connection" run executes to show a small sample of live data
+                    (capped at 5 columns/20 rows) — independent of the driver's own declared connection
+                    parameters, so it lives here rather than going through ParameterForm's values bag.
+                    Blank means "use the driver's own default", shown as this field's placeholder rather
+                    than copied in, so a fresh connection's saved config doesn't repeat it. */}
+                {driverRegistered && (
+                  <Field label="Test query">
+                    <textarea
+                      className="input mono"
+                      rows={3}
+                      value={draft.testQuery ?? ''}
+                      onChange={(e) => setDraft({ ...draft, testQuery: e.target.value.trim() ? e.target.value : null })}
+                      placeholder={capabilities.data?.defaultTestQuery ?? 'Leave blank to use the driver’s own default'}
+                      data-testid="connection-test-query-input"
+                    />
+                  </Field>
                 )}
               </div>
             </div>

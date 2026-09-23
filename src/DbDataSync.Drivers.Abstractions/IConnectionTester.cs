@@ -17,6 +17,18 @@ public interface IConnectionTester
     /// <summary>Runs the probe on an already-open connection. Must not throw for an engine-side
     /// failure — an unreachable or unhealthy database is an answer, not an exception.</summary>
     Task<ConnectionTestResult> TestAsync(DbConnection connection, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The query a "Test Connection" run executes to show a small sample of live data (capped at 5
+    /// columns and 20 rows), distinct from <see cref="TestAsync"/>'s own fixed reachability probe.
+    /// <para>
+    /// A default interface member, not a required one, so every existing <see cref="IConnectionTester"/>
+    /// implementer keeps compiling unchanged — null (no sample query) is the safe default for a driver
+    /// that hasn't opted in. A connection's own <c>ConnectionConfig.TestQuery</c> overrides whatever
+    /// this returns.
+    /// </para>
+    /// </summary>
+    string? DefaultTestQuery => null;
 }
 
 /// <param name="RoundTrip">Time for the probe itself. The caller adds connect time separately, since

@@ -179,6 +179,8 @@ public sealed class MySqlDriver : IDriver, IConnectionTester, IDialectProvider, 
         }
     }
 
+    public string? DefaultTestQuery => "SELECT VERSION();";
+
     public IReadOnlyList<string> SupportedActions => MySqlProvisioner.SupportedActions;
 
     public Task<ProvisioningPlan> PlanAsync(DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken) =>

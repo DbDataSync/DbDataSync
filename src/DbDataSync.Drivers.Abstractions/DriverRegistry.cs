@@ -91,6 +91,7 @@ public sealed class DriverRegistry
                 // hides "Test" — a driver with no RequiredLibraryId (descriptor-driven, resolved by
                 // name through DbProviderFactories) or no staging provider/writer of its own (DuckDb)
                 // has nothing this action could ever exercise.
-                driver.RequiredLibraryId is not null && driver.StagingProviders.Count > 0 && driver.Writers.Count > 0)
+                driver.RequiredLibraryId is not null && driver.StagingProviders.Count > 0 && driver.Writers.Count > 0,
+                driver is IConnectionTester tester ? tester.DefaultTestQuery : null)
             : null;
 }

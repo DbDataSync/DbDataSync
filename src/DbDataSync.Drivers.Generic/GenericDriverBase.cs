@@ -23,6 +23,10 @@ public interface IGenericDriverSpec
     IReadOnlyList<string> Writers { get; }
     ISegmentValueBinder? ValueBinder { get; }
     string? DisplayName { get; }
+
+    /// <summary>A <c>driver.yaml</c>'s own <c>testQuery</c> field, threaded through unchanged. Null
+    /// falls back to <see cref="GenericDriverBase{TSpec}"/>'s own <c>SELECT 1</c> default.</summary>
+    string? TestQuery { get; }
 }
 
 /// <summary>
@@ -181,4 +185,10 @@ public abstract class GenericDriverBase<TSpec>(TSpec spec, ISegmentValueBinder b
             return new ConnectionTestResult(false, Stopwatch.GetElapsedTime(started), null, ex.ToString());
         }
     }
+
+    /// <summary>The spec's own <c>testQuery</c> (a <c>driver.yaml</c>'s <c>testQuery</c> field, for a
+    /// descriptor-built driver), falling back to <c>SELECT 1</c> — the same portable, permission-free
+    /// probe <see cref="TestAsync"/> already runs, chosen so a fresh descriptor with no configured
+    /// sample query still shows *something* runs cleanly rather than showing nothing at all.</summary>
+    public string? DefaultTestQuery => Spec.TestQuery ?? "SELECT 1";
 }

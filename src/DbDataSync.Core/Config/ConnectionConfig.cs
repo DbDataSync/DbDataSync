@@ -124,6 +124,14 @@ public sealed class ConnectionConfig
     /// <see cref="HookResolution"/> — this is the level every mapping against this connection inherits
     /// from unless it or its replication overrides.</summary>
     public Dictionary<string, List<HookConfig>?> Hooks { get; set; } = new();
+
+    /// <summary>
+    /// The query a "Test Connection" run executes to show a small sample of live data, capped at 5
+    /// columns and 20 rows for display. Null falls back to the driver's own default test query — an
+    /// operator sets this only to override that default for this one connection (a real table to
+    /// sample, say, rather than the driver's generic reachability probe).
+    /// </summary>
+    public string? TestQuery { get; set; }
 }
 
 /// <summary>
@@ -160,4 +168,7 @@ public sealed class ConnectionInput
 
     /// <inheritdoc cref="ConnectionConfig.Hooks"/>
     public Dictionary<string, List<HookConfig>?> Hooks { get; set; } = new();
+
+    /// <inheritdoc cref="ConnectionConfig.TestQuery"/>
+    public string? TestQuery { get; set; }
 }

@@ -31,6 +31,9 @@ export interface ConnectionConfig {
   properties: Record<string, string>
   scripts?: ScriptBindings
   hooks?: Hooks
+  /** The query a "Test Connection" run executes to show a small sample of live data, capped at 5
+   * columns and 20 rows. Null falls back to the driver's own `DriverCapabilities.defaultTestQuery`. */
+  testQuery?: string | null
 }
 
 export interface ConnectionInput {
@@ -48,6 +51,8 @@ export interface ConnectionInput {
   properties?: Record<string, string>
   scripts?: ScriptBindings
   hooks?: Hooks
+  /** @inheritdoc ConnectionConfig.testQuery */
+  testQuery?: string | null
 }
 
 /**
@@ -750,6 +755,9 @@ export interface ConnectionTestReport {
   /** Whatever reached the driver outside the connection string/JDBC URL (JDBC's own property bag), each
    * value redacted — empty or absent for every non-JDBC driver today. */
   outsideProperties: Record<string, string> | null
+  /** The connection's test query, run and capped at 5 columns/20 rows, once the test itself succeeded
+   * and a test query exists (the connection's own, or the driver's default). Null otherwise. */
+  testQueryResult: QueryPreviewResult | null
 }
 
 /** Phase 109j item 4's result — a real, connection-scoped check run by a spawned child process, so it
@@ -797,6 +805,10 @@ export interface DriverCapabilities {
    * required library *and* a real staging provider/writer to drive. Same "hide an action that could
    * never work" posture as `supportsConnectionTest`. */
   supportsLibraryValidation: boolean
+  /** This driver's own default test query — what a connection's test-query field pre-fills from
+   * (as a placeholder) before an operator overrides it. Null for a driver with no sample query of
+   * its own. */
+  defaultTestQuery: string | null
 }
 
 /** Kind-name-only view of a driver's capabilities for a catalogue listing (phase 118, the admin

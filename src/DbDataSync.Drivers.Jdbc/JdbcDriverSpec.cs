@@ -54,4 +54,5 @@ public sealed record JdbcDriverSpec(
     string? UrlTemplate = null,
     GenericConnectionStringKeys? ConnectionStringKeys = null,
     ISegmentValueBinder? ValueBinder = null,
-    string? DisplayName = null) : IGenericDriverSpec;
+    string? DisplayName = null,
+    string? TestQuery = null) : IGenericDriverSpec;

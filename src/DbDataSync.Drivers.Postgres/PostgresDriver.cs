@@ -205,6 +205,8 @@ public sealed class PostgresDriver : IDriver, IConnectionTester, IDialectProvide
         }
     }
 
+    public string? DefaultTestQuery => "SELECT version();";
+
     public IReadOnlyList<string> SupportedActions => PostgresProvisioner.SupportedActions;
 
     public Task<ProvisioningPlan> PlanAsync(DbConnection connection, ProvisioningRequest request, CancellationToken cancellationToken) =>

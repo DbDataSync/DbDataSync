@@ -174,38 +174,83 @@ public sealed class ScriptTestService(
             var (connection, _) = await connections.OpenAsync(request.ConnectionName, cancellationToken);
             await using (connection)
             {
-                using var cmd = connection.CreateTimedCommand();
-                cmd.CommandText = request.Query;
-
-                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-                var schema = ResultSetSchema.From(reader);
-
-                // The cap is applied by stopping the read, not by wrapping the statement in a LIMIT.
-                // Rewriting SQL somebody else wrote means parsing it — their query may already carry a
-                // LIMIT, an ORDER BY it depends on, a CTE, or several statements — and a preview that
-                // silently ran something other than what is in the editor would defeat its own purpose.
-                // Stopping early costs nothing: the reader streams, so the engine is never asked for
-                // the rest.
-                var rows = new List<IReadOnlyList<string?>>();
-                var truncated = false;
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    if (rows.Count == limit)
-                    {
-                        truncated = true;
-                        break;
-                    }
-
-                    rows.Add([.. ResultSetSchema.ReadValues(reader, schema.Count).Select(Display)]);
-                }
-
-                return new QueryPreviewResult(source, schema.ColumnNames, rows, truncated);
+                return await RunCappedQueryAsync(connection, source, request.Query, limit, maxColumns: null, cancellationToken);
             }
         }
         // The same reasoning the script test uses, for the same reason: a query that does not parse,
         // names a column that is not there, or reaches a file that does not exist is exactly what an
         // operator pressed this button to find out. Whatever the engine said is the result. The two
         // rethrown are the caller's mistake rather than the query's — a connection that does not exist.
+        catch (Exception ex) when (ex is not (ConfigValidationException or FileNotFoundException))
+        {
+            return new QueryPreviewResult(source, [], [], Error: $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Runs a connection's test query (its own <c>ConnectionConfig.TestQuery</c>, or the driver's
+    /// <see cref="IConnectionTester.DefaultTestQuery"/>) on the same already-open connection
+    /// <c>ConnectionsController.Test</c> just proved reachable — a second, fresh
+    /// <see cref="DriverConnectionFactory.OpenAsync"/> round trip would cost a real connect for
+    /// something the caller already paid for a line above.
+    /// <para>
+    /// Capped tighter than <see cref="PreviewQueryAsync"/>'s own row limit — 5 columns as well as 20
+    /// rows — because this result sits on a "Test Connection" card, not a dedicated preview panel: a
+    /// sample proving the query ran is the point, not a full grid of whatever table it names.
+    /// </para>
+    /// </summary>
+    public Task<QueryPreviewResult> PreviewTestQueryAsync(
+        DbConnection connection, string connectionName, string query, CancellationToken cancellationToken) =>
+        RunCappedQueryAsync(
+            connection, $"test query against '{connectionName}'", query, MaxTestQueryRows, MaxTestQueryColumns, cancellationToken);
+
+    private const int MaxTestQueryRows = 20;
+    private const int MaxTestQueryColumns = 5;
+
+    /// <summary>
+    /// The read loop <see cref="PreviewQueryAsync"/> and <see cref="PreviewTestQueryAsync"/> share:
+    /// runs <paramref name="query"/> on an already-open connection, stops reading once
+    /// <paramref name="maxRows"/> rows are in hand, and — only for <see cref="PreviewTestQueryAsync"/>,
+    /// which passes a real <paramref name="maxColumns"/> — takes just the first that many columns of
+    /// both the schema and every row. Null <paramref name="maxColumns"/> (<see cref="PreviewQueryAsync"/>'s
+    /// own call) means no column cap at all, matching that endpoint's existing, unchanged contract.
+    /// </summary>
+    private static async Task<QueryPreviewResult> RunCappedQueryAsync(
+        DbConnection connection, string source, string query, int maxRows, int? maxColumns,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cmd = connection.CreateTimedCommand();
+            cmd.CommandText = query;
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            var schema = ResultSetSchema.From(reader);
+            var columnCount = maxColumns is { } cap ? Math.Min(schema.Count, cap) : schema.Count;
+            var columnsTruncated = maxColumns is { } cap2 && schema.Count > cap2;
+
+            // The cap is applied by stopping the read, not by wrapping the statement in a LIMIT.
+            // Rewriting SQL somebody else wrote means parsing it — their query may already carry a
+            // LIMIT, an ORDER BY it depends on, a CTE, or several statements — and a preview that
+            // silently ran something other than what is in the editor would defeat its own purpose.
+            // Stopping early costs nothing: the reader streams, so the engine is never asked for
+            // the rest.
+            var rows = new List<IReadOnlyList<string?>>();
+            var rowsTruncated = false;
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (rows.Count == maxRows)
+                {
+                    rowsTruncated = true;
+                    break;
+                }
+
+                rows.Add([.. ResultSetSchema.ReadValues(reader, schema.Count).Take(columnCount).Select(Display)]);
+            }
+
+            return new QueryPreviewResult(
+                source, [.. schema.ColumnNames.Take(columnCount)], rows, rowsTruncated || columnsTruncated);
+        }
         catch (Exception ex) when (ex is not (ConfigValidationException or FileNotFoundException))
         {
             return new QueryPreviewResult(source, [], [], Error: $"{ex.GetType().Name}: {ex.Message}");
