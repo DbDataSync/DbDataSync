@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assembleDriverYaml, parseDriverYaml, RAW_BODY_SKELETON } from './driverYamlAssembly'
+import { assembleDriverYaml, parseDriverYaml, roundTripsCleanly, RAW_BODY_SKELETON } from './driverYamlAssembly'
 
 describe('assembleDriverYaml / parseDriverYaml', () => {
   it('round-trips an ADO.NET-based driver', () => {
@@ -176,5 +176,38 @@ describe('assembleDriverYaml / parseDriverYaml', () => {
 
     expect(parsed.rawBody).toBe('dialect:\n  quoteIdentifier: backtick\ntypeMap:\n  int: Int32')
     expect(parsed.readers).toEqual(['Watermark'])
+  })
+
+  it('roundTripsCleanly (phase 180N): true for anything this app itself would generate', () => {
+    const yaml = assembleDriverYaml({
+      id: 'postgres-via-jdbc', displayName: 'Postgres (via JDBC)', base: 'jdbc',
+      library: '', driverClass: 'org.postgresql.Driver', driverJarPaths: ['a.jar', 'b.jar'],
+      readers: ['Watermark'], staging: [], writers: ['DeleteInsert'],
+      rawBody: RAW_BODY_SKELETON,
+      urlTemplate: 'jdbc:postgresql://{host}:{port}/{database}',
+      connectionStringKeys: { host: '', port: '', database: '', username: 'pguser', password: '', connectTimeout: '' },
+    })
+
+    expect(roundTripsCleanly(yaml)).toBe(true)
+  })
+
+  it('roundTripsCleanly: false for a hand-authored file the splitter cannot model', () => {
+    // A top-level key whose value starts on the same line with unusual (non-generated) spacing —
+    // parseDriverYaml's own doc comment names exactly this as outside what it reliably splits.
+    const handAuthored = [
+      'id:      x   # id and value crammed together with a trailing comment, unlike this app\'s own writer',
+      'displayName: X',
+      'library: lib',
+      'dialect:',
+      '  quoteIdentifier: doubleQuote',
+      '  parameterPrefix: "@"',
+      '  rowLimit: limitOffset',
+      'capabilities:',
+      '  readers: []',
+      '  staging: []',
+      '  writers: []',
+    ].join('\n')
+
+    expect(roundTripsCleanly(handAuthored)).toBe(false)
   })
 })

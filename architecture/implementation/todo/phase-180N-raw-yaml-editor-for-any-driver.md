@@ -1,6 +1,7 @@
 # Phase 180N: a completely raw YAML editor mode for any driver definition
 
-**Status: todo.** Third of five phases for the JDBC/driver-editing UI round requested 2026-09-23.
+**Status: done (2026-09-23).** Third of five phases for the JDBC/driver-editing UI round requested
+2026-09-23.
 
 ## The gap
 

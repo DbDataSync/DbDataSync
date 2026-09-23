@@ -295,3 +295,15 @@ export function assembleDriverYaml(form: {
 
   return lines.join('\n') + '\n'
 }
+
+/**
+ * Phase 180N. Whether `yaml` splits into structured fields and reassembles back to itself, byte for
+ * byte — the mechanical test for whether the structured editor is safe to use on this file at all. Every
+ * driver.yaml this app itself has ever written passes; one edited by hand into a shape
+ * `parseDriverYaml`'s own doc comment already admits it can't split cleanly (unusual spacing, a
+ * differently-placed comment, a key this form doesn't model) does not — and that's the whole point: a
+ * `false` here is the signal to open in raw mode instead of silently reinterpreting the file.
+ */
+export function roundTripsCleanly(yaml: string): boolean {
+  return assembleDriverYaml(parseDriverYaml(yaml)) === yaml
+}

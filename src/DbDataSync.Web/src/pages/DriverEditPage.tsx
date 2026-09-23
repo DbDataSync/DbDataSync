@@ -11,7 +11,7 @@ import {
   useCreateDriver, useDriverYaml, useFiles, useKnownDriverKinds, useLibraries, useUpdateDriverYaml,
 } from '../api/hooks'
 import {
-  assembleDriverYaml, parseDriverYaml, RAW_BODY_SKELETON,
+  assembleDriverYaml, parseDriverYaml, roundTripsCleanly, RAW_BODY_SKELETON,
   type Base, type JdbcConnectionStringKeysForm,
 } from './driverYamlAssembly'
 
@@ -84,17 +84,49 @@ export function DriverEditPage() {
   // the *same* driver (e.g. `useLibraries`' own invalidation after installing one from this same form)
   // must not clobber an in-progress edit the way re-running on every `loaded` identity change would.
   const [populatedFor, setPopulatedFor] = useState<string | undefined>(undefined)
+  // Phase 180N. 'structured' is the default for a new driver and for anything this app itself wrote
+  // (roundTripsCleanly true); a hand-authored file that doesn't split cleanly opens in 'raw' instead of
+  // being silently reinterpreted — see rawModeReason below for the banner explaining why.
+  const [mode, setMode] = useState<'structured' | 'raw'>('structured')
+  const [rawText, setRawText] = useState('')
+  const [rawModeReason, setRawModeReason] = useState<string | null>(null)
 
   if (loaded && populatedFor !== existingId) {
-    setForm(parseDriverYaml(loaded.yaml))
+    const parsed = parseDriverYaml(loaded.yaml)
+    const clean = roundTripsCleanly(loaded.yaml)
+    setForm(parsed)
+    setRawText(loaded.yaml)
+    setMode(clean ? 'structured' : 'raw')
+    setRawModeReason(clean
+      ? null
+      : "This file doesn't match the structured editor's expected shape — opened in raw mode so nothing is silently reinterpreted.")
     setPopulatedFor(existingId)
   }
 
   const saving = create.isPending || update.isPending
 
+  const switchToRaw = () => {
+    setRawText(assembleDriverYaml(form))
+    setRawModeReason(null)
+    setMode('raw')
+  }
+
+  const switchToStructured = () => {
+    const parsed = parseDriverYaml(rawText)
+    if (assembleDriverYaml(parsed) !== rawText) {
+      const proceed = window.confirm(
+        "Switching to the structured view may not preserve everything in this YAML if it doesn't " +
+        'match the console’s own generated shape — switch anyway?',
+      )
+      if (!proceed) return
+    }
+    setForm(parsed)
+    setMode('structured')
+  }
+
   const save = async () => {
     setSaveError(null)
-    const yaml = assembleDriverYaml(form)
+    const yaml = mode === 'raw' ? rawText : assembleDriverYaml(form)
     try {
       if (isNew) await create.mutateAsync(yaml)
       else await update.mutateAsync({ id: existingId, yaml })
@@ -118,10 +150,55 @@ export function DriverEditPage() {
             A <code>driver.yaml</code> descriptor — the same file <code>dbdatasync config driver install</code>
             writes, editable here instead.
           </span>
+          <div className="right" style={{ gap: 16 }}>
+            <label className="row" style={{ gap: 6 }}>
+              <input
+                type="radio"
+                checked={mode === 'structured'}
+                onChange={() => { if (mode !== 'structured') switchToStructured() }}
+                data-testid="driver-edit-mode-structured"
+              />
+              Structured
+            </label>
+            <label className="row" style={{ gap: 6 }}>
+              <input
+                type="radio"
+                checked={mode === 'raw'}
+                onChange={() => { if (mode !== 'raw') switchToRaw() }}
+                data-testid="driver-edit-mode-raw"
+              />
+              Raw YAML
+            </label>
+          </div>
         </div>
 
         <ErrorBanner error={saveError} />
 
+        {mode === 'raw' ? (
+          <div className="card" data-testid="driver-edit-form">
+            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {rawModeReason && <span className="hint warn" data-testid="driver-edit-raw-mode-reason">{rawModeReason}</span>}
+              <CodeEditor
+                language="yaml"
+                value={rawText}
+                onChange={setRawText}
+                minLines={24}
+                testId="driver-edit-raw-yaml"
+              />
+              <div className="row" style={{ gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={saving || !rawText.trim()}
+                  onClick={() => void save()}
+                  data-testid="driver-edit-save"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="card" data-testid="driver-edit-form">
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="row" style={{ gap: 12 }}>
@@ -314,6 +391,7 @@ export function DriverEditPage() {
             </div>
           </div>
         </div>
+        )}
       </div>
     </AppShell>
   )
