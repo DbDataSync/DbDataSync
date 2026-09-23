@@ -29,6 +29,32 @@ public sealed class JdbcUrlTemplateTests(JdbcTestDatabase db) : IClassFixture<Jd
             id, JdbcDialect.Instance, JdbcCatalog.Instance, "org.postgresql.Driver", [JarPath],
             Readers: [], Staging: [], Writers: [], UrlTemplate: urlTemplate));
 
+    /// <summary>Phase 176M. Masks the credential rather than dropping it — the resolved JDBC URL and
+    /// the other host/port/database values stay real and inspectable, only the password is replaced.
+    /// Same driver, same config shape as <see cref="CreateConnection_WithAFullyPlaceholderedTemplate_ProducesTheExpectedUrl_AndConnects"/>,
+    /// so the two together prove the preview and the real connection agree on everything except the
+    /// credential.</summary>
+    [Fact]
+    public void PreviewConnection_MasksTheCredential_AndReportsTheResolvedJdbcUri()
+    {
+        var driver = NewDriver("jdbc-preview-full", "jdbc:postgresql://{host}:{port}/{database}");
+        var config = new ConnectionConfig
+        {
+            Name = "jdbc-preview-full", DriverType = "Jdbc",
+            Host = "localhost", Port = 15432, Database = db.DatabaseName,
+            AuthMode = AuthMode.SqlAuth, UserId = "dbdatasync",
+        };
+
+        var preview = driver.PreviewConnection(config);
+
+        Assert.Equal($"jdbc:postgresql://localhost:15432/{db.DatabaseName}", preview.JdbcUri);
+        Assert.Contains("••••••", preview.ConnectionString);
+        // host/port/database were all consumed by the template, same as the real connection.
+        Assert.False(preview.Properties.ContainsKey("database"));
+        Assert.Equal("dbdatasync", preview.Properties["user"]);
+        Assert.Equal("••••••", preview.Properties["password"]);
+    }
+
     /// <summary>Every value the template references gets substituted, and — since this template has no
     /// <c>{username}</c> placeholder — the username still reaches the driver, as a property. Opened for
     /// real, not just assembled: proves the built URL is one pgJDBC actually accepts and connects with,

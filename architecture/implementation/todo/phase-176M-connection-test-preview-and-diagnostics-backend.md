@@ -1,6 +1,12 @@
 # Phase 176M — Connection-test preview and broadened diagnostics (backend)
 
-**Status**: Not started — design only.
+**Status**: Done, 2026-09-22. `ConnectionPreview`/`IConnectionPreviewer` (new, `DbDataSync.Drivers.Abstractions`),
+implemented by both `GenericDriver` and `JdbcGenericDriver`; `ConnectionTestReport`'s three new fields;
+both catches widened; `ConnectionDiagnostics.Describe`/`Redact` (`DbDataSync.Api`). Real, load-bearing
+corrections found building it, not part of the design above — see "What changed from the design" below,
+especially the IKVM one: the design as written would have taken down **every** driver's Test Connection,
+not just JDBC's, the first time it hit an ordinary failure. Caught by the existing integration suite, not
+invented as a hypothetical — see that section for how.
 **Plan reference**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md` (full
 rationale and code sketches). **Depends on phase 175M** — `JdbcGenericDriver`'s side of
 `PreviewConnection` reuses the unification logic 175M builds, and `GenericDriver.CreateConnection`
@@ -126,16 +132,63 @@ diagnostic in the first place. Redact the one specific known-sensitive substring
 - Does not attempt to redact anything beyond the literal known credential value(s) for the attempt in
   question — no heuristic scanning for "things that look like secrets" in arbitrary text.
 
+## What changed from the design, found building it
+
+- **`Diagnostics` can't live where the design's own code sketch implies (one shared class both
+  `GenericDriverBase.TestAsync` and `ConnectionsController.Test` call identically).** `Describe` touches
+  `java.sql.SQLException` by name, which needs a compile-time reference to IKVM's Java surface.
+  `GenericDriverBase.TestAsync` lives in `DbDataSync.Drivers.Generic`, which has no such reference and
+  can't gain one — that would mean depending on `DbDataSync.Drivers.Jdbc`, which itself depends on
+  `DbDataSync.Drivers.Generic`, a cycle. Resolved by *not* sharing one class: `GenericDriverBase.TestAsync`'s
+  own catch widened to "everything except cancellation" and now returns `ex.ToString()` directly (no
+  java.sql-aware enrichment — it structurally can't have any), while the full `ConnectionDiagnostics`
+  class (`Describe`/`Redact`, java.sql-aware) lives in `DbDataSync.Api`, the one layer that already
+  references `DbDataSync.Drivers.Jdbc` (to host the driver at all) and so can actually see that type. A
+  JDBC probe failure inside `TestAsync` itself (as opposed to a JDBC *connect* failure, caught in the
+  controller) gets the plainer `ex.ToString()` treatment as a result — a real, accepted scope reduction,
+  not an oversight.
+- **Even with that split, the design's own literal code sketch (`if (ex is java.sql.SQLException sql)`
+  inline inside a try/catch) is a real bug, not a style choice — found by the existing integration
+  suite, not invented.** `ConnectionTestIntegrationTests.Test_AgainstAClosedPort_ReportsFailureRatherThanThrowing`
+  (an ordinary MsSql closed-port test, no JDBC driver anywhere in that process) started failing with an
+  unhandled `FileNotFoundException` for `IKVM.Java` the moment `Describe`'s widened catch first ran. Root
+  cause: the JIT resolves every type a method's IL references while compiling that *whole method*, before
+  any of its own try/catch executes — so a type-load failure for a type referenced inside a method's own
+  try block still isn't catchable by that same try/catch. Confirmed directly: the inline version, wrapped
+  in the exact catch clause the fix ended up using, reproduced the identical unhandled exception. Fixed by
+  moving the `java.sql.SQLException` touch into its own private method (`TryDescribeSqlException`), called
+  from inside `Describe`'s try — because *that* method's JIT compilation is deferred to its first call,
+  which happens inside the try, the resulting load failure is a call-site exception the surrounding catch
+  genuinely sees. This means the *design's* own sketch, if implemented literally, would have broken Test
+  Connection for **every** driver — not a JDBC-only edge case — the first time any connection failed for
+  an ordinary reason in a process that had never touched IKVM.
+- **`GenericDriver.PreviewConnection`'s `Properties` is a fresh empty `Dictionary<string, string>` per
+  call**, not a cached singleton — cheap enough (always empty) that this wasn't worth optimizing away, and
+  keeps the record's own field genuinely a real, per-call value rather than one shared mutable instance an
+  overly-clever caller could mutate.
+
 ## How to verify
 
-- A successful test against a real (or fake, in unit tests) connection returns a populated
-  `ResolvedConnectionString` with the real password replaced by the redaction marker, not omitted.
-- A failing test — driven by each of: a `DbException`, an `InvalidOperationException` from phase 175M's new
-  checks, and a raw unwrapped `java.sql.SQLException` — all return `Succeeded: false` with a populated
-  `Error`, never an unhandled 500.
-- A cancelled test request (cancel the `CancellationToken` mid-flight) does not produce a `Succeeded: false`
-  report — confirm it propagates as a cancellation, not a reported failure.
-- `Diagnostics.Describe` against a chained `java.sql.SQLException` (`getNextException()` returning more than
-  one link) includes every link's message, SQLState, and error code in the final string.
-- `Redact` leaves every part of a message untouched except the literal secret substring, confirmed against a
-  message containing the secret in more than one place.
+- A successful test against a real connection returns a populated `ResolvedConnectionString` with the real
+  password replaced by the redaction marker, not omitted — proven at the driver level (not yet wired
+  through a live API-level test — see below) by `GenericDriverTests.PreviewConnection_MasksTheCredential_AndNeverTouchesTheNetwork`
+  (a real Postgres fixture) and `JdbcUrlTemplateTests.PreviewConnection_MasksTheCredential_AndReportsTheResolvedJdbcUri`.
+- A failing test — driven by an `InvalidOperationException` (phase 175M's own checks) and an ordinary
+  exception — returns `Succeeded: false` with a populated `Error`, never an unhandled 500:
+  `ConnectionTestIntegrationTests`'s existing closed-port test (unchanged assertions, now exercising the
+  widened catch) plus the two new `ConnectionDiagnosticsTests.Describe_*` tests. **Not covered**: a raw
+  unwrapped `java.sql.SQLException` specifically, end to end through the API — no fixture in this test
+  suite opens a real JDBC connection through `DbDataSync.Api` (same gap phase 175M's own doc already
+  names for `isValid`). The non-JDBC path this bug actually broke *is* covered, which is what the real
+  incident needed.
+- A cancelled test request does not produce a `Succeeded: false` report:
+  `GenericDriverTests.TestAsync_WithAnAlreadyCancelledToken_PropagatesCancellation_InsteadOfReportingFailure`.
+- `Redact` leaves every part of a message untouched except the literal secret substring, including a
+  message containing the secret more than once and a call with multiple distinct secrets:
+  `ConnectionDiagnosticsTests.Redact_*`.
+- `Diagnostics.Describe` against a chained `java.sql.SQLException` — **not covered**, for the same reason
+  as the API-level JDBC gap above: this test project has no IKVM.Java loaded to construct one, and
+  fabricating that instance without a real JDBC driver behind it isn't practical over IKVM interop (no
+  precedent anywhere in this codebase for mocking a `java.sql.*` type). What *is* covered, and is the more
+  load-bearing property: `Describe` doesn't throw when IKVM.Java is absent, which is the actual failure
+  this phase's own build surfaced.

@@ -30,8 +30,13 @@ namespace DbDataSync.Drivers.Jdbc;
 /// <c>PreparedStatement.setXxx</c> call.
 /// </para>
 /// </summary>
-public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>
+public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>, IConnectionPreviewer
 {
+    /// <summary>Phase 176M's masked placeholder for <see cref="PreviewConnection"/> — never the real
+    /// secret, so a redaction bug downstream of this call can't leak it.</summary>
+    private const string MaskedCredential = "••••••";
+
+
     public JdbcGenericDriver(JdbcDriverSpec spec)
         : base(spec, spec.ValueBinder ?? new GenericValueBinder(spec.Dialect, new JdbcProviderFactoryHandle()))
     {
@@ -53,8 +58,30 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>
     public static readonly GenericConnectionStringKeys DefaultConnectionStringKeys =
         new(Host: "host", Port: "port", Database: "database", Username: "user", Password: "password");
 
+    /// <summary>Real credential from <see cref="ConnectionConfig"/>'s own resolved secret — see
+    /// <see cref="BuildUnifiedJdbcUrlAndProperties"/> for how it's assembled.</summary>
+    public override DbConnection CreateConnection(ConnectionConfig connection, string? credential)
+    {
+        var (jdbcUrl, props) = BuildUnifiedJdbcUrlAndProperties(connection, credential);
+        var connectionString = JdbcConnectionStringBuilder.CreateConnectionString(Spec.DriverClass, jdbcUrl, props);
+        return new JdbcConnection { ConnectionString = connectionString }.WithCommandTimeout(connection);
+    }
+
+    /// <summary>Phase 176M. <see cref="MaskedCredential"/> stands in for the real credential — never
+    /// touches the network, never the real secret. Same assembly as <see cref="CreateConnection"/>, via
+    /// <see cref="BuildUnifiedJdbcUrlAndProperties"/>, so this can't drift from what a real connection
+    /// would actually resolve to.</summary>
+    public ConnectionPreview PreviewConnection(ConnectionConfig connection)
+    {
+        var (jdbcUrl, props) = BuildUnifiedJdbcUrlAndProperties(connection, MaskedCredential);
+        var connectionString = JdbcConnectionStringBuilder.CreateConnectionString(Spec.DriverClass, jdbcUrl, props);
+        var propertyNames = (object[]?)props.stringPropertyNames()?.toArray() ?? [];
+        var properties = propertyNames.Cast<string>().ToDictionary(name => name, name => props.getProperty(name));
+        return new ConnectionPreview(connectionString, jdbcUrl, properties);
+    }
+
     /// <summary>
-    /// Phase 175M. Unifies like <see cref="GenericDriver.CreateConnection"/> does — one scratch
+    /// Phase 175M/176M. Unifies like <see cref="GenericDriver.CreateConnection"/> does — one scratch
     /// <see cref="DbConnectionStringBuilder"/>, <see cref="ConnectionConfig.Host"/>/
     /// <see cref="ConnectionConfig.Database"/>/<see cref="ConnectionConfig.Port"/>/the
     /// <see cref="AuthMode"/> branch, all via <see cref="JdbcDriverSpec.ConnectionStringKeys"/> — before
@@ -76,8 +103,14 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>
     /// at all, so every resolved value falls back to a property automatically — the same outcome as
     /// today for an operator who already types the whole URL, not a behavior change for them.
     /// </para>
+    /// <para>
+    /// Shared between <see cref="CreateConnection"/> (real credential) and <see cref="PreviewConnection"/>
+    /// (<see cref="MaskedCredential"/>) — phase 176M's own reason to factor this out, one assembly path,
+    /// two callers, no duplicated key-mapping logic.
+    /// </para>
     /// </summary>
-    public override DbConnection CreateConnection(ConnectionConfig connection, string? credential)
+    private (string JdbcUrl, java.util.Properties Properties) BuildUnifiedJdbcUrlAndProperties(
+        ConnectionConfig connection, string? credential)
     {
         var keys = Spec.ConnectionStringKeys ?? DefaultConnectionStringKeys;
 
@@ -157,8 +190,7 @@ public sealed class JdbcGenericDriver : GenericDriverBase<JdbcDriverSpec>
         foreach (var (key, value) in connection.Properties)
             props.setProperty(key, value);
 
-        var connectionString = JdbcConnectionStringBuilder.CreateConnectionString(Spec.DriverClass, jdbcUrl, props);
-        return new JdbcConnection { ConnectionString = connectionString }.WithCommandTimeout(connection);
+        return (jdbcUrl, props);
     }
 
     public override Task<IReadOnlyList<string>> ListDatabasesAsync(DbConnection connection, CancellationToken cancellationToken) =>

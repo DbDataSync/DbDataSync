@@ -127,6 +127,16 @@ public sealed class ConnectionsController(
     /// unreachable database is an answer to the question this endpoint asks, and a 500 would tell the
     /// operator the console is broken rather than the database is.
     /// </para>
+    /// <para>
+    /// Phase 176M: the catch below widened from an allowlist (<see cref="DbException"/>/
+    /// <see cref="InvalidOperationException"/>/<see cref="SocketException"/>) to everything except
+    /// <see cref="OperationCanceledException"/> — a raw <c>java.sql.SQLException</c> isn't a
+    /// <see cref="DbException"/> subtype and escaped the old allowlist entirely, becoming an unhandled
+    /// 500 that directly contradicted this method's own "not as a 500" promise above. Both the success
+    /// and failure paths now also fold in <see cref="IConnectionPreviewer.PreviewConnection"/>'s output
+    /// (when the driver implements it) — most valuable on failure, since seeing what was actually
+    /// resolved and attempted is the diagnostic value an operator needs precisely then.
+    /// </para>
     /// </summary>
     [HttpPost("{name}/test")]
     public async Task<ActionResult<ConnectionTestReport>> Test(string name, CancellationToken cancellationToken)
@@ -147,10 +157,22 @@ public sealed class ConnectionsController(
         if (driver is not IConnectionTester tester)
             return BadRequest(new { error = $"The '{connection.DriverType}' driver cannot test a connection." });
 
+        // The same credential DriverConnectionFactory.OpenAsync resolves internally, resolved again here
+        // — that method doesn't hand the credential back to its caller, and this is the one value
+        // ConnectionDiagnostics.Redact needs to scrub it from a preview or an error message.
+        var credential = connection.AuthMode == AuthMode.SqlAuth
+            ? secrets.Resolve(connection.CredentialSecretRef!)
+            : null;
+
         var started = Stopwatch.GetTimestamp();
         DbConnection? open = null;
         try
         {
+            // Never touches the network — safe to compute before OpenAsync, and if the config itself is
+            // bad enough that even this throws (e.g. SqlAuth with no UserId), OpenAsync is about to hit
+            // the identical check and report it through the catch below anyway.
+            var preview = driver is IConnectionPreviewer previewer ? previewer.PreviewConnection(connection) : null;
+
             (open, _) = await connectionFactory.OpenAsync(name, cancellationToken);
             var connectMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
@@ -173,15 +195,20 @@ public sealed class ConnectionsController(
                 }
             }
 
-            return Ok(new ConnectionTestReport(
-                result.Succeeded, connectMs, result.RoundTrip.TotalMilliseconds, result.ServerVersion, result.Error, libraryWarning));
+            return Ok(BuildTestReport(
+                result.Succeeded, connectMs, result.RoundTrip.TotalMilliseconds, result.ServerVersion,
+                result.Error, libraryWarning, preview, credential));
         }
-        catch (Exception ex) when (ex is DbException or InvalidOperationException or SocketException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Failing to *open* is the most common failure and never reaches the driver's probe, so it
             // is reported in the same shape rather than as an error the SPA has to handle separately.
-            return Ok(new ConnectionTestReport(
-                Succeeded: false, Stopwatch.GetElapsedTime(started).TotalMilliseconds, 0, ServerVersion: null, ex.Message));
+            // preview isn't reachable here even when the try's own PreviewConnection call is what threw
+            // — it's a local of the try block. Not a real loss: a config broken enough to fail
+            // PreviewConnection fails OpenAsync for the identical reason, right after.
+            return Ok(BuildTestReport(
+                succeeded: false, Stopwatch.GetElapsedTime(started).TotalMilliseconds, probeMs: 0, serverVersion: null,
+                ConnectionDiagnostics.Describe(ex), libraryWarning: null, preview: null, credential));
         }
         finally
         {
@@ -189,6 +216,24 @@ public sealed class ConnectionsController(
                 await open.DisposeAsync();
         }
     }
+
+    /// <summary>
+    /// Assembles a <see cref="ConnectionTestReport"/> from a <see cref="Test"/> attempt (success or
+    /// failure) and its optional <see cref="ConnectionPreview"/>, redacting <paramref name="credential"/>
+    /// out of every text field it appears in — <see cref="ConnectionDiagnostics.Redact"/>'s own "applied
+    /// once at the boundary" rule, so no caller of this method needs to remember to redact anything
+    /// itself.
+    /// </summary>
+    private static ConnectionTestReport BuildTestReport(
+        bool succeeded, double connectMs, double probeMs, string? serverVersion, string? error,
+        string? libraryWarning, ConnectionPreview? preview, string? credential) =>
+        new(
+            succeeded, connectMs, probeMs, serverVersion,
+            error is null ? null : ConnectionDiagnostics.Redact(error, credential),
+            libraryWarning,
+            preview is null ? null : ConnectionDiagnostics.Redact(preview.ConnectionString, credential),
+            preview?.JdbcUri is null ? null : ConnectionDiagnostics.Redact(preview.JdbcUri, credential),
+            preview?.Properties.ToDictionary(kv => kv.Key, kv => ConnectionDiagnostics.Redact(kv.Value, credential)));
 
     /// <summary>
     /// Phase 109j item 4: the deep, connection-scoped check — spawns
@@ -327,8 +372,21 @@ public sealed class ConnectionsController(
 /// failure (a connection that can't even connect has a more pressing problem) and whenever the check is
 /// clean or has nothing to report yet (library not installed, driver has no
 /// <see cref="Drivers.Abstractions.IDriver.RequiredLibraryId"/>).</param>
+/// <param name="ResolvedConnectionString">Phase 176M — the ADO.NET-shaped connection string actually
+/// resolved and attempted, redacted. Populated for every driver that implements
+/// <see cref="IConnectionPreviewer"/> (every built-in and generic/descriptor driver today), null for one
+/// that doesn't.</param>
+/// <param name="JdbcUri">The resolved JDBC URL, redacted — null for a driver with no such notion (every
+/// non-JDBC driver).</param>
+/// <param name="OutsideProperties">Whatever reached the driver outside <paramref name="ResolvedConnectionString"/>/
+/// <paramref name="JdbcUri"/> (JDBC's own <c>java.util.Properties</c> bag), each value redacted — always
+/// empty for a plain ADO.NET driver today.</param>
 public sealed record ConnectionTestReport(
-    bool Succeeded, double ConnectMs, double ProbeMs, string? ServerVersion, string? Error, string? LibraryWarning = null);
+    bool Succeeded, double ConnectMs, double ProbeMs, string? ServerVersion, string? Error,
+    string? LibraryWarning = null,
+    string? ResolvedConnectionString = null,
+    string? JdbcUri = null,
+    IReadOnlyDictionary<string, string>? OutsideProperties = null);
 
 public sealed record CredentialSource(string Store, string SecretRef, string EnvironmentVariable, bool RequiresCredential);
 

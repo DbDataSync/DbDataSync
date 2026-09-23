@@ -14,18 +14,24 @@ namespace DbDataSync.Drivers.Generic;
 /// registration (this phase) can already stand up today.
 /// </summary>
 public sealed class GenericDriver(GenericDriverSpec spec)
-    : GenericDriverBase<GenericDriverSpec>(spec, spec.ValueBinder ?? new GenericValueBinder(spec.Dialect, spec.ProviderFactory))
+    : GenericDriverBase<GenericDriverSpec>(spec, spec.ValueBinder ?? new GenericValueBinder(spec.Dialect, spec.ProviderFactory)),
+      IConnectionPreviewer
 {
     public int? DefaultPort => Spec.DefaultPort;
+
+    /// <summary>Phase 176M's masked placeholder for <see cref="PreviewConnection"/> — never the real
+    /// secret, so a redaction bug downstream of this call can't leak it.</summary>
+    private const string MaskedCredential = "••••••";
 
     /// <summary>
     /// Assembles the connection string through a plain <see cref="DbConnectionStringBuilder"/> —
     /// key/value pairs by name, not a provider-typed builder — using the key spellings
-    /// <see cref="GenericDriverSpec.ConnectionStringKeys"/> declares. The credential goes on top of an
-    /// operator-supplied connection string exactly as every compiled driver does: config never carries
-    /// it, and it is escaped correctly by going through the builder rather than being concatenated.
+    /// <see cref="GenericDriverSpec.ConnectionStringKeys"/> declares. Factored out of
+    /// <see cref="CreateConnection"/> (phase 176M) so <see cref="PreviewConnection"/> can run the
+    /// identical unification with <paramref name="credential"/> as a masked placeholder rather than
+    /// duplicating the key-mapping logic.
     /// </summary>
-    public override DbConnection CreateConnection(ConnectionConfig connection, string? credential)
+    private string BuildUnifiedConnectionString(ConnectionConfig connection, string? credential)
     {
         var keys = Spec.ConnectionStringKeys;
         var builder = new DbConnectionStringBuilder();
@@ -73,11 +79,25 @@ public sealed class GenericDriver(GenericDriverSpec spec)
         foreach (var (key, value) in connection.Properties)
             builder[key] = value;
 
+        return builder.ConnectionString;
+    }
+
+    /// <summary>The credential goes on top of an operator-supplied connection string exactly as every
+    /// compiled driver does: config never carries it, and it is escaped correctly by going through the
+    /// builder rather than being concatenated.</summary>
+    public override DbConnection CreateConnection(ConnectionConfig connection, string? credential)
+    {
         var providerConnection = Spec.ProviderFactory.CreateConnection()
             ?? throw new InvalidOperationException($"The provider factory for '{Spec.Id}' did not produce a connection.");
-        providerConnection.ConnectionString = builder.ConnectionString;
+        providerConnection.ConnectionString = BuildUnifiedConnectionString(connection, credential);
         return providerConnection.WithCommandTimeout(connection);
     }
+
+    /// <summary>Always <c>JdbcUri: null</c>, <c>Properties: { }</c> — nothing routes through an
+    /// out-of-connection-string channel for a plain ADO.NET driver today; see
+    /// <see cref="ConnectionPreview.Properties"/>'s own doc comment for why the field still exists.</summary>
+    public ConnectionPreview PreviewConnection(ConnectionConfig connection) =>
+        new(BuildUnifiedConnectionString(connection, MaskedCredential), JdbcUri: null, Properties: new Dictionary<string, string>());
 
     /// <summary>
     /// The ADO.NET-standard <c>Databases</c> schema collection, which every provider built on

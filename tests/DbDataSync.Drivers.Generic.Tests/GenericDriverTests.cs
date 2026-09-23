@@ -85,6 +85,24 @@ public sealed class GenericDriverTests(GenericDriverTestDatabase db) : IClassFix
         Assert.Equal(System.Data.ConnectionState.Open, connection.State);
     }
 
+    /// <summary>Phase 176M. <see cref="GenericDriver.PreviewConnection"/> runs the identical unification
+    /// <see cref="GenericDriver.CreateConnection"/> does — proven here by the masked placeholder taking
+    /// the exact position the real password did in <see cref="CreateConnection_AssembledFromHostPortDatabaseAndCredential_Opens"/>,
+    /// against the same real fixture, not a hand-assembled string that only looks right.</summary>
+    [Fact]
+    public void PreviewConnection_MasksTheCredential_AndNeverTouchesTheNetwork()
+    {
+        var preview = _driver.PreviewConnection(Connection());
+
+        Assert.Contains("••••••", preview.ConnectionString);
+        Assert.DoesNotContain(GenericDriverTestDatabase.Password, preview.ConnectionString);
+        Assert.Contains(db.DatabaseName, preview.ConnectionString);
+        Assert.Contains(GenericDriverTestDatabase.Host, preview.ConnectionString);
+        // Nothing routes through an out-of-connection-string channel for a plain ADO.NET driver.
+        Assert.Null(preview.JdbcUri);
+        Assert.Empty(preview.Properties);
+    }
+
     [Fact]
     public async Task ListDatabasesAsync_FindsTheFixtureDatabase()
     {
@@ -105,6 +123,23 @@ public sealed class GenericDriverTests(GenericDriverTestDatabase db) : IClassFix
         var result = await _driver.TestAsync(connection, CancellationToken.None);
 
         Assert.True(result.Succeeded);
+    }
+
+    /// <summary>Phase 176M widened <c>TestAsync</c>'s catch to "everything except cancellation" —
+    /// deliberately, since a cancelled test request is not a "connection failed" answer and reporting it
+    /// as a <c>ConnectionTestResult(Succeeded: false, ...)</c> would misreport what happened. Proves the
+    /// exclusion actually holds: an already-cancelled token must still propagate as a cancellation, not
+    /// get swallowed into a false-negative result.</summary>
+    [Fact]
+    public async Task TestAsync_WithAnAlreadyCancelledToken_PropagatesCancellation_InsteadOfReportingFailure()
+    {
+        await using var connection = Open();
+        await connection.OpenAsync();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _driver.TestAsync(connection, cts.Token));
     }
 
     [Fact]

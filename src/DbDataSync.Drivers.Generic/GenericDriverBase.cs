@@ -144,6 +144,23 @@ public abstract class GenericDriverBase<TSpec>(TSpec spec, ISegmentValueBinder b
 
     /// <summary>Round-trips <c>SELECT 1</c> — no user object, no permission beyond connecting, and
     /// portable across every engine either kind could plausibly stand up against.</summary>
+    /// <remarks>
+    /// Phase 176M widened this from <c>catch (DbException ex)</c> — a raw <c>java.sql.SQLException</c>
+    /// (JDBC's own exception type, not a <see cref="DbException"/> subtype) escaped this catch entirely
+    /// before, becoming an unhandled 500 at the API layer instead of a reported <c>Succeeded: false</c>.
+    /// <see cref="OperationCanceledException"/> stays excluded deliberately — a cancelled test request is
+    /// not a "connection failed" answer, and conflating the two would misreport what happened.
+    /// <para>
+    /// <c>ex.ToString()</c>, not <c>ex.Message</c> — this project has no compile-time visibility into
+    /// <c>java.sql.SQLException</c> (that would mean depending on <c>DbDataSync.Drivers.Jdbc</c>, which
+    /// itself depends on this project — a cycle), so it can't give a JDBC-specific exception the same
+    /// <c>SQLState</c>/<c>ErrorCode</c>/chained-message enrichment <c>DbDataSync.Api</c>'s own
+    /// <c>ConnectionsController.Test</c> path gives one (that layer already references
+    /// <c>DbDataSync.Drivers.Jdbc</c>, so it can). <c>ToString()</c> at least keeps an inner exception's
+    /// own message, which a wrapped <see cref="InvalidOperationException"/> (as every phase-175M
+    /// connect-time validation throws) would otherwise lose.
+    /// </para>
+    /// </remarks>
     public async Task<ConnectionTestResult> TestAsync(DbConnection connection, CancellationToken cancellationToken)
     {
         var started = Stopwatch.GetTimestamp();
@@ -154,9 +171,9 @@ public abstract class GenericDriverBase<TSpec>(TSpec spec, ISegmentValueBinder b
             await cmd.ExecuteScalarAsync(cancellationToken);
             return new ConnectionTestResult(true, Stopwatch.GetElapsedTime(started), connection.ServerVersion, null);
         }
-        catch (DbException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new ConnectionTestResult(false, Stopwatch.GetElapsedTime(started), null, ex.Message);
+            return new ConnectionTestResult(false, Stopwatch.GetElapsedTime(started), null, ex.ToString());
         }
     }
 }
