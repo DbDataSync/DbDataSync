@@ -47,6 +47,26 @@ public sealed class LibrariesControllerTests(LibrariesAdminApiFactory factory) :
         Assert.True(library.Curated);
     }
 
+    /// <summary>
+    /// Found chasing a real report: an operator's JDBC driver.yaml correctly named <c>library: ikvm</c>
+    /// (the catalog id) while the installed library was keyed under its real package id ("IKVM") — same
+    /// divergence <c>KnownLibraries.TryGetByIdOrPackageId</c> already fixed for the <c>Curated</c> flag,
+    /// left unfixed for "used by". Reproduced here with the mysql-connector pair already installed by
+    /// this fixture, from the opposite direction (a driver.yaml naming the package id while the library
+    /// is installed under the catalog id) — proving the fix is symmetric, not just patched for one
+    /// direction of the divergence.
+    /// </summary>
+    [Fact]
+    public async Task AnAdmin_SeesADriverNamingTheLibraryByItsPackageId_AsUsingTheSameLibrary()
+    {
+        var client = await factory.SignedInAsAsync(UserRole.Admin);
+
+        var libraries = await client.GetFromJsonAsync<List<LibraryDto>>("/api/libraries");
+
+        var library = libraries!.Single(l => l.Id == LibrariesAdminApiFactory.LibraryId);
+        Assert.Contains(LibrariesAdminApiFactory.DriverIdByPackageId, library.UsedBy);
+    }
+
     [Fact]
     public async Task AnAdmin_SeesTheBundledCatalogs()
     {

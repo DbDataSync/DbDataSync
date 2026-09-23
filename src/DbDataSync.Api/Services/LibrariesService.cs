@@ -27,8 +27,10 @@ public sealed class LibrariesService(LibraryRegistry libraryRegistry, ApiOptions
     {
         var usedBy = DriverDescriptorScanner.Scan(apiOptions.RepoRoot)
             .Where(e => e.LibraryId is not null)
-            .GroupBy(e => e.LibraryId!)
-            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(e => e.DriverId).OrderBy(x => x, StringComparer.Ordinal).ToList());
+            .GroupBy(e => CanonicalLibraryId(e.LibraryId!), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key, g => (IReadOnlyList<string>)g.Select(e => e.DriverId).OrderBy(x => x, StringComparer.Ordinal).ToList(),
+                StringComparer.OrdinalIgnoreCase);
 
         return libraryRegistry.Installed.Values
             .OrderBy(m => m.Id, StringComparer.Ordinal)
@@ -37,7 +39,7 @@ public sealed class LibrariesService(LibraryRegistry libraryRegistry, ApiOptions
                 m.Packages.Select(p => new PackageRefSummary(p.Id, p.Version)).ToList(),
                 m.FactoryType,
                 Resolves(m.Id),
-                usedBy.GetValueOrDefault(m.Id, []),
+                usedBy.GetValueOrDefault(CanonicalLibraryId(m.Id), []),
                 KnownLibraries.TryGetByIdOrPackageId(m.Id) is not null,
                 !Directory.Exists(LibraryPaths.LibDir(LibraryPaths.LibraryDir(apiOptions.RepoRoot, m.Id)))))
             .ToList();
@@ -46,12 +48,28 @@ public sealed class LibrariesService(LibraryRegistry libraryRegistry, ApiOptions
     /// <summary>Every descriptor driver on disk whose <c>library:</c> names <paramref name="libraryId"/>
     /// — what <c>DELETE /api/libraries/{id}</c> (phase 120) checks before refusing to remove one still
     /// in use.</summary>
-    public IReadOnlyList<string> UsedBy(string libraryId) =>
-        DriverDescriptorScanner.Scan(apiOptions.RepoRoot)
-            .Where(e => e.LibraryId == libraryId)
+    public IReadOnlyList<string> UsedBy(string libraryId)
+    {
+        var canonical = CanonicalLibraryId(libraryId);
+        return DriverDescriptorScanner.Scan(apiOptions.RepoRoot)
+            .Where(e => e.LibraryId is not null && string.Equals(CanonicalLibraryId(e.LibraryId), canonical, StringComparison.OrdinalIgnoreCase))
             .Select(e => e.DriverId)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// A driver.yaml's <c>library:</c> can name either a <see cref="KnownLibraries"/> catalog id
+    /// ("ikvm") or the real installed package id ("IKVM") — see that class's own
+    /// <see cref="KnownLibraries.TryGetByIdOrPackageId"/> doc comment for why both shapes are real.
+    /// Resolving both sides of a comparison through this (plus an ordinal-ignore-case compare/dictionary,
+    /// since a catalog id and its package id can differ in case alone, exactly like ikvm/IKVM) is what
+    /// <see cref="LibrarySummary"/>'s own <c>Curated</c> field's fix already does for that flag —
+    /// <see cref="UsedBy"/>/<see cref="List"/>'s own "used by" computation needs the identical treatment
+    /// or it silently reports a library "unused" whenever an operator's driver.yaml spells its id
+    /// differently than <see cref="LibraryRegistry.Installed"/> happens to key it.
+    /// </summary>
+    private static string CanonicalLibraryId(string id) => KnownLibraries.TryGetByIdOrPackageId(id)?.PackageId ?? id;
 
     private bool Resolves(string id)
     {
