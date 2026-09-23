@@ -275,3 +275,18 @@ host/port/database/URL shape, chained messages — stays intact.
   narrower instance of the same "non-`DbException` escapes the test path" bug class.
 - `driver-yaml-authoring-ui.md` — the JDBC create-path screen this eventually needs a `urlTemplate` field
   and connection-string-keys editor added to, once this design is implemented.
+
+## Phase docs
+
+Split into four small, ordered phases rather than one large one — namespace cleanup, then the driver-layer
+mechanics, then the shared backend surface, then the frontend that shows it:
+
+- `architecture/implementation/todo/phase-174M-jdbc-namespace-rename-away-from-imported.md` — `Jdbc.Imported`
+  → `Jdbc.Ado` (a separate, unrelated naming cleanup raised in the same conversation, sequenced first since
+  it touches the same files phase 175M does).
+- `architecture/implementation/todo/phase-175M-jdbc-url-template-and-connect-validation.md` — this doc's
+  `JdbcDriverSpec`/`JdbcGenericDriver`/`JdbcProviderFactory`/`JdbcConnection` sections.
+- `architecture/implementation/todo/phase-176M-connection-test-preview-and-diagnostics-backend.md` — this
+  doc's connection-preview and exception-handling sections.
+- `architecture/implementation/todo/phase-177M-connection-test-preview-frontend.md` — surfacing 176M's new
+  fields in the web console.
