@@ -7,9 +7,9 @@ a dedicated `JdbcConnectionStringKeysYaml` (all-nullable fields). See phase 181N
 for the full story and the regression test. First of five phases for the JDBC/driver-editing UI round
 requested 2026-09-23 —
 prerequisite plumbing for 179N (the URL template editor) and 181N (validate/echo). Implements
-[`follow-up-jdbc-url-template-unreachable-from-driver-yaml.md`](../../planning/todo/follow-up-jdbc-url-template-unreachable-from-driver-yaml.md)
+[`follow-up-jdbc-url-template-unreachable-from-driver-yaml.md`](../../planning/done/follow-up-jdbc-url-template-unreachable-from-driver-yaml.md)
 in full (both its parts) and
-[`follow-up-jdbc-url-template-password-placeholder-validation.md`](../../planning/todo/follow-up-jdbc-url-template-password-placeholder-validation.md) —
+[`follow-up-jdbc-url-template-password-placeholder-validation.md`](../../planning/done/follow-up-jdbc-url-template-password-placeholder-validation.md) —
 folded in here rather than its own phase because it's a few lines in the same constructor this phase
 already has open, and the URL template editor (179N) needs a real error to demonstrate/report against.
 

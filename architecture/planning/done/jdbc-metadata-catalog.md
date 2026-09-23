@@ -1,8 +1,10 @@
 # JDBC metadata — `DatabaseMetaData` by default, three escape hatches, no pipeline workaround needed
 
-**Status: design settled in planning — not yet built.**
+**Status: built.** See "Resolved, 2026-09-23" below — this line is stale from when the doc was first
+written; the design shipped, by a different concrete mechanism than sketched below in one place (item 4),
+achieving the same result.
 
-**Plan reference**: `architecture/planning/todo/jdbc-driver-support.md` (this doc's own still-open
+**Plan reference**: `architecture/planning/done/jdbc-driver-support.md` (this doc's own still-open
 "metadata browsing shape" risk), `architecture/implementation/done/phase-029-scripted-metadata-providers.md`
 (built the `metadataProvider` script mechanism this doc leans on), `architecture/implementation/done/phase-165V-jdbc-reader-spike-ikvm-postgres.md`
 (the real, built JDBC driver this doc changes), `architecture/implementation/todo/phase-166V-pipeline-metadata-override-for-preview-and-segmentation.md`
@@ -322,3 +324,14 @@ method (widened from `private` to `internal`) rather than reimplementing type-st
    questions. Phase 165V's own Findings 1–2 are the concrete precedent for "assumed identical, only a real
    run-time comparison caught the difference." Doesn't block implementation — belongs in documentation for
    whoever authors a JDBC-backed `driver.yaml`'s `typeMap`, not an API design question.
+
+## Resolved, 2026-09-23
+
+The "Decided in this round" section's own "Status update" undersold what actually shipped: phase 167V
+built items 1/2/3/5/6 essentially as designed here, and phase 168V — not by making a JDBC engine literally
+*a* `GenericDriverSpec`, but by introducing `JdbcDriverSpec` as its own record implementing the shared
+`IGenericDriverSpec` interface `GenericDriverBase<TSpec>` is generic over — built item 4 (the `typeMap`/
+`driver.yaml` mechanism), achieving the design's real goal (one shared descriptor-driven pipeline, JDBC
+included) through a slightly different concrete shape than first sketched. The one remaining "still open"
+item above is exactly as non-blocking as it says — documentation for a future `typeMap` author, not a
+design gap — so nothing here is left to build.

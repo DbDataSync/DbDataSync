@@ -7,7 +7,7 @@ reachable in this test environment — every hand-written built-in doesn't imple
 driver (MsSql, via the full `golden-path.spec.ts` run). The JDBC-specific case (`jdbcUri` populated, a
 rejected-URL failure) has no browser-level proof — no fixture in this suite opens a real JDBC connection
 through the console, the same gap phases 175M/176M already named.
-**Plan reference**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md` (full
+**Plan reference**: `architecture/planning/done/jdbc-url-template-and-connection-testing.md` (full
 rationale). **Depends on phase 176M** — this phase only renders fields `ConnectionTestReport` doesn't carry
 yet.
 

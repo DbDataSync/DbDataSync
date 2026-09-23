@@ -1,6 +1,8 @@
 # The library-id divergence fix broke the "curated" badge for exactly the id shape it introduced
 
-**Status: open.** Found 2026-09-22 in CI run `35780881069` (job `106925769608`, commit `9b6eb2c`,
+**Status: fixed.** See "Applied (2026-09-22)" below, and "Also closed, 2026-09-23" for the sibling bug
+this same divergence caused elsewhere. Found 2026-09-22 in CI run `35780881069` (job `106925769608`,
+commit `9b6eb2c`,
 "A library's id is always its real package id — fix the actual divergence, not just its symptom"),
 the run that verified that very fix. Filed per `architecture/implementation/README.md`'s "Follow-up
 work gets its own doc, not a paragraph." Not one of the eight items in
@@ -148,4 +150,15 @@ installs under the pre-`9b6eb2c` catalog-id shape, so it never exercised the sha
 
 **Not applied:** the `describe.serial` / non-idempotent-retry masking problem this doc's own
 investigation ran into (three failures reported, only one real) — that's a Playwright/test-authoring
-question independent of this bug, still open above.
+question independent of this bug, still open above. Minor, and worth a callout rather than a blocker: it
+was never spun into its own follow-up doc and remains unaddressed, but it isn't the regression this doc's
+own title names.
+
+## Also closed, 2026-09-23
+
+The identical catalog-id/package-id divergence caused a second, quieter bug in the same file:
+`LibrariesService.List()`'s `usedBy` computation (not just `Curated`) also did a bare, case-sensitive
+string match — so a JDBC driver.yaml correctly naming `library: ikvm` (the catalog id) never matched an
+install keyed under `IKVM` (the real package id, differing only in case). Fixed by
+`phase-183M-libraries-usedby-catalog-package-id-divergence.md`
+(`architecture/implementation/done/`), applying the same `TryGetByIdOrPackageId` fix this doc introduced.

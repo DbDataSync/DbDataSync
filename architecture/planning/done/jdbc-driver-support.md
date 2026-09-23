@@ -138,7 +138,7 @@ Both forms must work:
 `AssemblyDependencyResolver` per directory, plus phase 109j's surface checking). A `.jar` is none of
 those.
 
-**Resolved 2026-09-22**: `architecture/planning/todo/user-provided-files-store.md` — neither `libraries/`
+**Resolved 2026-09-22**: `architecture/planning/done/user-provided-files-store.md` — neither `libraries/`
 nor a jar-specific `jars/` root as first floated here, but a general **`files/`**, "a standard place for
 user-provided files" (jars being the motivating and so far only case), with its own small management GUI.
 The IKVM-compiled `.dll` case stays separate from that store on purpose, for a different reason than
@@ -229,6 +229,21 @@ table read through Npgsql.
 
 That one spike answers the Java 8 question, the Linux `IKVM.Home` question, the type round-trip and the
 parameter design at once — and every one of those is currently an assumption.
+
+## Resolved, 2026-09-23
+
+Built out in full, across a long phase sequence: `phase-165V` (the spike this doc's own "What to do
+first" asked for — Postgres via pgJDBC, proven), `phase-167V`/`phase-168V` (metadata + the
+`GenericDriverSpec`/`JdbcDriverSpec` conversion — see "Open question" #1 below, decided in `JdbcDriverSpec`'s
+favor), `phase-169V` (multiple jars), `phase-170V` (an IKVM version bump), `phase-171V`/`phase-175M`–`phase-176M`
+(connection-testing completeness), `phase-172V` (write support), `phase-173V` (the files store — see "Open
+question" #2, resolved as neither `jars/` nor `libraries/` but a third `files/` store), and
+`phase-178N`–`phase-182N` (the driver-authoring UI round, JDBC included).
+
+Open question #3 (which files an eventual real-JDBC-driver contributor needs, and whether the parameter/
+`PreparedStatement` work gets upstreamed to `ClrKernel` itself) is the one loose end this doc never
+answered — but it's a release-cadence question, not a technical one, and nothing above depends on
+resolving it. Open question #4 (writer symmetry) was answered by `phase-172V`.
 
 ## Sources
 

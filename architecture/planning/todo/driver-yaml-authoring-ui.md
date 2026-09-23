@@ -62,7 +62,7 @@ control (`FilesPage.tsx`). "Reuse" means extracting each into its own component 
 prerequisite this doc didn't originally price in, not a blocker.
 
 **JDBC**: `DriverClass` (text — `org.postgresql.Driver`-shaped) plus a jar list, picked from `GET
-/api/files` or uploaded inline via the now-extracted upload control — `architecture/planning/todo/user-provided-files-store.md`'s
+/api/files` or uploaded inline via the now-extracted upload control — `architecture/planning/done/user-provided-files-store.md`'s
 `files/` store, reachable directly too (Drivers section → Files tab) for general management.
 
 Once jars exist, `jdbc-ikvmreference-compile-button.md`'s "Compile" action is a natural next affordance

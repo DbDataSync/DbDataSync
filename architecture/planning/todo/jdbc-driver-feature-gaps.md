@@ -39,7 +39,7 @@ generalizes past Postgres — the same "prove it before generalizing" reasoning
 `follow-up-phase-168-hand-written-jdbc-path-vs-descriptor.md` already applies to the `typeMap`-per-vendor
 question.
 
-**Designed and implemented, 2026-09-22**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md`
+**Designed and implemented, 2026-09-22**: `architecture/planning/done/jdbc-url-template-and-connection-testing.md`
 closes this — found while chasing a real "Connection is closed." connection-test report back to
 `driver.connect()` silently returning `null`. `UrlTemplate` + a reused `GenericConnectionStringKeys` on
 `JdbcDriverSpec`, host/port/database/username placed in the URL or falling back to a JDBC property when the
@@ -77,7 +77,7 @@ URL-template question is still open, still named as a real dependency inside tha
 
 ## `jars/` vs `libraries/` — resolved 2026-09-22, neither
 
-`architecture/planning/todo/user-provided-files-store.md` decided this: not `jars/` (proposed, never
+`architecture/planning/done/user-provided-files-store.md` decided this: not `jars/` (proposed, never
 built), not `libraries/` (NuGet-package-shaped — `library.json`, a `DbProviderFactory` type, an
 `AssemblyDependencyResolver`, phase 109j's surface checking — a `.jar` fits none of it), but a third,
 general **`files/`** — "a standard place for user-provided files," jars being the motivating and so far

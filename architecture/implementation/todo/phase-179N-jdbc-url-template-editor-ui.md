@@ -4,7 +4,7 @@
 2026-09-23 — the
 **first priority** of the round. Builds on 178N (the schema has to exist and round-trip before an editor
 for it means anything). Closes the "whether `urlTemplate` deserves a real field" open question the
-[url-template-and-connection-testing design](../../planning/todo/jdbc-url-template-and-connection-testing.md)
+[url-template-and-connection-testing design](../../planning/done/jdbc-url-template-and-connection-testing.md)
 left open, and the design note that `urlTemplate` is "closer in spirit to `driverClass` than to a
 rarely-touched key-spelling override."
 

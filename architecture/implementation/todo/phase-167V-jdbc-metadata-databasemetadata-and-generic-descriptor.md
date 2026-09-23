@@ -2,7 +2,7 @@
 
 **Status**: Built — items 1, 2 (partial — see Retrospective), 3, 5, 6. Item 4 (JDBC's own `typeMap`,
 converting `JdbcDriver` to a `GenericDriverSpec`) deliberately deferred — see Retrospective.
-**Plan reference**: `architecture/planning/todo/jdbc-metadata-catalog.md` (the full design, worked through
+**Plan reference**: `architecture/planning/done/jdbc-metadata-catalog.md` (the full design, worked through
 in planning conversation — this phase carries it out), `architecture/implementation/done/phase-165V-jdbc-reader-spike-ikvm-postgres.md`
 (the driver this phase changes), `architecture/implementation/todo/phase-166V-pipeline-metadata-override-for-preview-and-segmentation.md`
 (**superseded** — its goal is met here by a different, smaller mechanism; its own proposed

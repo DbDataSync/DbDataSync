@@ -2,10 +2,10 @@
 
 **Status**: Design, not phase-ready. Depends on phase 169V (multiple jars) landing first — this reuses
 `JdbcDriverSpec.DriverJarPaths`, plural, as its input list.
-**Plan reference**: `architecture/planning/todo/jdbc-driver-support.md` ("Where driver artifacts live" —
+**Plan reference**: `architecture/planning/done/jdbc-driver-support.md` ("Where driver artifacts live" —
 the `.jar` vs `.dll` trade-off this operationalizes), this session's own `IkvmReference` probe (folded
 into that doc), `architecture/implementation/todo/phase-170V-jdbc-ikvm-version-update.md` (the pinned
-IKVM version this compiles against), `architecture/planning/todo/user-provided-files-store.md` (where the
+IKVM version this compiles against), `architecture/planning/done/user-provided-files-store.md` (where the
 source jars live, and why the compiled output does *not* live there).
 
 ## The good news: half of this already exists, unused

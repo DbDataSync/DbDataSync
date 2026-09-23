@@ -6,7 +6,7 @@
 design above — see "What changed from the design" below. All 16 pre-existing
 `DbDataSync.Drivers.Jdbc.Tests` pass unchanged (the literal-URL contract is a true regression check, not
 just claimed to be one), plus 4 new tests, plus a full solution build.
-**Plan reference**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md` (full
+**Plan reference**: `architecture/planning/done/jdbc-url-template-and-connection-testing.md` (full
 rationale, design discussion, and code sketches — this phase doc scopes exactly the driver-layer slice of
 it). **Depends on phase 174M** landing first — every file this phase touches (`JdbcConnection.cs`,
 `JdbcProviderFactory.cs`) moves namespace there; writing this phase against the old `Imported` namespace

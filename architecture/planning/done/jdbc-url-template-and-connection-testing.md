@@ -286,7 +286,7 @@ host/port/database/URL shape, chained messages — stays intact.
   — 175M's `PlaceOrFallback` is simply never called for password, so a `{password}` token in a template
   today just sits there unsubstituted rather than being rejected; no descriptor-load-time validation was
   added. Given its own follow-up doc:
-  `architecture/planning/todo/follow-up-jdbc-url-template-password-placeholder-validation.md`.
+  `architecture/planning/done/follow-up-jdbc-url-template-password-placeholder-validation.md`.
 - `OutsideProperties` is always empty for a plain `GenericDriver` today (nothing routes through it) — worth
   confirming that's fine to leave as "always empty, not removed" rather than making it JDBC-only, since a
   future ADO.NET driver with its own out-of-connection-string properties could reuse the same field.
@@ -295,7 +295,7 @@ host/port/database/URL shape, chained messages — stays intact.
 - **Found after "done," not anticipated by this design**: nothing built here is reachable from a
   `driver.yaml` at all — the descriptor schema never grew `UrlTemplate`/`ConnectionStringKeys` fields, so
   every phase 174M-177M mechanism only exists from direct C# construction (every test fixture). Its own
-  follow-up: `architecture/planning/todo/follow-up-jdbc-url-template-unreachable-from-driver-yaml.md`.
+  follow-up: `architecture/planning/done/follow-up-jdbc-url-template-unreachable-from-driver-yaml.md`.
 - **Also found after "done"**: `isValid`'s two negative branches and every JDBC-through-the-console
   Playwright flow have no real-failure test coverage (same root cause — no jar/`ikvm` fixture in the
   Web.Tests scratch repo). Its own follow-up:
@@ -315,12 +315,26 @@ host/port/database/URL shape, chained messages — stays intact.
 Split into four small, ordered phases rather than one large one — namespace cleanup, then the driver-layer
 mechanics, then the shared backend surface, then the frontend that shows it:
 
-- `architecture/implementation/todo/phase-174M-jdbc-namespace-rename-away-from-imported.md` — `Jdbc.Imported`
+- `architecture/implementation/done/phase-174M-jdbc-namespace-rename-away-from-imported.md` — `Jdbc.Imported`
   → `Jdbc.Ado` (a separate, unrelated naming cleanup raised in the same conversation, sequenced first since
   it touches the same files phase 175M does).
-- `architecture/implementation/todo/phase-175M-jdbc-url-template-and-connect-validation.md` — this doc's
+- `architecture/implementation/done/phase-175M-jdbc-url-template-and-connect-validation.md` — this doc's
   `JdbcDriverSpec`/`JdbcGenericDriver`/`JdbcProviderFactory`/`JdbcConnection` sections.
-- `architecture/implementation/todo/phase-176M-connection-test-preview-and-diagnostics-backend.md` — this
+- `architecture/implementation/done/phase-176M-connection-test-preview-and-diagnostics-backend.md` — this
   doc's connection-preview and exception-handling sections.
 - `architecture/implementation/todo/phase-177M-connection-test-preview-frontend.md` — surfacing 176M's new
   fields in the web console.
+
+## Closed out, 2026-09-23
+
+174M, 175M, 176M all independently verified (real test runs, not just code reading) and moved to
+`architecture/implementation/done/`. Both real gaps this design's own retrospectives found "after done" —
+a `{password}` placeholder in a `UrlTemplate` never being rejected, and a hand-authored `driver.yaml`
+having no way to set `urlTemplate`/`connectionStringKeys` at all — are themselves now fixed, by
+`phase-178N`; see `follow-up-jdbc-url-template-password-placeholder-validation.md` and
+`follow-up-jdbc-url-template-unreachable-from-driver-yaml.md`, both closed.
+
+**177M stays in `todo/`.** Its backend half is solid, but the phase's own point — a JDBC connection
+test's `jdbcUri` actually showing up in the console on a rejected-URL failure — has never been observed
+running in a real browser; no Playwright spec opens a real JDBC connection through the console at all.
+Closing 177M needs that real run, not another code review.

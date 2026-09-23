@@ -16,7 +16,7 @@ what "What changed from the design" now describes — moves the translation to w
 `DbDataSync.Drivers.Jdbc` itself. `ConnectionDiagnostics` in `DbDataSync.Api` now touches zero `java.sql`
 types — no guard, no isolated-method JIT workaround, none needed, because there's nothing left to guard
 against.
-**Plan reference**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md` (full
+**Plan reference**: `architecture/planning/done/jdbc-url-template-and-connection-testing.md` (full
 rationale and code sketches). **Depends on phase 175M** — `JdbcGenericDriver`'s side of
 `PreviewConnection` reuses the unification logic 175M builds, and `GenericDriver.CreateConnection`
 (`src/DbDataSync.Drivers.Generic/GenericDriver.cs:28-80`) needs the same builder-assembly factored out for

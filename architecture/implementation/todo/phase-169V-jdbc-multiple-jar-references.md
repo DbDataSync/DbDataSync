@@ -3,7 +3,7 @@
 **Status**: Built. See Retrospective.
 **Plan reference**: none — raised directly by the user, following on from phase 168V
 (`architecture/implementation/todo/phase-168V-generic-driver-base-and-jdbc-descriptor.md`).
-**Updated 2026-09-22**: `architecture/planning/todo/user-provided-files-store.md` resolved the
+**Updated 2026-09-22**: `architecture/planning/done/user-provided-files-store.md` resolved the
 "literal filesystem path, provisional" question this phase originally deferred — `DriverJarPaths` entries
 are now **names within the new `files/` store**, not arbitrary filesystem paths. Unbuilt, so changed here
 directly rather than migrated; see that doc for the store itself, which this phase now depends on.

@@ -8,7 +8,7 @@ wide grep, not just `src/`). Historical `architecture/implementation/done/phase-
 `phase-171V`/`phase-172V` docs still say "Imported" — left alone, they're records of what was true when
 written, not live references.
 **Plan reference**: none — a naming cleanup raised directly in conversation while designing
-`architecture/planning/todo/jdbc-url-template-and-connection-testing.md`, split out as its own phase
+`architecture/planning/done/jdbc-url-template-and-connection-testing.md`, split out as its own phase
 because it touches every file phase 175M also needs to touch and should land first, cleanly, on its own.
 
 ## Why

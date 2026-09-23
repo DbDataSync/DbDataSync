@@ -5,7 +5,7 @@
 section alongside Drivers/Libraries (still admin-gated) — a follow-on UX correction, not a redo of this
 phase's own work. Every "Admin → Files" reference below describes where it first landed, not where it
 ended up; see `user-provided-files-store.md`'s own "Small GUI" section for the current placement.
-**Plan reference**: `architecture/planning/todo/user-provided-files-store.md` (the full design — this
+**Plan reference**: `architecture/planning/done/user-provided-files-store.md` (the full design — this
 phase builds it), `architecture/implementation/todo/phase-169V-jdbc-multiple-jar-references.md` (already
 depends on `FilesPaths`, built there; this phase adds the CRUD surface and GUI on top of that same
 on-disk convention).

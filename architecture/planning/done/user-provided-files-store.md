@@ -2,7 +2,7 @@
 
 **Status**: Design, not phase-ready.
 **Plan reference**: resolves the `jars/` vs `libraries/` question left open by
-`architecture/planning/todo/jdbc-driver-support.md` and repeated in
+`architecture/planning/done/jdbc-driver-support.md` and repeated in
 `architecture/planning/todo/jdbc-driver-feature-gaps.md`; unblocks the jar-upload dependency named in
 `architecture/planning/todo/driver-yaml-authoring-ui.md` §2 and the jar source for
 `architecture/planning/todo/jdbc-ikvmreference-compile-button.md`.

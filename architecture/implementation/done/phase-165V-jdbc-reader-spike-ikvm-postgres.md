@@ -1,7 +1,7 @@
 # Phase 165V — JDBC reader spike: import ClrKernel's IKVM JDBC bridge, read Postgres over pgJDBC
 
 **Status**: Built and verified 2026-09-21. See the Retrospective below.
-**Plan reference**: `architecture/planning/todo/jdbc-driver-support.md` (the decisions this phase carries
+**Plan reference**: `architecture/planning/done/jdbc-driver-support.md` (the decisions this phase carries
 out — IKVM not a real JVM, import the source rather than reference the package, reader before writer —
 and its own "What to do first" section, which this phase *is*), `architecture/planning/done/additional-database-drivers.md`
 (the parameter-placeholder and `ConnectionConfig`-shape questions this phase's dialect work answers for
