@@ -155,6 +155,71 @@ public sealed class PreviewIntegrationTests : IClassFixture<TestApiFactory>, IAs
         Assert.Equal(previewRows, targetRows);
     }
 
+    /// <summary>
+    /// A bound sqlColumnExpression script is handed the source column's real metadata
+    /// (SqlColumnExpressionContext.Column), not null — checked the same way as the test above, in both
+    /// the preview's own SQL text and what a real pass actually writes, since both go through
+    /// ApplyScriptedTransforms and must agree.
+    /// </summary>
+    [Fact]
+    public async Task AColumnExpressionScript_SeesTheSourceColumnsRealMetadata_InPreviewAndInARealPass()
+    {
+        var scriptName = $"needs-metadata-{Guid.NewGuid():N}";
+        (await _client.PutAsJsonAsync($"/api/scripts/{scriptName}", new ScriptDefinition
+        {
+            Manifest = new ScriptConfig { Name = scriptName, Kind = "sqlColumnExpression", EntryType = "Expr" },
+            Code = """
+                using DbDataSync.Scripting.Abstractions;
+
+                public sealed class Expr : ISqlColumnExpression
+                {
+                    // Id stays untouched (it's the merge key into an INT column) — only Name, whose real
+                    // metadata this asserts against, goes through the branch below.
+                    public string? RenderSql(SqlColumnExpressionContext c)
+                    {
+                        if (c.SourceColumn != "Name") return null;
+                        return c.Column is null
+                            ? "'NO_METADATA'"
+                            : $"CONCAT('HAS_METADATA:', '{c.Column.Name}', ':', '{(c.Column.IsNullable ? "Y" : "N")}')";
+                    }
+                }
+                """,
+        }, JsonOptions)).EnsureSuccessStatusCode();
+
+        await SaveMappingAsync(new TableMappingConfig
+        {
+            Name = "main",
+            Sources = [new SourceTableSpec { Schema = "dbo", Table = _sourceTable }],
+            Targets = [new TableSpec { Schema = "dbo", Table = _targetTable }],
+            ColumnMappings =
+            [
+                new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" },
+                new ColumnMapping { SourceColumn = "Name", TargetColumn = "Name" },
+            ],
+            Scripts = new Dictionary<string, ScriptBinding?>
+            {
+                ["sqlColumnExpression"] = new ScriptBinding { ScriptName = scriptName },
+            },
+        });
+
+        var preview = await GetPreviewAsync();
+        var read = Assert.Single(preview.Statements, s => s.Stage == "Source read" && s.Sql is not null);
+        Assert.DoesNotContain("NO_METADATA", read.Sql!);
+        // The preview shows the unevaluated expression — CONCAT('HAS_METADATA:', 'Name', ':', 'N') — not
+        // its executed result, so this checks the literal arguments the script read off Column rather
+        // than the concatenated string, which only exists once SQL Server evaluates it below.
+        Assert.Contains("'HAS_METADATA:'", read.Sql!);
+        Assert.Contains("'Name'", read.Sql!);
+        // Name is NVARCHAR(50) NOT NULL — real metadata means the script's own IsNullable branch reads
+        // false ('N'), not the "Column was null so I can't tell" case a broken caller would produce either way.
+        Assert.Matches("CONCAT\\([^)]*'N'\\)", read.Sql!);
+
+        await TriggerAndWaitAsync();
+
+        var targetRows = await QueryAsync($"SELECT Id, Name FROM dbo.[{_targetTable}];");
+        Assert.All(targetRows.Values, v => Assert.Equal("HAS_METADATA:Name:N", v));
+    }
+
     [Fact]
     public async Task ThePreviewDescribesEveryStageInTheOrderAPassRunsThem_WithEachOnesOrigin()
     {

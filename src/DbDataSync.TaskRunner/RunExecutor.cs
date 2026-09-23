@@ -777,8 +777,9 @@ public sealed class RunExecutor(
             // including the {{column}} substitution that makes it correct in a reader whose statement
             // aliases the source table.
             var sourceScriptDialect = ScriptDialectFor(sourceDriver);
-            var columnMappings = ApplyScriptedTransforms(
-                task, mapping, sourceConnectionConfig, sourceScriptDialect, item.RunId);
+            var columnMappings = await ApplyScriptedTransformsAsync(
+                task, mapping, sourceConnectionConfig, sourceScriptDialect, sourceDriver, sourceConnection, source,
+                item.RunId, cancellationToken);
 
             // KeyReconcile (phase 124) projects only the source's primary-key columns — it filters
             // this internally from whatever columnMappings it's handed (KeyReconcileReader.
@@ -1074,9 +1075,10 @@ public sealed class RunExecutor(
     /// column it lands in.
     /// </para>
     /// </summary>
-    private IReadOnlyList<ColumnMapping> ApplyScriptedTransforms(
+    private async Task<IReadOnlyList<ColumnMapping>> ApplyScriptedTransformsAsync(
         ReplicationTaskConfig task, TableMappingConfig mapping, ConnectionConfig connection,
-        IScriptDialect dialect, Guid runId)
+        IScriptDialect dialect, IDriver sourceDriver, DbConnection sourceConnection, SourceTableRef source,
+        Guid runId, CancellationToken cancellationToken)
     {
         var binding = scriptHost.ResolveBinding<ISqlColumnExpression>(
             ScriptSlots.SqlColumnExpression, connection, task, mapping);
@@ -1084,13 +1086,23 @@ public sealed class RunExecutor(
         if (binding is null)
             return mapping.ColumnMappings;
 
+        // Fetched only here, gated on a script actually being bound — the same "pay nothing for the
+        // common mapping with nothing bound" posture EnsureTargetTableProvisionedAsync and
+        // WithDerivedNaturalKeyAsync already take for their own catalog reads, rather than a fetch for
+        // every pass regardless. Not cached across passes either: BuildLifecycleHookContextAsync's own
+        // "fetches fresh on every call, deliberately not cached" is the precedent this follows — a
+        // source table's shape can legitimately change between passes, and this already runs once per
+        // pass, not once per row.
+        var columnMetadata = await sourceDriver.ListColumnsAsync(
+            sourceConnection, source.Database, source.Schema, source.Table, cancellationToken);
+
         var generated = new List<string>();
         var result = ScriptedColumnTransforms.Apply(
             mapping.ColumnMappings,
             binding.Value.Script,
             binding.Value.Parameters,
             dialect,
-            columnMetadata: null,
+            columnMetadata,
             log: generated.Add);
 
         if (generated.Count > 0)

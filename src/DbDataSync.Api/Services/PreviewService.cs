@@ -66,11 +66,20 @@ public sealed class PreviewService(
             var sourceDialect = DialectOf(sourceDriver);
             var targetDialect = DialectOf(targetDriver);
 
+            // Resolved before the scripted transform below, which needs it to fill a bound script's
+            // SqlColumnExpressionContext.Column — the same path browsing and mapping refresh already use
+            // (see the target-side fetch's own doc comment further down), moved earlier here rather than
+            // duplicated, so a script asking for the column's declared type gets a real answer instead of
+            // always null.
+            var sourceColumns = await ResolveColumnsAsync(
+                source.ConnectionName, sourceConnection, sourceDriver, source.Database, source.Schema, source.Table,
+                "source", problems, cancellationToken);
+
             // The same substitution a pass makes before the reader ever sees the mappings: a scripted
             // column expression becomes a literal Transform, so what the projection renders here is
             // what it would render then.
             var columnMappings = ApplyScriptedTransforms(
-                task, mapping, sourceConnectionConfig, sourceDriver, statements, problems);
+                task, mapping, sourceConnectionConfig, sourceDriver, sourceColumns, statements, problems);
 
             statements.AddRange(DescribeInProcessTransforms(task, mapping, sourceConnectionConfig));
             statements.AddRange(RenderHooks(
@@ -86,9 +95,6 @@ public sealed class PreviewService(
             // asking its own driver's native catalog directly and silently ignoring it. Still live —
             // preview shows today's real table on purpose — just live through the path that checks for a
             // script first.
-            var sourceColumns = await ResolveColumnsAsync(
-                source.ConnectionName, sourceConnection, sourceDriver, source.Database, source.Schema, source.Table,
-                "source", problems, cancellationToken);
             var targetColumns = await ResolveColumnsAsync(
                 target.ConnectionName, targetConnection, targetDriver, target.Database, target.Schema, target.Table,
                 "target", problems, cancellationToken);
@@ -171,7 +177,8 @@ public sealed class PreviewService(
     /// </summary>
     private IReadOnlyList<ColumnMapping> ApplyScriptedTransforms(
         ReplicationTaskConfig task, TableMappingConfig mapping, ConnectionConfig sourceConnection,
-        IDriver sourceDriver, List<PreviewStatement> statements, List<string> problems)
+        IDriver sourceDriver, IReadOnlyList<ColumnMetadata> sourceColumns, List<PreviewStatement> statements,
+        List<string> problems)
     {
         var binding = ScriptResolution.Resolve(ScriptSlots.SqlColumnExpression, sourceConnection, task, mapping);
         if (binding is null)
@@ -187,7 +194,7 @@ public sealed class PreviewService(
             var result = ScriptedColumnTransforms.Apply(
                 mapping.ColumnMappings, resolved.Script, resolved.Parameters,
                 ScriptDialectAdapter.For(sourceDriver) ?? DialectlessScriptDialect.Instance,
-                columnMetadata: null, log: generated.Add);
+                sourceColumns, log: generated.Add);
 
             foreach (var expression in generated)
             {
