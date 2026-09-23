@@ -106,14 +106,14 @@ the preview the same way a strategy-name edit already did).
   round-trip on the strategy itself); fills the newly-shown `bulk-load-column-input` before expecting
   candidates in the ad-hoc Bulk Load flow, which previously needed no column at all and would now fail
   without one.
-- **Not run** in this environment — this repo's Playwright suite needs a real SQL Server container and a
-  real browser, neither available here. The spec edits above are a source-level update to match the new
-  UI shape, not a confirmed passing run; whoever next has a real environment should run
-  `golden-path.spec.ts` test 41 for real before calling this fully verified.
+- **Not run yet** — deliberately left for CI rather than run here. The spec edits above are a
+  source-level update to match the new UI shape, not a confirmed passing run; this phase stays in
+  `todo/` until `golden-path.spec.ts` test 41 has actually run green.
 
 ## Retrospective
 
-Built and verified as far as this environment allows, 2026-09-23. The one real design decision — column
+Built 2026-09-23; verification of the Playwright spec deferred to CI rather than run in this session. The
+one real design decision — column
 lives entirely on the reference with no replication-level default at all, versus a `ReconcileConfig`-style
 inherit-or-override — was resolved by asking rather than guessing, since either is defensible and this
 repo's "no migration" policy means whichever shape ships is the only one anyone gets without a second
