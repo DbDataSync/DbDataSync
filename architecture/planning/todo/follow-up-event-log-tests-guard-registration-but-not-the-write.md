@@ -87,6 +87,35 @@ and used to sail past the old guard). A permissions failure on the write now rep
 
 **Not applied — deliberately, per this doc's own scoping:** the larger question (should these tests run at all
 on an unelevated machine, gated behind an explicit opt-in instead of always attempted) is left alone, since this
-doc already said that decision belongs to whoever owns phase 136/140's testing intent. Also not narrowed: which
-of the two write-side candidates (registration-not-yet-effective vs. a genuine privilege gap) is the real cause
-— the next real occurrence still needs to attach its diagnostic output here.
+doc already said that decision belongs to whoever owns phase 136/140's testing intent.
+
+## The next real occurrence (2026-09-23, run `35812820281`) — narrowed to one cause, and fixed
+
+`dotnet-windows` → `WriteError_ARealEntryIsReadableBackFromTheApplicationLog`, same symptom
+(`Cannot open log for source 'DbDataSync'. You may not have write access.`), with the guard's own
+diagnostic attached to the failure message this time:
+
+```
+This process is elevated — a source that was just registered can still deny the first write until the
+Event Log service has picked up the registration, and the write path is not guaranteed to run with the
+same privileges the registration path had either way.
+```
+
+**Narrowed**: `WindowsElevation.IsAdministrator()` reported `true` at the moment of failure —
+`runneradmin` (CI's own account) was elevated the whole time, which rules out candidate 2 (a genuine
+privilege gap between the registration and write paths). Candidate 1 — registration succeeding but not
+yet having propagated to the write path — is the real cause, not a guess.
+
+**Applied**: `WriteOrExplain` now retries on the same access-denied condition for up to 5 seconds (a
+100ms poll, not a fixed sleep) before falling through to the original failure message. There's no
+synchronous "wait until the Event Log write path is ready" API to block on instead —
+`EventLog.SourceExists` (what `EnsureSourceRegisteredOrExplain` already checks) only confirms the
+registry side, and it was already `true` in the run that still failed here — so a bounded, condition-
+checked retry is the honest fix for a real OS-level propagation delay with no synchronous alternative,
+the same shape this repo's own `UntilAsync`/`ScanUntilPastAsync` helpers already use elsewhere for a
+real service's own eventual consistency. A failure that outlasts the retry window still reports with the
+full elevation context, unchanged — at that point it's no longer a propagation delay.
+
+Not verified against a live Windows run yet (this environment has no Windows machine) — cross-platform
+build confirmed clean, and the class's existing `[WindowsOnlyFact]` gate skips it correctly here (3
+skipped, 0 attempted). The next `dotnet-windows` CI run is the real proof.

@@ -128,23 +128,49 @@ public sealed class WindowsServiceEventLogTests(ITestOutputHelper output)
     /// <see cref="SecurityException"/>, so it used to sail past that guard and surface as a bare assertion
     /// failure with none of the elevation context the guard exists to supply. See
     /// architecture/planning/todo/follow-up-event-log-tests-guard-registration-but-not-the-write.md.
+    /// <para>
+    /// **Retries on that same access denial, briefly — the real cause, confirmed, not guessed.** CI run
+    /// `35812820281` printed this method's own "This process is elevated" from a live failure: `runneradmin`
+    /// stayed elevated the whole time, which rules out the follow-up doc's second candidate (a genuine
+    /// privilege gap between the registration and write paths) and leaves its first — registering a
+    /// brand-new source and being able to open it for writing are not the same instant, and .NET's
+    /// <see cref="EventLog"/> has no synchronous "wait until the write path is ready" call to block on
+    /// instead (<see cref="EventLog.SourceExists"/>, already checked by
+    /// <see cref="EnsureSourceRegisteredOrExplain"/>, only confirms the registry side — it was already
+    /// true in the run that still failed here). Retrying the one thing that's genuinely still uncertain
+    /// (does *this* write succeed yet) is a bounded wait on a real condition, the same shape this repo's
+    /// own <c>UntilAsync</c>/<c>ScanUntilPastAsync</c> helpers already use elsewhere for a real service's
+    /// own eventual consistency — not a fixed sleep guessing a duration. A failure that outlasts the
+    /// retry window is left to report exactly as before: elevation context and all, because at that point
+    /// it is no longer a propagation delay, it is a real problem.
+    /// </para>
     /// </summary>
     [SupportedOSPlatform("windows")]
     private static void WriteOrExplain(Action write)
     {
-        try
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (true)
         {
-            write();
-        }
-        catch (Exception ex) when (IsAccessDenied(ex))
-        {
-            Assert.Fail(
-                $"Could not write to the Event Log under source '{WindowsServiceEventLog.SourceName}'. "
-                + $"This process is {(WindowsElevation.IsAdministrator() ? "elevated" : "NOT elevated")} — a "
-                + "source that was just registered can still deny the first write until the Event Log service "
-                + "has picked up the registration, and the write path is not guaranteed to run with the same "
-                + "privileges the registration path had either way. Run this suite from an elevated prompt to "
-                + $"exercise these tests. The underlying error was: {ex.Message}");
+            try
+            {
+                write();
+                return;
+            }
+            catch (Exception ex) when (IsAccessDenied(ex))
+            {
+                if (DateTime.UtcNow >= deadline)
+                {
+                    Assert.Fail(
+                        $"Could not write to the Event Log under source '{WindowsServiceEventLog.SourceName}', " +
+                        "even after retrying for 5s. "
+                        + $"This process is {(WindowsElevation.IsAdministrator() ? "elevated" : "NOT elevated")} — a "
+                        + "source that was just registered can still deny the first write until the Event Log service "
+                        + "has picked up the registration, and the write path is not guaranteed to run with the same "
+                        + "privileges the registration path had either way. Run this suite from an elevated prompt to "
+                        + $"exercise these tests. The underlying error was: {ex.Message}");
+                }
+                Thread.Sleep(100);
+            }
         }
     }
 
