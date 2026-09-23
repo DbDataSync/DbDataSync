@@ -15,8 +15,13 @@ import { RECONCILE_ONLY_KINDS, runsAgainstAConnection } from '../../api/types'
 import { readerNotes } from '../../api/readerNotes'
 
 /**
- * Queues an ad-hoc reload of one table mapping. Sits beside the live-run panel in the design, as a
- * 288px column rather than a band across the top.
+ * Queues an ad-hoc reload of one table mapping. A popup, not a column beside the live-run panel — a
+ * 288px-wide card pinned to the right of a row that is otherwise empty (no live run to fill the other
+ * side) left most of the screen blank for no reason, and a fixed side column had nowhere sensible to
+ * go when a live run legitimately *is* showing beside it (queuing a second bulk load while watching an
+ * earlier one). The same `.modal-backdrop`/`.modal` shell every other short-action dialog in this app
+ * already uses (`DriverEditPage`'s own "Install a library" popup, for one) sidesteps both: it overlays
+ * regardless of what else the page is showing, and closes the same way — Escape, or a click outside it.
  *
  * Opens pre-filled from the mapping's own default segmenting, so a table that is always reloaded the
  * same way does not have to be re-described every time. Everything stays editable for this one
@@ -189,182 +194,190 @@ export function BulkLoadForm({ replicationName, onQueued, onClose }: {
 
   const nothingChosen = mode === 'custom' && chosen.length === 0
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
-    <form className="card" style={{ width: 288, flex: 'none' }} onSubmit={submit} data-testid="bulk-load-form">
-      <div className="card-head tight">
-        <span className="card-title sm">Bulk Load</span>
-        <button type="button" className="btn-link quiet spacer" onClick={onClose}>Close</button>
-      </div>
-      <div className="card-body" style={{ gap: 10 }}>
-        <ErrorBanner error={bulkLoad.error ?? capabilities.error} />
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <form className="modal" role="dialog" aria-modal="true" aria-label="Bulk load" onSubmit={submit} data-testid="bulk-load-form">
+        <div className="card-head tight">
+          <span className="card-title sm">Bulk Load</span>
+          <button type="button" className="btn-link quiet spacer" onClick={onClose}>Close</button>
+        </div>
+        <div className="card-body" style={{ gap: 10 }}>
+          <ErrorBanner error={bulkLoad.error ?? capabilities.error} />
 
-        <Field label="Table mapping">
-          <select className="select" value={selectedMapping} onChange={(e) => setMappingName(e.target.value)} data-testid="bulk-load-mapping-select">
-            {(mappingNames ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </Field>
-
-        <Field label="Segment">
-          <select className="select" value={mode} onChange={(e) => setMode(e.target.value as SegmentMode)} data-testid="bulk-load-mode-select">
-            <option value="full">Full — whole table</option>
-            <option value="list">List — specific values</option>
-            <option value="range">Range — between bounds</option>
-            <option value="auto">Auto — split into buckets</option>
-            <option value="custom">Custom — a segmenting strategy</option>
-          </select>
-        </Field>
-
-        {mode !== 'full' && (
-          <Field label="Source column">
-            <input
-              className="input"
-              required={mode !== 'custom'}
-              value={column}
-              onChange={(e) => setColumn(e.target.value)}
-              data-testid="bulk-load-column-input"
-            />
+          <Field label="Table mapping">
+            <select className="select" value={selectedMapping} onChange={(e) => setMappingName(e.target.value)} data-testid="bulk-load-mapping-select">
+              {(mappingNames ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
           </Field>
-        )}
-        {mode === 'list' && (
-          <Field label="Values (comma-separated)">
-            <input className="input" required value={values} onChange={(e) => setValues(e.target.value)} data-testid="bulk-load-values-input" />
+
+          <Field label="Segment">
+            <select className="select" value={mode} onChange={(e) => setMode(e.target.value as SegmentMode)} data-testid="bulk-load-mode-select">
+              <option value="full">Full — whole table</option>
+              <option value="list">List — specific values</option>
+              <option value="range">Range — between bounds</option>
+              <option value="auto">Auto — split into buckets</option>
+              <option value="custom">Custom — a segmenting strategy</option>
+            </select>
           </Field>
-        )}
-        {mode === 'range' && (
-          <>
-            <Field label="From (inclusive)">
-              <input className="input" required value={rangeMin} onChange={(e) => setRangeMin(e.target.value)} data-testid="bulk-load-min-input" />
+
+          {mode !== 'full' && (
+            <Field label="Source column">
+              <input
+                className="input"
+                required={mode !== 'custom'}
+                value={column}
+                onChange={(e) => setColumn(e.target.value)}
+                data-testid="bulk-load-column-input"
+              />
             </Field>
-            <Field label="To (exclusive)">
-              <input className="input" required value={rangeMax} onChange={(e) => setRangeMax(e.target.value)} data-testid="bulk-load-max-input" />
+          )}
+          {mode === 'list' && (
+            <Field label="Values (comma-separated)">
+              <input className="input" required value={values} onChange={(e) => setValues(e.target.value)} data-testid="bulk-load-values-input" />
             </Field>
-          </>
-        )}
-        {mode === 'auto' && (
-          <Field label="Buckets">
-            <input
-              className="input" type="number" min={1} value={bucketCount}
-              onChange={(e) => setBucketCount(Number(e.target.value))}
-              data-testid="bulk-load-buckets-input"
-            />
-          </Field>
-        )}
-
-        {mode === 'custom' && (
-          <>
-            <Field label="Strategy">
-              <select
-                className="select"
-                value={strategyName ?? ''}
-                onChange={(e) => setStrategyName(e.target.value || null)}
-                data-testid="bulk-load-strategy-select"
-              >
-                <option value="">Pick a strategy…</option>
-                {strategies.map((s) => <option key={s.name} value={s.name}>{s.name} — {s.kind}</option>)}
-              </select>
+          )}
+          {mode === 'range' && (
+            <>
+              <Field label="From (inclusive)">
+                <input className="input" required value={rangeMin} onChange={(e) => setRangeMin(e.target.value)} data-testid="bulk-load-min-input" />
+              </Field>
+              <Field label="To (exclusive)">
+                <input className="input" required value={rangeMax} onChange={(e) => setRangeMax(e.target.value)} data-testid="bulk-load-max-input" />
+              </Field>
+            </>
+          )}
+          {mode === 'auto' && (
+            <Field label="Buckets">
+              <input
+                className="input" type="number" min={1} value={bucketCount}
+                onChange={(e) => setBucketCount(Number(e.target.value))}
+                data-testid="bulk-load-buckets-input"
+              />
             </Field>
+          )}
 
-            {strategies.length === 0 && (
-              <span className="hint" data-testid="bulk-load-no-strategies">
-                This replication defines no segmenting strategies yet.
-              </span>
-            )}
+          {mode === 'custom' && (
+            <>
+              <Field label="Strategy">
+                <select
+                  className="select"
+                  value={strategyName ?? ''}
+                  onChange={(e) => setStrategyName(e.target.value || null)}
+                  data-testid="bulk-load-strategy-select"
+                >
+                  <option value="">Pick a strategy…</option>
+                  {strategies.map((s) => <option key={s.name} value={s.name}>{s.name} — {s.kind}</option>)}
+                </select>
+              </Field>
 
-            {strategy && runsAgainstAConnection(strategy.kind) && (
-              <span className="hint" data-testid="bulk-load-strategy-connection-note">
-                Running this strategy queries the {strategy.kind === 'TargetSql' ? 'target' : 'source'} database.
-              </span>
-            )}
+              {strategies.length === 0 && (
+                <span className="hint" data-testid="bulk-load-no-strategies">
+                  This replication defines no segmenting strategies yet.
+                </span>
+              )}
 
-            <ErrorBanner error={preview.error} />
-            {preview.isFetching && <span className="hint">Running the strategy…</span>}
+              {strategy && runsAgainstAConnection(strategy.kind) && (
+                <span className="hint" data-testid="bulk-load-strategy-connection-note">
+                  Running this strategy queries the {strategy.kind === 'TargetSql' ? 'target' : 'source'} database.
+                </span>
+              )}
 
-            {candidates.length > 0 && (
-              <div data-testid="bulk-load-candidates">
-                <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                  <button
-                    type="button"
-                    className="btn-link quiet"
-                    onClick={() => setChecked(Object.fromEntries(candidates.map((_, i) => [i, true])))}
-                    data-testid="bulk-load-select-all"
-                  >
-                    Select all
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-link quiet"
-                    onClick={() => setChecked({})}
-                    data-testid="bulk-load-select-none"
-                  >
-                    None
-                  </button>
-                  <span className="hint spacer">{chosen.length} of {candidates.length}</span>
+              <ErrorBanner error={preview.error} />
+              {preview.isFetching && <span className="hint">Running the strategy…</span>}
+
+              {candidates.length > 0 && (
+                <div data-testid="bulk-load-candidates">
+                  <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <button
+                      type="button"
+                      className="btn-link quiet"
+                      onClick={() => setChecked(Object.fromEntries(candidates.map((_, i) => [i, true])))}
+                      data-testid="bulk-load-select-all"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-link quiet"
+                      onClick={() => setChecked({})}
+                      data-testid="bulk-load-select-none"
+                    >
+                      None
+                    </button>
+                    <span className="hint spacer">{chosen.length} of {candidates.length}</span>
+                  </div>
+                  <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {candidates.map((candidate, i) => (
+                      <label key={`${candidate.label}-${i}`} className="row" style={{ gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={checked[i] ?? false}
+                          onChange={(e) => setChecked((prev) => ({ ...prev, [i]: e.target.checked }))}
+                          data-testid={`bulk-load-candidate-${i}`}
+                        />
+                        <span className="mono sm">{candidate.label}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {candidates.map((candidate, i) => (
-                    <label key={`${candidate.label}-${i}`} className="row" style={{ gap: 6, alignItems: 'center' }}>
-                      <input
-                        type="checkbox"
-                        checked={checked[i] ?? false}
-                        onChange={(e) => setChecked((prev) => ({ ...prev, [i]: e.target.checked }))}
-                        data-testid={`bulk-load-candidate-${i}`}
-                      />
-                      <span className="mono sm">{candidate.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
+              )}
 
-            {strategyName && !preview.isFetching && candidates.length === 0 && !preview.error && (
-              <span className="hint" data-testid="bulk-load-no-candidates">
-                This strategy proposed no segments.
-              </span>
-            )}
-          </>
-        )}
+              {strategyName && !preview.isFetching && candidates.length === 0 && !preview.error && (
+                <span className="hint" data-testid="bulk-load-no-candidates">
+                  This strategy proposed no segments.
+                </span>
+              )}
+            </>
+          )}
 
-        <Field label="Reader">
-          <select className="select" value={selectedReader} onChange={(e) => setReaderKind(e.target.value)} data-testid="bulk-load-reader-select">
-            {availableReaders.map((r) => (
-              <option key={r.kind} value={r.kind}>{[r.kind, ...readerNotes(r)].join(' — ')}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Staging">
-          <select className="select" value={selectedCache} onChange={(e) => setCacheKind(e.target.value)} data-testid="bulk-load-cache-select">
-            {capabilities.stagingProviders.map((p) => <option key={p.kind} value={p.kind}>{p.kind}</option>)}
-          </select>
-        </Field>
-        <Field label="Writer">
-          <select className="select" value={selectedWriter} onChange={(e) => setWriterKind(e.target.value)} data-testid="bulk-load-writer-select">
-            {availableWriters.map((w) => (
-              <option key={w.kind} value={w.kind}>{w.supportsReconciliation ? `${w.kind} — reconciling` : `${w.kind} — upsert-only`}</option>
-            ))}
-          </select>
-        </Field>
+          <Field label="Reader">
+            <select className="select" value={selectedReader} onChange={(e) => setReaderKind(e.target.value)} data-testid="bulk-load-reader-select">
+              {availableReaders.map((r) => (
+                <option key={r.kind} value={r.kind}>{[r.kind, ...readerNotes(r)].join(' — ')}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Staging">
+            <select className="select" value={selectedCache} onChange={(e) => setCacheKind(e.target.value)} data-testid="bulk-load-cache-select">
+              {capabilities.stagingProviders.map((p) => <option key={p.kind} value={p.kind}>{p.kind}</option>)}
+            </select>
+          </Field>
+          <Field label="Writer">
+            <select className="select" value={selectedWriter} onChange={(e) => setWriterKind(e.target.value)} data-testid="bulk-load-writer-select">
+              {availableWriters.map((w) => (
+                <option key={w.kind} value={w.kind}>{w.supportsReconciliation ? `${w.kind} — reconciling` : `${w.kind} — upsert-only`}</option>
+              ))}
+            </select>
+          </Field>
 
-        {writer && !writer.supportsReconciliation && (
-          <span className="hint" data-testid="bulk-load-upsert-note">
-            <span className="mono">{writer.kind}</span> only adds and updates rows — rows deleted at the source
-            will stay in the target.
-          </span>
-        )}
+          {writer && !writer.supportsReconciliation && (
+            <span className="hint" data-testid="bulk-load-upsert-note">
+              <span className="mono">{writer.kind}</span> only adds and updates rows — rows deleted at the source
+              will stay in the target.
+            </span>
+          )}
 
-        <button
-          type="submit"
-          className="btn btn-primary"
-          style={{ alignSelf: 'flex-start' }}
-          disabled={bulkLoad.isPending || !selectedMapping || nothingChosen}
-          data-testid="bulk-load-submit-button"
-        >
-          {bulkLoad.isPending
-            ? 'Queueing…'
-            : mode === 'custom' && chosen.length > 0
-              ? `Queue ${chosen.length} segment${chosen.length === 1 ? '' : 's'}`
-              : 'Queue bulk load'}
-        </button>
-      </div>
-    </form>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ alignSelf: 'flex-start' }}
+            disabled={bulkLoad.isPending || !selectedMapping || nothingChosen}
+            data-testid="bulk-load-submit-button"
+          >
+            {bulkLoad.isPending
+              ? 'Queueing…'
+              : mode === 'custom' && chosen.length > 0
+                ? `Queue ${chosen.length} segment${chosen.length === 1 ? '' : 's'}`
+                : 'Queue bulk load'}
+          </button>
+        </div>
+      </form>
+    </div>
   )
 }

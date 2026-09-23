@@ -165,56 +165,53 @@ export function RunsPanel({ replicationName, command }: { replicationName: strin
     <>
       <ErrorBanner error={historyError ?? trigger.error ?? cancel.error ?? resync.error} />
 
-      {(isWatching || showBulkLoad || showReconcile) && (
-        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-          {isWatching && (
-            <div className="card flush" style={{ flex: 1, minWidth: 0 }} data-testid="live-run-panel">
-              <div className="card-head tight">
-                <span className="card-title sm">Live run</span>
-                {completed ? <StatusBadge status={completed.status} /> : <span className="status"><span className="dot dot-ok" />running</span>}
-                {completed && (
-                  // No duration here: the hub's completion payload carries counts and status only,
-                  // not timestamps. History computes it from the stored run.
-                  <span className="spacer mono" style={{ font: '400 11.5px var(--mono)', color: 'var(--ink-7)' }}>
-                    {completed.rowsRead} row(s) read · {completed.rowsWritten} row(s) written
-                    {completed.errorSummary ? ` · ${completed.errorSummary}` : ''}
-                  </span>
-                )}
-                {!completed && (
-                  <button className="btn btn-sm spacer" onClick={() => cancel.mutate(activeRunId!)}>Cancel</button>
-                )}
-              </div>
-              <div style={{ padding: '12px 14px' }}>
-                <div className="log" data-testid="live-log-viewer">
-                  {logLines.length === 0 && <span className="log-time">Waiting for log output…</span>}
-                  {logLines.map((line) => (
-                    <span key={line.id} className={`log-line level-${line.level}`}>
-                      <span className="log-time">[{new Date(line.timestampUtc).toLocaleTimeString()}] </span>
-                      {line.message}
-                    </span>
-                  ))}
-                </div>
-              </div>
+      {isWatching && (
+        <div className="card flush" data-testid="live-run-panel">
+          <div className="card-head tight">
+            <span className="card-title sm">Live run</span>
+            {completed ? <StatusBadge status={completed.status} /> : <span className="status"><span className="dot dot-ok" />running</span>}
+            {completed && (
+              // No duration here: the hub's completion payload carries counts and status only,
+              // not timestamps. History computes it from the stored run.
+              <span className="spacer mono" style={{ font: '400 11.5px var(--mono)', color: 'var(--ink-7)' }}>
+                {completed.rowsRead} row(s) read · {completed.rowsWritten} row(s) written
+                {completed.errorSummary ? ` · ${completed.errorSummary}` : ''}
+              </span>
+            )}
+            {!completed && (
+              <button className="btn btn-sm spacer" onClick={() => cancel.mutate(activeRunId!)}>Cancel</button>
+            )}
+          </div>
+          <div style={{ padding: '12px 14px' }}>
+            <div className="log" data-testid="live-log-viewer">
+              {logLines.length === 0 && <span className="log-time">Waiting for log output…</span>}
+              {logLines.map((line) => (
+                <span key={line.id} className={`log-line level-${line.level}`}>
+                  <span className="log-time">[{new Date(line.timestampUtc).toLocaleTimeString()}] </span>
+                  {line.message}
+                </span>
+              ))}
             </div>
-          )}
-
-          {/* Keeps the bulk load column on the right even when no live run occupies the left. */}
-          {!isWatching && <div style={{ flex: 1, minWidth: 0 }} />}
-          {showBulkLoad && (
-            <BulkLoadForm
-              replicationName={replicationName}
-              onQueued={(runIds) => { setShowBulkLoad(false); setActiveRunId(runIds[0]) }}
-              onClose={() => setShowBulkLoad(false)}
-            />
-          )}
-          {showReconcile && (
-            <ReconcileDeletesForm
-              replicationName={replicationName}
-              onQueued={(runIds) => { setShowReconcile(false); setActiveRunId(runIds[0]) }}
-              onClose={() => setShowReconcile(false)}
-            />
-          )}
+          </div>
         </div>
+      )}
+
+      {/* Popups, not a column beside the live run above — they overlay regardless of whether one is
+          showing, which is what lets an operator queue a second bulk load while watching an earlier
+          one without the two fighting over a shared row. See BulkLoadForm's own doc comment. */}
+      {showBulkLoad && (
+        <BulkLoadForm
+          replicationName={replicationName}
+          onQueued={(runIds) => { setShowBulkLoad(false); setActiveRunId(runIds[0]) }}
+          onClose={() => setShowBulkLoad(false)}
+        />
+      )}
+      {showReconcile && (
+        <ReconcileDeletesForm
+          replicationName={replicationName}
+          onQueued={(runIds) => { setShowReconcile(false); setActiveRunId(runIds[0]) }}
+          onClose={() => setShowReconcile(false)}
+        />
       )}
 
       <div className="card flush" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }} data-testid="run-history-table">
