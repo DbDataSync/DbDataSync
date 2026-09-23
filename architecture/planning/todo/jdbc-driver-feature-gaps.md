@@ -39,6 +39,14 @@ generalizes past Postgres — the same "prove it before generalizing" reasoning
 `follow-up-phase-168-hand-written-jdbc-path-vs-descriptor.md` already applies to the `typeMap`-per-vendor
 question.
 
+**Designed, 2026-09-22**: `architecture/planning/todo/jdbc-url-template-and-connection-testing.md` closes
+this — found while chasing a real "Connection is closed." connection-test report back to
+`driver.connect()` silently returning `null`. `UrlTemplate` + a reused `GenericConnectionStringKeys` on
+`JdbcDriverSpec`, host/port/database/username placed in the URL or falling back to a JDBC property when the
+template doesn't reference them, `acceptsURL`/`isValid` validation instead of trusting a non-null
+reference, and a connection-preview + broadened exception-handling design for Test Connection generally
+(not JDBC-only) all live there. Not yet implemented.
+
 ## No operator-facing UI or CLI support for a JDBC connection at all
 
 Grepped the SPA (`web/`) and `DriverTemplates.cs`: zero mentions of JDBC anywhere in either. Every JDBC
