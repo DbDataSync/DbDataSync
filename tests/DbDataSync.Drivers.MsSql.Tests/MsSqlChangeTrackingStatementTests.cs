@@ -49,7 +49,7 @@ public sealed class MsSqlChangeTrackingStatementTests
     {
         var sql = Build("Region", "Amount");
         var selectList = sql[sql.IndexOf("SELECT ", StringComparison.Ordinal)..sql.IndexOf("\nFROM", StringComparison.Ordinal)];
-        var columns = selectList["SELECT ".Length..].Split(", ");
+        var columns = selectList["SELECT ".Length..].Split(",\n    ");
 
         Assert.Equal("CT.SYS_CHANGE_OPERATION", columns[MsSqlChangeTrackingStatement.OperationOrdinal]);
         Assert.StartsWith("CASE WHEN", columns[MsSqlChangeTrackingStatement.BaseMissingOrdinal]);
@@ -63,7 +63,7 @@ public sealed class MsSqlChangeTrackingStatementTests
         var sql = MsSqlChangeTrackingStatement.BuildIncremental("dbo", "Orders", ["TenantId", "Id"], ["Region"]);
 
         Assert.Contains("CT.[TenantId] = base.[TenantId] AND CT.[Id] = base.[Id]", sql);
-        Assert.Contains("CT.[TenantId], CT.[Id]", sql);
+        Assert.Contains("CT.[TenantId],\n    CT.[Id]", sql);
         // The marker only needs one key column; any of them being NULL means the same thing.
         Assert.Contains("CASE WHEN base.[TenantId] IS NULL", sql);
     }
@@ -117,7 +117,7 @@ public sealed class MsSqlChangeTrackingStatementTests
         // ahead of the key columns. The position column is bookkeeping and goes at the end.
         var sql = BuildBounded("Region", "Amount");
 
-        Assert.Contains("base.[Amount], CT.SYS_CHANGE_VERSION AS [__DS_Position]\nFROM", sql);
+        Assert.Contains("base.[Amount],\n    CT.SYS_CHANGE_VERSION AS [__DS_Position]\nFROM", sql);
     }
 
     [Fact]

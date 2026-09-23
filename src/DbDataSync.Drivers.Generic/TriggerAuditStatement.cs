@@ -122,7 +122,7 @@ public static class TriggerAuditStatement
         // omitting it is valid on every other engine here too, so this is a portability fix that costs
         // nothing on the engines that would have accepted either form.
         return $"""
-            SELECT {string.Join(", ", selected)}
+            SELECT {SelectListFormatting.JoinSelectList(selected)}
             FROM {shadow} c
             JOIN (
                 SELECT {keyList}, MAX({seq}) AS {seq}

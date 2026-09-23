@@ -42,7 +42,7 @@ public sealed class MsSqlCdcStatementTests
     public void TheOperationIsSelectedFirst()
     {
         var sql = Read();
-        Assert.Contains("SELECT __$operation, [Id], [Name]", sql);
+        Assert.Contains("SELECT __$operation,\n    [Id],\n    [Name]", sql);
         Assert.Equal(0, MsSqlCdcStatement.OperationOrdinal);
     }
 
@@ -170,7 +170,8 @@ public sealed class MsSqlCdcStatementTests
         var sql = Bounded(MsSqlCdcStatement.CdcFunction.AllChanges);
 
         Assert.Contains(
-            "SELECT __$operation, [Id], [Name], [__DS_ChangeOrdering], [__DS_ChangedAtUtc], [__DS_Position]", sql);
+            "SELECT __$operation,\n    [Id],\n    [Name],\n    [__DS_ChangeOrdering],\n    [__DS_ChangedAtUtc],\n    [__DS_Position]",
+            sql);
         // __$seqval is carried inside the derived table only, for the outer ORDER BY to use.
         Assert.Contains("__$seqval", InnerQuery(sql));
         Assert.DoesNotContain("__$seqval", sql[..sql.IndexOf("FROM (", StringComparison.Ordinal)]);
@@ -194,7 +195,8 @@ public sealed class MsSqlCdcStatementTests
 
         Assert.Contains("UPPER([Name]) AS [Name]", sql);
         Assert.Contains(
-            "SELECT __$operation, [Name], [__DS_ChangeOrdering], [__DS_ChangedAtUtc], [__DS_Position]", sql);
+            "SELECT __$operation,\n    [Name],\n    [__DS_ChangeOrdering],\n    [__DS_ChangedAtUtc],\n    [__DS_Position]",
+            sql);
     }
 
     // ---- Phase 132: per-row source order and time ------------------------------------------------
@@ -205,7 +207,7 @@ public sealed class MsSqlCdcStatementTests
     {
         var sql = Read(MsSqlCdcStatement.CdcFunction.AllChanges);
 
-        Assert.Contains("SELECT __$operation, [Id], [Name],", sql);
+        Assert.Contains("SELECT __$operation,\n    [Id],\n    [Name],", sql);
         Assert.Contains(") AS [__DS_ChangeOrdering]", sql);
         Assert.Contains("sys.fn_cdc_map_lsn_to_time(__$start_lsn) AS [__DS_ChangedAtUtc]", sql);
         Assert.Contains("CONVERT(varchar(20), __$start_lsn, 2)", sql);

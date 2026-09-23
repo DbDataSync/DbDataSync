@@ -80,7 +80,7 @@ public sealed class KeyReconcileStatementTests
         var projection = SourceProjection.Render(BracketDialect.Instance, keyMappings);
 
         Assert.Equal(
-            "SELECT [Id], [Region] FROM [dbo].[Orders]\nWHERE 1 = 1",
+            "SELECT [Id],\n    [Region] FROM [dbo].[Orders]\nWHERE 1 = 1",
             KeyReconcileStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "1 = 1", null, projection));
     }
 

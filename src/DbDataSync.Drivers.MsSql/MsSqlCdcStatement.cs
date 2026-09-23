@@ -142,7 +142,7 @@ public static class MsSqlCdcStatement
         {
             return $"""
                 DECLARE @from binary(10) = {from};
-                SELECT {string.Join(", ", selected)}
+                SELECT {SelectListFormatting.JoinSelectList(selected)}
                 FROM {name}(@from, @toLsn, N'all')
                 ORDER BY {(hasSeqval ? $"{StartLsnColumn}, {SeqvalColumn}" : StartLsnColumn)};
                 """;
@@ -167,9 +167,9 @@ public static class MsSqlCdcStatement
 
         return $"""
             DECLARE @from binary(10) = {from};
-            SELECT {string.Join(", ", outer)}
+            SELECT {SelectListFormatting.JoinSelectList(outer)}
             FROM (
-                SELECT {limit}{string.Join(", ", inner)}
+                SELECT {limit}{SelectListFormatting.JoinSelectList(inner)}
                 FROM {name}(@from, @toLsn, N'all')
                 ORDER BY {StartLsnColumn}
             ) AS capped

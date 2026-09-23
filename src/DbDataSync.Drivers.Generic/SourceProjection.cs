@@ -48,7 +48,7 @@ public static class SourceProjection
             entries.Add(RenderColumn(dialect, mapping, reference));
         }
 
-        return string.Join(", ", entries);
+        return SelectListFormatting.JoinSelectList(entries);
     }
 
     private static string RenderColumn(SqlDialect dialect, ColumnMapping mapping, Func<string, string> reference)

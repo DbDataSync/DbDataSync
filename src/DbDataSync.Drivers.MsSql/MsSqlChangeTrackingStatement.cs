@@ -94,7 +94,7 @@ public static class MsSqlChangeTrackingStatement
         }
 
         return $"""
-            SELECT {limit}{string.Join(", ", selected)}
+            SELECT {limit}{SelectListFormatting.JoinSelectList(selected)}
             FROM CHANGETABLE(CHANGES {quotedSchema}.{quotedTable}, @previousVersion) AS CT
             LEFT JOIN {quotedSchema}.{quotedTable} AS base ON {joinCondition}
             WHERE CT.SYS_CHANGE_VERSION <= @targetVersion

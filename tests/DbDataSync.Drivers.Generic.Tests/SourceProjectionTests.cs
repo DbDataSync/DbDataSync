@@ -23,7 +23,7 @@ public sealed class SourceProjectionTests
     public void WithoutATransform_AColumnIsJustTheQuotedColumn()
     {
         Assert.Equal(
-            "[Id], [Region]",
+            "[Id],\n    [Region]",
             SourceProjection.Render(BracketDialect.Instance, [Map("Id"), Map("Region")]));
     }
 
@@ -33,7 +33,7 @@ public sealed class SourceProjectionTests
         // Aliasing back to the *source* name is what keeps everything downstream unchanged: staging
         // still maps source names to target names, and ChangeSchema still carries source names.
         Assert.Equal(
-            "[Id], UPPER([Region]) AS [Region]",
+            "[Id],\n    UPPER([Region]) AS [Region]",
             SourceProjection.Render(BracketDialect.Instance, [Map("Id"), Map("Region", "UPPER({{column}})")]));
     }
 
@@ -59,7 +59,7 @@ public sealed class SourceProjectionTests
     public void QuotingAndTheColumnReferenceFollowTheDialect()
     {
         Assert.Equal(
-            "\"Id\", UPPER(\"Region\") AS \"Region\"",
+            "\"Id\",\n    UPPER(\"Region\") AS \"Region\"",
             SourceProjection.Render(ColonDialect.Instance, [Map("Id"), Map("Region", "UPPER({{column}})")]));
     }
 
@@ -70,7 +70,7 @@ public sealed class SourceProjectionTests
         // there is ambiguous against CHANGETABLE's own copy of the key. This hook is why the token
         // exists at all.
         Assert.Equal(
-            "base.[Id], UPPER(base.[Region]) AS [Region]",
+            "base.[Id],\n    UPPER(base.[Region]) AS [Region]",
             SourceProjection.Render(
                 BracketDialect.Instance,
                 [Map("Id"), Map("Region", "UPPER({{column}})")],
