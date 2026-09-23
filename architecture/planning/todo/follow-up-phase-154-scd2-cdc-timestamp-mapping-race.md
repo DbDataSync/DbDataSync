@@ -166,3 +166,34 @@ fail, not a cost on the happy path. `DiagnoseAsync` now also reports how many sc
 `cdc.lsn_time_mapping`'s total row count, so a future timeout (if any) can distinguish "many fast attempts, genuinely
 nothing new" from "attempts themselves were slow" — the one thing this occurrence's own diagnostics couldn't say. **Not
 proven**: whether 90s is enough under worse contention than this one occurrence saw — still the thing to watch.
+
+## The 90s widening was falsified too (2026-09-23, run `35901453430`) — the wait was hammering its own dependency
+
+A different test in the same class, `APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation`,
+timed out at the full 90s — with the sharper diagnostics this time saying something the 30s occurrence couldn't:
+**777 scan attempts across the full 90 seconds, every single one reporting the identical, unmoved `latest` value**
+(`cdc.lsn_time_mapping did not record a transaction after 2026-09-23T18:22:32.3670000 within 90s (777 scan attempts,
+latest seen: 2026-09-23T18:22:32.3670000)`). This falsifies the "CDC log-scan catch-up latency occasionally runs long"
+theory the 90s widen was built on: a genuine catch-up lag would not survive 777 real, cheap attempts (≈115ms apart)
+without ever budging once. That many fast attempts finding nothing is a real stall, not a slow-but-eventually one —
+widening the deadline again would only spend more CI time arriving at the same failure.
+
+**What was actually wrong, found by re-reading `ScanUntilPastAsync`'s own loop, not by waiting for more data**: every
+100ms retry called the *whole* `ScanAsync` — re-stop the (already-stopped) capture job, re-scan, then re-release the log
+reader via `sp_repldone @xactid = NULL, ..., @reset = 1`. That meant a stuck wait re-issued `sp_repldone @reset = 1`
+against the exact capture mechanism it was waiting on, hundreds of times, with nothing new consumed between calls.
+`sp_repldone` is shared infrastructure with transactional replication, whose actual job is advancing a "how far has this
+been consumed" marker — this doc does not claim certainty about its exact interaction with CDC's own internal
+bookkeeping under repeated, rapid, out-of-band calls, but "stop hammering the mechanism you are waiting on with a call
+whose whole job is marking things as already handled" is strictly safer than guessing at a longer timeout a third time.
+
+**Applied**: `CdcCaptureJob` split into `ScanOnceAsync` (just `sp_cdc_scan` + read the latest mapped time — the
+*repeatable* part) and `ReleaseLogReaderAsync` (`sp_repldone @reset = 1` — the *cleanup* part). `ScanAsync` (the
+single-shot callers) still does stop → scan-once → release, unchanged in effect. `ScanUntilPastAsync` now stops the
+capture job **once**, loops `ScanOnceAsync` alone for its retries, and releases the log reader **once** via a `finally`
+whether it succeeds or times out — not once per 100ms poll. Verified: the full `DbDataSync.Drivers.MsSql.Tests` project
+(261/261) and the three CDC-touching classes run three more times back to back, all green — this environment's own
+idle/fast containers don't reproduce the original stall either way, so this is proof of no regression, not proof of the
+fix; the real proof is whether this class of failure recurs on CI. **Not proven**: whether the hammering theory is
+actually correct — only that it's a real, justified inefficiency this removes regardless, and a materially different
+change from "wait longer" the next occurrence (if any) will distinguish from a still-open mystery.

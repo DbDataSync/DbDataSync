@@ -39,12 +39,27 @@ internal static class CdcCaptureJob
     /// restarted by <c>sp_cdc_enable_table</c>, so this cannot be a one-time step) and waits for it to
     /// release the log reader. Returns the latest <c>tran_end_time</c> the scan produced in
     /// <c>cdc.lsn_time_mapping</c> — see <see cref="ScanUntilPastAsync"/>, which uses it to wait for a
-    /// genuinely later mapping point instead of guessing a delay.
+    /// genuinely later mapping point instead of guessing a delay, and shares this method's own
+    /// stop/scan/release machinery rather than repeating a full stop-and-release cycle per retry — see
+    /// that method's own doc comment for why that repetition, not scan timing, is the likelier cause of
+    /// a real recurrence.
     /// </summary>
     public static async Task<DateTime> ScanAsync(SqlConnection connection)
     {
         await StopCaptureJobAsync(connection);
+        var latest = await ScanOnceAsync(connection);
+        await ReleaseLogReaderAsync(connection);
+        return latest;
+    }
 
+    /// <summary>
+    /// The repeatable half of a scan: assumes the capture job is already stopped and the log reader
+    /// already checked out to this session (both <see cref="ScanAsync"/> and
+    /// <see cref="ScanUntilPastAsync"/> arrange that once, before calling this any number of times) —
+    /// <c>sp_cdc_scan</c> itself, then the latest mapped time it produced.
+    /// </summary>
+    private static async Task<DateTime> ScanOnceAsync(SqlConnection connection)
+    {
         for (var attempt = 1; ; attempt++)
         {
             try
@@ -52,16 +67,6 @@ internal static class CdcCaptureJob
                 // @maxtrans must be > 0; these bounds are far above anything a test writes in a pass.
                 await ExecuteAsync(connection,
                     "EXEC sys.sp_cdc_scan @maxtrans = 5000, @maxscans = 10, @continuous = 0;");
-
-                // sp_cdc_scan checks the log reader (sp_replcmds) out to this session and does not
-                // check it back in — so a pooled connection carries the lock back to the pool and the
-                // next test's scan fails with "another connection is already running 'sp_replcmds'".
-                // @reset = 1 hands it back; guarded because with nothing checked out it raises.
-                await ExecuteAsync(connection, """
-                    BEGIN TRY
-                        EXEC sys.sp_repldone @xactid = NULL, @xact_seqno = NULL, @numtrans = 0, @time = 0, @reset = 1;
-                    END TRY BEGIN CATCH END CATCH;
-                    """);
                 return await LatestMappedTimeAsync(connection);
             }
             catch (SqlException ex) when (attempt < 20 && IsScanBusy(ex))
@@ -72,6 +77,22 @@ internal static class CdcCaptureJob
             }
         }
     }
+
+    /// <summary>
+    /// <c>sp_cdc_scan</c> checks the log reader (<c>sp_replcmds</c>) out to this session and does not
+    /// check it back in — so a pooled connection carries the lock back to the pool and the next test's
+    /// scan fails with "another connection is already running 'sp_replcmds'". <c>@reset = 1</c> hands
+    /// it back; guarded because with nothing checked out it raises. Called once per logical scan
+    /// operation (a single <see cref="ScanAsync"/>, or the whole retry loop in
+    /// <see cref="ScanUntilPastAsync"/>) — never once per retry attempt, since there is nothing to hand
+    /// back until that operation is actually done with the session.
+    /// </summary>
+    private static async Task ReleaseLogReaderAsync(SqlConnection connection) =>
+        await ExecuteAsync(connection, """
+            BEGIN TRY
+                EXEC sys.sp_repldone @xactid = NULL, @xact_seqno = NULL, @numtrans = 0, @time = 0, @reset = 1;
+            END TRY BEGIN CATCH END CATCH;
+            """);
 
     /// <summary>
     /// The latest transaction commit time <c>cdc.lsn_time_mapping</c> has recorded — the same value
@@ -97,36 +118,57 @@ internal static class CdcCaptureJob
     /// architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md).
     /// <para>
     /// The deadline was originally 30s; run <c>35854242228</c> (2026-09-23) timed out at 30s with every
-    /// attempt in the window reporting the identical <c>latest</c> value — every individual scan
-    /// completed (no exception, so <see cref="ScanAsync"/>'s own busy-retry never ran out either), just
-    /// none of them saw the write this method was told to wait for. That is consistent with CDC's log
-    /// scan itself occasionally lagging behind a just-committed transaction under I/O-contended CI (six
-    /// database containers sharing one runner), not with the polling loop being wrong — so the deadline
-    /// widened (patience only spent when a run is about to fail; the diagnostic below now reports how
-    /// many attempts actually ran, which a 30s-and-still-stuck case couldn't distinguish from "scanning
-    /// fast but finding nothing" versus "each scan itself was slow").
+    /// attempt in the window reporting the identical <c>latest</c> value, so it was widened to 90s on
+    /// the theory that CDC's log scan itself was occasionally lagging under I/O-contended CI. **That
+    /// theory was falsified by the very next recurrence** (run <c>35901453430</c>, 2026-09-23): 777
+    /// scan attempts across the full 90s, every one reporting the identical, unmoved <c>latest</c>. A
+    /// genuine catch-up lag would not survive 777 real attempts without ever budging once — that many
+    /// fast, cheap attempts finding nothing points at a real stall, not a slow-but-eventually one, and
+    /// widening the deadline further would only spend more CI time arriving at the same failure.
+    /// </para>
+    /// <para>
+    /// What changed instead: this loop used to call the *whole* <see cref="ScanAsync"/> — stop the
+    /// capture job, scan, release the log reader — on every single 100ms retry, meaning a stuck wait
+    /// re-issued <c>sp_cdc_stop_job</c> and, more pointedly, <c>sp_repldone @reset = 1</c> hundreds of
+    /// times against the very capture mechanism it was waiting on. <c>sp_repldone</c> is shared
+    /// infrastructure with transactional replication, whose actual job is advancing a "how far has this
+    /// been consumed" marker — its exact interaction with CDC's own internal bookkeeping under repeated,
+    /// rapid, out-of-band calls with nothing new consumed in between is not something this comment
+    /// claims to fully understand, but "stop hammering the mechanism you are waiting on with a call
+    /// whose whole job is marking things as already handled" is a strictly safer, more targeted change
+    /// than guessing at a longer timeout again. The capture job is now stopped once and the log reader
+    /// released once per logical wait, not once per 100ms poll — see <see cref="ScanOnceAsync"/> and
+    /// <see cref="ReleaseLogReaderAsync"/>.
     /// </para>
     /// </summary>
     public static async Task<DateTime> ScanUntilPastAsync(SqlConnection connection, DateTime after)
     {
-        var deadline = DateTime.UtcNow + ScanUntilPastDeadline;
-        var attempts = 0;
-        while (true)
+        await StopCaptureJobAsync(connection);
+        try
         {
-            attempts++;
-            var latest = await ScanAsync(connection);
-            if (latest > after)
-                return latest;
-
-            if (DateTime.UtcNow >= deadline)
+            var deadline = DateTime.UtcNow + ScanUntilPastDeadline;
+            var attempts = 0;
+            while (true)
             {
-                throw new TimeoutException(
-                    $"cdc.lsn_time_mapping did not record a transaction after {after:O} within "
-                    + $"{ScanUntilPastDeadline.TotalSeconds:0}s ({attempts} scan attempts, latest seen: "
-                    + $"{latest:O}). {await DiagnoseAsync(connection)}");
-            }
+                attempts++;
+                var latest = await ScanOnceAsync(connection);
+                if (latest > after)
+                    return latest;
 
-            await Task.Delay(TimeSpan.FromMilliseconds(100));
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException(
+                        $"cdc.lsn_time_mapping did not record a transaction after {after:O} within "
+                        + $"{ScanUntilPastDeadline.TotalSeconds:0}s ({attempts} scan attempts, latest seen: "
+                        + $"{latest:O}). {await DiagnoseAsync(connection)}");
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(100));
+            }
+        }
+        finally
+        {
+            await ReleaseLogReaderAsync(connection);
         }
     }
 
