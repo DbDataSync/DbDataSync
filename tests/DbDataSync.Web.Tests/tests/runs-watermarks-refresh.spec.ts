@@ -140,8 +140,22 @@ async function stub(page: Page): Promise<Counts> {
   return counts
 }
 
-const seconds = async (page: Page, testId: string) =>
-  Number(await page.getByTestId(testId).getAttribute('data-seconds'))
+/**
+ * Real bug, found chasing a flake, not assumed: `RefreshCountdown` renders `data-seconds=""` before
+ * its query's first fetch resolves (`seconds === null` in the hook, per that component's own doc
+ * comment) — and `Number('')` is `0` in JavaScript, not `NaN`. Reading that through `Number(...)`
+ * directly made "hasn't loaded yet" indistinguishable from "the real countdown just hit zero", which
+ * let `toBeLessThanOrEqual(2)` below pass on a component that had not fetched at all if the read
+ * landed in the (usually sub-millisecond, but real) window between mount and the mock's first
+ * response — reproduced locally about 1 run in 15. `NaN` for the empty-string case instead: every
+ * comparison in this file (`<=`, `<`, `>`) is false against `NaN`, so a caller polling for a specific
+ * countdown value keeps waiting past "not loaded yet" exactly like it already waits past any other
+ * value that isn't the one it wants, rather than treating "no data" as a data point.
+ */
+const seconds = async (page: Page, testId: string) => {
+  const raw = await page.getByTestId(testId).getAttribute('data-seconds')
+  return raw === '' ? NaN : Number(raw)
+}
 
 test.describe('runs page watermarks and the shared refresh', () => {
   test('01 - the run list shows the PID and dates both ends of the watermark', async ({ page }) => {
