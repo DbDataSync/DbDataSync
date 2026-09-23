@@ -22,14 +22,22 @@ test.describe.serial('connection test preview (phase 177M)', () => {
   test('installing mysql.generic makes a preview-capable driver available', async ({ page }) => {
     await page.goto('/drivers')
     const catalogRow = page.getByTestId(`admin-known-driver-${KNOWN_DRIVER_ID}`)
+    const driverRow = page.getByTestId(`admin-driver-row-${KNOWN_DRIVER_ID}`)
+
+    // Which of the two branches applies depends on whether an earlier spec in this same run already
+    // installed mysql.generic — but the known-drivers catalog list loads asynchronously, so checking
+    // catalogRow.isVisible() right after navigation can read "not visible yet" (the fetch hasn't
+    // resolved) as "already installed," which isn't what either element actually means. Wait for the
+    // page to settle into one of its two real starting states first.
+    await expect(catalogRow.or(driverRow)).toBeVisible({ timeout: 10_000 })
 
     if (await catalogRow.isVisible()) {
       await catalogRow.getByTestId(`admin-known-driver-version-${KNOWN_DRIVER_ID}`).fill('2.4.0')
       await catalogRow.getByTestId(`admin-known-driver-add-${KNOWN_DRIVER_ID}`).click()
-      await expect(page.getByTestId(`admin-driver-row-${KNOWN_DRIVER_ID}`)).toBeVisible({ timeout: 20_000 })
+      await expect(driverRow).toBeVisible({ timeout: 20_000 })
     } else {
       // Another spec in this same run already installed it (real full-suite ordering) — nothing to do.
-      await expect(page.getByTestId(`admin-driver-row-${KNOWN_DRIVER_ID}`)).toBeVisible()
+      await expect(driverRow).toBeVisible()
     }
   })
 
@@ -50,7 +58,12 @@ test.describe.serial('connection test preview (phase 177M)', () => {
 
     await page.goto(`/connections/${CONNECTION_NAME}`)
     await page.getByTestId('test-connection-button').click()
-    await expect(page.getByTestId('connection-test-result')).toContainText('reachable', { timeout: 20_000 })
+    const result = page.getByTestId('connection-test-result')
+    // Not .toContainText('reachable') — ConnectionTestCard's own failure text is "unreachable", which
+    // contains that exact substring, so a loose text match would report a genuine connection failure
+    // as a pass. The .dot-ok class is the actual succeeded/failed signal; asserting on that instead of
+    // string-matching text is what actually distinguishes the two.
+    await expect(result.locator('.dot-ok')).toBeVisible({ timeout: 20_000 })
 
     const details = page.getByTestId('connection-resolved-details')
     await expect(details).toBeVisible()

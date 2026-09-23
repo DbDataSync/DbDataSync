@@ -205,8 +205,13 @@ jobs:
             tests/DbDataSync.Web.Tests/package-lock.json
       - name: Start the databases
         # --wait blocks on the healthchecks docker-compose.yml already declares, so the suite never
-        # opens a connection to a SQL Server that is still coming up.
-        run: docker compose up -d --wait mssql-source mssql-target postgres
+        # opens a connection to a SQL Server that is still coming up. mysql added alongside the
+        # original three for connection-test-preview.spec.ts (phase 177M) — the only Playwright-level
+        # proof that IConnectionPreviewer's redaction actually reaches the console, and the only
+        # bundled catalog driver (mysql.generic) that exercises it, since every hand-written built-in
+        # (MsSql/Postgres) doesn't implement that interface. Found missing by a real CI failure (three
+        # in a row), not anticipated when that spec was added.
+        run: docker compose up -d --wait mssql-source mssql-target postgres mysql
       - name: Build the API and the worker
         # Debug, deliberately: playwright.config.ts's webServer runs
         # src/DbDataSync.Api/bin/Debug/net10.0/DbDataSync.Api.dll through `dotnet exec`, so a Release
