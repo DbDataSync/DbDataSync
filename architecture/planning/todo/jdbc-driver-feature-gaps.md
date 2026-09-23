@@ -48,6 +48,17 @@ reference, and a connection-preview + broadened exception-handling design for Te
 (not JDBC-only) all live there — and all four phase docs (174M-177M) are done. The template shape is still
 only proven against Postgres, per that doc's own open question.
 
+**Real gaps found after "done," each its own follow-up rather than left as prose here**:
+- `follow-up-jdbc-url-template-unreachable-from-driver-yaml.md` — the biggest one: no `driver.yaml`, hand-
+  authored or console-authored, can actually set `UrlTemplate`/`ConnectionStringKeys` today. The descriptor
+  schema never grew the fields, so the mechanism above is reachable only from direct C# construction.
+- `follow-up-jdbc-url-template-password-placeholder-validation.md` — a `{password}` token in a template
+  silently never matches instead of being rejected.
+- `follow-up-jdbc-connection-failure-test-coverage-gaps.md` — `isValid`'s two negative branches, and every
+  JDBC-through-the-console Playwright flow (including this doc's own "no operator-facing UI" item below),
+  have no real-failure test coverage; same root cause (no jar/`ikvm` fixture in the Web.Tests scratch repo)
+  as the JDBC create-path gap already named further down this file.
+
 ## No operator-facing UI or CLI support for a JDBC connection at all
 
 Grepped the SPA (`web/`) and `DriverTemplates.cs`: zero mentions of JDBC anywhere in either. Every JDBC

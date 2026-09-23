@@ -285,12 +285,21 @@ host/port/database/URL shape, chained messages — stays intact.
   more honest than a template that looks like it supports it but never will. **Still open as implemented**
   — 175M's `PlaceOrFallback` is simply never called for password, so a `{password}` token in a template
   today just sits there unsubstituted rather than being rejected; no descriptor-load-time validation was
-  added.
+  added. Given its own follow-up doc:
+  `architecture/planning/todo/follow-up-jdbc-url-template-password-placeholder-validation.md`.
 - `OutsideProperties` is always empty for a plain `GenericDriver` today (nothing routes through it) — worth
   confirming that's fine to leave as "always empty, not removed" rather than making it JDBC-only, since a
   future ADO.NET driver with its own out-of-connection-string properties could reuse the same field.
   **Confirmed, as implemented** — 176M kept it exactly this shape (`GenericDriver.PreviewConnection`
   always returns an empty dictionary), per this note's own reasoning.
+- **Found after "done," not anticipated by this design**: nothing built here is reachable from a
+  `driver.yaml` at all — the descriptor schema never grew `UrlTemplate`/`ConnectionStringKeys` fields, so
+  every phase 174M-177M mechanism only exists from direct C# construction (every test fixture). Its own
+  follow-up: `architecture/planning/todo/follow-up-jdbc-url-template-unreachable-from-driver-yaml.md`.
+- **Also found after "done"**: `isValid`'s two negative branches and every JDBC-through-the-console
+  Playwright flow have no real-failure test coverage (same root cause — no jar/`ikvm` fixture in the
+  Web.Tests scratch repo). Its own follow-up:
+  `architecture/planning/todo/follow-up-jdbc-connection-failure-test-coverage-gaps.md`.
 
 ## Cross-references
 
