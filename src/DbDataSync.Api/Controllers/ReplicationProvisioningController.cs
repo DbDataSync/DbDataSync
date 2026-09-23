@@ -41,9 +41,13 @@ public sealed class ReplicationProvisioningController(ProvisioningService provis
     /// fresh plan no longer contains: that comes back as an ordinary
     /// <see cref="ProvisioningStepOutcome.NoLongerNeeded"/> result, not a request failure.
     /// </summary>
-    // No explicit policy, matching ProvisioningController.Apply beside it — see that controller's
-    // routing test doc comment for why: the fallback policy (any authenticated user) is what every
-    // Apply endpoint in this app runs under today.
+    /// <remarks>Runs DDL. Was Admin-only only by the fallback policy — the comment this replaced
+    /// claimed the fallback was "any authenticated user," which is not what <c>Program.cs</c>'s
+    /// <c>AddAuthorizationBuilder</c> actually configures (<c>RequireAuthenticatedUser().RequireRole(Admin)</c>,
+    /// checked directly, not assumed). Not a behavior change: a Viewer could never reach this either
+    /// way. Stated explicitly now, matching <see cref="ProvisioningController.Apply"/> beside it and
+    /// every other Admin controller in this app.</remarks>
+    [Authorize(Policies.Admin)]
     [HttpPost("apply")]
     public async Task<ActionResult<ReplicationProvisioningApplyResult>> Apply(
         string replicationName, [FromBody] ApplyReplicationProvisioningRequest request,

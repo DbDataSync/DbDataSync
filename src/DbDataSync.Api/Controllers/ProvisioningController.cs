@@ -108,6 +108,11 @@ public sealed class ProvisioningController(ProvisioningService provisioningServi
     /// declaring it never matches, and this endpoint was unreachable until phase 40 tried to use it.
     /// The URL is unchanged; only what the segment is called is.
     /// </summary>
+    /// <remarks>Runs DDL. Was Admin-only only by the fallback policy (<c>Program.cs</c>'s own default
+    /// for anything unmarked) — stated explicitly here now, matching every other Admin controller in
+    /// this app, so a reader never has to know what today's fallback happens to be to know this one
+    /// needs it. Not a behavior change: a Viewer could never reach this.</remarks>
+    [Authorize(Policies.Admin)]
     [HttpPost("{provisioningAction}/apply")]
     public async Task<ActionResult<ApplyResult>> Apply(
         string replicationName, string mappingName, string provisioningAction, CancellationToken cancellationToken)
