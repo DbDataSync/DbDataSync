@@ -1,9 +1,12 @@
 # Follow-up: two gaps on the new-driver screen — a thin typeMap example, and the library picker eating the page
 
-Found reading `DriverEditPage`/`driverYamlAssembly.ts` after `driver-yaml-authoring-ui.md`'s core shipped.
-Both frontend-only. Documented to fix later, not fixed here.
+**Status, 2026-09-22**: both fixed. #2 shipped with one real correction from this doc's own plan — see its
+own note below: auto-closing the popup on install, as originally proposed here, turned out to be a real bug.
 
-## 1. `RAW_BODY_SKELETON`'s typeMap is one entry — not enough to actually start from
+Found reading `DriverEditPage`/`driverYamlAssembly.ts` after `driver-yaml-authoring-ui.md`'s core shipped.
+Both frontend-only.
+
+## 1. `RAW_BODY_SKELETON`'s typeMap is one entry — not enough to actually start from — fixed
 
 A brand-new driver's raw dialect/typeMap editor starts from `RAW_BODY_SKELETON`
 (`driverYamlAssembly.ts:95-100`):
@@ -56,13 +59,14 @@ example wholesale is already a large improvement over one entry; adding the miss
 extra lines (matching the `dialect:` block's own commenting style) would make it a genuinely complete
 reference rather than "one real driver's own subset."
 
-**Fix**: replace `RAW_BODY_SKELETON`'s `typeMap` (and give its `dialect` block the same commented-options
-treatment `mysql.generic.driver.yaml` already uses) with this fuller example — either lifted directly from
-the mysql resource file, or written fresh with all 17 kinds represented. A vendor-specific driver being
-authored will still need to edit the native type names on the left of every entry; the point is giving the
-operator a real, complete shape to edit rather than a single line to extrapolate the whole DSL from.
+**Fixed**: `RAW_BODY_SKELETON` now carries the full mysql example verbatim, its `dialect` block given the
+same commented-options treatment, plus a trailing commented block naming the six kinds the example doesn't
+use (`Boolean`, `Float`, `Time`, `TimestampTz`, `Guid`, `Xml`) so all 17 are represented, shown or named.
+Verified end to end, not just read back: `driver-authoring.spec.ts` creates a real driver through the form
+with this exact skeleton untouched, and the server-side `YamlDotNet` parse + `BuildDriver` round-trip both
+succeed — proof the comment styling and the extra kinds don't trip the real parser, not just a visual check.
 
-## 2. The library-install panel is always rendered, full size, whether or not it's needed
+## 2. The library-install panel is always rendered, full size, whether or not it's needed — fixed
 
 `DriverEditPage`'s ADO.NET branch (`DriverEditPage.tsx:147-164`) renders the "Library" `<select>` of
 already-installed libraries, then unconditionally renders the full `LibraryFindPanel` right below it —
@@ -72,14 +76,22 @@ amount of vertical space it takes as a dedicated page's entire body — for the 
 operator wants is already installed and just needs picking from the dropdown), that space is spent on
 something never touched.
 
-**Fix**: gate it behind a button — "Install a new library…" beside/below the `<select>` — that opens
-`LibraryFindPanel` in a popup instead of inline. No new modal machinery to build: `.modal-backdrop`/
-`.modal` are already real, styled, and used in this exact file's own dependency
-(`LibraryFindPanel.tsx`'s own `TrustInstallDialog`, `index.css` modal rules) — wrapping the existing
-`LibraryFindPanel` render in that same shell is the same pattern one level up, not a new one. `onInstalled`
-already exists as the exact callback that would also close the popup (`setForm({ ...form, library:
-installedId }); closePopup()`), so the component itself needs no change, only how `DriverEditPage`
-mounts it.
+**Fixed**: a button — "Install a new library…" beside the `<select>` — opens `InstallLibraryDialog`, which
+wraps the existing `LibraryFindPanel` in `.modal-backdrop`/`.modal`, the same shell
+`LibraryFindPanel.tsx`'s own `TrustInstallDialog` already built. `LibraryFindPanel` itself is unchanged.
+
+**A real bug in this doc's own plan, found by the Playwright spec, not by reading**: this doc originally
+proposed `onInstalled` both selecting the library *and* closing the popup in the same call
+(`setForm(...); closePopup()`) — built that way first, and `driver-authoring.spec.ts` immediately hung
+waiting for the "Installed" confirmation text that `LibraryFindPanel` shows on success. Root cause: closing
+the popup unmounts `LibraryFindPanel` (and the "Installed" text with it) in the *same* render pass as the
+success state that would have shown it — React batches both `setState` calls, so the confirmation never
+paints at all. The server-side install itself was fine throughout (confirmed via the webServer's own
+request log — `POST /api/libraries` returning `200` in ~1.3s every time); nothing wrong until the UI
+discarded its own success state before rendering it. Fixed by *not* auto-closing: `onInstalled` selects the
+library into the form immediately, but the dialog stays open until the operator closes it themselves,
+same as every other modal in this app — they get to see "Installed" (and, for a non-curated pick, the
+detected factory type) before it goes away.
 
 **Scoped to `DriverEditPage` only** — `LibrariesPage`'s own embedding is unchanged: that page's entire
 purpose *is* finding and installing a library, so keeping it inline there is correct; the popup is only for
@@ -87,7 +99,7 @@ the case where installing one is a small step inside a larger form that's usuall
 
 ## Where this applies
 
-Both are `DriverEditPage`-only changes; `driverYamlAssembly.ts`'s skeleton (item 1) is also read by the
-Playwright/unit tests that assert on its shape (`driverYamlAssembly.test.ts`,
-`driver-authoring.spec.ts`) — worth checking those don't assert on the exact current skeleton text before
-replacing it.
+Both are `DriverEditPage`-only changes. `driverYamlAssembly.test.ts` references `RAW_BODY_SKELETON` by
+symbol, not by hardcoded text, so it needed no changes for #1's content swap.
+`driver-authoring.spec.ts` needed real updates for #2's gating (open the popup before the quick-add chip
+is reachable; close it explicitly after seeing "Installed", instead of asserting it vanished on its own).

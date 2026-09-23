@@ -22,17 +22,23 @@ test.describe.serial('admin: driver authoring', () => {
     await page.getByTestId('driver-edit-id').fill(driverId)
     await page.getByTestId('driver-edit-display-name').fill('Authoring E2E driver')
 
-    // ADO.NET is the default; the mysql-connector quick-add chip installs+selects it inline. A library's
-    // id is always its real NuGet package id ("MySqlConnector"), never the catalog shorthand
+    // ADO.NET is the default. LibraryFindPanel is behind a popup now ("Install a new library…") rather
+    // than sitting inline — opened here, then the mysql-connector quick-add chip installs+selects it. A
+    // library's id is always its real NuGet package id ("MySqlConnector"), never the catalog shorthand
     // ("mysql-connector") the chip is labeled with — every install path agrees on this now (see
     // follow-up-library-install-paths-disagree-on-the-resulting-library-id.md).
+    await page.getByTestId('driver-edit-open-install-library').click()
     const chip = page.getByTestId('admin-libraries-chip-mysql-connector')
     await expect(chip).toBeVisible()
     await chip.click()
     await page.getByTestId('admin-libraries-command-version').fill('2.4.0')
     await page.getByTestId('admin-libraries-install-button').click()
     await expect(page.getByTestId('admin-libraries-install-command')).toContainText('Installed', { timeout: 15_000 })
-    await page.getByTestId('driver-edit-library-select').selectOption('MySqlConnector')
+    // The form already has the library selected (DriverEditPage's own onInstalled fires on success),
+    // but the dialog itself stays open until closed explicitly — the "Installed" confirmation above is
+    // worth seeing rather than the popup vanishing the instant the install call resolves.
+    await page.getByTestId('driver-edit-install-library-close').click()
+    await expect(page.getByTestId('driver-edit-library-select')).toHaveValue('MySqlConnector')
 
     await page.getByTestId('driver-edit-kind-Watermark').check()
     await page.getByTestId('driver-edit-kind-StagingTable').check()

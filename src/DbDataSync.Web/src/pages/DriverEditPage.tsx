@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { CodeEditor } from '../components/CodeEditor'
@@ -52,6 +52,10 @@ export function DriverEditPage() {
 
   const [form, setForm] = useState<FormState>(EMPTY)
   const [saveError, setSaveError] = useState<unknown>(null)
+  // LibraryFindPanel is the full chips+search+install flow LibrariesPage uses as its whole page body —
+  // too much of this form to show unconditionally when the common case (the library is already
+  // installed) never touches it. Gated behind a popup instead; closed automatically once a pick lands.
+  const [installPanelOpen, setInstallPanelOpen] = useState(false)
   // Which driver's yaml the form was last populated from — React's own "adjust state during render"
   // pattern (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
   // rather than an effect: setState here runs before the browser paints, avoiding the extra render an
@@ -147,20 +151,38 @@ export function DriverEditPage() {
             {form.base === 'adonet' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <Field label="Library">
-                  <select
-                    className="input"
-                    value={form.library}
-                    onChange={(e) => setForm({ ...form, library: e.target.value })}
-                    data-testid="driver-edit-library-select"
-                  >
-                    <option value="">Choose an installed library…</option>
-                    {(libraries ?? []).map((l) => <option key={l.id} value={l.id}>{l.id}</option>)}
-                  </select>
+                  <div className="row" style={{ gap: 10 }}>
+                    <select
+                      className="input"
+                      value={form.library}
+                      onChange={(e) => setForm({ ...form, library: e.target.value })}
+                      data-testid="driver-edit-library-select"
+                    >
+                      <option value="">Choose an installed library…</option>
+                      {(libraries ?? []).map((l) => <option key={l.id} value={l.id}>{l.id}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn-link"
+                      style={{ flexShrink: 0 }}
+                      onClick={() => setInstallPanelOpen(true)}
+                      data-testid="driver-edit-open-install-library"
+                    >
+                      Install a new library…
+                    </button>
+                  </div>
                 </Field>
-                <LibraryFindPanel
-                  installedIds={installedLibraryIds}
-                  onInstalled={(installedId) => setForm({ ...form, library: installedId })}
-                />
+                {installPanelOpen && (
+                  <InstallLibraryDialog
+                    installedIds={installedLibraryIds}
+                    // Selects the library into the form immediately, but leaves the dialog open —
+                    // LibraryFindPanel's own "Installed" confirmation (and, for a non-curated pick, the
+                    // detected factory type) is worth seeing rather than the popup vanishing the instant
+                    // the install call resolves. The operator closes it themselves once they've seen it.
+                    onInstalled={(installedId) => setForm({ ...form, library: installedId })}
+                    onCancel={() => setInstallPanelOpen(false)}
+                  />
+                )}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -238,6 +260,37 @@ export function DriverEditPage() {
         </div>
       </div>
     </AppShell>
+  )
+}
+
+/** `LibraryFindPanel` in the same `.modal-backdrop`/`.modal` shell `LibraryFindPanel.tsx`'s own
+ * `TrustInstallDialog` already built — the popup this form's "Install a new library…" button opens,
+ * instead of the panel sitting inline and full-size whether or not it's ever touched. */
+function InstallLibraryDialog({ installedIds, onInstalled, onCancel }: {
+  installedIds: Set<string>
+  onInstalled: (id: string) => void
+  onCancel: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+      <div className="modal wide" role="dialog" aria-modal="true" aria-label="Install a library" data-testid="driver-edit-install-library-dialog">
+        <div className="card-head">
+          <span className="card-title">Install a library</span>
+          <button type="button" className="btn-link quiet" style={{ marginLeft: 'auto' }} onClick={onCancel} data-testid="driver-edit-install-library-close">
+            Close
+          </button>
+        </div>
+        <div className="card-body">
+          <LibraryFindPanel installedIds={installedIds} onInstalled={onInstalled} />
+        </div>
+      </div>
+    </div>
   )
 }
 

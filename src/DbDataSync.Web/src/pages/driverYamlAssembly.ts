@@ -91,13 +91,43 @@ export function parseDriverYaml(yaml: string): ParsedDriverYaml {
 }
 
 /** The skeleton a brand-new driver's raw body starts from — enough of a shape to edit rather than a
- * blank page, matching every other block-style dialect this repo's own `driver.yaml`s use. */
+ * blank page, matching every other block-style dialect this repo's own `driver.yaml`s use. The typeMap
+ * here is lifted from the bundled `mysql.generic.driver.yaml` resource — a real, complete example
+ * covering every shape `TypeMapEntryYaml`'s DSL actually has (a bare scalar, the `(p,s)`-placeholder
+ * substitution form, a `{ kind, length, unicode }` object, and a `{ kind, max }` object) rather than the
+ * single `int: Int32` line this used to be, plus a commented reminder of the canonical kinds that
+ * example doesn't happen to use. Every native type name on the left still has to be edited for whatever
+ * engine is actually being described — the point is giving a real shape to edit, not a finished map. */
 export const RAW_BODY_SKELETON = `dialect:
-  quoteIdentifier: doubleQuote
-  parameterPrefix: "@"
-  rowLimit: limitOffset
+  quoteIdentifier: doubleQuote        # doubleQuote | backtick | bracket
+  parameterPrefix: "@"                # "@" -> @p , ":" -> :p , "?" -> positional
+  rowLimit: limitOffset               # limitOffset (LIMIT n OFFSET m) | offsetFetch (OFFSET..FETCH)
+  # catalog: query                    # uncomment (+ a metadataQueries block) if information_schema
+                                       # doesn't fit this engine
+
+# Native type name (with its (p,s) args) -> canonical. Anything unlisted -> Unmappable, which
+# provisioning reports as unsupported rather than guessing a rendering. Edit the native names on the
+# left for the engine this driver is actually for — these are MySQL's, as a worked example.
 typeMap:
-  int: Int32`
+  tinyint:        Int8
+  smallint:       Int16
+  int:            Int32
+  bigint:         Int64
+  "decimal(p,s)": { kind: Decimal, precision: p, scale: s }
+  double:         Double
+  "varchar(n)":   { kind: String, length: n, unicode: true }
+  text:           { kind: String, max: true }
+  datetime:       Timestamp
+  date:           Date
+  json:           Json
+  blob:           { kind: Binary, max: true }
+  # Canonical kinds this example doesn't use — add if this engine needs them:
+  # bit:               Boolean
+  # real:              Float
+  # time:              Time
+  # timestamptz:       TimestampTz
+  # uniqueidentifier:  Guid
+  # xml:               Xml`
 
 export function assembleDriverYaml(form: {
   id: string
