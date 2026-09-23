@@ -141,3 +141,28 @@ of sleeping a guessed duration; `NextClockTickAsync` is removed. This proves the
 distinct mapping points) rather than betting a delay is long enough, on this runner and every future one. **Not proven:** that
 CI stays green on this class over several runs — that's still the thing to watch, and if `ScanUntilPastAsync` itself times out
 often, that's new information about the real granularity worth its own follow-up.
+
+## `ScanUntilPastAsync` itself timed out (2026-09-23, run `35854242228`) — widened, not re-guessed
+
+`ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid` failed with `ScanUntilPastAsync`'s own
+`TimeoutException` after its 30s deadline — "new information about the real granularity worth its own follow-up," exactly
+as predicted above. What the message showed: every scan attempt in the window completed without error (no `IsScanBusy`
+exhaustion, no unhandled `SqlException`) and reported the identical `latest` value throughout — the polling loop itself
+was working correctly, it just never observed the write within 30 real seconds. Given tests in this assembly already run
+one at a time (`[assembly: CollectionBehavior(DisableTestParallelization = true)]`, `AssemblyInfo.cs`), that rules out
+CDC-capture contention *between test classes* — the likelier story is CDC's own log-scan catch-up latency occasionally
+running long under the CI runner's I/O contention (six database containers sharing one host), which a forced `sp_cdc_scan`
+reduces but does not eliminate.
+
+Considered and dropped, checked live rather than assumed: a diagnostic comparing `sys.fn_cdc_get_max_lsn()` against
+`cdc.lsn_time_mapping`'s own `MAX(start_lsn)`, on the theory the former reads the live transaction log independent of
+CDC's own capture. A throwaway probe against a real CDC-enabled table showed the two are identical before and after a
+scan — `fn_cdc_get_max_lsn()` is sourced from `cdc.lsn_time_mapping` itself, so that comparison would always read "nothing
+unmapped." Not shipped.
+
+**Applied**: `ScanUntilPastAsync`'s deadline widened 30s → 90s — the same shape as this repo's own `c66b834`
+(`UpdateConfirmationServiceTests`'s deadline raise for a slow Windows runner): patience spent only when a run is about to
+fail, not a cost on the happy path. `DiagnoseAsync` now also reports how many scan attempts ran and
+`cdc.lsn_time_mapping`'s total row count, so a future timeout (if any) can distinguish "many fast attempts, genuinely
+nothing new" from "attempts themselves were slow" — the one thing this occurrence's own diagnostics couldn't say. **Not
+proven**: whether 90s is enough under worse contention than this one occurrence saw — still the thing to watch.

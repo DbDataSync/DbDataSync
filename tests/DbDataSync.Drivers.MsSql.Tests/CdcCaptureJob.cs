@@ -84,6 +84,8 @@ internal static class CdcCaptureJob
         return result is DateTime time ? time : DateTime.MinValue;
     }
 
+    private static readonly TimeSpan ScanUntilPastDeadline = TimeSpan.FromSeconds(90);
+
     /// <summary>
     /// Re-scans until <c>cdc.lsn_time_mapping</c> records a transaction strictly after
     /// <paramref name="after"/> — proof the next tracked change will map to a genuinely later time,
@@ -93,20 +95,36 @@ internal static class CdcCaptureJob
     /// actually governs how often a mapping point advances is coarser or load-dependent, and worth
     /// checking for rather than out-waiting (see
     /// architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md).
+    /// <para>
+    /// The deadline was originally 30s; run <c>35854242228</c> (2026-09-23) timed out at 30s with every
+    /// attempt in the window reporting the identical <c>latest</c> value — every individual scan
+    /// completed (no exception, so <see cref="ScanAsync"/>'s own busy-retry never ran out either), just
+    /// none of them saw the write this method was told to wait for. That is consistent with CDC's log
+    /// scan itself occasionally lagging behind a just-committed transaction under I/O-contended CI (six
+    /// database containers sharing one runner), not with the polling loop being wrong — so the deadline
+    /// widened (patience only spent when a run is about to fail; the diagnostic below now reports how
+    /// many attempts actually ran, which a 30s-and-still-stuck case couldn't distinguish from "scanning
+    /// fast but finding nothing" versus "each scan itself was slow").
+    /// </para>
     /// </summary>
     public static async Task<DateTime> ScanUntilPastAsync(SqlConnection connection, DateTime after)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        var deadline = DateTime.UtcNow + ScanUntilPastDeadline;
+        var attempts = 0;
         while (true)
         {
+            attempts++;
             var latest = await ScanAsync(connection);
             if (latest > after)
                 return latest;
 
             if (DateTime.UtcNow >= deadline)
+            {
                 throw new TimeoutException(
-                    $"cdc.lsn_time_mapping did not record a transaction after {after:O} within 30s "
-                    + $"(latest seen: {latest:O}). {await DiagnoseAsync(connection)}");
+                    $"cdc.lsn_time_mapping did not record a transaction after {after:O} within "
+                    + $"{ScanUntilPastDeadline.TotalSeconds:0}s ({attempts} scan attempts, latest seen: "
+                    + $"{latest:O}). {await DiagnoseAsync(connection)}");
+            }
 
             await Task.Delay(TimeSpan.FromMilliseconds(100));
         }
@@ -158,6 +176,16 @@ internal static class CdcCaptureJob
     /// <summary>
     /// A one-line snapshot of the capture job and CDC's scan errors, for a timeout message — so a
     /// genuinely dead Agent is no longer indistinguishable from a slow one.
+    /// <para>
+    /// Tried and dropped, checked live rather than assumed (after run <c>35854242228</c>'s timeout):
+    /// comparing <c>sys.fn_cdc_get_max_lsn()</c> against <c>MAX(start_lsn)</c> from
+    /// <c>cdc.lsn_time_mapping</c>, on the theory that the former reads the live transaction log's own
+    /// current end and would reveal whether the log had more to give than CDC had scanned. A throwaway
+    /// probe against a real CDC-enabled table showed <c>fn_cdc_get_max_lsn()</c> reads the *same*
+    /// value as <c>MAX(start_lsn)</c> — before a newly-inserted row's scan and after, identically — so
+    /// it is sourced from <c>cdc.lsn_time_mapping</c> itself, not an independent view of the log. That
+    /// comparison would always report "nothing unmapped," which is not a diagnostic, so it isn't here.
+    /// </para>
     /// </summary>
     public static async Task<string> DiagnoseAsync(SqlConnection connection)
     {
@@ -168,7 +196,8 @@ internal static class CdcCaptureJob
                 SELECT
                     (SELECT COUNT(*) FROM msdb.dbo.sysjobs WHERE name LIKE N'cdc.%_capture' AND enabled = 1),
                     (SELECT COUNT(*) FROM sys.dm_cdc_errors),
-                    (SELECT TOP (1) error_message FROM sys.dm_cdc_errors ORDER BY entry_time DESC);
+                    (SELECT TOP (1) error_message FROM sys.dm_cdc_errors ORDER BY entry_time DESC),
+                    (SELECT COUNT(*) FROM cdc.lsn_time_mapping);
                 """;
             await using var reader = await cmd.ExecuteReaderAsync();
             if (!await reader.ReadAsync())
@@ -177,8 +206,10 @@ internal static class CdcCaptureJob
             var enabledJobs = reader.GetInt32(0);
             var errorCount = reader.GetInt32(1);
             var lastError = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var mappingRows = reader.GetInt32(3);
             return $"capture jobs enabled: {enabledJobs}; CDC scan errors: {errorCount}"
-                + (lastError is null ? "" : $" (last: {lastError})");
+                + (lastError is null ? "" : $" (last: {lastError})")
+                + $"; lsn_time_mapping rows: {mappingRows}";
         }
         catch (Exception ex)
         {
