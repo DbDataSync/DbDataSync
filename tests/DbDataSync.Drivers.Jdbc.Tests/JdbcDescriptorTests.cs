@@ -398,4 +398,66 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
         Assert.Equal("one", reader.GetName(0));
         Assert.Equal(1, reader.GetInt32(0));
     }
+
+    /// <summary>A double-quoted scalar — <c>testQuery: "select * from systable"</c>, a reported
+    /// real-world shape — parses identically to an unquoted one; YAML strips the delimiters.</summary>
+    [Fact]
+    public void ADoubleQuotedTestQuery_ParsesToTheUnquotedText()
+    {
+        const string yaml = """
+            id: quoted-testquery
+            displayName: Quoted testQuery probe
+            library: ikvm
+            base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc
+            jdbc:
+              driverClass: org.postgresql.Driver
+              driverJarPaths: [postgresql.jar]
+            testQuery: "select * from systable"
+            dialect:
+              quoteIdentifier: doubleQuote
+              parameterPrefix: "@"
+              rowLimit: limitOffset
+            capabilities:
+              readers: []
+              staging: []
+              writers: []
+            """;
+
+        var descriptor = DriverDescriptorReader.Deserialize(yaml);
+
+        Assert.Equal("select * from systable", descriptor.TestQuery);
+    }
+
+    /// <summary>
+    /// The one placement this project's own deserializer setup (no <c>IgnoreUnmatchedProperties</c> —
+    /// DriverDescriptorReader.cs's own <c>Deserializer</c>) does NOT tolerate: nested under <c>jdbc:</c>
+    /// rather than at the top level. <c>JdbcDescriptorYaml</c> has no <c>testQuery</c> property of its
+    /// own, so a key there is unmatched, and YamlDotNet throws rather than silently dropping it — this
+    /// pins that it throws (not silently ignores), since "the driver just never loaded" and "loaded fine
+    /// but dropped one field" are different bugs with different fixes.
+    /// </summary>
+    [Fact]
+    public void ATestQueryNestedUnderJdbc_IsRejectedRatherThanSilentlyDropped()
+    {
+        const string yaml = """
+            id: misplaced-testquery
+            displayName: Misplaced testQuery probe
+            library: ikvm
+            base: DbDataSync.Drivers.Jdbc.JdbcGenericDriver, DbDataSync.Drivers.Jdbc
+            jdbc:
+              driverClass: org.postgresql.Driver
+              driverJarPaths: [postgresql.jar]
+              testQuery: "select * from systable"
+            dialect:
+              quoteIdentifier: doubleQuote
+              parameterPrefix: "@"
+              rowLimit: limitOffset
+            capabilities:
+              readers: []
+              staging: []
+              writers: []
+            """;
+
+        Assert.ThrowsAny<YamlDotNet.Core.YamlException>(() => DriverDescriptorReader.Deserialize(yaml));
+    }
 }

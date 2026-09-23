@@ -180,15 +180,35 @@ public sealed class ConnectionsController(
             (open, _) = await connectionFactory.OpenAsync(name, cancellationToken);
             var connectMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
-            var result = await tester.TestAsync(open, cancellationToken);
+            var probe = await tester.TestAsync(open, cancellationToken);
+
+            // The connection's own override, falling back to the driver's default sample query — same
+            // as the capabilities response works out DefaultTestQuery. Attempted whenever one is
+            // configured, **not only when the driver's own generic probe above just succeeded** — a
+            // custom test query exists precisely to prove a connection works on an engine whose generic
+            // probe cannot: GenericDriverBase.TestAsync hardcodes a bare `SELECT 1`, which a JDBC-backed
+            // engine requiring every SELECT to name a table rejects outright with a parse error, on every
+            // single test, regardless of what testQuery is configured. Gating this on that probe's own
+            // success made the feature unusable for exactly the connections it exists to help. The
+            // connection is already known-open at this point (OpenAsync above), so there is nothing
+            // unsafe about trying anyway.
+            var testQuery = connection.TestQuery ?? tester.DefaultTestQuery;
+            var testQueryResult = string.IsNullOrWhiteSpace(testQuery)
+                ? null
+                : await testService.PreviewTestQueryAsync(open, name, testQuery, cancellationToken);
+
+            // Succeeded if *either* proves the connection is actually usable — the generic probe is one
+            // way to show that, a working test query is another, and an operator who configured one
+            // specifically because the other doesn't work on their engine should see it counted.
+            var succeeded = probe.Succeeded || testQueryResult is { Error: null };
+            var error = succeeded ? null : (testQueryResult?.Error ?? probe.Error);
 
             // Phase 109j item 5: the static, no-execution compatibility check's result surfaces here —
             // it's already computed (from `library install`/`config check` time), cheap, and in-process,
             // so a successful Test Connection is the natural place to mention it. Only on success: a
             // connection that can't even connect has a more pressing problem than a library warning.
             string? libraryWarning = null;
-            QueryPreviewResult? testQueryResult = null;
-            if (result.Succeeded)
+            if (succeeded)
             {
                 var compatibility = DriverLibraryCompatibility.Check(driver, libraryRegistry, apiOptions.RepoRoot);
                 if (compatibility is { Compatible: false })
@@ -198,20 +218,11 @@ public sealed class ConnectionsController(
                         $"{compatibility.MissingMembers.Count} member(s) this driver uses — " +
                         "Validate library for a full check.";
                 }
-
-                // The connection's own override, falling back to the driver's default sample query —
-                // same as ConnectionsController's own capabilities response works out DefaultTestQuery.
-                // Only attempted once reachability is already proven: a connection that can't even
-                // connect has nothing this would add, and running it here would just report the same
-                // failure a second time under a different label.
-                var testQuery = connection.TestQuery ?? tester.DefaultTestQuery;
-                if (!string.IsNullOrWhiteSpace(testQuery))
-                    testQueryResult = await testService.PreviewTestQueryAsync(open, name, testQuery, cancellationToken);
             }
 
             return Ok(BuildTestReport(
-                result.Succeeded, connectMs, result.RoundTrip.TotalMilliseconds, result.ServerVersion,
-                result.Error, libraryWarning, preview, credential, testQueryResult));
+                succeeded, connectMs, probe.RoundTrip.TotalMilliseconds, probe.ServerVersion,
+                error, libraryWarning, preview, credential, testQueryResult));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
