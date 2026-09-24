@@ -451,6 +451,26 @@ export function useColumns(
   })
 }
 
+/**
+ * Every declared relationship's own foreign-table columns, fetched live for the mapping editor's own
+ * pickers — phase 189J. `useQueries` rather than one `useColumns` per relationship, the same reason
+ * `useTableMappingDetails` below uses it: the count varies with how many relationships a mapping
+ * declares, and a hook cannot be called a variable number of times. Returned in the same order as
+ * `relationships`, so a caller zips the two by index.
+ */
+export function useRelationshipColumns(
+  connectionName: string | undefined, database: string | undefined,
+  relationships: { schema: string; table: string }[],
+) {
+  return useQueries({
+    queries: relationships.map((r) => ({
+      queryKey: keys.columns(connectionName ?? '', database ?? '', r.schema, r.table),
+      queryFn: () => api.metadata.columns(connectionName!, database!, r.schema, r.table),
+      enabled: !!connectionName && !!database && !!r.schema && !!r.table,
+    })),
+  })
+}
+
 export function useReplications() {
   return useQuery({ queryKey: keys.replications, queryFn: api.replications.list })
 }

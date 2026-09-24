@@ -1,12 +1,15 @@
 import { useState } from 'react'
-import { useColumns, useInferredColumnTypes } from '../../api/hooks'
+import { useColumns, useInferredColumnTypes, useRelationshipColumns } from '../../api/hooks'
 import { EditableValue } from '../../components/EditableValue'
-import type { ColumnMapping, ColumnMetadata, ResolvedRef } from '../../api/types'
+import type { ColumnMapping, ColumnMetadata, RelationshipConfig, ResolvedRef } from '../../api/types'
 
 interface Props {
   replicationName: string
   /** Undefined for a mapping that has not been saved yet — there is nothing on disk to infer from. */
   mappingName: string | undefined
+  /** A relationship's foreign table is always on this same connection/database (186J's own
+   * constraint) — where its own columns are fetched from. */
+  resolvedSource: ResolvedRef
   target: ResolvedRef
   mappings: ColumnMapping[]
   onChange: (mappings: ColumnMapping[]) => void
@@ -29,6 +32,9 @@ interface Props {
   /** A query source has no catalog, so an empty list here means "not previewed yet" rather than
    * "this table has no columns" — which are different things to tell an operator. */
   querySource: boolean
+  /** This mapping's own declared relationships — phase 186J/189J. Empty for every mapping that
+   * doesn't use this feature, which is every mapping saved before it existed. */
+  relationships: RelationshipConfig[]
 }
 
 const COLUMNS = '1fr 22px 1fr 0.95fr 1.15fr 74px'
@@ -51,8 +57,8 @@ const COLUMNS = '1fr 22px 1fr 0.95fr 1.15fr 74px'
  * columns is the only answer that makes the table that appears match the table that was described.
  */
 export function ColumnMappingEditor({
-  replicationName, mappingName, target, mappings, onChange, targetExists,
-  sourceColumns, querySource,
+  replicationName, mappingName, resolvedSource, target, mappings, onChange, targetExists,
+  sourceColumns, querySource, relationships,
 }: Props) {
   // Not asked for at all when the table is not there: the request would 404 and be retried, and the
   // answer is already known.
@@ -60,6 +66,13 @@ export function ColumnMappingEditor({
     target.connectionName, target.database, target.schema, targetExists === true ? target.table : undefined)
   const targetColumns = targetExists === false ? sourceColumns : catalogTargetColumns
   const { data: inferred } = useInferredColumnTypes(replicationName, mappingName)
+  // One request per relationship (`useQueries`, not one `useColumns` each — the count varies with how
+  // many a mapping declares) — see RelationshipsCard's own doc comment for why this is a live fetch
+  // rather than a read of the persisted `relationshipColumns` cache.
+  const relationshipColumnResults = useRelationshipColumns(
+    resolvedSource.connectionName, resolvedSource.database, relationships)
+  const relationshipColumnsByName: Record<string, ColumnMetadata[]> = {}
+  relationships.forEach((r, i) => { relationshipColumnsByName[r.name] = relationshipColumnResults[i]?.data ?? [] })
   const [columnToAdd, setColumnToAdd] = useState('')
   // Why the last Add was refused, shown beside the control. Surfaced rather than the input silently
   // doing nothing, which is indistinguishable from a broken button.
@@ -95,8 +108,24 @@ export function ColumnMappingEditor({
     )
   }
 
-  const typeOf = (name: string) => sourceColumns.find((c) => c.name === name)?.nativeType
+  // A relationship-sourced mapping's column lives in that relationship's own fetched list, never in
+  // sourceColumns — see RelationshipsCard's own doc comment for why the two are looked up separately.
+  const columnsFor = (m: ColumnMapping) =>
+    m.relationship ? (relationshipColumnsByName[m.relationship] ?? []) : sourceColumns
+  const typeOf = (m: ColumnMapping) => columnsFor(m).find((c) => c.name === m.sourceColumn)?.nativeType
+  const isKnownColumn = (m: ColumnMapping) => columnsFor(m).some((c) => c.name === m.sourceColumn)
   const inferenceFor = (sourceColumn: string) => inferred?.find((i) => i.sourceColumn === sourceColumn)
+  // Encodes which group a picked option came from into the <select>'s own value — a relationship's
+  // column can share a bare name with the primary table's (or another relationship's), so the name
+  // alone cannot tell two options apart the way a plain value would need to.
+  const encodeOption = (relationship: string | null | undefined, column: string) =>
+    relationship ? `${relationship}\u0000${column}` : column
+  const decodeOption = (value: string): { relationship: string | null; sourceColumn: string } => {
+    const sep = value.indexOf('\u0000')
+    return sep < 0
+      ? { relationship: null, sourceColumn: value }
+      : { relationship: value.slice(0, sep), sourceColumn: value.slice(sep + 1) }
+  }
   // For a table that does not exist yet this reads the source's key, which is what the generated
   // CREATE TABLE will carry over.
   const isPk = (name: string) => targetColumns.find((c) => c.name === name)?.isPrimaryKey
@@ -193,22 +222,37 @@ export function ColumnMappingEditor({
             <select
               className="select sm"
               style={{ maxWidth: 190 }}
-              value={m.sourceColumn}
-              onChange={(e) => updateRow(i, { sourceColumn: e.target.value })}
+              value={encodeOption(m.relationship, m.sourceColumn)}
+              onChange={(e) => {
+                const { relationship, sourceColumn } = decodeOption(e.target.value)
+                updateRow(i, { sourceColumn, relationship })
+              }}
               data-testid={`column-mapping-source-${i}`}
             >
               {/* A stored value the freshly loaded metadata does not have is shown as itself, marked.
                   Without this option present the browser silently renders the *first* one instead —
                   the state is unchanged, only the display lies — so a mapping could be resaved
                   against a column the operator never chose and never saw change. */}
-              {!sourceColumns.some((c) => c.name === m.sourceColumn) && (
-                <option value={m.sourceColumn}>
-                  {m.sourceColumn ? `${m.sourceColumn} — not on the source` : 'Select…'}
+              {!isKnownColumn(m) && (
+                <option value={encodeOption(m.relationship, m.sourceColumn)}>
+                  {!m.sourceColumn
+                    ? 'Select…'
+                    : m.relationship
+                      ? `${m.relationship} → ${m.sourceColumn} — not found`
+                      : `${m.sourceColumn} — not on the source`}
                 </option>
               )}
               {sourceColumns.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+              {relationships.map((r) => {
+                const cols = relationshipColumnsByName[r.name] ?? []
+                return cols.length === 0 ? null : (
+                  <optgroup key={r.name} label={r.name}>
+                    {cols.map((c) => <option key={c.name} value={encodeOption(r.name, c.name)}>{c.name}</option>)}
+                  </optgroup>
+                )
+              })}
             </select>
-            <span className="faint">{typeOf(m.sourceColumn)}</span>
+            <span className="faint">{typeOf(m)}</span>
           </span>
           <span className="faint">→</span>
           <span className="row" style={{ gap: 7, minWidth: 0 }}>

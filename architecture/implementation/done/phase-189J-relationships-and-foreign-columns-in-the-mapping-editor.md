@@ -1,10 +1,6 @@
 # Phase 189J — Relationships and foreign columns in the mapping editor
 
-**Status**: Planned, not started. Depends on `architecture/implementation/done/phase-186J-relationship-config-and-shared-reader-plumbing.md` (built)
-(needs `RelationshipConfig`, `ColumnMapping.Relationship`, and `RelationshipColumns` metadata to exist and
-be reachable through the API before there's anything real for this UI to read or write). Does not depend on
-187J/188J — the editor can be built and reviewed against saved config alone; the *result* of running a
-mapping that uses a relationship isn't needed to build the screen that declares one.
+**Status**: Built. See Retrospective.
 **Plan reference**: `phase-185J-declared-relationships-and-foreign-column-lookups.md` (superseded — its
 Open Question 2 named this as untraced; this doc is that tracing).
 
@@ -104,3 +100,73 @@ manual check once 187J/188J land that the rendered JOIN reads clearly in that po
   184M's own retrospective for the shape of that kind of assertion).
 - Manual check of the Preview SQL popup against a real mapping using a relationship, confirming the rendered
   `JOIN` is legible inline in the `SourceRead` stage's statement text.
+
+## Retrospective
+
+Built as designed, with the three open questions resolved and one real regression found and fixed by the
+existing Playwright suite — not assumed up front.
+
+**Open questions, resolved:**
+
+1. **Foreign schema/table picker**: not a shared component — `MappingSide.tsx`'s own "Table" picker is
+   inline JSX, not extracted. `RelationshipsCard.tsx`'s own picker mirrors its exact shape (an indexed
+   `<select>` over `useTables(connectionName, database)`'s result, schema and table set together from
+   the picked entry) rather than trying to share code across two screens with different surrounding
+   layout — the same "same idiom, not a shared component" judgment call this codebase already makes
+   elsewhere for near-identical pickers.
+2. **`<optgroup>`**: not used anywhere else in this codebase, and adopted here anyway rather than a
+   prefixed-label workaround — it is the native, semantically correct way to group a `<select>`'s
+   options, needs no new styling to render acceptably, and a prefixed-label string would have made the
+   encoded `relationship\u0000column` value (needed regardless, to disambiguate a relationship's column
+   from a same-named primary one — see below) redundant with the *visible* label doing the same job twice.
+3. **Reader-Kind gating**: not built. By the time this phase landed, 187J and 188J both already shipped,
+   covering every reader Kind this feature initially targets (batch reload, Watermark, Change Tracking,
+   CDC) — so the "what if 188J hasn't shipped yet" scenario the doc raised never materialized, and gating
+   the UI on reader Kind would have been speculative complexity for a gap that closed before this phase
+   started.
+
+**What was built, concretely**: `RelationshipsCard.tsx` (new) — a list editor, its own tab ahead of
+Column Mapping (a relationship has to exist before a column can be mapped through it). Each relationship
+row picks a foreign table from the same connection/database the primary source resolved to, and a
+repeatable join-key editor (local column from the primary table's own `sourceColumns`, foreign column
+fetched live for that specific relationship's table — via a new `useRelationshipColumns` hook,
+`useQueries`-based like the existing `useTableMappingDetails` precedent, since the number of relationships
+varies per mapping and a hook cannot be called a variable number of times). `ColumnMappingEditor.tsx`'s
+single flat `<select>` gained an `<optgroup>` per relationship alongside its existing ungrouped
+primary-table options, picking a grouped option now sets both `sourceColumn` and `relationship` in one
+update. `TableMappingForm.tsx` carries `relationships` as ordinary draft state, included in the dirty-check
+and the save payload the same way every other field is. No change to the persisted `relationshipColumns`
+cache path — 186J's own `refresh-metadata` endpoint (`CachedMetadataCard`'s existing "Refresh" button)
+already captures it server-side; this editor reads relationship columns live, the same way it already
+reads the primary source's and target's.
+
+**The real regression, found by the existing suite, not assumed**: the column `<select>`'s "not on the
+source" fallback option (for a saved mapping whose `sourceColumn` no longer matches anything real) had its
+wording changed to "not found" while adding the equivalent relationship-aware check — and
+`golden-path.spec.ts`'s own step 34 asserts the literal text `'not on the source'`. Caught by running the
+*existing* Playwright suite against this change, not by writing a new test for it: the fix keeps the
+original wording for a primary-table mapping and adds a distinct `"<relationship> → <column> — not found"`
+message only when the mapping actually names a relationship, so neither case lies about which table the
+missing column was expected on.
+
+**A second, smaller thing traced rather than assumed**: two `ColumnMapping`s can legitimately name the
+same bare column string from two different sources (a relationship's foreign table sharing a name with the
+primary table, or with another relationship — the exact collision 187J's own retrospective found to be the
+*common* case for a lookup table's own "Id"). A plain `value={m.sourceColumn}` on the `<select>` cannot
+tell those apart, so the option value is `relationship\u0000column` when relationship-sourced, decoded back
+into both fields on pick — checked by writing the encode/decode as pure functions and reading them back
+before wiring the `<select>`, not discovered as a live bug.
+
+**Verified for real**: `tsc -b` and `oxlint` clean (no new warnings in any touched file), `vitest run`
+86/86 (all pre-existing — no new unit tests were the right level for this feature; the round-trip claim is
+what a browser-driven test can prove and a unit test can only assert about internals). A new Playwright
+spec, `mapping-relationships.spec.ts`, stubbed at the network boundary like `mapping-column-add.spec.ts`'s
+own precedent: declares a relationship (name, foreign table, one join key) in the new card, maps a target
+column through it in Column Mapping, saves, and asserts on the actual PUT body — both the relationship
+declaration and the column mapping's `relationship` field survive, which is the thing "round-trips on
+reopening" actually has to prove, not something to infer from what the screen shows before a save.
+Confirmed by re-running the full, unfiltered `golden-path.spec.ts` (46/46, including the fixed step 34) and
+the broader mapping/column-tagged subset. **Not manually checked**: the Preview SQL popup's rendering of a
+real relationship JOIN inline in the SourceRead stage's statement text — the doc's own "worth a manual
+check" item, left for whoever next has a live browser session against a real relationship-using mapping,
+same as it was scoped.

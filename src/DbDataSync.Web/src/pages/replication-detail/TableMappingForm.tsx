@@ -10,7 +10,8 @@ import { tableExists } from '../../api/tableExists'
 import { canonicalJson } from '../../api/canonicalJson'
 import type {
   BatchReloadSegment, ColumnMapping, ColumnMetadata, ProvisioningConfig, ReadIntent, ReconcileConfig,
-  ReplicationTaskConfig, ResolvedRef, ScriptBindings, SourceTableSpec, TableMappingConfig, TableSpec,
+  RelationshipConfig, ReplicationTaskConfig, ResolvedRef, ScriptBindings, SourceTableSpec,
+  TableMappingConfig, TableSpec,
 } from '../../api/types'
 import { MappingSide } from './MappingSide'
 import { EndpointSidePair } from '../../components/EndpointSidePair'
@@ -22,6 +23,7 @@ import { NotesPanel } from '../../components/NotesPanel'
 import { SubTabs } from '../../components/SubTabs'
 import { useMappingTabs } from './mappingTabs'
 import { ProvisioningCard } from './ProvisioningCard'
+import { RelationshipsCard } from './RelationshipsCard'
 import { DefaultSegmentingCard } from './DefaultSegmentingCard'
 import { SourceFilterCard } from './SourceFilterCard'
 import { MappingPipelineCard, type PipelineOverrides } from './MappingPipelineCard'
@@ -85,6 +87,9 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   const [source, setSource] = useState<SourceTableSpec>(existing?.sources[0] ?? { ...emptySpec, filter: null })
   const [target, setTarget] = useState<TableSpec>(existing?.targets[0] ?? { ...emptySpec })
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(existing?.columnMappings ?? [])
+  const [relationships, setRelationships] = useState<RelationshipConfig[]>(
+    structuredClone(existing?.relationships ?? []),
+  )
   const [scripts, setScripts] = useState<ScriptBindings>(structuredClone(existing?.scripts ?? {}))
   const [notes, setNotes] = useState<string | null>(existing?.notes ?? null)
   const [traceTiming, setTraceTiming] = useState(existing?.traceTiming ?? false)
@@ -219,7 +224,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
    * dirty as soon as it is valid.
    */
   const draftShape = canonicalJson({
-    name, source, target, columnMappings, scripts, provisioning, defaultSegmenting,
+    name, source, target, columnMappings, relationships, scripts, provisioning, defaultSegmenting,
     notes, traceTiming, defaultReadIntent,
     readerOverride: pipeline.readerOverride,
     cacheOverride: pipeline.cacheOverride,
@@ -234,6 +239,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     source: existing.sources[0] ?? { ...emptySpec, filter: null },
     target: existing.targets[0] ?? { ...emptySpec },
     columnMappings: existing.columnMappings ?? [],
+    relationships: existing.relationships ?? [],
     scripts: existing.scripts ?? {},
     provisioning: existing.provisioning ?? inheritedProvisioning,
     defaultSegmenting: existing.defaultSegmenting ?? [],
@@ -283,7 +289,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
         // across explicitly — verification checks and hooks are both edited elsewhere, and were
         // being dropped by a save from here.
         ...existing,
-        name, sources: [source], targets: [target], columnMappings, scripts, provisioning,
+        name, sources: [source], targets: [target], columnMappings, relationships, scripts, provisioning,
         defaultSegmenting, notes, traceTiming, defaultReadIntent, ...pipeline, reconcileOverride,
         sourceColumns: captureFor(sourceColumns, existing?.sourceColumns, sourceTableChanged),
         // `catalogTargetColumns`, not `targetColumns` — the latter falls back to the *source's*
@@ -385,6 +391,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
             replicationName, existing, resolvedSource, resolvedTarget, targetExists,
             targetChangedSinceSave, connections: connections ?? [], task,
             columnMappings, setColumnMappings,
+            relationships, setRelationships,
             sourceColumns, querySource,
             scripts, setScripts,
             defaultSegmenting, setDefaultSegmenting,
@@ -414,6 +421,8 @@ export interface MappingEditorContext {
   task: ReplicationTaskConfig | undefined
   columnMappings: ColumnMapping[]
   setColumnMappings: (next: ColumnMapping[]) => void
+  relationships: RelationshipConfig[]
+  setRelationships: (next: RelationshipConfig[]) => void
   /** The source's columns as this form resolved them — the catalog's, or the query preview's for a
    * source that has no catalog. Undefined while the catalog call is still in flight. */
   sourceColumns: ColumnMetadata[] | undefined
@@ -447,14 +456,15 @@ export function MappingNotesTab() {
 
 export function ColumnMappingTab() {
   const {
-    replicationName, existing, resolvedTarget, columnMappings, setColumnMappings,
-    targetExists, sourceColumns, querySource,
+    replicationName, existing, resolvedSource, resolvedTarget, columnMappings, setColumnMappings,
+    targetExists, sourceColumns, querySource, relationships,
   } = useOutletContext<MappingEditorContext>()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <ColumnMappingEditor
         replicationName={replicationName}
+        resolvedSource={resolvedSource}
         sourceColumns={sourceColumns}
         querySource={querySource}
         // The saved name, not the draft one: the inferred-type endpoint reads config off disk, and a
@@ -464,12 +474,31 @@ export function ColumnMappingTab() {
         mappings={columnMappings}
         onChange={setColumnMappings}
         targetExists={targetExists}
+        relationships={relationships}
       />
       {/* Below the editor rather than on a tab of its own: the cache is the same five facts about
           the same two tables that this grid is showing, and a screen an operator has to go looking
           for is one they will not think to refresh. */}
       <CachedMetadataCard replicationName={replicationName} existing={existing} />
     </div>
+  )
+}
+
+/**
+ * Declaring named joins to other tables on the same connection — phase 186J/189J. Its own tab, ahead
+ * of Column Mapping: a relationship has to exist before a column mapping can be picked through it, the
+ * same ordering the tab list itself follows.
+ */
+export function MappingRelationshipsTab() {
+  const { resolvedSource, sourceColumns, relationships, setRelationships } = useOutletContext<MappingEditorContext>()
+
+  return (
+    <RelationshipsCard
+      resolvedSource={resolvedSource}
+      sourceColumns={sourceColumns}
+      relationships={relationships}
+      onChange={setRelationships}
+    />
   )
 }
 

@@ -217,6 +217,35 @@ export interface ColumnMapping {
    * has renamed, which is nearly all of them.
    */
   renames?: RenameStep[]
+
+  /**
+   * Which `RelationshipConfig` (by `name`) this column comes from — absent (the default) means
+   * `sourceColumn` names a column on the mapping's own primary source table. Set, `sourceColumn`
+   * instead names a column on that relationship's foreign table. See phase 186J/189J.
+   */
+  relationship?: string | null
+}
+
+/** One equality condition a relationship's join is built from — the mapping's own primary source
+ * column on the left, the foreign table's column on the right. Ties are ANDed within a relationship,
+ * expressed as more than one entry rather than a delimited string. */
+export interface RelationshipJoinKey {
+  localColumn: string
+  foreignColumn: string
+}
+
+/**
+ * A named relationship from this mapping's own primary source table to a foreign table on the same
+ * connection and database — phase 186J. Declared per mapping, joined as a plain `LEFT JOIN` the reader
+ * renders itself. A self-join (`schema`/`table` equal to the mapping's own primary source) is ordinary,
+ * not a special case.
+ */
+export interface RelationshipConfig {
+  name: string
+  schema: string
+  table: string
+  /** ANDed together. At least one is required to save. */
+  joinKeys: RelationshipJoinKey[]
 }
 
 /** One rename of a target column. `applied` records whether provisioning has run it. */
@@ -301,6 +330,10 @@ export interface TableMappingConfig {
   sources: SourceTableSpec[]
   targets: TableSpec[]
   columnMappings: ColumnMapping[]
+  /** Named joins from this mapping's own primary source table to a foreign table, for a
+   * `ColumnMapping` to pull a column through via `ColumnMapping.relationship` — phase 186J. Empty (or
+   * absent) for every mapping that doesn't use this feature. */
+  relationships?: RelationshipConfig[]
   scripts?: ScriptBindings
   hooks?: Hooks
   provisioning?: ProvisioningConfig
@@ -347,6 +380,10 @@ export interface TableMappingConfig {
    */
   sourceColumns?: ColumnMetadata[]
   targetColumns?: ColumnMetadata[]
+  /** Each declared `RelationshipConfig`'s own foreign table's shape, keyed by its `name` — the same
+   * cache-on-refresh treatment as `sourceColumns`/`targetColumns` above, captured by the same refresh
+   * action. Empty for a mapping with no relationships. */
+  relationshipColumns?: Record<string, ColumnMetadata[]>
   /** When the two lists above were last written. Null for a mapping nobody has captured. */
   columnsCapturedUtc?: string | null
   /** What this mapping reads next, in place of the replication's `defaultReadIntent`. Null means
