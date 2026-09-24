@@ -220,3 +220,71 @@ idle/fast containers don't reproduce the original stall either way, so this is p
 fix; the real proof is whether this class of failure recurs on CI. **Not proven**: whether the hammering theory is
 actually correct — only that it's a real, justified inefficiency this removes regardless, and a materially different
 change from "wait longer" the next occurrence (if any) will distinguish from a still-open mystery.
+
+## 2026-09-23 (again): the exact `sp_replcmds` collision recurred through the "stop hammering" fix — both tests disabled
+
+CI run `35947908766` (commit `763c6e7`, an unrelated query-source feature push — nothing in that commit touches
+`Scd2CdcGuaranteedDeliveryIntegrationTests`, `CdcCaptureJob`, or CDC provisioning), job `dotnet-integration`:
+**both** tests in this class failed, in the same run, with the same signature `4916d9a` ("stop hammering
+`sp_repldone`") was supposed to have fixed:
+
+```
+APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation:
+  cdc.lsn_time_mapping did not record a transaction after 2026-09-24T02:40:24.7200000 within 90s
+  (796 scan attempts, latest seen: 2026-09-24T02:40:24.7200000). capture jobs enabled: 1;
+  CDC scan errors: 1 (last: Another connection with session ID 79 is already running 'sp_replcmds'
+  for Change Data Capture in the current database.); lsn_time_mapping rows: 5
+
+ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid:
+  cdc.lsn_time_mapping did not record a transaction after 2026-09-24T02:41:55.2170000 within 90s
+  (832 scan attempts, latest seen: 2026-09-24T02:41:55.2170000). capture jobs enabled: 1;
+  CDC scan errors: 1 (last: Another connection with session ID 79 is already running 'sp_replcmds'
+  for Change Data Capture in the current database.); lsn_time_mapping rows: 10
+```
+
+This is the same "Another connection ... already running 'sp_replcmds'" message the 17:40 2026-09-23 occurrence
+had, which `4916d9a` diagnosed as `ScanUntilPastAsync` re-issuing `sp_repldone @reset = 1` on every 100ms retry
+and fixed by releasing the log reader once instead of every poll. That fix is still in place and still verified
+locally (three back-to-back green runs of the full class at the time). The identical error message recurring
+under it means either the fix only narrowed the window rather than closing it, or session ID 79 in this run
+belongs to something else entirely contending for the same capture job (this environment shares CDC-enabled
+databases across six containers per the earlier "I/O contention" theory) — not established, and not chased
+further here.
+
+**Six real fix attempts, over four days, have not produced a stable green class**: the 30ms clock-tick delay
+(falsified), the verified-wait replacing it (still timing out), the 30s→90s deadline widen (falsified by 777
+identical-latest attempts), the hammering fix for the exact error seen again just now, plus two deadline/CDC
+scan-error diagnostics improvements along the way. Each fix was real and justified on its own evidence — none
+of this doc's "Applied" sections were guesses — and each was independently falsified by the next occurrence.
+That pattern, not any single failure, is the reason to stop here rather than attempt a seventh.
+
+### Decision: both tests disabled, not deleted
+
+Per policy going forward for any CDC-related test failure (recorded in `[[cdc-test-flake-policy]]`): a failing
+CDC test gets its failure documented here (or in its own follow-up doc, if it's not already tracked), then is
+disabled with `[Fact(Skip = "...")]` naming this doc, rather than left red or fixed-and-hoped. `dotnet-integration`
+does not get to stay a coin flip while this is investigated properly, off the CI critical path.
+
+- `APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation` — **disabled**, `763c6e7`'s
+  follow-up commit.
+- `ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid` — **disabled**, same commit.
+
+Both are the entire `Scd2CdcGuaranteedDeliveryIntegrationTests` class — nothing is left running in it.
+
+### Bar for re-enabling: 20 consecutive clean runs, in isolation, before touching CI again
+
+Whoever picks this up next does not get to re-enable on "the fix looks right" — every prior fix in this doc
+looked right and was falsified by CI within days. Before flipping `Skip` back off:
+
+1. Run the specific test **alone** (`dotnet test --filter FullyQualifiedName~<TestName>`, not the whole class
+   or assembly) against a real SQL Server container, **20 consecutive times with no failure**. Isolation matters
+   because the leading theory for the latest recurrence is contention from *something else* sharing the capture
+   job — running solo removes that variable and tests the mechanism itself.
+2. Only after 20/20 solo: run the full `Scd2CdcGuaranteedDeliveryIntegrationTests` class back to back a further
+   few times (this doc's existing bar) to catch any within-class interaction.
+3. Only after both: remove the `Skip`, push, and watch the next several `dev` `dotnet-integration` runs — the
+   thing every prior "Applied" section in this doc called "not yet proven" and was each time proven wrong.
+
+Fewer than 20 solo runs is exactly the amount of confidence every earlier "Applied" section in this doc already
+had before being falsified. This is a stricter bar than this project's usual "verified" language, chosen
+deliberately because that language has now been wrong six times on this exact class.
