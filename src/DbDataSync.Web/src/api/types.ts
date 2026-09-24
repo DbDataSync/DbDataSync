@@ -1768,6 +1768,10 @@ export interface QueryPreviewResult {
   truncated: boolean
   /** What the engine said about a query that would not run. Not a failed request — an answer. */
   error: string | null
+  /** The query's own result-set shape, read off the real DataReader (native type, nullability, key,
+   * identity) — not a guess. Null when the query failed before a reader existed, or when the
+   * provider's own schema call isn't supported; a caller falls back to name-only metadata then. */
+  columnMetadata: ColumnMetadata[] | null
 }
 
 // Updating this installation from the console — phase 159. Phases are the server's, lower-cased: an update is

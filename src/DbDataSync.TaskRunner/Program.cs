@@ -4,6 +4,7 @@ using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.DuckDb;
+using DbDataSync.Drivers.Generic;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.MySql;
 using DbDataSync.Drivers.Oracle;
@@ -40,11 +41,24 @@ var libraryRegistry = new LibraryRegistry(options.RepoRoot).LoadAll();
 var driverRegistry = new DriverRegistry();
 // The scripted reader is composed here rather than inside a driver, because it needs the script host
 // and a driver must not depend on Roslyn.
-driverRegistry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
-driverRegistry.RegisterWithScripting(new PostgresDriver(), scriptHost);
-driverRegistry.RegisterWithScripting(new MySqlDriver(), scriptHost);
-driverRegistry.RegisterWithScripting(new OracleDriver(), scriptHost);
-driverRegistry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
+var msSqlDriver = new MsSqlDriver();
+var postgresDriver = new PostgresDriver();
+var mySqlDriver = new MySqlDriver();
+var oracleDriver = new OracleDriver();
+var duckDbDriver = new DuckDbDriver();
+driverRegistry.RegisterWithScripting(msSqlDriver, scriptHost);
+driverRegistry.RegisterWithScripting(postgresDriver, scriptHost);
+driverRegistry.RegisterWithScripting(mySqlDriver, scriptHost);
+driverRegistry.RegisterWithScripting(oracleDriver, scriptHost);
+driverRegistry.RegisterWithScripting(duckDbDriver, scriptHost);
+// A raw-query source ("a mapping's source is a query I wrote, not a table") — DuckDb is skipped by
+// this call itself (RawQueryRegistration's own doc comment): it already offers the identical
+// capability under its own DuckDbQueryReader/"DuckDbQuery" Kind.
+driverRegistry.RegisterWithRawQuery(msSqlDriver);
+driverRegistry.RegisterWithRawQuery(postgresDriver);
+driverRegistry.RegisterWithRawQuery(mySqlDriver);
+driverRegistry.RegisterWithRawQuery(oracleDriver);
+driverRegistry.RegisterWithRawQuery(duckDbDriver);
 DriverLoader.LoadDescriptorDrivers(options.RepoRoot, libraryRegistry, driverRegistry);
 DriverLoader.LoadCompiledDrivers(options.RepoRoot, driverRegistry);
 

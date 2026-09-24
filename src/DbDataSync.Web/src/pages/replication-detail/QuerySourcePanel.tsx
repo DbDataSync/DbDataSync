@@ -93,10 +93,10 @@ function QueryEditorDialog({
     // Only on a query that ran. A failed preview leaves the last good columns in place rather than
     // emptying the column-mapping tab underneath an operator who is mid-edit and mid-typo.
     if (!next.error)
-      onColumns(next.columns.map((name) => ({
-        // The result set says what the columns are called and nothing else — a preview reports no
-        // types, no nullability and no keys. Stated as blanks rather than guessed from the sample
-        // values, which would be a type inferred from three rows and wrong on the fourth.
+      onColumns(next.columnMetadata ?? next.columns.map((name) => ({
+        // The provider's own schema call didn't come back (older server, or a provider that doesn't
+        // implement it) — the same blank-guess fallback this feature is additive to, rather than a
+        // type inferred from the sample values, which would be right by luck and wrong on row four.
         name, nativeType: '', isNullable: true, isPrimaryKey: false, isIdentity: false,
       })))
   }

@@ -8,8 +8,16 @@ import type { PipelineOverrides } from './MappingPipelineCard'
  * is the only handle the SPA has: capabilities describe *what* a reader takes, never *why*, and a
  * source tab that swaps its pickers for an editor is making a judgement about the shape of a
  * particular reader that no declaration expresses.
+ *
+ * **Two Kind names, not one.** "DuckDbQuery" is DuckDB's own — the reader began there, and existing
+ * mappings already have it saved. "Query" is what every other driver offers the identical reader under
+ * (see the backend's own `RawQueryRegistration`): a Postgres or MsSql source reporting "DuckDbQuery" as
+ * its reader kind would be a confusing label for a capability that has nothing to do with DuckDB.
  */
-export const QUERY_READER_KIND = 'DuckDbQuery'
+export const QUERY_READER_KINDS: ReadonlySet<string> = new Set(['DuckDbQuery', 'Query'])
+/** What a fresh query-source reader override is seeded with, absent any existing reader to clone —
+ * the neutral name, since DuckDB mappings always already have a reader (theirs) to clone from instead. */
+export const DEFAULT_QUERY_READER_KIND = 'Query'
 export const QUERY_OPTION = 'query'
 
 /** This mapping's reader: its own override, or the replication's if it has not overridden one. */
@@ -24,7 +32,8 @@ export function isQuerySource(
   task: ReplicationTaskConfig | undefined,
   pipeline: PipelineOverrides,
 ): boolean {
-  return effectiveReader(task, pipeline)?.kind === QUERY_READER_KIND
+  const kind = effectiveReader(task, pipeline)?.kind
+  return kind !== undefined && QUERY_READER_KINDS.has(kind)
 }
 
 export function queryOf(
@@ -51,7 +60,7 @@ export function withQuery(
 ): PipelineOverrides {
   const base = pipeline.readerOverride
     ?? structuredClone(task?.changeProcessing?.reader)
-    ?? { kind: QUERY_READER_KIND, options: {} }
+    ?? { kind: DEFAULT_QUERY_READER_KIND, options: {} }
 
   return {
     ...pipeline,

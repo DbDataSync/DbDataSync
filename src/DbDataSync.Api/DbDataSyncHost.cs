@@ -13,6 +13,7 @@ using DbDataSync.Core.Config;
 using DbDataSync.Core.Git;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.DuckDb;
+using DbDataSync.Drivers.Generic;
 using DbDataSync.Drivers.MsSql;
 using DbDataSync.Drivers.MySql;
 using DbDataSync.Drivers.Oracle;
@@ -188,15 +189,29 @@ public static class DbDataSyncHost
             // has — including the capability endpoint the SPA's reader picker is built from.
             var registry = new DriverRegistry();
             var scriptHost = sp.GetRequiredService<ScriptHost>();
-            registry.RegisterWithScripting(new MsSqlDriver(), scriptHost);
-            registry.RegisterWithScripting(new PostgresDriver(), scriptHost);
-            registry.RegisterWithScripting(new MySqlDriver(), scriptHost);
-            registry.RegisterWithScripting(new OracleDriver(), scriptHost);
+            var msSqlDriver = new MsSqlDriver();
+            var postgresDriver = new PostgresDriver();
+            var mySqlDriver = new MySqlDriver();
+            var oracleDriver = new OracleDriver();
+            var duckDbDriver = new DuckDbDriver();
+            registry.RegisterWithScripting(msSqlDriver, scriptHost);
+            registry.RegisterWithScripting(postgresDriver, scriptHost);
+            registry.RegisterWithScripting(mySqlDriver, scriptHost);
+            registry.RegisterWithScripting(oracleDriver, scriptHost);
             // DuckDb takes the same call and gets no ScriptedQuery reader out of it: it names a dialect
             // but supplies no ITableCatalog, and a scripted query builder is handed the source table's
             // columns by contract. Registered through the same helper anyway, so there is one
             // registration shape rather than a special case to keep in step.
-            registry.RegisterWithScripting(new DuckDbDriver(), scriptHost);
+            registry.RegisterWithScripting(duckDbDriver, scriptHost);
+
+            // A raw-query source ("a mapping's source is a query I wrote, not a table") — DuckDb is
+            // skipped by this call itself (RawQueryRegistration's own doc comment): it already offers
+            // the identical capability under its own DuckDbQueryReader/"DuckDbQuery" Kind.
+            registry.RegisterWithRawQuery(msSqlDriver);
+            registry.RegisterWithRawQuery(postgresDriver);
+            registry.RegisterWithRawQuery(mySqlDriver);
+            registry.RegisterWithRawQuery(oracleDriver);
+            registry.RegisterWithRawQuery(duckDbDriver);
 
             // A descriptor-defined driver's library (resolved above) is already loadable; this is
             // what actually stands one up and puts it beside the built-ins.

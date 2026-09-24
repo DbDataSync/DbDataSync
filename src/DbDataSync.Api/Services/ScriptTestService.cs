@@ -49,12 +49,22 @@ public sealed record QueryPreviewRequest(string ConnectionName, string Query, in
 /// operator can see beats one they cannot.</param>
 /// <param name="Error">What the engine said, for a query that did not run. Not a 500: a query that
 /// does not parse is the answer this endpoint exists to give.</param>
+/// <param name="ColumnMetadata">
+/// The query's own result-set shape, read off the live <see cref="DbDataReader"/> via
+/// <see cref="DbDataReader.GetColumnSchema"/> — real native types and nullability, not a guess. This is
+/// what lets a mapping whose source is a query (no catalog to introspect a table for) get the same
+/// quality of cached column metadata a table-backed source already gets from <c>ListColumnsAsync</c>.
+/// Null when the query failed before a reader existed, or when the provider's own
+/// <see cref="DbDataReader.GetColumnSchema"/> threw (some providers don't implement it) — a caller
+/// falls back to name-only metadata in that case, the same as before this existed.
+/// </param>
 public sealed record QueryPreviewResult(
     string Source,
     IReadOnlyList<string> Columns,
     IReadOnlyList<IReadOnlyList<string?>> Rows,
     bool Truncated = false,
-    string? Error = null);
+    string? Error = null,
+    IReadOnlyList<ColumnMetadata>? ColumnMetadata = null);
 
 /// <summary>What to run the script against.</summary>
 /// <param name="ConnectionName">Set only for a live test. Empty by default, and choosing one is a
@@ -228,6 +238,7 @@ public sealed class ScriptTestService(
             var schema = ResultSetSchema.From(reader);
             var columnCount = maxColumns is { } cap ? Math.Min(schema.Count, cap) : schema.Count;
             var columnsTruncated = maxColumns is { } cap2 && schema.Count > cap2;
+            var columnMetadata = TryReadColumnMetadata(reader, columnCount);
 
             // The cap is applied by stopping the read, not by wrapping the statement in a LIMIT.
             // Rewriting SQL somebody else wrote means parsing it — their query may already carry a
@@ -249,11 +260,38 @@ public sealed class ScriptTestService(
             }
 
             return new QueryPreviewResult(
-                source, [.. schema.ColumnNames.Take(columnCount)], rows, rowsTruncated || columnsTruncated);
+                source, [.. schema.ColumnNames.Take(columnCount)], rows, rowsTruncated || columnsTruncated,
+                ColumnMetadata: columnMetadata);
         }
         catch (Exception ex) when (ex is not (ConfigValidationException or FileNotFoundException))
         {
             return new QueryPreviewResult(source, [], [], Error: $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The query's own result-set shape — real types, not the name-only <see cref="ResultSetSchema"/>
+    /// every other caller here works with. What makes a query-source mapping's cached columns as
+    /// trustworthy as a table-source one's: <see cref="DbDataReader.GetColumnSchema"/> is the ADO.NET
+    /// contract every provider in this codebase implements (verified against the real SqlClient and
+    /// Npgsql connections this project's own tests already run against), so this needs no per-engine
+    /// code. Falls back to null rather than throwing — a provider that genuinely doesn't implement it
+    /// leaves the caller with the same name-only metadata this feature is additive to, not a broken
+    /// preview.
+    /// </summary>
+    private static IReadOnlyList<ColumnMetadata>? TryReadColumnMetadata(DbDataReader reader, int columnCount)
+    {
+        try
+        {
+            return reader.GetColumnSchema()
+                .Take(columnCount)
+                .Select(c => new ColumnMetadata(
+                    c.ColumnName, c.DataTypeName ?? "unknown", c.AllowDBNull ?? true, c.IsKey ?? false, c.IsIdentity ?? false))
+                .ToList();
+        }
+        catch (NotSupportedException)
+        {
+            return null;
         }
     }
 
