@@ -5,25 +5,8 @@ using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.Generic;
 using Microsoft.Data.SqlClient;
-using DbDataSync.Core.Sql;
 
 namespace DbDataSync.Drivers.MsSql;
-
-/// <summary>
-/// This driver's binding of the engine-neutral <see cref="SegmentScope"/>: its dialect for quoting and
-/// placeholders, its value binder for typed bounds. Predicate rendering itself lives in
-/// <see cref="SegmentScope"/> — there is nothing SQL Server-specific about <c>IN (…)</c> or a
-/// half-open range, and duplicating it per engine is what this layer exists to avoid.
-/// </summary>
-internal static class MsSqlSegmentScope
-{
-    public static SegmentScope Build(
-        BatchReloadSegment? segment,
-        IReadOnlyList<ColumnMetadata> columns,
-        IReadOnlyList<ColumnMapping>? columnMappings = null,
-        Func<string, string>? reference = null) =>
-        SegmentScope.Build(MsSqlDialect.Instance, MsSqlValueBinding.Instance, segment, columns, columnMappings, reference);
-}
 
 /// <summary>
 /// Converts a segment's string bound into a SQL Server parameter typed to match the column it's

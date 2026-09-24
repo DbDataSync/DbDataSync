@@ -68,8 +68,6 @@ public sealed class ChangeReaderFirstPassContractTests
             + "incremental pass has already seen, so it ignores the watermark rather than branching on "
             + "it. Its only checkmark in the original matrix was InitialLoad, which stopped being a "
             + "per-reader question when the bulk-load retarget made it universally available.",
-        [typeof(MsSqlBatchReloadReader)] =
-            "The same contract as BatchReloadReader, in the engine-specific form.",
         [typeof(ScriptedQueryReader)] =
             "A query source has no change feed to have been switched on, and no catalog behind it. The "
             + "watermark is handed to the script, which decides what it means — there is no first-pass "

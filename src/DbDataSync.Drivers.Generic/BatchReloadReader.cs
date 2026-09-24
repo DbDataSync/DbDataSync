@@ -21,10 +21,18 @@ namespace DbDataSync.Drivers.Generic;
 /// converge rather than only ever add.
 /// </para>
 /// </summary>
-public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder binder)
+public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder binder, string kind = GenericDriverKinds.BatchReload)
     : IChangeReader, ISegmentExpandingReader, IStatementPreview
 {
-    public string Kind => GenericDriverKinds.BatchReload;
+    /// <summary>
+    /// <paramref name="kind"/> (phase 191S) lets one engine register this reader under more than one
+    /// Kind string — <c>MsSqlDriver</c> registers it under both <see cref="GenericDriverKinds.BatchReload"/>
+    /// and its own pre-existing <c>"MsSqlBatchReload"</c>, the retired <c>MsSqlBatchReloadReader</c>'s
+    /// Kind, so a mapping saved against that name keeps resolving to a real reader rather than losing its
+    /// Kind outright — the same "one reader, more than one registered name" shape
+    /// <see cref="DbDataSync.Drivers.Generic.RawQueryReader"/> already uses for the identical reason.
+    /// </summary>
+    public string Kind => kind;
 
     /// <summary>A reload reports what exists, not what was removed; the reconciling writer covers the
     /// rest. Stated so the UI can say so rather than infer it.</summary>
@@ -52,24 +60,36 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
     {
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
 
-        var relationshipAliases = RelationshipAliases.Assign(relationships, columnMappings);
-        var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases);
-
         var segment = SegmentSerializer.ReadOptional(options);
+
+        // A query-shaped source with subqueries disallowed gets none of segmenting, relationships, or
+        // (RunExecutor's own, already-applied) column-expression transforms — the plain query still
+        // runs, silently, rather than failing. See SourceTableSpec.AllowSubquery's own doc comment.
+        var canWrap = source.Query is null || source.AllowSubquery;
+        var effectiveRelationships = canWrap ? relationships : [];
+        var effectiveSegment = canWrap ? segment : null;
+
+        var relationshipAliases = RelationshipAliases.Assign(effectiveRelationships, columnMappings);
+        var wrapForFeatures = effectiveSegment is not (null or FullSegment) ||
+            columnMappings.Any(m => !string.IsNullOrWhiteSpace(m.Transform));
+        var willWrap = source.Query is not null && (wrapForFeatures || relationshipAliases.Count > 0);
+        var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases, sourceIsQuery: willWrap);
+
         // Cache-only as of phase 91 — ExpandAutoSegmentsAsync (a different method entirely) is the one
         // place in this reader that still asks the live catalog, because it samples the column's actual
         // value distribution, which no cache could substitute for. This read of a segment's *shape* has
         // no such excuse. Resolved only for a segment that actually names a column: SegmentScope.Build
         // never consults it for null/FullSegment, so a plain reload shouldn't have to pay for a
         // populated cache it doesn't need.
-        IReadOnlyList<ColumnMetadata> columns = segment is ListSegment or RangeSegment
+        IReadOnlyList<ColumnMetadata> columns = effectiveSegment is ListSegment or RangeSegment
             ? sourceColumns.RequireAll(mappingName, "source")
             : [];
-        var scope = SegmentScope.Build(dialect, binder, segment, columns, reference: primaryReference);
+        var scope = SegmentScope.Build(dialect, binder, effectiveSegment, columns, reference: primaryReference);
 
         var projection = SourceProjection.Render(dialect, columnMappings, primaryReference, relationshipAliases);
         var rows = ReadRowsAsync(
-            sourceConnection, source, scope, projection, relationships, relationshipAliases, cancellationToken);
+            sourceConnection, source, scope, projection, wrapForFeatures, effectiveRelationships, relationshipAliases,
+            cancellationToken);
 
         // This reader has no watermark of its own to report. It echoes the previous one back rather
         // than inventing a value, so that a standalone reload replication — which runs as a Primary
@@ -88,13 +108,21 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
     {
         await dialect.UseDatabaseAsync(request.Connection, request.Source.Database, cancellationToken);
 
-        var relationshipAliases = RelationshipAliases.Assign(request.Relationships, request.ColumnMappings);
-        var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases);
-
+        var source = request.Source;
         var segment = SegmentSerializer.ReadOptional(request.Options);
+        var canWrap = source.Query is null || source.AllowSubquery;
+        var effectiveRelationships = canWrap ? request.Relationships : [];
+        var effectiveSegment = canWrap ? segment : null;
+
+        var relationshipAliases = RelationshipAliases.Assign(effectiveRelationships, request.ColumnMappings);
+        var wrapForFeatures = effectiveSegment is not (null or FullSegment) ||
+            request.ColumnMappings.Any(m => !string.IsNullOrWhiteSpace(m.Transform));
+        var willWrap = source.Query is not null && (wrapForFeatures || relationshipAliases.Count > 0);
+        var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases, sourceIsQuery: willWrap);
+
         // request.SourceColumns — phase 167V. Resolved once by PreviewService through ScriptedMetadata
         // (so a bound metadataProvider script is honoured), not a live catalog.GetColumnsAsync call here.
-        var scope = SegmentScope.Build(dialect, binder, segment, request.SourceColumns, reference: primaryReference);
+        var scope = SegmentScope.Build(dialect, binder, effectiveSegment, request.SourceColumns, reference: primaryReference);
 
         return
         [
@@ -102,9 +130,9 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
                 PreviewStages.SourceRead,
                 segment is null ? "Reload every row" : $"Reload the segment {segment.Describe()}",
                 BatchReloadStatement.BuildRead(
-                    dialect, request.Source.Schema, request.Source.Table, scope.Predicate, request.Source.Filter,
+                    dialect, source.Schema, source.Table, source.Query, scope.Predicate, source.Filter,
                     SourceProjection.Render(dialect, request.ColumnMappings, primaryReference, relationshipAliases),
-                    request.Relationships, relationshipAliases),
+                    wrapForFeatures, effectiveRelationships, relationshipAliases),
                 PreviewOrigin.BuiltIn,
                 segment is null
                     ? "A bulk load supplies its own segment, which narrows this further — this is the " +
@@ -125,6 +153,12 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
             return segments;
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
+
+        // Soft unavailability, the same as any other segment on a source with subqueries disallowed:
+        // there is no way to sample a range without wrapping the query, so an auto segment simply
+        // cannot be expanded — one Full segment stands in for it, exactly like an empty observed range.
+        if (source.Query is not null && !source.AllowSubquery)
+            return segments.Select(BatchReloadSegment (s) => s is AutoSegment ? new FullSegment() : s).ToList();
 
         var expanded = new List<BatchReloadSegment>(segments.Count);
         foreach (var segment in segments)
@@ -160,7 +194,8 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         DbConnection connection, SourceTableRef source, ColumnMetadata column, CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateTimedCommand();
-        cmd.CommandText = BatchReloadStatement.BuildRange(dialect, source.Schema, source.Table, column.Name, source.Filter);
+        cmd.CommandText = BatchReloadStatement.BuildRange(
+            dialect, source.Schema, source.Table, source.Query, column.Name, source.Filter);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -174,14 +209,15 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         SourceTableRef source,
         SegmentScope scope,
         string projection,
+        bool wrapQuery,
         IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> relationshipAliases,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = BatchReloadStatement.BuildRead(
-            dialect, source.Schema, source.Table, scope.Predicate, source.Filter, projection,
-            relationships, relationshipAliases);
+            dialect, source.Schema, source.Table, source.Query, scope.Predicate, source.Filter, projection,
+            wrapQuery, relationships, relationshipAliases);
         scope.AddTo(cmd);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -205,18 +241,35 @@ public static class BatchReloadStatement
     /// alias once at least one join is present, so a mapping with no relationships renders byte-for-byte
     /// what it always has.
     /// </para>
+    /// <para>
+    /// **Phase 191S**: <paramref name="query"/>, when set, replaces <paramref name="table"/> as the
+    /// primary source, wrapped as a derived table — <c>(&lt;query&gt;) AS base</c> — but *only* when
+    /// <paramref name="wrapQuery"/> says something on this pass actually needs it (a real segment, a
+    /// relationship join, or a generated column expression: the caller knows all three, this method
+    /// only knows about the join half). Absent all three, the query runs completely unwrapped — the
+    /// operator's own statement, byte-for-byte, with no projection, no predicate, and nothing to
+    /// substitute a <c>{{column}}</c> transform into, the same way a hand-written query has always run.
+    /// A query that can't be used as a subquery still works for a plain read; it only fails (an ordinary
+    /// SQL error) on the specific pass that needed to wrap it.
+    /// </para>
     /// </summary>
     public static string BuildRead(
-        SqlDialect dialect, string schema, string table, string scopePredicate, string? filter,
-        string projection = "*",
+        SqlDialect dialect, string schema, string table, string? query, string scopePredicate, string? filter,
+        string projection = "*", bool wrapQuery = false,
         IReadOnlyList<RelationshipConfig>? relationships = null,
         IReadOnlyDictionary<string, string>? relationshipAliases = null)
     {
-        var userFilter = string.IsNullOrWhiteSpace(filter) ? "" : $" AND ({filter})";
         var joins = RelationshipJoins.Render(dialect, relationships, relationshipAliases);
-        var fromTable = joins.Length == 0
-            ? dialect.QualifyTable(schema, table)
-            : $"{dialect.QualifyTable(schema, table)} AS base";
+
+        // Unwrapped: nothing on this pass needs the query to be anything but exactly what the operator
+        // wrote. Checked before anything else runs, since none of the rest of this method's output would
+        // be meaningful otherwise.
+        if (query is not null && joins.Length == 0 && !wrapQuery)
+            return query;
+
+        var userFilter = string.IsNullOrWhiteSpace(filter) ? "" : $" AND ({filter})";
+        var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
+        var fromTable = joins.Length == 0 && query is null ? sourceExpression : $"{sourceExpression} AS base";
 
         return $"""
             SELECT {projection} FROM {fromTable}{joins}
@@ -224,11 +277,22 @@ public static class BatchReloadStatement
             """;
     }
 
-    /// <summary>The observed extent of the column an auto segment divides up.</summary>
-    public static string BuildRange(SqlDialect dialect, string schema, string table, string column, string? filter)
+    /// <summary>
+    /// The observed extent of the column an auto segment divides up.
+    /// <para>
+    /// **Phase 191S**: <paramref name="query"/>, when set, always wraps — unlike <see cref="BuildRead"/>,
+    /// there is no "run the operator's own statement unwrapped" alternative for an aggregate: the whole
+    /// point of this statement is the <c>MIN</c>/<c>MAX</c> it computes, which is not something a raw
+    /// passthrough could produce. Relationship joins are not threaded through this statement yet — segmenting
+    /// (auto or otherwise) by a relationship column is phase 192S's own work.
+    /// </para>
+    /// </summary>
+    public static string BuildRange(SqlDialect dialect, string schema, string table, string? query, string column, string? filter)
     {
-        var quoted = dialect.QuoteIdentifier(column);
+        var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
+        var fromTable = query is not null ? $"{sourceExpression} AS base" : sourceExpression;
+        var quoted = query is not null ? $"base.{dialect.QuoteIdentifier(column)}" : dialect.QuoteIdentifier(column);
         var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
-        return $"SELECT MIN({quoted}), MAX({quoted}) FROM {dialect.QualifyTable(schema, table)}{filterClause}";
+        return $"SELECT MIN({quoted}), MAX({quoted}) FROM {fromTable}{filterClause}";
     }
 }

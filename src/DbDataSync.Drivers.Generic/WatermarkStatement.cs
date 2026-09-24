@@ -14,13 +14,21 @@ public static class WatermarkStatement
 {
     public const string PreviousWatermarkParameter = "previousWatermark";
 
-    /// <summary>The highest watermark currently present, which becomes the run's new watermark.</summary>
-    public static string BuildMaxWatermark(SqlDialect dialect, string schema, string table, string watermarkColumn, string? filter)
+    /// <summary>
+    /// The highest watermark currently present, which becomes the run's new watermark.
+    /// <para>
+    /// **Phase 191S**: <paramref name="query"/>, when set, always wraps — like
+    /// <see cref="BatchReloadStatement.BuildRange"/>, there is no unwrapped alternative for an
+    /// aggregate.
+    /// </para>
+    /// </summary>
+    public static string BuildMaxWatermark(SqlDialect dialect, string schema, string table, string? query, string watermarkColumn, string? filter)
     {
+        var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
+        var fromTable = query is not null ? $"{sourceExpression} AS base" : sourceExpression;
+        var quotedColumn = query is not null ? $"base.{dialect.QuoteIdentifier(watermarkColumn)}" : dialect.QuoteIdentifier(watermarkColumn);
         var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
-        return
-            $"SELECT MAX({dialect.QuoteIdentifier(watermarkColumn)}) FROM " +
-            $"{dialect.QualifyTable(schema, table)}{filterClause}";
+        return $"SELECT MAX({quotedColumn}) FROM {fromTable}{filterClause}";
     }
 
     /// <summary>
@@ -53,16 +61,26 @@ public static class WatermarkStatement
     /// through it, once at least one join is present — matching
     /// <see cref="BatchReloadStatement.BuildRead"/>'s identical treatment, and for the identical reason:
     /// a mapping with no relationships renders byte-for-byte what it always has.
+    /// <para>
+    /// **Phase 191S**: <paramref name="query"/>, when set, always wraps, with no unwrapped alternative —
+    /// unlike a reload, watermark reading needs <c>ORDER BY</c> for its tie-safe bounded-read guarantee
+    /// on essentially every pass, including the first, so there is nothing to conditionally skip. Safe to
+    /// do unconditionally because a query-shaped source with subqueries disallowed can never reach this
+    /// reader in the first place — <c>ConfigValidation.ValidateQuerySourceReader</c> rejects that
+    /// combination outright at save.
+    /// </para>
     /// </summary>
     public static string BuildRead(
-        SqlDialect dialect, string schema, string table, string watermarkColumn, bool hasPreviousWatermark,
+        SqlDialect dialect, string schema, string table, string? query, string watermarkColumn, bool hasPreviousWatermark,
         string? filter, string projection = "*", bool bounded = false,
         IReadOnlyList<RelationshipConfig>? relationships = null,
         IReadOnlyDictionary<string, string>? relationshipAliases = null)
     {
         var joins = RelationshipJoins.Render(dialect, relationships, relationshipAliases);
-        var fromTable = joins.Length == 0 ? dialect.QualifyTable(schema, table) : $"{dialect.QualifyTable(schema, table)} AS base";
-        Func<string, string> reference = joins.Length == 0 ? dialect.QuoteIdentifier : c => $"base.{dialect.QuoteIdentifier(c)}";
+        var needsAlias = joins.Length > 0 || query is not null;
+        var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
+        var fromTable = needsAlias ? $"{sourceExpression} AS base" : sourceExpression;
+        Func<string, string> reference = needsAlias ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
         var quotedColumn = reference(watermarkColumn);
         var predicate = hasPreviousWatermark
             ? $"{quotedColumn} > {dialect.ParameterReference(PreviousWatermarkParameter)}"

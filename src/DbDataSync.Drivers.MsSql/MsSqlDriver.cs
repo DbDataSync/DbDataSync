@@ -35,14 +35,22 @@ public sealed class MsSqlDriver : IDriver, IConnectionTester, IDialectProvider, 
     // SQL Server's prefixed ones are faster (SqlBulkCopy, MERGE) and stay the default; the portable
     // ones are what proves the generic pipeline against a working engine, and are a real fallback on
     // an instance where bulk insert is not permitted.
+    //
+    // MsSqlBatchReloadReader (phase 191S: retired) used to sit here too, under its own
+    // "MsSqlBatchReload" Kind — it predated the generic pipeline (phase 9 vs. phase 18) and was never
+    // migrated onto it: a one-line wrapper around SegmentScope supplying only an ISegmentValueBinder
+    // (which BatchReloadReader's own constructor already accepts), plus a live catalog call phase 91's
+    // cache-only migration never reached. The generic reader below is registered under both its own
+    // Kind and "MsSqlBatchReload", so a mapping already saved against that name keeps resolving to a
+    // real (and, unlike before, correctly cache-only) reader rather than losing its Kind outright.
     public IReadOnlyList<IChangeReader> Readers { get; } =
     [
         new MsSqlChangeTrackingReader(),
         new MsSqlCdcReader(),
         new TriggerAuditReader(MsSqlDialect.Instance, MsSqlCatalog.Instance),
         new WatermarkReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance),
-        new MsSqlBatchReloadReader(),
         new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance),
+        new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance, MsSqlDriverKinds.BatchReload),
         new KeyReconcileReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance),
     ];
 

@@ -46,7 +46,15 @@ public static class RelationshipAliases
     /// own integration tests). <c>null</c> — meaning "render exactly as before" — when nothing is
     /// actually joined, so every mapping without a relationship is unaffected.
     /// </summary>
+    /// <param name="sourceIsQuery">
+    /// Whether the primary source is a hand-written query wrapped as a derived table (phase 191S) rather
+    /// than a real table — a wrapped source is aliased <c>base</c> the same as a joined one, even with
+    /// zero relationships present, since the wrap itself is what the alias refers to.
+    /// </param>
     public static Func<string, string>? PrimaryReference(
-        SqlDialect dialect, IReadOnlyDictionary<string, string> relationshipAliases, string baseAlias = "base") =>
-        relationshipAliases.Count == 0 ? null : column => $"{baseAlias}.{dialect.QuoteIdentifier(column)}";
+        SqlDialect dialect, IReadOnlyDictionary<string, string> relationshipAliases, bool sourceIsQuery = false,
+        string baseAlias = "base") =>
+        relationshipAliases.Count == 0 && !sourceIsQuery
+            ? null
+            : column => $"{baseAlias}.{dialect.QuoteIdentifier(column)}";
 }

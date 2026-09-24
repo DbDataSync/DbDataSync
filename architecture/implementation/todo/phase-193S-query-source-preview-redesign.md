@@ -5,6 +5,13 @@
 query-shaped source comes only from the existing preview flow). This phase extends that flow rather than
 replacing it.
 
+**Scope note (added after 191S landed)**: this phase's own scope now also absorbs two items originally
+assigned to 191S and deliberately deferred here instead — retiring `RawQueryReader`/`DuckDbQueryReader`/
+`QuerySegmentTokens` and their `"Query"`/`"DuckDbQuery"` Kind registrations, and relocating the frontend's
+query-text field from a reader option to `SourceTableSpec.Query`. Both touch the same `QuerySourcePanel.tsx`
+surface this phase's max-rows/retry/stale-guard work already has to touch, so they land in one pass rather
+than two. See 191S's own Retrospective for why.
+
 ## Why
 
 190S deliberately keeps the existing preview mechanism (`ScriptTestService.PreviewQueryAsync` →

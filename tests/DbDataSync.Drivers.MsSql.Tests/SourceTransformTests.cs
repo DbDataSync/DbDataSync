@@ -88,18 +88,6 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
     }
 
     [Fact]
-    public async Task BatchReloadReader_AppliesTheTransform()
-    {
-        await SeedAsync();
-        var reader = new MsSqlBatchReloadReader();
-
-        var read = await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
-
-        AssertTransformed(Assert.Single(await CollectAsync(read.Rows)));
-    }
-
-    [Fact]
     public async Task WatermarkReader_AppliesTheTransform()
     {
         await SeedAsync();
@@ -113,8 +101,10 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
     }
 
     [Fact]
-    public async Task GenericBatchReloadReader_AppliesTheTransform()
+    public async Task BatchReloadReader_AppliesTheTransform()
     {
+        // Phase 191S: the reader under test is the generic BatchReloadReader — MsSqlBatchReloadReader
+        // was retired as a leftover from before the generic pipeline existed.
         await SeedAsync();
         var reader = new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
 
@@ -154,7 +144,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
         // The side effect worth pinning: losing it later would be silent, and it is the difference
         // between reading 3 columns and reading 40.
         await SeedAsync();
-        var reader = new MsSqlBatchReloadReader();
+        var reader = new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
 
         var read = await reader.ReadChangesAsync(
             _connection, Source(), null, ReadIntent.InitialLoad, Transformed, "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
@@ -168,7 +158,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
     public async Task NoMappings_StillReadsTheWholeRow()
     {
         await SeedAsync();
-        var reader = new MsSqlBatchReloadReader();
+        var reader = new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
 
         var read = await reader.ReadChangesAsync(
             _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);

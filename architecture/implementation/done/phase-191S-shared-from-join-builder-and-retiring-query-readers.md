@@ -1,6 +1,6 @@
 # Phase 191S — Shared FROM/JOIN builder, subquery wrapping, and retiring the standalone query readers
 
-**Status**: Not built.
+**Status**: Built, except one deferral. See Retrospective.
 **Plan reference**: `phase-190S-source-table-spec-query-and-allow-subquery.md` (the config field this phase
 consumes). Extends `phase-187J-relationship-joins-in-the-batch-readers.md`/
 `phase-188J-relationship-joins-in-the-change-readers.md`'s own join machinery.
@@ -110,3 +110,57 @@ to three divergent implementations, this phase unifies them into one.
   unchanged after collapsing `MsSqlBatchReloadReader` into the generic reader.
 - Confirm no currently-saved mapping references `MsSqlDriverKinds.BatchReload`/`Query`/`DuckDbQuery` without
   a working migration path in place first.
+
+## Retrospective
+
+**Built**: `BatchReloadReader`/`WatermarkReader` (and their statement builders, `BatchReloadStatement`/
+`WatermarkStatement`) now support a query-shaped `SourceTableRef`. `BuildRead` gained a `query`/`wrapQuery`
+pair: when `query` is set, the statement wraps as `(<query>) AS base` whenever `wrapQuery` (a real segment
+or a generated transform — the two things the statement builder can't see for itself) or a relationship
+join is present; absent all three, it returns the operator's own query text completely unwrapped, no
+projection or predicate substituted at all. `BuildRange`/`BuildMaxWatermark` always wrap when `query` is
+set, matching the design: there's no "run it unwrapped" alternative for an aggregate, and
+`WatermarkStatement.BuildRead` always wraps too, matching the design's watermark-specific reasoning
+(`ORDER BY` needed on essentially every pass). `BatchReloadReader.ReadChangesAsync`/`DescribeAsync`/
+`ExpandAutoSegmentsAsync` compute the `AllowSubquery`-gated soft-suppression themselves — a query-shaped
+source with subqueries disallowed gets an empty effective relationship list and a nulled-out effective
+segment, so `needsWrap` and `joins.Length` both stay at zero and the statement builder's own unwrapped path
+fires naturally, with no separate suppression branch needed. `WatermarkReader` needed no equivalent gate at
+all — 190S's hard validation already guarantees `AllowSubquery = true` whenever `Watermark` pairs with a
+query-shaped source, so it can (and does) just always wrap.
+
+`MsSqlBatchReloadReader`/`MsSqlSegmentScope` are deleted. One real correction along the way: the original
+file (`MsSqlSegmentScope.cs`) held *two* classes, not one — the retirable one-line `MsSqlSegmentScope`
+wrapper, and `MsSqlValueBinding`, the actual `ISegmentValueBinder` implementation still used by
+`MsSqlDeleteInsertWriter`/`MsSqlMergeReconcileWriter`/`MsSqlDriver` itself. An investigating subagent's
+earlier report (used to plan this phase) said the file's only consumer was the reader being retired — true
+of `MsSqlSegmentScope`, not of the file as a whole. Caught immediately by the build (`CS0103: the name
+'MsSqlValueBinding' does not exist`) rather than by a deeper investigation; fixed by keeping the file
+(renamed `MsSqlValueBinding.cs`) and deleting only the `MsSqlSegmentScope` class from it, updating its two
+writer call sites and the corresponding test file to call `SegmentScope.Build(MsSqlDialect.Instance,
+MsSqlValueBinding.Instance, ...)` directly instead of through the retired wrapper.
+
+The `"MsSqlBatchReload"` Kind string is **not** dropped, contrary to a first-draft comment in this doc's own
+history — `BatchReloadReader` gained an optional `kind` constructor parameter (defaulting to
+`GenericDriverKinds.BatchReload`, mirroring `RawQueryReader`'s own existing "one reader, more than one
+registered Kind" shape), and `MsSqlDriver` registers a second instance under `MsSqlDriverKinds.BatchReload`.
+A mapping already saved against that Kind keeps resolving to a real reader — now correctly cache-only,
+unlike before.
+
+**Deferred, not dropped**: retiring `RawQueryReader`/`DuckDbQueryReader`/`QuerySegmentTokens` and their
+`"Query"`/`"DuckDbQuery"` Kind registrations, plus the frontend's query-text-field relocation from a reader
+option to `SourceTableSpec.Query`. Both touch the identical frontend surface (`QuerySourcePanel.tsx`) that
+193S's preview redesign also has to touch — doing the field relocation once, alongside that work, avoids
+two separate passes over the same component. Folded into 193S's scope; see that phase doc.
+
+**Verified for real**: full solution build (`dotnet build`, root), 0 errors, 0 warnings. Full non-integration
+suite green throughout (2,449+ passed, 0 failed). New unit tests added for every statement-builder
+combination the design specifies: unwrapped-by-default, wrap-on-`wrapQuery`, wrap-on-relationship-alone
+(`BuildRead`), always-wraps (`BuildRange`, `WatermarkStatement.BuildRead`/`BuildMaxWatermark`). **Not
+verified**: the reader-level `AllowSubquery`-gated suppression logic inside `BatchReloadReader` itself has
+no unit test of its own — this codebase's existing convention tests reader classes' actual DB-touching
+behavior via `[Trait("Category", "Integration")]` tests against a live server, which this sandbox has none
+of; the statement-builder tests cover the SQL-generation logic that suppression ultimately depends on, but
+the reader-level orchestration (computing `effectiveSegment`/`wrapForFeatures` correctly from
+`source.AllowSubquery`) is an honest gap for whoever next has a live server, the same way several existing
+phase docs in this repo already name a live-server gap rather than assume it away.

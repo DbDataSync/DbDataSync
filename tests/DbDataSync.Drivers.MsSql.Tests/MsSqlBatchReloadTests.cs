@@ -1,5 +1,7 @@
 using DbDataSync.Core.Config;
+using DbDataSync.Core.Sql;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Generic;
 using Microsoft.Data.SqlClient;
 using Xunit;
 
@@ -10,11 +12,18 @@ namespace DbDataSync.Drivers.MsSql.Tests;
 /// reconciling writers. The properties under test here can't be checked without an engine — that a
 /// CTE-scoped MERGE really does leave out-of-segment rows alone, that delete+insert really is atomic,
 /// and that MERGE against a CTE is even legal T-SQL.
+/// <para>
+/// **Phase 191S**: the reader under test is the generic <see cref="BatchReloadReader"/>, not a
+/// dedicated MsSql class — <c>MsSqlBatchReloadReader</c> was retired as a leftover from before the
+/// generic pipeline existed (it duplicated the same SQL this class already builds, plus a live
+/// catalog call phase 91's cache-only migration never reached). <c>MsSqlDriver</c> now registers the
+/// generic reader under both the generic and the MsSql-specific Kind string.
+/// </para>
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<MsSqlTestDatabase>, IAsyncLifetime
 {
-    private readonly MsSqlBatchReloadReader _reader = new();
+    private readonly BatchReloadReader _reader = new(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
     private readonly MsSqlStagingTableProvider _staging = new();
     private SqlConnection _sourceConnection = null!;
     private SqlConnection _targetConnection = null!;

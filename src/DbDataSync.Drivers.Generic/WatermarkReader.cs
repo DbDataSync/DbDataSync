@@ -136,7 +136,8 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
 
         var effectivePreviousWatermark = incremental ? previousWatermark : null;
         var relationshipAliases = RelationshipAliases.Assign(relationships, columnMappings);
-        var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases);
+        var primaryReference = RelationshipAliases.PrimaryReference(
+            dialect, relationshipAliases, sourceIsQuery: source.Query is not null);
         var projection = SourceProjection.Render(dialect, columnMappings, primaryReference, relationshipAliases);
         var bounded = maxRows is null ? null : new BoundedReadPosition();
         var rows = ReadRowsAsync(
@@ -185,7 +186,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
             statements.Add(new PreviewStatement(
                 PreviewStages.SourceRead,
                 $"Read the highest '{watermarkColumn}', which becomes the next pass's watermark",
-                WatermarkStatement.BuildMaxWatermark(dialect, source.Schema, source.Table, watermarkColumn, source.Filter),
+                WatermarkStatement.BuildMaxWatermark(dialect, source.Schema, source.Table, source.Query, watermarkColumn, source.Filter),
                 PreviewOrigin.BuiltIn,
                 "Taken before the rows are read, not derived from them — a row written during the pass " +
                 "must be picked up by the next one rather than silently skipped."));
@@ -226,7 +227,8 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
             parameters.Add(new(BoundedRead.RowLimitParameter, "int", cap.ToString()));
 
         var relationshipAliases = RelationshipAliases.Assign(request.Relationships, request.ColumnMappings);
-        var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases);
+        var primaryReference = RelationshipAliases.PrimaryReference(
+            dialect, relationshipAliases, sourceIsQuery: source.Query is not null);
 
         statements.Add(new PreviewStatement(
             PreviewStages.SourceRead,
@@ -234,7 +236,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
                 ? $"Read rows after watermark '{request.PreviousWatermark}'"
                 : "Read every row — no watermark stored yet",
             WatermarkStatement.BuildRead(
-                dialect, source.Schema, source.Table, watermarkColumn, incremental, source.Filter,
+                dialect, source.Schema, source.Table, source.Query, watermarkColumn, incremental, source.Filter,
                 SourceProjection.Render(dialect, request.ColumnMappings, primaryReference, relationshipAliases),
                 bounded: maxRows is not null, relationships: request.Relationships, relationshipAliases: relationshipAliases),
             PreviewOrigin.BuiltIn,
@@ -249,7 +251,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
     {
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = WatermarkStatement.BuildMaxWatermark(
-            dialect, source.Schema, source.Table, watermarkColumn, source.Filter);
+            dialect, source.Schema, source.Table, source.Query, watermarkColumn, source.Filter);
 
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is null or DBNull ? null : WatermarkValue.Format(result);
@@ -270,8 +272,9 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
     {
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = WatermarkStatement.BuildRead(
-            dialect, source.Schema, source.Table, watermarkColumn, previousWatermark is not null, source.Filter,
-            projection, bounded: maxRows is not null, relationships: relationships, relationshipAliases: relationshipAliases);
+            dialect, source.Schema, source.Table, source.Query, watermarkColumn, previousWatermark is not null,
+            source.Filter, projection, bounded: maxRows is not null, relationships: relationships,
+            relationshipAliases: relationshipAliases);
         if (maxRows is { } limit)
             cmd.AddParameter(dialect.ParameterName(BoundedRead.RowLimitParameter), limit);
         if (previousWatermark is not null)

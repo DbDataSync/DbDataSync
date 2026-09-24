@@ -15,7 +15,7 @@ public sealed class WatermarkStatementTests
     {
         Assert.Equal(
             "SELECT MAX([ModifiedAt]) FROM [dbo].[Orders]",
-            WatermarkStatement.BuildMaxWatermark(BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", filter: null));
+            WatermarkStatement.BuildMaxWatermark(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", filter: null));
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public sealed class WatermarkStatementTests
     {
         Assert.Equal(
             "SELECT MAX([ModifiedAt]) FROM [dbo].[Orders] WHERE Region = 'EU'",
-            WatermarkStatement.BuildMaxWatermark(BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", "Region = 'EU'"));
+            WatermarkStatement.BuildMaxWatermark(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", "Region = 'EU'"));
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public sealed class WatermarkStatementTests
             WHERE 1 = 1
             ORDER BY [ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: false, filter: null));
+            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: false, filter: null));
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public sealed class WatermarkStatementTests
             WHERE [ModifiedAt] > @previousWatermark
             ORDER BY [ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: true, filter: null));
+            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: true, filter: null));
     }
 
     [Fact]
@@ -61,7 +61,8 @@ public sealed class WatermarkStatementTests
             WHERE 1 = 1 AND (Region = 'EU')
             ORDER BY [ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: false, "Region = 'EU'"));
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: false, filter: "Region = 'EU'"));
     }
 
     [Fact]
@@ -73,7 +74,7 @@ public sealed class WatermarkStatementTests
             WHERE "MODIFIED_AT" > :previousWatermark
             ORDER BY "MODIFIED_AT"
             """,
-            WatermarkStatement.BuildRead(ColonDialect.Instance, "APP", "ORDERS", "MODIFIED_AT", hasPreviousWatermark: true, filter: null));
+            WatermarkStatement.BuildRead(ColonDialect.Instance, "APP", "ORDERS", null, "MODIFIED_AT", hasPreviousWatermark: true, filter: null));
     }
 
     [Fact]
@@ -85,8 +86,7 @@ public sealed class WatermarkStatementTests
             WHERE [ModifiedAt] > @previousWatermark
             ORDER BY [ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: true,
+            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: true,
                 filter: null, bounded: true));
     }
 
@@ -103,8 +103,7 @@ public sealed class WatermarkStatementTests
             ORDER BY "MODIFIED_AT"
             FETCH FIRST :maxRows ROWS WITH TIES
             """,
-            WatermarkStatement.BuildRead(
-                ColonDialect.Instance, "APP", "ORDERS", "MODIFIED_AT", hasPreviousWatermark: true,
+            WatermarkStatement.BuildRead(ColonDialect.Instance, "APP", "ORDERS", null, "MODIFIED_AT", hasPreviousWatermark: true,
                 filter: null, bounded: true));
     }
 
@@ -113,8 +112,7 @@ public sealed class WatermarkStatementTests
     {
         // The reader builds the change schema from the leading columns and reads the position off the
         // trailing one. If the position column ever moved, every row would gain a phantom column.
-        var sql = WatermarkStatement.BuildRead(
-            BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: false,
+        var sql = WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: false,
             filter: null, projection: "[Id], [Name]", bounded: true);
 
         Assert.Contains("[Id], [Name], [ModifiedAt] AS [__DS_Position] FROM", sql);
@@ -131,8 +129,7 @@ public sealed class WatermarkStatementTests
             WHERE [ModifiedAt] > @previousWatermark
             ORDER BY [ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: true, filter: null));
+            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: true, filter: null));
     }
 
     private static RelationshipConfig Rel(string name, string table, params (string Local, string Foreign)[] joinKeys) =>
@@ -157,8 +154,7 @@ public sealed class WatermarkStatementTests
             WHERE base.[ModifiedAt] > @previousWatermark
             ORDER BY base.[ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: true, filter: null,
+            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: true, filter: null,
                 projection: "[Id],\n    r0.[Name]", relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -180,8 +176,7 @@ public sealed class WatermarkStatementTests
             WHERE 1 = 1
             ORDER BY base.[ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: false, filter: null,
+            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: false, filter: null,
                 relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -197,8 +192,7 @@ public sealed class WatermarkStatementTests
             WHERE 1 = 1
             ORDER BY [ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: false, filter: null,
+            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: false, filter: null,
                 relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -215,8 +209,7 @@ public sealed class WatermarkStatementTests
             WHERE 1 = 1
             ORDER BY base.[ModifiedAt]
             """,
-            WatermarkStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Employee", "ModifiedAt", hasPreviousWatermark: false, filter: null,
+            WatermarkStatement.BuildRead(BracketDialect.Instance, "dbo", "Employee", null, "ModifiedAt", hasPreviousWatermark: false, filter: null,
                 relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -224,5 +217,31 @@ public sealed class WatermarkStatementTests
     public void QualifyTable_OmitsTheSchemaWhenThereIsNone() =>
         Assert.Equal(
             "SELECT MAX([ModifiedAt]) FROM [Orders]",
-            WatermarkStatement.BuildMaxWatermark(BracketDialect.Instance, "", "Orders", "ModifiedAt", filter: null));
+            WatermarkStatement.BuildMaxWatermark(BracketDialect.Instance, "", "Orders", null, "ModifiedAt", filter: null));
+
+    // ---- Phase 191S: query-shaped sources -------------------------------------------------------
+
+    [Fact]
+    public void Read_AQuery_AlwaysWraps_EvenWithNoPreviousWatermarkAndNoRelationships()
+    {
+        // Watermark reading needs ORDER BY for its tie-safe bounded-read guarantee on essentially every
+        // pass, so wrapping is unconditional here — unlike a reload, there is no "run it unwrapped"
+        // alternative once the source is query-shaped.
+        Assert.Equal(
+            """
+            SELECT * FROM (SELECT * FROM Orders) AS base
+            WHERE 1 = 1
+            ORDER BY base.[ModifiedAt]
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "SELECT * FROM Orders", "ModifiedAt",
+                hasPreviousWatermark: false, filter: null));
+    }
+
+    [Fact]
+    public void MaxWatermark_AQuery_AlwaysWraps() =>
+        Assert.Equal(
+            "SELECT MAX(base.[ModifiedAt]) FROM (SELECT * FROM Orders) AS base",
+            WatermarkStatement.BuildMaxWatermark(
+                BracketDialect.Instance, "dbo", "Orders", "SELECT * FROM Orders", "ModifiedAt", filter: null));
 }

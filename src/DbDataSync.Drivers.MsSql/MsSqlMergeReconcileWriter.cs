@@ -1,6 +1,7 @@
 using System.Data.Common;
 using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Generic;
 using DbDataSync.Core.Sql;
 
 namespace DbDataSync.Drivers.MsSql;
@@ -38,7 +39,7 @@ public sealed class MsSqlMergeReconcileWriter : IChangeWriter, IStatementPreview
         targetConnection.ChangeDatabase(target.Database);
 
         var shape = MsSqlTargetShape.FromCachedColumns(mappingName, targetColumns, target, columnMappings);
-        var scope = MsSqlSegmentScope.Build(SegmentSerializer.ReadOptional(options), shape.Columns, columnMappings);
+        var scope = SegmentScope.Build(MsSqlDialect.Instance, MsSqlValueBinding.Instance, SegmentSerializer.ReadOptional(options), shape.Columns, columnMappings);
 
         using var cmd = targetConnection.CreateTimedCommand();
         cmd.CommandText = BuildMerge(shape, scope.Predicate, staged.StagingLocation);
@@ -78,7 +79,7 @@ public sealed class MsSqlMergeReconcileWriter : IChangeWriter, IStatementPreview
         var shape = await MsSqlTargetShape.LoadAsync(
             request.Connection, request.Target, request.ColumnMappings, cancellationToken);
         var segment = SegmentSerializer.ReadOptional(request.Options);
-        var scope = MsSqlSegmentScope.Build(segment, shape.Columns, request.ColumnMappings);
+        var scope = SegmentScope.Build(MsSqlDialect.Instance, MsSqlValueBinding.Instance, segment, shape.Columns, request.ColumnMappings);
 
         return
         [

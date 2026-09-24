@@ -16,8 +16,7 @@ public sealed class PipelineStatementTests
             SELECT * FROM [dbo].[Orders]
             WHERE [OrderId] >= @segMin AND [OrderId] < @segMax AND (Region = 'EU')
             """,
-            BatchReloadStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders",
+            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null,
                 "[OrderId] >= @segMin AND [OrderId] < @segMax", "Region = 'EU'"));
     }
 
@@ -29,7 +28,7 @@ public sealed class PipelineStatementTests
             SELECT * FROM [dbo].[Orders]
             WHERE 1 = 1
             """,
-            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null));
+            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "1 = 1", filter: null));
     }
 
     private static RelationshipConfig Rel(string name, string table, params (string Local, string Foreign)[] joinKeys) =>
@@ -53,8 +52,7 @@ public sealed class PipelineStatementTests
             LEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]
             WHERE 1 = 1
             """,
-            BatchReloadStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null,
+            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "1 = 1", filter: null,
                 projection: "[Id],\n    r0.[Name]", relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -73,8 +71,7 @@ public sealed class PipelineStatementTests
             LEFT JOIN [dbo].[Region] AS r0 ON base.[CountryCode] = r0.[CountryCode] AND base.[RegionId] = r0.[Id]
             WHERE 1 = 1
             """,
-            BatchReloadStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null,
+            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "1 = 1", filter: null,
                 relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -95,8 +92,7 @@ public sealed class PipelineStatementTests
             LEFT JOIN [dbo].[Employee] AS r1 ON base.[ManagerId] = r1.[Id]
             WHERE 1 = 1
             """,
-            BatchReloadStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null,
+            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "1 = 1", filter: null,
                 relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -114,8 +110,7 @@ public sealed class PipelineStatementTests
             SELECT * FROM [dbo].[Orders]
             WHERE 1 = 1
             """,
-            BatchReloadStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null,
+            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", null, "1 = 1", filter: null,
                 relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -133,8 +128,7 @@ public sealed class PipelineStatementTests
             LEFT JOIN [dbo].[Employee] AS r0 ON base.[ManagerId] = r0.[Id]
             WHERE 1 = 1
             """,
-            BatchReloadStatement.BuildRead(
-                BracketDialect.Instance, "dbo", "Employee", "1 = 1", filter: null,
+            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Employee", null, "1 = 1", filter: null,
                 relationships: relationships, relationshipAliases: aliases));
     }
 
@@ -143,7 +137,60 @@ public sealed class PipelineStatementTests
     {
         Assert.Equal(
             "SELECT MIN([OrderId]), MAX([OrderId]) FROM [dbo].[Orders] WHERE Region = 'EU'",
-            BatchReloadStatement.BuildRange(BracketDialect.Instance, "dbo", "Orders", "OrderId", "Region = 'EU'"));
+            BatchReloadStatement.BuildRange(BracketDialect.Instance, "dbo", "Orders", null, "OrderId", "Region = 'EU'"));
+    }
+
+    // ---- Phase 191S: query-shaped sources -------------------------------------------------------
+
+    [Fact]
+    public void BatchRead_AQueryWithNothingNeedingIt_RunsCompletelyUnwrapped()
+    {
+        // Absent a real segment, a relationship, or a forced wrap, a query-shaped source runs exactly
+        // as the operator wrote it — no projection, no predicate, nothing substituted.
+        Assert.Equal(
+            "SELECT * FROM Region",
+            BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "SELECT * FROM Region", "1 = 1", filter: null));
+    }
+
+    [Fact]
+    public void BatchRead_AQuery_WrapsWhenTheCallerSaysSomethingNeedsIt()
+    {
+        Assert.Equal(
+            """
+            SELECT * FROM (SELECT * FROM Region) AS base
+            WHERE [Id] >= @segMin AND [Id] < @segMax
+            """,
+            BatchReloadStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "SELECT * FROM Region",
+                "[Id] >= @segMin AND [Id] < @segMax", filter: null, wrapQuery: true));
+    }
+
+    [Fact]
+    public void BatchRead_AQueryWithARelationship_WrapsEvenWithWrapQueryFalse()
+    {
+        // The join itself is what forces the wrap here — wrapQuery only covers the two reasons
+        // BuildRead can't see for itself (a real segment, a generated transform).
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            """
+            SELECT * FROM (SELECT * FROM Orders) AS base
+            LEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]
+            WHERE 1 = 1
+            """,
+            BatchReloadStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "SELECT * FROM Orders", "1 = 1", filter: null,
+                relationships: relationships, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void Range_AQuery_AlwaysWraps()
+    {
+        // Unlike BuildRead, there is no unwrapped alternative for an aggregate.
+        Assert.Equal(
+            "SELECT MIN(base.[OrderId]), MAX(base.[OrderId]) FROM (SELECT * FROM Orders) AS base",
+            BatchReloadStatement.BuildRange(BracketDialect.Instance, "dbo", "Orders", "SELECT * FROM Orders", "OrderId", filter: null));
     }
 
     [Fact]
