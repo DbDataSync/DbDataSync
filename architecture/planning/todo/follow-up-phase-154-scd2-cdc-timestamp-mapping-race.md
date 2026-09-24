@@ -323,3 +323,25 @@ release/reacquire gap between those four calls for anything else to land in.
 specifically because every fix in this doc so far "looked right" first. See the next section for the actual
 20-consecutive-solo-run result against both disabled tests, run against this change before either test is
 re-enabled.
+
+## The 20-run bar, actually run (2026-09-24) — both tests re-enabled
+
+Executed exactly the bar the disable decision set, against a real, unthrottled `dbdatasync-mssql-source`
+container, with the fix above in place:
+
+1. `APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation`, alone
+   (`dotnet test --filter FullyQualifiedName=...APassWithDuplicateAndSingletonKeys...`), **20 consecutive
+   runs, 20/20 green** (5-7s each).
+2. `ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid`, alone, **20 consecutive
+   runs, 20/20 green** (5-7s each).
+3. The full `Scd2CdcGuaranteedDeliveryIntegrationTests`/`MsSqlCdcReaderTests`/`MsSqlCdcLsnTimeTests` set (23
+   tests, both previously-disabled tests included), **5 consecutive runs, 5/5 green** (25-27s each) — the
+   class's own within-class-interaction bar, run after the solo bar rather than instead of it.
+
+**Both tests re-enabled** — `[Fact(Skip = ...)]` removed from both. This is real evidence within the honest
+limit this doc has named every time before: this environment's containers are idle and fast, and every prior
+falsified fix in this doc also passed clean here first. What's different this time, and the actual basis for
+re-enabling rather than another "looks right": the disable decision itself set a numeric bar in advance,
+naming exactly what would count as enough before any run happened, and both tests cleared it — 40 solo runs
+and 5 class runs, not zero. The next `dev` `dotnet-integration` history is still the real proof; if either
+test recurs, that recurrence — not this doc's own local numbers — is what would reopen this.

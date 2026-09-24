@@ -252,14 +252,11 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
     // two distinct *times* — see CdcCaptureJob.ScanUntilPastAsync's own doc comment for why a fixed delay
     // between the operations turned out not to be enough, and why these tests wait on that instead of on time.
 
-    // Disabled 2026-09-23: six independent fixes to this class's CDC-mapped-time waiting over four days
-    // (clock-tick delay, verified-wait, deadline widen, hammering fix, ...) have each been falsified by
-    // the next CI occurrence, most recently the exact "sp_replcmds" session collision the hammering fix
-    // was supposed to have closed, recurring unchanged in run 35947908766. Re-enable only after 20
-    // consecutive clean solo runs (`dotnet test --filter FullyQualifiedName~<TestName>`) plus the class's
-    // own repeat-run bar — see architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md's
-    // "2026-09-23 (again)" section for the full history and why a seventh guess isn't the move.
-    [Fact(Skip = "Disabled — see follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md; needs 20 consecutive clean solo runs before re-enabling")]
+    // Disabled 2026-09-23, re-enabled 2026-09-24 after clearing the bar the disable decision itself set —
+    // see architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md's "20-run bar"
+    // section for the fix (CdcCaptureJob.ReleaseLogReaderAsync moved to test teardown) and the actual
+    // 20-consecutive-solo-run result for this test.
+    [Fact]
     public async Task APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation()
     {
         await ExecuteAsync(_sourceConnection, $"""
@@ -368,10 +365,10 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
     /// version this pass opened is opened already closed, by the delete that follows it.
     /// </para>
     /// </summary>
-    // Disabled 2026-09-23 — same reason and same bar to re-enable as the sibling test above; see
-    // architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md's
-    // "2026-09-23 (again)" section.
-    [Fact(Skip = "Disabled — see follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md; needs 20 consecutive clean solo runs before re-enabling")]
+    // Disabled 2026-09-23, re-enabled 2026-09-24 — same fix and same cleared bar as the sibling test above;
+    // see architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md's "20-run bar"
+    // section.
+    [Fact]
     public async Task ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid()
     {
         await ExecuteAsync(_sourceConnection, $"""
