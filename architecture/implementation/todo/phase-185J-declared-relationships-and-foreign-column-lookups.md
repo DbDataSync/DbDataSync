@@ -1,6 +1,12 @@
 # Phase 185J — Declared relationships to a foreign source table, for column lookups
 
-**Status**: Planned, not started.
+**Status**: Superseded by four narrower docs — `phase-186J-relationship-config-and-shared-reader-plumbing.md`
+(backend data structures), `phase-187J-relationship-joins-in-the-batch-readers.md` (batch readers),
+`phase-188J-relationship-joins-in-the-change-readers.md` (change readers — now including CDC, which this
+doc had deferred), `phase-189J-relationships-and-foreign-columns-in-the-mapping-editor.md` (UI). This doc's
+own design and four confirmed decisions carry forward unchanged into those; the split exists because the
+work spans four genuinely different layers with different implementers and different verification shapes,
+and because the scope grew to include CDC (see 188J) rather than deferring it a second time.
 **Plan reference**: none — raised directly in conversation ("add a feature to support relationship, and a
 lookup feature to source entities"), narrowed by asking rather than guessing on four shape decisions this
 repo's own "no migration" policy makes expensive to get wrong later.
