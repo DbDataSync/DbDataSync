@@ -956,6 +956,60 @@ A phase small enough to implement, verify locally, and commit within one session
 this — it is for the case this section exists to name: a phase that will outlive the session that
 started it.
 
+## A flaky test found during any work gets fixed now, not logged and left
+
+Adopted 2026-09-23. **A flaky test is worse than no test.** It spends the same CI minutes and the same
+green checkmark a real test spends, but the guarantee it appears to give isn't there — and until it's
+fixed, every unrelated change riding through it pays the cost: `promote-test.yml` only fast-forwards on a
+green run, and `release.yml`/`publish-snapshot.yml` both now gate on a green run for the exact commit
+SHA, so one intermittent test blocks releases and promotions for work that never touched it. This is not
+a hypothetical — `architecture/planning/todo/follow-up-ci-is-red-on-most-pushes-from-unrelated-flaky-tests.md`
+recorded four consecutive `promote-test` runs skipped in a row from exactly this.
+
+**The rule: a flaky test discovered during any session's work — whether or not that work touches the test,
+the code path it covers, or anything related — is investigated and fixed in that same session, before the
+session's own work is considered done.** Not filed for later. Not left as a data point in a catalogue.
+"I found a pre-existing flaky test, unrelated to my task, so I'm leaving it and moving on" is not an
+acceptable stopping point, for the same reason "I found a phase with a gap, so I left it in `todo/`"
+wasn't, two sections above — the gap is real, but the response has to be *fix it*, not merely *see it and
+say so*.
+
+**Root-cause the failure before reaching for a band-aid.** "Widen the timeout," "add a retry," "poll
+longer" are sometimes the correct fix — but only when the actual mechanism of the flake is understood well
+enough to know that more time or one more attempt is what closes the gap, not merely a way to make the
+symptom less frequent. This session's own history is the evidence for why: the SCD2 CDC race
+(`follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md`) went through a clock-tick delay (falsified same
+day), a 30s verified-wait (timed out for real — 777 scan attempts, zero movement), and a 30s→90s widen
+(falsified again, identical shape, same run count) before the actual mechanism — the log reader being
+released and re-checked-out mid-test rather than once at teardown — was identified and fixed. Each of the
+first three "fixes" made the test fail less often without being wrong to ship, but each was reached for
+*instead of* finishing the diagnosis, and each cost a further recurrence — in production terms, a further
+batch of unrelated blocked releases — to discover. A timeout widen or a retry is the right call only when
+it's the last step of a diagnosis, not a substitute for one.
+
+**A fix that doesn't hold after a recurrence is itself the signal to dig deeper immediately — not to log
+the recurrence and move on.** The corresponding planning doc's own "Applied" section exists to record what
+was tried and why it was believed sufficient; a docs-only convention of appending "Recurrence, <date>" and
+stopping there, as this project's own history shows happened for both the SCD2 CDC race and the bulk-load
+retrigger race, is the same failure as leaving a gapped phase in `todo/` — it's writing down the problem
+instead of doing the next round of the work the first fix's own falsification demands.
+
+**The only acceptable reason to defer is a genuine, narrowly-scoped environment gap** — real hardware or
+a real Windows box this sandbox cannot provide, a fixture that requires infrastructure not present here —
+and even then, the deferral is scoped to exactly that gap (tracked in its own follow-up doc, per the
+section above), never used to avoid the root-cause work that doesn't actually require the missing
+environment. "I can't run this on real hardware to prove it" is a legitimate, narrow deferral. "I couldn't
+reproduce it locally" is not, by itself, a reason to stop — reason from the code and the actual CI failure
+text to a real mechanism, the way both fixes in this session were reached (neither reproduced locally;
+both were diagnosed from the mechanism plus the CI evidence).
+
+**How this replaces the open policy question in
+`architecture/planning/todo/follow-up-what-ci-should-do-about-a-known-flake.md`**: that doc weighed (b)
+auto-retry the flaky job against (c) fix every catalogued flake, and recommended (c) — this section is (c)
+adopted as the durable rule, not a one-time cleanup pass, so a fresh session picks it up automatically
+instead of needing to be told again. A retry-based workaround (b) is still never adopted for a *known*
+flake under this rule; it only ever hides whether the mechanism was actually understood.
+
 ## Phase doc structure
 
 Match the existing `done/` docs' shape:

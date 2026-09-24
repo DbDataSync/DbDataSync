@@ -39,6 +39,16 @@ public static class LibraryValidationRunner
     /// is still identifiable and safe to drop by — see <see cref="SweepStaleTablesAsync"/>.</summary>
     public const string TablePrefix = "DbDataSync_LibraryValidation_";
 
+    /// <summary>
+    /// A table this run's own sweep finds younger than this is never dropped, no matter how well its name
+    /// matches <see cref="TablePrefix"/> — see <see cref="SweepStaleTablesAsync"/>'s own doc comment for
+    /// the real race this closes. Real crash orphans are found the *next* time anything validates against
+    /// this same connection, which is not time-sensitive; a real validate run, per this repo's own CI
+    /// evidence, completes in well under a second, so 5 minutes has no observed cost against the actual
+    /// failure this exists to catch.
+    /// </summary>
+    private static readonly TimeSpan StaleTableAge = TimeSpan.FromMinutes(5);
+
     private static readonly string[] SyntheticNames = ["phase-109j-alpha", "phase-109j-beta", "phase-109j-gamma"];
 
     public static async Task<LibraryValidationResult> RunAsync(
@@ -87,7 +97,10 @@ public static class LibraryValidationRunner
             // once open.
             var database = dbConnection.Database;
             var schema = DefaultSchema(driver.DriverType);
-            var tableName = $"{TablePrefix}{Guid.NewGuid():N}";
+            // The unix-seconds segment right after TablePrefix is what lets SweepStaleTablesAsync tell a
+            // genuine crash orphan from a sibling run's table that is merely still in flight — see that
+            // method's own doc comment.
+            var tableName = $"{TablePrefix}{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}_{Guid.NewGuid():N}";
             var target = new TableRef { ConnectionName = connection.Name, Database = database, Schema = schema, Table = tableName };
 
             // Open question 3 (phase doc): decided yes — a best-effort sweep of any stale scratch table
@@ -182,18 +195,35 @@ public static class LibraryValidationRunner
         }
     }
 
-    /// <summary>Drops any previous run's scratch table this connection can still see, by listing tables
-    /// via the driver's own <see cref="IDriver.ListTablesAsync"/> (already-shipped metadata browsing,
-    /// not new SQL) and filtering to <see cref="TablePrefix"/>. Best-effort: a failure here (a
-    /// permission the credential doesn't have, an engine quirk) is swallowed rather than failing the
-    /// whole validate run over housekeeping for a *previous* run.</summary>
+    /// <summary>
+    /// Drops any previous run's scratch table this connection can still see, by listing tables via the
+    /// driver's own <see cref="IDriver.ListTablesAsync"/> (already-shipped metadata browsing, not new
+    /// SQL) and filtering to <see cref="TablePrefix"/>. Best-effort: a failure here (a permission the
+    /// credential doesn't have, an engine quirk) is swallowed rather than failing the whole validate run
+    /// over housekeeping for a *previous* run.
+    /// <para>
+    /// **Real race found in CI, not hypothesized**: nothing about matching on <see cref="TablePrefix"/>
+    /// alone distinguishes a genuinely orphaned table (left behind by a crashed run) from one a *sibling*
+    /// validate run — a different process, racing this one against the same connection's target database
+    /// — created moments ago and is still actively staging into. `DbDataSync.Api.Tests` and
+    /// `DbDataSync.Cli.Tests` both run real, `Category=Integration` validate calls against the same
+    /// shared `master` database on the same container, in separate test-host processes `dotnet test` runs
+    /// concurrently — each disables parallelization only within its own assembly, which does nothing to
+    /// serialize against the other. One process's sweep dropped the other's just-created table mid-write,
+    /// surfacing as <c>Table '...' was not found</c> from <c>MsSqlMerge</c> (CI run `35885505054`). Ages
+    /// out only tables the embedded unix-seconds segment in the name (see the call site that builds
+    /// <c>tableName</c>) proves are older than <see cref="StaleTableAge"/> — comfortably longer than any
+    /// real validate run takes, so a table this genuinely stale could only be a crash orphan, never a
+    /// concurrent sibling's live one, no matter how many validate runs race each other.
+    /// </para>
+    /// </summary>
     private static async Task SweepStaleTablesAsync(
         IDriver driver, DbConnection connection, string database, string schema, CancellationToken cancellationToken)
     {
         try
         {
             var tables = await driver.ListTablesAsync(connection, database, cancellationToken);
-            foreach (var stale in tables.Where(t => t.Table.StartsWith(TablePrefix, StringComparison.Ordinal)))
+            foreach (var stale in tables.Where(t => IsStaleEnoughToSweep(t.Table)))
             {
                 try
                 {
@@ -214,6 +244,27 @@ public static class LibraryValidationRunner
             // orphan (if any) is still identifiable by TablePrefix and safe to drop by hand.
             _ = ex;
         }
+    }
+
+    /// <summary>
+    /// True only for a <see cref="TablePrefix"/>-matching name whose embedded unix-seconds creation stamp
+    /// is provably older than <see cref="StaleTableAge"/>. A name that doesn't parse (created by a build
+    /// of this tool old enough to predate the stamp, or anything else unexpected) is left alone rather
+    /// than guessed at — the sweep is a best-effort convenience, not the only way a real orphan ever gets
+    /// cleaned up (it is also safe to drop by hand, by <see cref="TablePrefix"/> alone).
+    /// </summary>
+    private static bool IsStaleEnoughToSweep(string tableName)
+    {
+        if (!tableName.StartsWith(TablePrefix, StringComparison.Ordinal))
+            return false;
+
+        var afterPrefix = tableName.AsSpan(TablePrefix.Length);
+        var underscore = afterPrefix.IndexOf('_');
+        if (underscore < 0 || !long.TryParse(afterPrefix[..underscore], out var unixSeconds))
+            return false;
+
+        var createdAt = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+        return DateTimeOffset.UtcNow - createdAt > StaleTableAge;
     }
 
     private static string DefaultSchema(string driverType) => driverType switch

@@ -1,6 +1,7 @@
 # What CI should do about a known flake, now that two more gates depend on a green run
 
-**Status: open — a decision, not an implementation.** It is item 4 of
+**Status: decided (2026-09-24, see "Decision" below) — (c), adopted durably. Still in `todo/` because the
+table below isn't empty yet**, per this doc's own "how to verify when closed." It is item 4 of
 [the CI flake catalogue](follow-up-ci-is-red-on-most-pushes-from-unrelated-flaky-tests.md)'s own suggested
 order of attack, which deliberately declined to make the call: *"Either is a policy choice; this doc doesn't
 make it."* Nothing has made it since. This doc exists to make it decidable, and rules one of the three
@@ -59,9 +60,10 @@ it names now has a doc with a diagnosed cause and a fix shape:
 
 | failure | doc | shape of fix | status (2026-09-22) |
 | --- | --- | --- | --- |
-| SCD2 CDC identical mapped times | [phase-154 SCD2](follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md) | test-harness; the clock-tick delay (`a2a8d66`) was falsified by a same-day recurrence, replaced with a verified-wait (`ScanUntilPastAsync`) | **both tests disabled 2026-09-23**, not applied — six independent fixes over four days (clock-tick delay, verified-wait, 30s→90s deadline widen, the "stop hammering `sp_repldone`" fix) were each falsified by the next occurrence, most recently the exact `sp_replcmds` session-collision error the hammering fix targeted, recurring unchanged in run `35947908766` on a commit that touches none of this code. Stopped guessing; both tests in `Scd2CdcGuaranteedDeliveryIntegrationTests` are `[Fact(Skip = ...)]` until 20 consecutive clean solo runs prove a real fix — see that doc's "2026-09-23 (again)" section |
+| SCD2 CDC identical mapped times | [phase-154 SCD2](follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md) | test-harness; the clock-tick delay (`a2a8d66`) was falsified by a same-day recurrence, replaced with a verified-wait (`ScanUntilPastAsync`) | **both tests disabled 2026-09-23** — six independent fixes over four days were each falsified by the next occurrence; `[Fact(Skip = ...)]` until 20 consecutive clean solo runs prove a real fix. **2026-09-24: a candidate seventh fix** — `ReleaseLogReaderAsync` moved out of `ScanAsync`/`ScanUntilPastAsync` into each CDC test class's own teardown, closing the release/reacquire gap the four sequential scan calls in the failing test left even after the "release once per call" fix. Not a re-enable by itself — see that doc's own "20-run bar" section for whether it actually cleared the bar the disable decision set |
 | Playwright `ENOTEMPTY` teardown | [temp dir](follow-up-a-temp-dir-that-cannot-be-deleted-fails-a-job-whose-tests-all-passed.md) | don't fail a run on an undeletable temp dir | applied (both the `dotnet-windows` and Playwright occurrences), unproven over multiple CI runs |
-| Bulk-load retrigger race | [phase-154 bulk load](follow-up-phase-154-bulk-load-race-retrigger-still-observational.md) | accept both outcomes, as the same test already does for `map-1` | applied, unproven over multiple CI runs |
+| Bulk-load retrigger race | [phase-154 bulk load](follow-up-phase-154-bulk-load-race-retrigger-still-observational.md) | accept both outcomes, as the same test already does for `map-1` | applied — recurred once more 2026-09-23 (`35915250548`) at a different, unconditional-success assertion the 2026-09-22 fix didn't touch: the final "self-healing" retrigger fired without ever waiting for map-1's own explicit reload to clear `ReadHold.Loading` first (only map-2's was waited for). **2026-09-24: added the missing `WaitForLoadToCompleteAsync(_replicationName, "map-1")` before that retrigger**; verified with 5 clean back-to-back local runs, unproven yet on CI |
+| `LibraryValidationRunner`'s stale-table sweep (new, 2026-09-24) | [library-validate sweep race](follow-up-library-validate-scratch-table-sweep-races-across-processes.md) | age-gate the sweep instead of matching on name prefix alone | found and fixed same-day: `DbDataSync.Api.Tests` and `DbDataSync.Cli.Tests` both run real validate-library calls against the same shared `master` database, in separate concurrent processes CI's own `dotnet test` invocation overlaps — one process's sweep could drop a sibling's still-in-use scratch table. Applied — verified with 5 concurrent-process local runs, unproven yet on CI |
 | `RunWatermarkTimeTests` wrong row | [scheduler](follow-up-runwatermarktimetests-claims-the-wrong-row-again-via-the-real-scheduler.md) | stop the test host scheduling; claim by run id | applied (both, plus the `ORDER BY` tie-breaker), unproven over multiple CI runs |
 | `MsSqlCdcReaderTests` floor | [CDC floor](follow-up-cdc-floor-test-asserts-a-row-count-its-own-guard-allows-to-be-wrong.md) | assert inclusivity, not a row count | applied |
 | Event Log write denial | [Event Log](follow-up-event-log-tests-guard-registration-but-not-the-write.md) | guard the write; skip unelevated | write guarded, and (2026-09-23, on a real recurrence) the retry-not-a-guess: `WindowsElevation.IsAdministrator()` confirmed elevated at the failure, narrowing the cause to registration-not-yet-propagated, now retried for up to 5s — confirmed by a green `dotnet-windows` on the very next push (`35814734262`). The unelevated-skip policy question is still explicitly left open |
@@ -92,9 +94,25 @@ Worth noting for whoever picks this up: since the 2026-09-20 storm, `a2a8d66` an
 **every CI run on 2026-09-21 was green** — the pressure that made this urgent has eased, which is exactly
 when a stopgap is most tempting to adopt permanently and least necessary.
 
+## Decision (2026-09-24): (c), adopted as a durable rule, not a one-time cleanup pass
+
+**(c) — fix every flake, root cause first — is adopted**, and is no longer just this doc's own
+recommendation for the table above; it is now written into
+`architecture/implementation/README.md`'s own documented process ("A flaky test found during any work gets
+fixed now, not logged and left"), so a fresh session picks it up automatically instead of needing to be
+told again, which is the exact gap that made this decision worth forcing in the first place. (b) — retry a
+known flake — is not adopted, durably: this session found a flaky test not even in the table above (the
+`LibraryValidationRunner` stale-table sweep race) purely from investigating real CI red runs, and fixed it
+the same day it was found, which is the strongest evidence yet that undiagnosed flakes in this project are
+still tractable to actually fix rather than needing to be automated around.
+
+This table is not yet empty — several rows above are "applied, unproven over multiple CI runs" — so this
+doc is not closed by its own "how to verify" bar below. What's closed is the *policy question* the doc
+exists to answer; the remaining rows are tracked to zero by each linked doc's own recurrence-or-silence,
+not by this one.
+
 ## How to verify when closed
 
-- A decision is recorded here, with its reasoning, and this doc moves to `planning/done/`.
-- If (b): the retry is visible in the run summary, and this doc names the condition under which it is removed.
-- If (c): the table above is empty, and several consecutive `dev` pushes go green with no re-runs — the
-  catalogue's own definition of done.
+- A decision is recorded here, with its reasoning — **done, above.**
+- The table above is empty, and several consecutive `dev` pushes go green with no re-runs — the catalogue's
+  own definition of done. Not yet true; tracked via the linked docs, not restated here.

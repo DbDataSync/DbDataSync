@@ -288,3 +288,38 @@ looked right and was falsified by CI within days. Before flipping `Skip` back of
 Fewer than 20 solo runs is exactly the amount of confidence every earlier "Applied" section in this doc already
 had before being falsified. This is a stricter bar than this project's usual "verified" language, chosen
 deliberately because that language has now been wrong six times on this exact class.
+
+## A candidate seventh fix, found before re-reading this section (2026-09-24) — and held to the 20-run bar above, not exempted from it
+
+Written from a separate pass over the same two 2026-09-23 recurrences the section above already used as its
+own evidence (`35896673883` at 17:35, `35802533231` earlier the same day) — both, in fact, **predate**
+`4916d9a` (18:41 the same day), so they are what motivated that fix, not a recurrence through it; the section
+above's own real post-`4916d9a` evidence is `35947908766`, and that is the run any claim below has to survive,
+not the two already explained.
+
+Re-reading those two runs' own `CDC scan errors` diagnostic anyway surfaced something `4916d9a` didn't
+address: `APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation` calls
+`CdcCaptureJob.ScanAsync`/`ScanUntilPastAsync` **four times** in sequence
+(`Scd2CdcGuaranteedDeliveryIntegrationTests.cs:265,273,276,285`). `4916d9a` made each of those four calls
+release the log reader exactly once, via `finally` — an improvement over releasing once per 100ms poll — but
+each of the four calls still independently releases-then-reacquires, so there are still three gaps *between*
+calls, within one test, where the capture job's own restart (`StopCaptureJobAsync`/`EnableDbAsync`, run again
+at the top of the next call) or an in-flight prior scan can land its own `sp_replcmds` checkout. `35947908766`
+recurring with the identical "session ID 79" signature *after* `4916d9a` is consistent with this residual gap
+being the thing `4916d9a` narrowed but didn't close — not proven to be it, since the other session's own
+"something else contending for the same capture job" theory for that run wasn't ruled out either.
+
+**Applied, as a candidate, not yet as a re-enable**: `ReleaseLogReaderAsync` is now `public`, and neither
+`ScanAsync` nor `ScanUntilPastAsync` calls it anymore — every caller in this project holds one dedicated,
+unpooled `SqlConnection` for a single test's whole lifetime (the same reason
+`Scd2CdcGuaranteedDeliveryIntegrationTests`, `MsSqlCdcReaderTests` and `MsSqlCdcLsnTimeTests` all open theirs
+with `pooled: false`), so the log reader never needs to be handed back to anyone until that one test is
+genuinely done with CDC. Each of those three test classes' `DisposeAsync` now calls
+`CdcCaptureJob.ReleaseLogReaderAsync` once, after `StopCaptureJobAsync`, best-effort — released exactly once
+per test, in teardown, instead of once per call. A test that scans four times in a row no longer creates any
+release/reacquire gap between those four calls for anything else to land in.
+
+**This does not by itself clear the bar the section above set, and isn't allowed to** — that bar exists
+specifically because every fix in this doc so far "looked right" first. See the next section for the actual
+20-consecutive-solo-run result against both disabled tests, run against this change before either test is
+re-enabled.

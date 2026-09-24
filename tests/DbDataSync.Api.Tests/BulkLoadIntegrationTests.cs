@@ -262,6 +262,14 @@ public sealed class BulkLoadIntegrationTests : IClassFixture<TestApiFactory>, IA
         // RunExecutorTests.ExecuteWorkerAsync_AManualTriggerWhileStillLoading_FailsCleanly_BeforeAnyConnectionIsOpened,
         // which sets the hold directly rather than racing a real Bulk Load for it.
 
+        // Both of map-1's own explicit reload (asserted terminal at line 194) and map-2's real Bulk Load
+        // are waited past ReadHold.Loading before the final retrigger below — a run going terminal only
+        // means its own row is done, not that the promotion that clears the hold has finished (the same
+        // gap this helper's own doc comment names for the Primary-pass case). The 2026-09-23 CI recurrence
+        // (`35915250548`) hit exactly this for map-1: the retrigger's own Primary pass failed with
+        // "Mapping 'map-1' ... is still loading" because nothing here had ever waited for map-1's hold to
+        // clear — only map-2's.
+        await _client.WaitForLoadToCompleteAsync(_replicationName, "map-1");
         await _client.WaitForLoadToCompleteAsync(_replicationName, "map-2");
 
         // Self-healing: map-1 still has no live watermark (its own attempt never promoted one), so its

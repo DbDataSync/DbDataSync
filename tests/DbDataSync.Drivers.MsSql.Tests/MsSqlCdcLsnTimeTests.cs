@@ -50,6 +50,8 @@ public sealed class MsSqlCdcLsnTimeTests(MsSqlTestDatabase db)
     {
         try { await CdcCaptureJob.StopCaptureJobAsync(_connection); }
         catch { /* best-effort teardown */ }
+        try { await CdcCaptureJob.ReleaseLogReaderAsync(_connection); }
+        catch { /* best-effort teardown */ }
         _connection.Dispose();
     }
 

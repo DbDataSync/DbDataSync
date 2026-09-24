@@ -78,6 +78,8 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
     {
         try { await CdcCaptureJob.StopCaptureJobAsync(_sourceConnection); }
         catch { /* best-effort teardown, matching MsSqlCdcReaderTests */ }
+        try { await CdcCaptureJob.ReleaseLogReaderAsync(_sourceConnection); }
+        catch { /* best-effort teardown, matching MsSqlCdcReaderTests */ }
         _sourceConnection.Dispose();
         _targetConnection.Dispose();
     }

@@ -99,6 +99,8 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         // scanning a vanished database and contending for the log reader with the next CDC test class.
         try { await CdcCaptureJob.StopCaptureJobAsync(_connection); }
         catch { /* best-effort teardown */ }
+        try { await CdcCaptureJob.ReleaseLogReaderAsync(_connection); }
+        catch { /* best-effort teardown */ }
         _connection.Dispose();
     }
 

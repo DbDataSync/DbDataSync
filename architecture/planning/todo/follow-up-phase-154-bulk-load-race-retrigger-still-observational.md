@@ -120,3 +120,30 @@ asserts unconditional success and got the same "still loading" race outcome the 
 legitimate, not-a-bug result elsewhere in the same test. Not re-diagnosed or re-fixed in this pass — logged
 so it isn't lost, per this doc's own reason for existing. Still open; the race is real and evidently reaches
 more than the one call site already patched.
+
+## Diagnosed and applied (2026-09-24)
+
+The gap: the test explicitly waits for map-2's real Bulk Load to clear `ReadHold.Loading`
+(`WaitForLoadToCompleteAsync(_replicationName, "map-2")`) before firing the final "self-healing" retrigger
+— but never did the same for map-1's own explicit reload, even though that reload is the one whose hold the
+retrigger's own Primary pass depends on being clear. `MappingLoadWaiter.WaitForLoadToCompleteAsync`'s own
+doc comment names exactly this shape of gap for the analogous Primary-pass case: a run going terminal
+("Succeeded") is not the same moment as the hold it was holding actually clearing — there's a real
+promotion step in between. Line 194 already asserts `bulkLoadRun`'s own status is `"Succeeded"`, but nothing
+after that point ever confirmed map-1's `ReadHold` had actually cleared before the test fired a second,
+whole-replication retrigger a few lines later. The 2026-09-23 recurrence's own failure text —
+`Mapping 'map-1' ... is still loading — an initial load is in flight and its watermark is not durable
+yet` — is exactly what firing that retrigger into the still-open gap produces.
+
+**Applied**: added `await _client.WaitForLoadToCompleteAsync(_replicationName, "map-1");` immediately
+before the existing map-2 wait, right before the final retrigger (`BulkLoadIntegrationTests.cs`, just above
+the "Self-healing" comment). Safe in both branches of the earlier `map1Status` check — if map-1's own
+Primary pass already succeeded (the `else` branch, no bulk load was ever pending), the wait returns
+immediately since the hold was never set; if it failed with `ConcurrentLoadInProgress` (the intended
+branch), this is exactly the wait that was missing.
+
+**Verified**: built and ran `ARaceBetweenAConcurrentReloadAndAMappingsOwnFirstPass_TheLoserFailsCleanly_AndSelfHeals`
+five times back to back against the real `dbdatasync-mssql-source`/`target` containers — all green. As with
+every other fix in this doc and its sibling SCD2 CDC doc, this environment's own idle containers never
+reproduced the original race even before the fix, so this proves no regression, not that the race is gone;
+the real proof is whether "is still loading" recurs at this specific call site on CI.
