@@ -849,10 +849,21 @@ public sealed class DropGadgets : IRowTransform
     // And it answers a question that could not be asked before. Test 05 wrote UPPER({{column}}) on
     // Name by hand; test 15 bound a script to the same slot, and the script wins. The preview says so
     // — the generated expression, the script that produced it, and the level it is bound at — where
-    // previously the only way to find out was to run a pass and look at the data.
-    await expect(preview).toContainText('Generated column expression')
+    // previously the only way to find out was to run a pass and look at the data. Shown as a count plus
+    // a popup rather than one line per column (phase: the noisy-list fix), so this opens it and checks
+    // the table rather than just the summary line.
+    await expect(preview).toContainText('Generated 1 column expression(s)')
     await expect(preview).toContainText("Script 'reverse-name', bound on the mapping")
     await expect(preview).not.toContainText('UPPER(')
+
+    await preview.getByTestId('preview-column-expressions-open').click()
+    const expressionsDialog = page.getByTestId('preview-column-expressions-dialog')
+    await expect(expressionsDialog).toBeVisible()
+    await expect(expressionsDialog).toContainText('Name')
+    await expect(expressionsDialog).toContainText('REVERSE(')
+    await expect(expressionsDialog).not.toContainText('UPPER(')
+    await expressionsDialog.getByRole('button', { name: 'Close' }).click()
+    await expect(expressionsDialog).not.toBeVisible()
 
     // The row transform bound in test 16 runs in this process and generates no SQL. It is named and
     // says so — inventing a statement for it would be worse than admitting it has none.
