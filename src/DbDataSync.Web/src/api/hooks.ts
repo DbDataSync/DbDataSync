@@ -885,8 +885,12 @@ export function useReconcileDeletes(replicationName: string) {
  */
 export function usePreviewQuery() {
   return useMutation({
-    mutationFn: ({ connectionName, query }: { connectionName: string; query: string }) =>
-      api.connections.queryPreview(connectionName, query),
+    mutationFn: ({ connectionName, query, maxRows, allowSubquery }: {
+      connectionName: string
+      query: string
+      maxRows?: number
+      allowSubquery?: boolean
+    }) => api.connections.queryPreview(connectionName, query, maxRows, allowSubquery),
   })
 }
 

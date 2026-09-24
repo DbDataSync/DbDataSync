@@ -181,10 +181,13 @@ export const api = {
       request<CredentialSource>(`/api/connections/${encodeURIComponent(name)}/credential-source`),
     /** Runs a query and returns its columns and first few rows. Takes the text in the body, so what
      * runs is what is in the editor rather than what was last saved to the mapping. */
-    queryPreview: (name: string, query: string, sampleRows = 20) =>
+    /** `maxRows`: one of `0` (shape only, no data), `10`, or `50` — the SPA's own fixed choice.
+     * `allowSubquery`: whether the query may be wrapped to apply `maxRows` as a real SQL clause;
+     * regardless, the server always stops reading after `maxRows` rows. */
+    queryPreview: (name: string, query: string, maxRows = 10, allowSubquery = true) =>
       request<QueryPreviewResult>(`/api/connections/${encodeURIComponent(name)}/query-preview`, {
         method: 'POST',
-        body: JSON.stringify({ query, sampleRows }),
+        body: JSON.stringify({ query, maxRows, allowSubquery }),
       }),
   },
   scripts: {

@@ -28,7 +28,6 @@ import { DefaultSegmentingCard } from './DefaultSegmentingCard'
 import { SourceFilterCard } from './SourceFilterCard'
 import { MappingPipelineCard, type PipelineOverrides } from './MappingPipelineCard'
 import { ReconcileConfigCard } from './ReconcileConfigCard'
-import { isQuerySource, queryOf, withQuery } from './querySource'
 
 /** A new mapping inherits both endpoints — null connection and database — and states only its table. */
 const emptySpec: TableSpec = { connectionName: null, database: null, schema: '', table: '' }
@@ -46,6 +45,10 @@ const inheritedProvisioning: ProvisioningConfig =
  * inherits both endpoints has not itself changed when the replication's endpoint moves underneath
  * it, and quietly re-capturing every mapping on such an edit is exactly the silent catch-up the
  * cache exists to prevent. Refresh is how an operator says otherwise.
+ *
+ * Base `TableSpec` fields only — a query-shaped source's own `query` text is compared separately
+ * (`sourceTableChanged`, below), since `TableSpec` itself has no notion of one and this same
+ * function is shared with the target side, which never does either.
  */
 const samePlace = (a: TableSpec | undefined, b: TableSpec) =>
   !!a && a.connectionName === b.connectionName && a.database === b.database
@@ -84,7 +87,15 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   // name is already whatever it is, and rewriting it because the source was adjusted would rename a
   // mapping nobody asked to rename. Same shape as MappingSide's schema-follows-the-pick.
   const [nameTouched, setNameTouched] = useState(existing !== undefined)
-  const [source, setSource] = useState<SourceTableSpec>(existing?.sources[0] ?? { ...emptySpec, filter: null })
+  // A mapping saved before phase 193S has neither field in its persisted JSON at all, whatever the
+  // type above claims — normalized once here so every setter downstream can trust a real boolean and
+  // an explicit null rather than `undefined`.
+  const [source, setSource] = useState<SourceTableSpec>(() => {
+    const existingSource = existing?.sources[0]
+    return existingSource
+      ? { ...existingSource, query: existingSource.query ?? null, allowSubquery: existingSource.allowSubquery ?? true }
+      : { ...emptySpec, filter: null, query: null, allowSubquery: true }
+  })
   const [target, setTarget] = useState<TableSpec>(existing?.targets[0] ?? { ...emptySpec })
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(existing?.columnMappings ?? [])
   const [relationships, setRelationships] = useState<RelationshipConfig[]>(
@@ -149,7 +160,20 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
    * operator switches tabs — can map what the query actually returns.
    */
   const [queryColumns, setQueryColumns] = useState<ColumnMetadata[]>([])
-  const querySource = isQuerySource(task, pipeline)
+  // `null` means table-shaped — an empty string is still query-shaped, just not written yet, which is
+  // why this is an explicit null check rather than a truthiness one.
+  const querySource = source.query !== null
+  // Whether the query-editor popup is open — controlled here, not inside QuerySourcePanel, so the
+  // stale-metadata guard's own "run preview instead" exit can reopen it.
+  const [queryDialogOpen, setQueryDialogOpen] = useState(false)
+  /**
+   * The query text as of the last successful preview — an existing saved query-shaped mapping starts
+   * out counting its own saved text as "previewed" (a save can only ever have happened with some
+   * captured metadata behind it, whether from a real preview or an earlier confirmed stale save).
+   * Compared against the draft's current text at save time — see `queryIsStale`, below.
+   */
+  const [lastPreviewedQuery, setLastPreviewedQuery] = useState<string | null>(existing?.sources[0]?.query ?? null)
+  const [confirmingStaleQuery, setConfirmingStaleQuery] = useState(false)
 
   // What each side actually points at once the replication's endpoints are applied.
   const resolvedSource = resolveSide(task?.endpoints?.source ?? null, source)
@@ -205,7 +229,7 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
   // A query source is saveable without a source table, because it has none — its statement is what
   // it reads. Everything else is unchanged: both endpoints still have to resolve (config rejects a
   // mapping whose source database is blank), and there still has to be something mapped.
-  const sourceStated = querySource ? queryOf(task, pipeline).trim().length > 0 : Boolean(source.table)
+  const sourceStated = querySource ? Boolean(source.query?.trim()) : Boolean(source.table)
 
   const canSave = name
     && resolvedSource.connectionName && resolvedSource.database && sourceStated
@@ -277,11 +301,19 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     tableChanged: boolean,
   ) => (fetched && (tableChanged || !cached || cached.length === 0) ? fetched : cached ?? [])
 
-  const sourceTableChanged = !!existing && !samePlace(existing.sources[0], source)
+  // A query's own text changing counts as the source changing too, the same as its table would — see
+  // samePlace's own doc comment for why that comparison itself stays query-unaware.
+  const sourceTableChanged = !!existing
+    && (!samePlace(existing.sources[0], source) || existing.sources[0]?.query !== source.query)
   const targetTableChanged = !!existing && !samePlace(existing.targets[0], target)
 
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault()
+  // Phase 193S: a query-shaped source whose text has drifted from what was last actually previewed —
+  // saving now would carry across metadata that no longer describes what this query returns. Checked
+  // only for a query source; a table's own metadata staleness is the existing Cached Metadata card's
+  // job, signaled differently and not gated on save at all.
+  const queryIsStale = querySource && source.query !== lastPreviewedQuery
+
+  const doSave = async () => {
     await upsert.mutateAsync({
       mappingName: name,
       mapping: {
@@ -301,8 +333,27 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
     onSaved(name)
   }
 
+  // The stale-metadata guard sits in front of the actual save, never behind an automatic path — a
+  // blocking confirmation is the only way this form ever saves a query whose text has drifted from
+  // its last preview.
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (queryIsStale) {
+      setConfirmingStaleQuery(true)
+      return
+    }
+    void doSave()
+  }
+
   return (
-    <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {confirmingStaleQuery && (
+        <StaleQueryConfirmDialog
+          onRunPreviewInstead={() => { setConfirmingStaleQuery(false); setQueryDialogOpen(true) }}
+          onSaveAnyway={() => { setConfirmingStaleQuery(false); void doSave() }}
+          onCancel={() => setConfirmingStaleQuery(false)}
+        />
+      )}
       <div className="page-head">
         <h2 className="page-title mono">{existing ? existing.name : 'New table mapping'}</h2>
         {existing && <span className="badge badge-accent">MAPPED</span>}
@@ -352,13 +403,24 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
             label="Source"
             inherited={task?.endpoints?.source ?? null}
             spec={source}
-            onChange={(v) => setSourceSpec({ ...v, filter: source.filter })}
+            onChange={(v) => setSourceSpec({ ...v, filter: source.filter, query: source.query, allowSubquery: source.allowSubquery })}
             testIdPrefix="source"
-            query={querySource ? {
-              value: queryOf(task, pipeline),
-              onChange: (next) => setPipeline(withQuery(task, pipeline, next)),
-              onColumns: setQueryColumns,
-            } : undefined}
+            query={{
+              isQuerySource: querySource,
+              onToggleQuerySource: () => setSourceSpec(querySource
+                ? { ...source, query: null }
+                : { ...source, query: '', schema: '', table: '' }),
+              value: source.query ?? '',
+              onChange: (next) => setSource({ ...source, query: next }),
+              allowSubquery: source.allowSubquery,
+              onAllowSubqueryChange: (next) => setSource({ ...source, allowSubquery: next }),
+              onColumns: (columns, previewedQuery) => {
+                setQueryColumns(columns)
+                setLastPreviewedQuery(previewedQuery)
+              },
+              open: queryDialogOpen,
+              onOpenChange: setQueryDialogOpen,
+            }}
           />
         }
         target={
@@ -406,6 +468,74 @@ export function TableMappingForm({ replicationName, existing, base, onSaved, onR
         />
       </div>
     </form>
+  )
+}
+
+/**
+ * The blocking confirmation a stale query-shaped source forces at save time (phase 193S) — modeled on
+ * `MappingReadStateDialog`'s `DataLossConfirm`: names the actual risk rather than asking a bare "are you
+ * sure", and gives an explicit way to resolve it (re-preview) alongside the explicit way to proceed
+ * anyway. Never reached silently — see `queryIsStale`'s own gate in `handleSubmit`.
+ */
+function StaleQueryConfirmDialog({ onRunPreviewInstead, onSaveAnyway, onCancel }: {
+  onRunPreviewInstead: () => void
+  onSaveAnyway: () => void
+  onCancel: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Query changed since the last preview"
+        data-testid="stale-query-dialog"
+      >
+        <div className="card-head">
+          <span className="card-title">Query changed since the last preview</span>
+        </div>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="banner warn" role="alert" data-testid="stale-query-warning">
+            <span>
+              I understand that my changes haven't been validated, and this will be operating on
+              previously captured metadata.
+            </span>
+          </div>
+          <span className="hint">
+            The source query has changed since it was last previewed successfully. Saving now carries
+            across the column shape from that earlier preview, not whatever this version of the query
+            actually returns.
+          </span>
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn" onClick={onCancel} data-testid="stale-query-cancel">
+              Back
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={onRunPreviewInstead}
+              data-testid="stale-query-run-preview"
+            >
+              Run preview instead
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={onSaveAnyway}
+              data-testid="stale-query-save-anyway"
+            >
+              Save anyway
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

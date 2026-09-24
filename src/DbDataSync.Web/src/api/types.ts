@@ -190,6 +190,12 @@ export interface TableSpec {
 
 export interface SourceTableSpec extends TableSpec {
   filter: string | null
+  /** A hand-written query, run byte-for-byte unmodified, in place of a real table — mutually exclusive
+   * with `table` (null means table-shaped). See `SourceTableSpec.Query`'s own backend doc comment. */
+  query: string | null
+  /** Whether `query` may be wrapped as a subquery — meaningless when `query` is null. Operator-set,
+   * never inferred from a preview's outcome. */
+  allowSubquery: boolean
 }
 
 /** A mapping side with its endpoint resolved — what the metadata pickers and the drivers work from. */

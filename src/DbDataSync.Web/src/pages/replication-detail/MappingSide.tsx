@@ -23,16 +23,23 @@ interface Props {
    */
   allowNewTable?: boolean
   /**
-   * Source side only, and only for a reader whose configuration *is* a query. Rendered in place of
-   * the schema and table pickers, which such a source has no answer for — see `QuerySourcePanel`.
+   * Source side only. Lets the operator declare this source query-shaped instead of table-shaped —
+   * `SourceTableSpec.Query` in place of `Table` — and, once they have, edits it in place of the schema
+   * and table pickers, which such a source has no answer for. See `QuerySourcePanel`.
    *
-   * Passed in rather than decided here: which reader a mapping runs is the pipeline's question, and
-   * the draft that answers it lives in `TableMappingForm` alongside the query this edits.
+   * Passed in rather than decided here: the query and its metadata live in `TableMappingForm`'s own
+   * draft state, alongside everything else about the source.
    */
   query?: {
+    isQuerySource: boolean
+    onToggleQuerySource: () => void
     value: string
     onChange: (next: string) => void
-    onColumns: (columns: ColumnMetadata[]) => void
+    allowSubquery: boolean
+    onAllowSubqueryChange: (next: boolean) => void
+    onColumns: (columns: ColumnMetadata[], previewedQuery: string) => void
+    open: boolean
+    onOpenChange: (open: boolean) => void
   }
 }
 
@@ -143,15 +150,34 @@ export function MappingSide({ side, label, inherited, spec, onChange, testIdPref
           </Field>
         </div>
 
-        {query ? (
+        {query && (
+          <div className="row" style={{ gap: 7 }}>
+            <button
+              type="button"
+              className={`toggle ${query.isQuerySource ? 'on' : ''}`}
+              onClick={query.onToggleQuerySource}
+              aria-pressed={query.isQuerySource}
+              data-testid={`${testIdPrefix}-query-source-toggle`}
+            />
+            <span style={{ font: '500 11.5px var(--ui)', color: 'var(--ink-4)' }}>
+              Custom query, not a table
+            </span>
+          </div>
+        )}
+
+        {query?.isQuerySource ? (
           /* A query-first source: the statement replaces schema and table, which it has no answer
              for. Connection and database stay above — a query still runs somewhere, and config
              requires both to resolve — but there is no catalog entry here to point at. */
           <QuerySourcePanel
             query={query.value}
             onChange={query.onChange}
+            allowSubquery={query.allowSubquery}
+            onAllowSubqueryChange={query.onAllowSubqueryChange}
             connectionName={connectionName}
             onColumns={query.onColumns}
+            open={query.open}
+            onOpenChange={query.onOpenChange}
             testIdPrefix={testIdPrefix}
           />
         ) : allowNewTable ? (

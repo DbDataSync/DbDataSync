@@ -1,6 +1,6 @@
 # Phase 193S — Query-source preview redesign: max-rows choice, capped reads, and the stale-metadata guard
 
-**Status**: Not built.
+**Status**: Built. See Retrospective.
 **Plan reference**: `phase-190S-source-table-spec-query-and-allow-subquery.md` (decision 6: metadata for a
 query-shaped source comes only from the existing preview flow). This phase extends that flow rather than
 replacing it.
@@ -79,3 +79,52 @@ text has silently drifted from whatever was last actually previewed.
   save-anyway) verified to actually work.
 - A unit test for the reader-side stop-after-`n`-rows-and-dispose behavior specifically with
   `AllowSubquery = false` (no SQL-level cap available, so this is the only thing bounding the read).
+
+## Retrospective
+
+Built in full, including both items absorbed from 191S. The backend half (max-rows/wrap/retire) landed as
+its own commit before this one; see that commit's message for `SqlDialect.RenderRowLimit`, the `limit+1`
+wrapping fix, and the retirement of `RawQueryReader`/`DuckDbQueryReader`/`QuerySegmentTokens`.
+
+**Frontend, concretely**: `SourceTableSpec` (TS) gained `query`/`allowSubquery`. `querySource.ts` is deleted
+outright rather than adapted — once "is this a query source" became a plain field on the source itself
+(`source.query !== null`, an explicit null check, not truthiness, since an empty-but-chosen query must
+still count as query-shaped), the whole reader-Kind-lookup module it contained had nothing left to do.
+`MappingSide.tsx` gained a real, direct switch — "Custom query, not a table" — where none existed before:
+today's design no longer has a reader-Kind picker driving this, so the operator needs a first-class way to
+declare a source query-shaped at all, not just edit one that already is. `QuerySourcePanel`'s open/closed
+state moved from local to controlled (`open`/`onOpenChange`), so the new stale-metadata dialog's "run
+preview instead" exit can reopen the same popup rather than only being able to say so in words.
+`QuerySourcePanel`/`QueryEditorDialog` gained the max-rows `<select>` (0/10/50), the `AllowSubquery` toggle,
+and the one-click retry button — which reuses `PreviewGrid`'s own existing `${testId}-error` rendering for
+the message itself rather than duplicating it (a real duplicate-banner mistake caught before it shipped,
+not after).
+
+**A real robustness gap found and fixed while wiring this up, unprompted by any test failure**: a mapping
+saved before this phase has neither field in its persisted JSON at all, despite the TypeScript type now
+claiming both are always present. `TableMappingForm`'s initial `source` state normalizes defensively
+(`query ?? null`, `allowSubquery ?? true`) exactly once at load, so every setter downstream can trust a
+real value instead of `undefined` masquerading as a boolean.
+
+**The stale-metadata guard** (`StaleQueryConfirmDialog`, a local component in `TableMappingForm.tsx`,
+modeled on `MappingReadStateDialog`'s `DataLossConfirm`): tracks `lastPreviewedQuery` state, seeded from the
+saved mapping's own query text on load (an existing save is assumed to have *some* captured metadata behind
+it, whether from a real preview or an earlier confirmed stale save — the best available signal without new
+server-side tracking). `handleSubmit` blocks on `source.query !== lastPreviewedQuery` and shows the exact
+wording agreed earlier in this design's own conversation, with both exits wired for real: "run preview
+instead" reopens the query dialog via the same controlled `open` state; "save anyway" proceeds.
+
+Open question 2 is resolved in the design's own favor from the conversation that specified it: the retry
+button stays inside the query editor only, not duplicated into the stale-metadata dialog — the two guard
+different problems (a query that can't be wrapped, vs. one that hasn't been re-validated) and conflating
+them would blur which risk is actually being acknowledged.
+
+**Verified for real, not just type-checked**: `tsc -b` and `oxlint` clean (no new warnings in any touched
+file). `vitest run` 86/86 (all pre-existing). `duckdb-query-source.spec.ts` rewritten for the new fixture
+shape and extended with four new tests (toggling into/out of query mode, the retry-without-subqueries
+button actually flipping `AllowSubquery` and succeeding, the max-rows choice reaching the request, and the
+full stale-guard flow including both exits) — all 8 tests run against a real Chromium browser and a real
+`dotnet`-hosted API server, not mocked at the component level. The three sibling mapping-editor specs
+(`mapping-relationships`, `mapping-column-add`, `mapping-metadata-cache`) and the full 46-test
+`golden-path.spec.ts` all re-run green after these changes, confirming nothing else in the mapping editor
+regressed.

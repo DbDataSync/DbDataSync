@@ -6,9 +6,13 @@ const screenshotsDir = screenshotDir('duckdb-query-source')
 
 const REPLICATION_NAME = 'duck-demo'
 const MAPPING_NAME = 'orders'
+const TABLE_MAPPING_NAME = 'plain'
 
 /**
- * The mapping editor's source tab, for a reader whose configuration is a query — phase 89.
+ * The mapping editor's source tab, for a query-shaped source — phase 89, reworked by 190S-193S: the
+ * query and its own `allowSubquery` setting are fields on `SourceTableSpec` now, not a distinct reader
+ * Kind's own option, and toggling a mapping between table-shaped and query-shaped is a switch directly
+ * on the Source card rather than something decided by picking a reader elsewhere.
  *
  * **Stubbed at the network boundary**, following `lag-monitoring.spec.ts`. The property under test is
  * that Preview runs *the text in the editor* rather than the mapping's saved config, and a stub is
@@ -29,9 +33,7 @@ const TASK = {
   enabled: true,
   scheduling: { mode: 'Continuous', frequencySeconds: 60, cronExpression: null },
   changeProcessing: {
-    // The replication's reader is the query reader, so the mapping inherits it and the source tab
-    // swaps its pickers without the operator having overridden anything.
-    reader: { kind: 'DuckDbQuery', options: { query: SAVED_QUERY } },
+    reader: { kind: 'BatchReload', options: {} },
     cache: { kind: 'MsSqlStagingTable', options: {} },
     writer: { kind: 'MsSqlMerge', options: {} },
   },
@@ -46,9 +48,33 @@ const TASK = {
 const MAPPING = {
   name: MAPPING_NAME,
   // No schema and no table: a query source has neither, which is the whole point.
-  sources: [{ connectionName: null, database: null, schema: '', table: '', filter: null }],
+  sources: [{
+    connectionName: null, database: null, schema: '', table: '', filter: null,
+    query: SAVED_QUERY, allowSubquery: true,
+  }],
   targets: [{ connectionName: null, database: null, schema: 'dbo', table: 'Orders' }],
-  columnMappings: [],
+  columnMappings: [{ sourceColumn: 'Id', targetColumn: 'Id', transform: null }],
+  scripts: {},
+  defaultSegmenting: [],
+  verification: [],
+  hooks: [],
+  notes: null,
+  traceTiming: false,
+  readerOverride: null,
+  cacheOverride: null,
+  writerOverride: null,
+}
+
+/** A table-shaped mapping on the same replication — the starting point for the toggle-into-query test,
+ * which needs a mapping that is *not* already query-shaped when the page loads. */
+const TABLE_MAPPING = {
+  name: TABLE_MAPPING_NAME,
+  sources: [{
+    connectionName: null, database: null, schema: 'main', table: 'Orders', filter: null,
+    query: null, allowSubquery: true,
+  }],
+  targets: [{ connectionName: null, database: null, schema: 'dbo', table: 'Orders2' }],
+  columnMappings: [{ sourceColumn: 'Id', targetColumn: 'Id', transform: null }],
   scripts: {},
   defaultSegmenting: [],
   verification: [],
@@ -63,14 +89,7 @@ const MAPPING = {
 const CAPABILITIES = {
   driverType: 'DuckDb',
   readers: [{
-    kind: 'DuckDbQuery',
-    supportsSegmentation: false,
-    detectsDeletes: false,
-    parameters: [{
-      name: 'query', label: 'Query', description: null, type: 'Sql', required: true,
-      cardinality: null, dropdownOptions: null, dropdownLabels: null, default: null,
-      layout: null, visible: true, recalc: false,
-    }],
+    kind: 'BatchReload', supportsSegmentation: true, detectsDeletes: false, parameters: [],
   }],
   stagingProviders: [],
   writers: [],
@@ -84,10 +103,10 @@ const json = (body: unknown) => ({
   body: JSON.stringify(body),
 })
 
-/** Every query body the page sent to the preview endpoint, in order. */
-type Sent = { query: string }[]
+/** Every preview request body the page sent, in order. */
+type Sent = { query: string; maxRows: number; allowSubquery: boolean }[]
 
-async function stub(page: Page): Promise<Sent> {
+async function stub(page: Page, mapping: typeof MAPPING = MAPPING): Promise<Sent> {
   const sent: Sent = []
   const base = `/api/replications/${REPLICATION_NAME}`
 
@@ -102,8 +121,8 @@ async function stub(page: Page): Promise<Sent> {
   // "it ran what was in the editor" assertable from the rendered grid rather than only from the
   // request log — the screen shows the text it actually sent.
   await page.route('**/api/connections/lake/query-preview', async (route) => {
-    const body = route.request().postDataJSON() as { query: string }
-    sent.push({ query: body.query })
+    const body = route.request().postDataJSON() as { query: string; maxRows: number; allowSubquery: boolean }
+    sent.push(body)
     return route.fulfill(json({
       source: "live query against 'lake'",
       columns: ['Id', 'Name', 'Echo'],
@@ -115,9 +134,12 @@ async function stub(page: Page): Promise<Sent> {
 
   // A DuckDB source has no catalog. The driver returns empty lists, and these say so.
   await page.route('**/api/connections/lake/metadata/**', (route) => route.fulfill(json([])))
+  await page.route('**/api/connections/lake/metadata/databases/*/tables', (route) => route.fulfill(json([
+    { schema: 'main', table: 'Orders' },
+  ])))
   await page.route('**/api/connections/tgt/metadata/databases', (route) => route.fulfill(json(['Warehouse'])))
   await page.route('**/api/connections/tgt/metadata/databases/*/tables', (route) => route.fulfill(json([
-    { schema: 'dbo', table: 'Orders' },
+    { schema: 'dbo', table: 'Orders' }, { schema: 'dbo', table: 'Orders2' },
   ])))
   await page.route('**/api/connections/tgt/metadata/**/columns', (route) => route.fulfill(json([
     { name: 'Id', nativeType: 'int', isNullable: false, isPrimaryKey: true, isIdentity: false },
@@ -128,16 +150,23 @@ async function stub(page: Page): Promise<Sent> {
     supportsConnectionTest: true, supportedProvisioningActions: [],
   })))
 
-  await page.route(`**${base}/table-mappings`, (route) => route.fulfill(json([MAPPING_NAME])))
-  await page.route(`**${base}/table-mappings/${MAPPING_NAME}`, (route) => route.fulfill(json(MAPPING)))
-  // Everything else hanging off the mapping — inferred column types, inferred natural key — is a
+  await page.route(`**${base}/table-mappings`, (route) => route.fulfill(json([MAPPING_NAME, TABLE_MAPPING_NAME])))
+  await page.route(`**${base}/table-mappings/${MAPPING_NAME}`, (route) => {
+    if (route.request().method() === 'PUT') return route.fulfill(json(mapping))
+    return route.fulfill(json(mapping))
+  })
+  await page.route(`**${base}/table-mappings/${TABLE_MAPPING_NAME}`, (route) => route.fulfill(json(TABLE_MAPPING)))
+  // Everything else hanging off either mapping — inferred column types, inferred natural key — is a
   // list this screen can render empty.
   await page.route(`**${base}/table-mappings/${MAPPING_NAME}/**`, (route) => route.fulfill(json([])))
-  // Registered *after* that catch-all deliberately: Playwright matches the most recently added route
-  // first, so the specific one has to come last or the catch-all swallows it. The editor's tab bar
+  await page.route(`**${base}/table-mappings/${TABLE_MAPPING_NAME}/**`, (route) => route.fulfill(json([])))
+  // Registered *after* those catch-alls deliberately: Playwright matches the most recently added route
+  // first, so the specific ones have to come last or the catch-alls swallow them. The editor's tab bar
   // reads a provisioning plan for its badge and needs the report's shape, not an empty array.
   const emptyPlan = { action: '', state: 'UpToDate', steps: [], problems: [] }
   await page.route(`**${base}/table-mappings/${MAPPING_NAME}/provisioning`, (route) =>
+    route.fulfill(json({ source: emptyPlan, target: emptyPlan })))
+  await page.route(`**${base}/table-mappings/${TABLE_MAPPING_NAME}/provisioning`, (route) =>
     route.fulfill(json({ source: emptyPlan, target: emptyPlan })))
   await page.route(`**${base}/status`, (route) => route.fulfill(json({
     running: false, enabled: true, paused: false, pauseNote: null, shouldRun: true,
@@ -161,8 +190,12 @@ async function setQuery(page: Page, query: string) {
   await page.keyboard.insertText(query)
 }
 
+async function openMapping(page: Page, mappingName: string) {
+  await page.goto(`/replications/${REPLICATION_NAME}/mappings/${mappingName}`)
+}
+
 async function openSourceTab(page: Page) {
-  await page.goto(`/replications/${REPLICATION_NAME}/mappings/${MAPPING_NAME}`)
+  await openMapping(page, MAPPING_NAME)
   await expect(page.getByTestId('source-query-open-button')).toBeVisible({ timeout: 20_000 })
 }
 
@@ -219,8 +252,9 @@ test.describe('duckdb query source', () => {
     await page.getByTestId('source-query-preview-button').click()
     await expect(page.getByTestId('source-query-preview')).toBeVisible()
 
-    // What actually left the browser: the edited text, once, and not the saved query.
-    expect(sent).toEqual([{ query: edited }])
+    // What actually left the browser: the edited text, once, and not the saved query — with the
+    // mapping's own AllowSubquery (true) and the default 10-row cap, since neither control was touched.
+    expect(sent).toEqual([{ query: edited, maxRows: 10, allowSubquery: true }])
     expect(sent[0].query).not.toBe(SAVED_QUERY)
 
     // And what came back is rendered as the query's own result — the echo column carries the text
@@ -293,5 +327,107 @@ test.describe('duckdb query source', () => {
     await page.getByTestId('source-query-preview-button').click()
 
     await expect(page.getByTestId('source-query-preview-error')).toContainText('Parser Error')
+  })
+
+  /**
+   * Phase 193S: a query-shaped source is a switch directly on the Source card now, not something
+   * decided by picking a reader Kind elsewhere — an operator can turn a plain table mapping into one
+   * and back without touching the Pipeline tab at all.
+   */
+  test('05 - toggling into query mode replaces the table pickers, and back restores them', async ({ page }) => {
+    await stub(page)
+    await openMapping(page, TABLE_MAPPING_NAME)
+    await expect(page.getByTestId('source-table-select')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId('source-query-open-button')).toHaveCount(0)
+
+    await page.getByTestId('source-query-source-toggle').click()
+    await expect(page.getByTestId('source-query-open-button')).toBeVisible()
+    await expect(page.getByTestId('source-table-select')).toHaveCount(0)
+
+    await page.getByTestId('source-query-source-toggle').click()
+    await expect(page.getByTestId('source-table-select')).toBeVisible()
+    await expect(page.getByTestId('source-query-open-button')).toHaveCount(0)
+  })
+
+  /**
+   * The one-click recovery phase 193S asks for: never automatic, and it actually flips the setting a
+   * save would persist rather than merely retrying once and forgetting.
+   */
+  test('06 - a wrapped preview failure offers a one-click retry without subqueries', async ({ page }) => {
+    await stub(page)
+    await page.route('**/api/connections/lake/query-preview', async (route) => {
+      const body = route.request().postDataJSON() as { allowSubquery: boolean }
+      if (body.allowSubquery) {
+        return route.fulfill(json({
+          source: "live query against 'lake'", columns: [], rows: [], truncated: false,
+          error: 'this query cannot be used as a subquery',
+        }))
+      }
+      return route.fulfill(json({
+        source: "live query against 'lake'", columns: ['Id'], rows: [['1']], truncated: false, error: null,
+      }))
+    })
+
+    await openSourceTab(page)
+    await openQueryDialog(page)
+    await expect(page.getByTestId('source-query-allow-subquery-toggle')).toHaveAttribute('aria-pressed', 'true')
+
+    await page.getByTestId('source-query-preview-button').click()
+    await expect(page.getByTestId('source-query-preview-error')).toContainText('cannot be used as a subquery')
+
+    await page.getByTestId('source-query-retry-without-subqueries').click()
+    await expect(page.getByTestId('source-query-preview')).toBeVisible()
+    await expect(page.getByTestId('source-query-allow-subquery-toggle')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  test('07 - the max-rows choice is sent with the preview request', async ({ page }) => {
+    const sent = await stub(page)
+    await openSourceTab(page)
+    await openQueryDialog(page)
+
+    await page.getByTestId('source-query-maxrows-select').selectOption('50')
+    await page.getByTestId('source-query-preview-button').click()
+    await expect(page.getByTestId('source-query-preview')).toBeVisible()
+
+    expect(sent[0].maxRows).toBe(50)
+  })
+
+  /**
+   * The blocking guard phase 193S adds at save time: a query edited without a fresh preview must not
+   * save silently on whatever metadata an earlier preview captured.
+   */
+  test('08 - saving a mapping whose query changed since the last preview is blocked, with both exits working', async ({ page }) => {
+    let saved: unknown = null
+    await stub(page)
+    await page.route(`**/api/replications/${REPLICATION_NAME}/table-mappings/${MAPPING_NAME}`, async (route) => {
+      if (route.request().method() === 'PUT') {
+        saved = route.request().postDataJSON()
+        return route.fulfill(json(MAPPING))
+      }
+      return route.fulfill(json(MAPPING))
+    })
+
+    await openSourceTab(page)
+    await openQueryDialog(page)
+    await setQuery(page, "SELECT Id, Name FROM read_csv('/tmp/edited-not-previewed.csv')")
+    await page.getByTestId('source-query-close-button').click()
+
+    await page.getByTestId('save-mapping-button').click()
+    await expect(page.getByTestId('stale-query-dialog')).toBeVisible()
+    await expect(page.getByTestId('stale-query-warning')).toContainText("haven't been validated")
+
+    // "Run preview instead" reopens the same query editor rather than saving anything.
+    await page.getByTestId('stale-query-run-preview').click()
+    await expect(page.getByTestId('stale-query-dialog')).toHaveCount(0)
+    await expect(page.getByTestId('source-query-dialog')).toBeVisible()
+    expect(saved).toBeNull()
+    await page.getByTestId('source-query-close-button').click()
+
+    // "Save anyway" proceeds — the explicit, named acknowledgment the design calls for.
+    await page.getByTestId('save-mapping-button').click()
+    await expect(page.getByTestId('stale-query-dialog')).toBeVisible()
+    await page.getByTestId('stale-query-save-anyway').click()
+    await expect(page.getByTestId('stale-query-dialog')).toHaveCount(0)
+    await expect.poll(() => saved).not.toBeNull()
   })
 })
