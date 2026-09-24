@@ -323,9 +323,11 @@ public sealed class ConfigRepository
     {
         // A mapping that resolves to no connection or database cannot run. Catch it here rather than
         // at the first run, where it surfaces as a failed run instead of a rejected edit.
+        ConfigValidation.ValidateSources(mapping);
         EndpointResolution.Validate(task, mapping);
         ValidateHooks(mapping.Hooks);
         ConfigValidation.ValidateRelationships(mapping);
+        ConfigValidation.ValidateQuerySourceReader(mapping, PipelineResolution.Reader(task, mapping).Kind);
 
         // The mapping's own primary writer — computed once and reused below, both for the
         // already-existing historized-target check and for phase 129's Scd2-specific reconcile checks,

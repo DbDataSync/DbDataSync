@@ -72,11 +72,14 @@ public sealed class MappingMetadataTests : IDisposable
         List<CachedColumn>? sourceColumns = null,
         List<CachedColumn>? targetColumns = null,
         DateTime? capturedUtc = null,
-        string sourceTable = "Orders") =>
+        string sourceTable = "Orders",
+        string? sourceQuery = null) =>
         _config.SaveTableMapping("r", new TableMappingConfig
         {
             Name = "m",
-            Sources = [new SourceTableSpec { Schema = "dbo", Table = sourceTable }],
+            Sources = [sourceQuery is null
+                ? new SourceTableSpec { Schema = "dbo", Table = sourceTable }
+                : new SourceTableSpec { Query = sourceQuery }],
             Targets = [new TableSpec { Schema = "dbo", Table = "Orders" }],
             ColumnMappings = [new ColumnMapping { SourceColumn = "Id", TargetColumn = "Id" }],
             SourceColumns = sourceColumns ?? [],
@@ -191,7 +194,7 @@ public sealed class MappingMetadataTests : IDisposable
     {
         // A query-configured reader has no catalog entry to point at — a real configuration, not a
         // fault, and the refresh still does the target's side.
-        SaveMapping(sourceTable: "");
+        SaveMapping(sourceQuery: "SELECT * FROM Orders");
         _catalog.Set("tgt", "DW", "dbo", "Orders", Col("Id", "int", pk: true));
 
         var result = await _service.RefreshAsync("r", "m", Author, CancellationToken.None);

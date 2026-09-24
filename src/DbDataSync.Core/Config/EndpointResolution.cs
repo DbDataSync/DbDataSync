@@ -19,6 +19,8 @@ public static class EndpointResolution
             Schema = spec.Schema,
             Table = spec.Table,
             Filter = spec.Filter,
+            Query = spec.Query,
+            AllowSubquery = spec.AllowSubquery,
         };
 
     public static TableRef ResolveTarget(ReplicationTaskConfig task, TableSpec spec) =>

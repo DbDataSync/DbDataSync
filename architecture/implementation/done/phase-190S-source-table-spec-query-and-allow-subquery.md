@@ -1,6 +1,6 @@
 # Phase 190S — Query-shaped sources: `SourceTableSpec.Query`, `AllowSubquery`, and validation
 
-**Status**: Not built.
+**Status**: Built. See Retrospective.
 **Plan reference**: none — raised directly in conversation, as a follow-on to
 `phase-185J-declared-relationships-and-foreign-column-lookups.md` through
 `phase-189J-relationships-and-foreign-columns-in-the-mapping-editor.md`. Those four phases gave the mapping
@@ -114,3 +114,39 @@ that source — not that they don't work at all.
 - A round-trip test confirming an existing table-shaped mapping's saved config is byte-for-byte unaffected
   by the new optional fields (`Query`/`AllowSubquery` both absent, `Table` still required-in-practice for
   every mapping written before this phase).
+
+## Retrospective
+
+Built mostly as designed, with one real correction to the type shape along the way. `TableSpec.Table`/
+`TableRef.Table` did **not** become `string?` as originally planned — a first attempt at that produced 85
+new nullable-reference warnings across 29 files, because `Table` is the *shared* base property for both
+sides of a mapping, and every writer/provisioner/staging-provider (which only ever deals with the target,
+always non-null in practice) inherited the relaxed nullability along with the sources that actually need
+it. Fixed by dropping `required` and defaulting to `""` instead of switching to `string?` — the type stays
+a plain non-nullable `string` everywhere, so every existing consumer keeps compiling exactly as before;
+only `ConfigValidation.ValidateSources`/`ValidateQuerySourceReader` (both using the same
+`string.IsNullOrWhiteSpace` idiom `TableSpec.Database`'s own blank-means-something convention already
+established) actually police what's valid. Net effect: zero new warnings, zero touched call sites outside
+`DbDataSync.Core.Config` itself.
+
+`ConfigValidation.ValidateQuerySourceReader`'s reader-Kind check uses bare string literals
+(`"BatchReload"`/`"Watermark"`/`"MsSqlBatchReload"`) rather than referencing
+`DbDataSync.Drivers.Generic.GenericDriverKinds`, matching `PipelineResolution`'s own existing precedent
+(its Reconcile-Kind defaults) — `DbDataSync.Core` is upstream of the driver projects that define those
+constants and cannot reference them.
+
+One existing test needed updating, not fixing: `MappingMetadataTests.Refresh_ASourceWithNoTable_...`
+represented a query-shaped source the pre-190S way (an empty `Table` string, no formal `Query` field to
+set) — now correctly rejected by `ValidateSources` as "neither" set. Updated to save with `Query` set
+instead, which exercises the exact same "no catalog to read" code path in `MappingColumnReader` unchanged.
+
+The `ValidateQuerySourceReader` reconciling-writer-needs-a-mapped-column rule from this doc's own decision
+7 was **not** built here — it turned out to belong more naturally with 192S's segment/watermark-column
+resolution work, where the same "does this column exist as a `ColumnMapping`" question is already being
+answered for a different reason. Tracked there instead, not dropped.
+
+**Verified for real**: full solution build (`dotnet build`, root — 0 errors, 2 pre-existing unrelated
+warnings, same as before this phase), full non-integration test suite green (2,431 passed, 0 failed, 44
+skipped — all pre-existing Windows-only skips), plus 12 new tests in `QuerySourceValidationTests.cs`
+covering both new validation rules across every combination the doc's own decisions name.
+

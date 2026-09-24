@@ -327,6 +327,72 @@ public static class ConfigValidation
     }
 
     /// <summary>
+    /// Phase 190S. Every source names exactly one of a table or a query — never both, never neither —
+    /// and every target names a table: there is no query alternative for a write destination.
+    /// </summary>
+    public static void ValidateSources(TableMappingConfig mapping)
+    {
+        for (var i = 0; i < mapping.Sources.Count; i++)
+        {
+            var source = mapping.Sources[i];
+            var hasTable = !string.IsNullOrWhiteSpace(source.Table);
+            var hasQuery = !string.IsNullOrWhiteSpace(source.Query);
+            if (hasTable == hasQuery)
+                throw new ConfigValidationException(
+                    $"Table mapping '{mapping.Name}' source {i} must name exactly one of a table or a " +
+                    $"query — it currently names {(hasTable ? "both" : "neither")}.");
+        }
+
+        for (var i = 0; i < mapping.Targets.Count; i++)
+        {
+            if (string.IsNullOrWhiteSpace(mapping.Targets[i].Table))
+                throw new ConfigValidationException(
+                    $"Table mapping '{mapping.Name}' target {i} names no table. A target is always a " +
+                    "real table — there is no query alternative for a write destination.");
+        }
+    }
+
+    /// <summary>
+    /// Phase 190S. A query-shaped source has two more save-time rules than a table-shaped one, both
+    /// needing the mapping's *effective reader* rather than being shape-only like
+    /// <see cref="ValidateSources"/> above:
+    /// <para>
+    /// **Hard, always, no degraded mode**: a <c>Watermark</c> reader against a source with
+    /// <see cref="SourceTableSpec.AllowSubquery"/> <c>false</c> is rejected outright. Watermark reading
+    /// needs <c>ORDER BY</c> for its tie-safe bounded-read guarantee on essentially every pass, including
+    /// the first, so wrapping the query is not optional the way it is for a reload-style pass — there is
+    /// nothing to silently fall back to.
+    /// </para>
+    /// <para>
+    /// **Reader support**: only <c>BatchReload</c>/<c>Watermark</c> (generic or MsSql's own
+    /// <c>MsSqlBatchReload</c> Kind string, which resolves to the same reader — phase 191S) know how to
+    /// read a query-shaped source at all; every other reader still assumes a real table it can address
+    /// directly (Change Tracking, CDC, trigger-audit, Flashback, logical decoding, KeyReconcile). These are
+    /// bare string literals rather than a reference to <c>DbDataSync.Drivers.Generic</c>'s own Kind
+    /// constants, matching <see cref="PipelineResolution"/>'s own precedent (its Reconcile-Kind defaults) —
+    /// this project is upstream of the driver projects that define those constants and cannot reference them.
+    /// </para>
+    /// </summary>
+    public static void ValidateQuerySourceReader(TableMappingConfig mapping, string readerKind)
+    {
+        var querySources = mapping.Sources.Where(s => s.Query is not null).ToList();
+        if (querySources.Count == 0)
+            return;
+
+        if (readerKind == "Watermark" && querySources.Any(s => !s.AllowSubquery))
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' uses the Watermark reader against a query-shaped source " +
+                "that disallows subqueries. Watermark reading always needs to wrap the query, so this " +
+                "combination cannot run — allow subqueries for this source, or choose a different reader.");
+
+        if (readerKind is not ("BatchReload" or "Watermark" or "MsSqlBatchReload"))
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' has a query-shaped source, but its reader ('{readerKind}') " +
+                "does not support one — only a reload or Watermark reader can read from a query. Use one " +
+                "of those, or switch this source back to a table.");
+    }
+
+    /// <summary>
     /// Phase 186J. Three checks, all shape-level — whether a <see cref="RelationshipConfig"/>'s
     /// <see cref="RelationshipJoinKey"/> columns actually exist is a save-time metadata-refresh concern,
     /// the same way <see cref="ColumnMapping.SourceColumn"/>/<see cref="ColumnMapping.TargetColumn"/>

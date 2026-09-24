@@ -55,7 +55,21 @@ public class TableSpec
     public string? Database { get; set; }
 
     public string Schema { get; set; } = "dbo";
-    public required string Table { get; set; }
+
+    /// <summary>
+    /// The table this side names — required for a target (there is no query alternative for a write
+    /// destination: see <see cref="ConfigValidation.ValidateSources"/>), and mutually exclusive with
+    /// <see cref="SourceTableSpec.Query"/> for a source. **Not <c>required</c>, and deliberately not
+    /// nullable either** — a query-shaped source leaves this <c>""</c>, matching <see
+    /// cref="TableSpec.Database"/>'s own "an explicit blank is a real, resolved answer" convention, so
+    /// every existing consumer (a driver's <c>QualifyTable</c>/<c>ListColumnsAsync</c>, every reader that
+    /// hasn't been taught about query-shaped sources) keeps compiling against a plain <c>string</c>
+    /// exactly as before — phase 190S is a source narrowing what's *valid*, not widening the type every
+    /// downstream consumer has to handle. <see cref="ConfigValidation.ValidateSources"/> and <see
+    /// cref="ConfigValidation.ValidateQuerySourceReader"/> are what actually keep a blank Table away from
+    /// a reader that doesn't know what to do with one.
+    /// </summary>
+    public string Table { get; set; } = "";
 }
 
 public sealed class SourceTableSpec : TableSpec
@@ -63,6 +77,28 @@ public sealed class SourceTableSpec : TableSpec
     /// <summary>Raw SQL predicate narrowing which rows this reader considers. Never string-concatenated
     /// into generated statements without going through the driver's identifier/parameter validation.</summary>
     public string? Filter { get; set; }
+
+    /// <summary>
+    /// A hand-written query, run byte-for-byte unmodified, in place of a real table — mutually exclusive
+    /// with <see cref="TableSpec.Table"/> (exactly one of the two must be set, see
+    /// <see cref="ConfigValidation.ValidateSources"/>). Wrapped as a derived table (<c>(&lt;query&gt;) AS
+    /// base</c>) whenever a reader needs to compose a segment, a relationship join, or a
+    /// <c>sqlColumnExpression</c> transform around it — see phase 191S. Metadata for a query-shaped
+    /// source only ever comes from an operator previewing it (<c>ScriptTestService.PreviewQueryAsync</c>);
+    /// there is no live "describe the query" mechanism.
+    /// </summary>
+    public string? Query { get; set; }
+
+    /// <summary>
+    /// Whether <see cref="Query"/> may be wrapped as a subquery — operator-set, persisted, and never
+    /// silently inferred from a preview's success or failure. Defaults <c>true</c>. Gates two things:
+    /// a <c>Watermark</c> reader against this source is rejected outright at save when this is
+    /// <c>false</c> (watermark reading needs <c>ORDER BY</c> on essentially every pass, so there is no
+    /// degraded mode for it); segmenting, relationships, and <c>sqlColumnExpression</c> transforms simply
+    /// don't apply, with no error, for a reload-style reader when this is <c>false</c>. Meaningless (and
+    /// ignored) when <see cref="Query"/> is unset.
+    /// </summary>
+    public bool AllowSubquery { get; set; } = true;
 }
 
 /// <summary>
@@ -80,12 +116,22 @@ public class TableRef
     public required string Database { get; set; }
 
     public string Schema { get; set; } = "dbo";
-    public required string Table { get; set; }
+
+    /// <summary><c>""</c> for a query-shaped source — see <see cref="TableSpec.Table"/>'s own doc
+    /// comment. Always a real name for a target; <see cref="ConfigValidation.ValidateSources"/>
+    /// guarantees this at save time, before a driver ever has to consume it.</summary>
+    public string Table { get; set; } = "";
 }
 
 public sealed class SourceTableRef : TableRef
 {
     public string? Filter { get; set; }
+
+    /// <summary>See <see cref="SourceTableSpec.Query"/>.</summary>
+    public string? Query { get; set; }
+
+    /// <summary>See <see cref="SourceTableSpec.AllowSubquery"/>.</summary>
+    public bool AllowSubquery { get; set; } = true;
 }
 
 public sealed class ColumnMapping
