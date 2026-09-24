@@ -416,4 +416,53 @@ public sealed class MsSqlChangeTrackingReaderTests(MsSqlTestDatabase db) : IClas
                 _connection, long.Parse(result.WatermarkAfterRead), CancellationToken.None),
             result.WatermarkTimeAfterRead);
     }
+
+    /// <summary>
+    /// Phase 188J, end to end: a relationship's foreign table is <c>LEFT JOIN</c>ed in alongside the
+    /// existing <c>CHANGETABLE ... base</c> join, not inner-joined — a changed row whose foreign key
+    /// matches gets the looked-up value, and one with no match (including a row whose FK is <c>NULL</c>)
+    /// still arrives as its own change, with the looked-up column <c>null</c> rather than the row
+    /// silently disappearing.
+    /// </summary>
+    [Fact]
+    public async Task Reader_WithARelationship_LeftJoinsTheForeignTable_KeepingUnmatchedRows()
+    {
+        var lookup = $"CtLookup_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE TABLE dbo.[{lookup}] (Id INT NOT NULL PRIMARY KEY, Label NVARCHAR(50) NOT NULL);");
+        await ExecuteAsync($"INSERT INTO dbo.[{lookup}] (Id, Label) VALUES (1, 'North');");
+        await ExecuteAsync($"ALTER TABLE dbo.[{_tableName}] ADD RegionId INT NULL;");
+
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var captured = await capturing.CapturePositionAsync(
+            _connection, Source(), new Dictionary<string, string>(), CancellationToken.None);
+
+        await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name, RegionId) VALUES (1, 'Alice', 1), (2, 'Bob', NULL), (3, 'Carol', 99);");
+
+        var relationships = new List<RelationshipConfig>
+        {
+            new()
+            {
+                Name = "region",
+                Schema = "dbo",
+                Table = lookup,
+                JoinKeys = [new RelationshipJoinKey { LocalColumn = "RegionId", ForeignColumn = "Id" }],
+            },
+        };
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Id", TargetColumn = "Id" },
+            new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" },
+        };
+
+        var result = await _reader.ReadChangesAsync(
+            _connection, Source(), captured.Position, ReadIntent.Changes, mappings, "mapping", [], relationships,
+            new Dictionary<string, string>(), CancellationToken.None);
+        var rows = await CollectAsync(result.Rows);
+
+        var byId = rows.ToDictionary(r => (int)r["Id"]!, r => (string?)r["Label"]);
+        Assert.Equal(3, byId.Count);
+        Assert.Equal("North", byId[1]); // matched: the looked-up value comes through
+        Assert.Null(byId[2]);           // RegionId is NULL: no match, row still present, looked-up column null
+        Assert.Null(byId[3]);           // RegionId points at nothing: no match, row still present
+    }
 }

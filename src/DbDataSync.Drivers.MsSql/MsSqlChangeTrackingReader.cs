@@ -145,7 +145,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
 
         var rows = ReadIncrementalAsync(
             sourceConnection, source, previousVersion, targetVersion,
-            UseSnapshotIsolation(options), columnMappings, diagnostics, maxRows, bounded, cancellationToken);
+            UseSnapshotIsolation(options), columnMappings, relationships, diagnostics, maxRows, bounded, cancellationToken);
 
         return new ReadResult(
             rows, targetVersion.ToString(), diagnostics, bounded,
@@ -237,6 +237,8 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         if (UseSnapshotIsolation(request.Options))
             notes.Add("Runs in a snapshot-isolation transaction.");
 
+        var relationshipAliases = RelationshipAliases.Assign(request.Relationships, request.ColumnMappings);
+
         // The version ReadIncrementalAsync would fix as its own upper bound, fetched here for the same
         // reason: without a real value, @targetVersion in the statement text is a placeholder no query
         // tool can resolve on its own.
@@ -265,7 +267,9 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
                 MsSqlChangeTrackingStatement.BuildIncremental(
                     request.Source.Schema, request.Source.Table, pkColumns,
                     columns.Where(c => !c.IsPrimaryKey).Select(c => c.Name).ToList(),
-                    column => RenderNonKeyColumn(column, request.ColumnMappings), bounded: maxRows is not null),
+                    column => RenderNonKeyColumn(column, request.ColumnMappings), bounded: maxRows is not null,
+                    columnMappings: request.ColumnMappings, relationships: request.Relationships,
+                    relationshipAliases: relationshipAliases),
                 PreviewOrigin.BuiltIn,
                 notes.Count == 0 ? null : string.Join(" ", notes),
                 MsSqlDialect.Instance.RenderDeclarations(parameters)),
@@ -365,6 +369,7 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         long targetVersion,
         bool useSnapshotIsolation,
         IReadOnlyList<ColumnMapping> columnMappings,
+        IReadOnlyList<RelationshipConfig> relationships,
         ReadDiagnostics diagnostics,
         int? maxRows,
         BoundedReadPosition? bounded,
@@ -377,9 +382,14 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
                 $"Table '{source.Schema}.{source.Table}' has no primary key; Change Tracking requires one.");
         var nonKeyColumns = columns.Where(c => !c.IsPrimaryKey).Select(c => c.Name).ToList();
 
+        var relationshipAliases = RelationshipAliases.Assign(relationships, columnMappings);
+        var relationshipMappings = RelationshipColumns.Distinct(columnMappings);
+        RelationshipColumns.EnsureNoNameCollision(
+            [.. pkColumns, .. nonKeyColumns], relationshipMappings, $"'{source.Schema}.{source.Table}'");
+
         // Matches the select list's tail, so a result-set ordinal maps to a schema ordinal by
         // subtracting the two leading bookkeeping columns.
-        var schema = new ChangeSchema([.. pkColumns, .. nonKeyColumns]);
+        var schema = new ChangeSchema([.. pkColumns, .. nonKeyColumns, .. relationshipMappings.Select(m => m.SourceColumn)]);
 
         using var cmd = connection.CreateTimedCommand();
         // The statement joins the table under the alias `base`, so a transform's {{column}} has to
@@ -387,7 +397,8 @@ public sealed class MsSqlChangeTrackingReader : IChangeReader, IStatementPreview
         // ambiguous against CHANGETABLE's own copy. This is the reason the token exists.
         cmd.CommandText = MsSqlChangeTrackingStatement.BuildIncremental(
             source.Schema, source.Table, pkColumns, nonKeyColumns,
-            column => RenderNonKeyColumn(column, columnMappings), bounded: maxRows is not null);
+            column => RenderNonKeyColumn(column, columnMappings), bounded: maxRows is not null,
+            columnMappings: columnMappings, relationships: relationships, relationshipAliases: relationshipAliases);
         cmd.AddParameter("@previousVersion", previousVersion);
         cmd.AddParameter("@targetVersion", targetVersion);
         if (maxRows is { } limit)

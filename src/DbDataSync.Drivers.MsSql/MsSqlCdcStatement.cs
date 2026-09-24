@@ -1,5 +1,7 @@
+using DbDataSync.Core.Config;
 using DbDataSync.Core.Sql;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Generic;
 
 namespace DbDataSync.Drivers.MsSql;
 
@@ -100,9 +102,25 @@ public static class MsSqlCdcStatement
     /// this reader's own <c>Compare(storedLsn, minLsn) &lt; 0</c> guard exists precisely to refuse one
     /// that claims there is.
     /// </param>
+    /// <param name="columnMappings">
+    /// Phase 188J: consulted only for its relationship-sourced entries (see
+    /// <see cref="RelationshipColumns.Distinct"/>) — every column named in <paramref name="columns"/>
+    /// still comes from the change table exactly as before. Omitted (or empty) renders no relationship
+    /// columns at all.
+    /// </param>
+    /// <param name="relationships">
+    /// The change-table function call is aliased <c>ct</c> and joined against, one <c>LEFT JOIN</c> per
+    /// relationship actually referenced — inside the row-capping derived table when
+    /// <paramref name="bounded"/> is set, so the join runs once per CDC row rather than once per capped
+    /// row, and the outer query simply re-selects the already-joined columns by name, the same way it
+    /// already re-selects <see cref="ChangeOrdering.OrderingColumn"/>/<see cref="ChangeOrdering.ChangedAtColumn"/>.
+    /// </param>
     public static string BuildRead(
         string captureInstance, CdcFunction function, IReadOnlyList<string> columns,
-        Func<string, string>? renderColumn = null, bool bounded = false, bool inclusiveFloor = false)
+        Func<string, string>? renderColumn = null, bool bounded = false, bool inclusiveFloor = false,
+        IReadOnlyList<ColumnMapping>? columnMappings = null,
+        IReadOnlyList<RelationshipConfig>? relationships = null,
+        IReadOnlyDictionary<string, string>? relationshipAliases = null)
     {
         renderColumn ??= c => SqlIdentifier.Quote(c);
         var from = inclusiveFloor ? "@storedLsn" : "sys.fn_cdc_increment_lsn(@storedLsn)";
@@ -116,6 +134,19 @@ public static class MsSqlCdcStatement
         // collapsed them. Ordering by it unconditionally is an "Invalid column name" on the mode this
         // reader prefers — found by the integration tests, and not by reading the documentation.
         var hasSeqval = function == CdcFunction.AllChanges;
+
+        var relationshipJoins = RelationshipJoins.Render(MsSqlDialect.Instance, relationships, relationshipAliases, baseAlias: "ct");
+        var fromClause = relationshipJoins.Length == 0
+            ? $"{name}(@from, @toLsn, N'all')"
+            : $"{name}(@from, @toLsn, N'all') AS ct{relationshipJoins}";
+
+        var relationshipMappings = RelationshipColumns.Distinct(columnMappings ?? []);
+        var relationshipSelect = relationshipMappings.Select(mapping =>
+        {
+            var alias = relationshipAliases![mapping.Relationship!];
+            var expression = SourceProjection.RenderExpression(mapping, column => $"{alias}.{SqlIdentifier.Quote(column)}");
+            return $"{expression} AS {SqlIdentifier.Quote(mapping.SourceColumn)}";
+        }).ToList();
 
         var selected = new List<string> { OperationColumn };
         selected.AddRange(columns.Select(renderColumn));
@@ -134,6 +165,10 @@ public static class MsSqlCdcStatement
         var changedAt = $"sys.fn_cdc_map_lsn_to_time({StartLsnColumn}) AS {SqlIdentifier.Quote(ChangeOrdering.ChangedAtColumn)}";
         selected.Add(changeOrdering);
         selected.Add(changedAt);
+        // Phase 188J: appended last, after the ordering/time bookkeeping — same "after, never woven in"
+        // convention 187J/the CT reader use, so schema.Count (and therefore every ordinal computed from
+        // it) already accounts for these the moment they exist, with no other arithmetic to touch.
+        selected.AddRange(relationshipSelect);
 
         // 'all' for net changes means "give me the net row and tell me the operation"; 'all' for all
         // changes means "every change, without before-images". Same literal, and both are what this
@@ -143,7 +178,7 @@ public static class MsSqlCdcStatement
             return $"""
                 DECLARE @from binary(10) = {from};
                 SELECT {SelectListFormatting.JoinSelectList(selected)}
-                FROM {name}(@from, @toLsn, N'all')
+                FROM {fromClause}
                 ORDER BY {(hasSeqval ? $"{StartLsnColumn}, {SeqvalColumn}" : StartLsnColumn)};
                 """;
         }
@@ -153,7 +188,9 @@ public static class MsSqlCdcStatement
 
         // The derived table carries __$seqval only so the outer ORDER BY can use it; it is not
         // projected outwards, which is what keeps the bounded result set the unbounded one plus a
-        // position column and leaves every ordinal the reader reads by unchanged.
+        // position column and leaves every ordinal the reader reads by unchanged. The relationship join
+        // lives in here too (see fromClause above), so it runs once per underlying CDC row, before
+        // capping — not once per capped row.
         var inner = new List<string>(selected);
         if (hasSeqval)
             inner.Add(SeqvalColumn);
@@ -163,6 +200,10 @@ public static class MsSqlCdcStatement
         outer.AddRange(columns.Select(SqlIdentifier.Quote));
         outer.Add(SqlIdentifier.Quote(ChangeOrdering.OrderingColumn));
         outer.Add(SqlIdentifier.Quote(ChangeOrdering.ChangedAtColumn));
+        // Re-selected from the derived table by their already-joined, already-aliased name — the join
+        // itself is not repeated out here, the same way OrderingColumn/ChangedAtColumn above aren't
+        // recomputed out here either.
+        outer.AddRange(relationshipMappings.Select(m => SqlIdentifier.Quote(m.SourceColumn)));
         outer.Add(position);
 
         return $"""
@@ -170,7 +211,7 @@ public static class MsSqlCdcStatement
             SELECT {SelectListFormatting.JoinSelectList(outer)}
             FROM (
                 SELECT {limit}{SelectListFormatting.JoinSelectList(inner)}
-                FROM {name}(@from, @toLsn, N'all')
+                FROM {fromClause}
                 ORDER BY {StartLsnColumn}
             ) AS capped
             ORDER BY {(hasSeqval ? $"{position}, {SeqvalColumn}" : position)};

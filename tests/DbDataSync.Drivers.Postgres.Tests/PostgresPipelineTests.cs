@@ -195,6 +195,54 @@ public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixtu
         Assert.Equal(2, (int)Assert.Single(rows)["id"]!);
     }
 
+    /// <summary>
+    /// Phase 188J, end to end against a real server, proving the shared <c>Drivers.Generic</c>
+    /// <see cref="WatermarkReader"/> path: a relationship's foreign table is <c>LEFT JOIN</c>ed in, not
+    /// inner-joined, and the watermark column itself is qualified through the primary table's new
+    /// <c>base</c> alias so it stays unambiguous against a same-named joined column.
+    /// </summary>
+    [Fact]
+    public async Task Watermark_WithARelationship_LeftJoinsTheForeignTable_KeepingUnmatchedRows()
+    {
+        var lookup = $"rel_lookup_{Guid.NewGuid():N}";
+        await ExecuteAsync(_source, $"CREATE TABLE public.\"{lookup}\" (id integer primary key, label text not null);");
+        await ExecuteAsync(_source, $"INSERT INTO public.\"{lookup}\" VALUES (1, 'North');");
+        await ExecuteAsync(_source, $"ALTER TABLE public.\"{_sourceTable}\" ADD COLUMN region_id integer;");
+        await ExecuteAsync(_source, $"""
+            INSERT INTO public."{_sourceTable}" VALUES
+                (1, 'a', 1, '2026-01-01 00:00:00', 1), (2, 'b', 2, '2026-01-01 00:00:00', NULL), (3, 'c', 3, '2026-01-01 00:00:00', 99);
+            """);
+
+        var relationships = new List<RelationshipConfig>
+        {
+            new()
+            {
+                Name = "region",
+                Schema = "public",
+                Table = lookup,
+                JoinKeys = [new RelationshipJoinKey { LocalColumn = "region_id", ForeignColumn = "id" }],
+            },
+        };
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "id", TargetColumn = "id" },
+            new() { SourceColumn = "label", TargetColumn = "region_label", Relationship = "region" },
+        };
+        var options = new Dictionary<string, string> { ["watermarkColumn"] = "modified_at" };
+
+        var read = await _watermark.ReadChangesAsync(
+            _source, Source(), null, ReadIntent.InitialLoad, mappings, MappingName, Columns(), relationships, options, CancellationToken.None);
+
+        var byId = new Dictionary<int, string?>();
+        await foreach (var row in read.Rows)
+            byId[(int)row["id"]!] = (string?)row["label"];
+
+        Assert.Equal(3, byId.Count);
+        Assert.Equal("North", byId[1]); // matched: the looked-up value comes through
+        Assert.Null(byId[2]);           // region_id is NULL: no match, row still present, looked-up column null
+        Assert.Null(byId[3]);           // region_id points at nothing: no match, row still present
+    }
+
     [Fact]
     public async Task GeneratedAlwaysIdentity_IsWrittenExplicitlyWithTheOverride()
     {

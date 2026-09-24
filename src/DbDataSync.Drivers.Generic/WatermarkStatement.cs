@@ -1,3 +1,4 @@
+using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Core.Sql;
 
@@ -44,11 +45,25 @@ public static class WatermarkStatement
     /// stays where it was.
     /// </para>
     /// </param>
+    /// <summary>
+    /// <paramref name="relationships"/>/<paramref name="relationshipAliases"/> (phase 188J) add one
+    /// <c>LEFT JOIN</c> per relationship actually referenced by a <see cref="ColumnMapping"/> — see
+    /// <see cref="RelationshipAliases.Assign"/>/<see cref="RelationshipJoins.Render"/>. The primary table
+    /// only gets its own <c>AS base</c> alias, and <paramref name="watermarkColumn"/> only gets qualified
+    /// through it, once at least one join is present — matching
+    /// <see cref="BatchReloadStatement.BuildRead"/>'s identical treatment, and for the identical reason:
+    /// a mapping with no relationships renders byte-for-byte what it always has.
+    /// </summary>
     public static string BuildRead(
         SqlDialect dialect, string schema, string table, string watermarkColumn, bool hasPreviousWatermark,
-        string? filter, string projection = "*", bool bounded = false)
+        string? filter, string projection = "*", bool bounded = false,
+        IReadOnlyList<RelationshipConfig>? relationships = null,
+        IReadOnlyDictionary<string, string>? relationshipAliases = null)
     {
-        var quotedColumn = dialect.QuoteIdentifier(watermarkColumn);
+        var joins = RelationshipJoins.Render(dialect, relationships, relationshipAliases);
+        var fromTable = joins.Length == 0 ? dialect.QualifyTable(schema, table) : $"{dialect.QualifyTable(schema, table)} AS base";
+        Func<string, string> reference = joins.Length == 0 ? dialect.QuoteIdentifier : c => $"base.{dialect.QuoteIdentifier(c)}";
+        var quotedColumn = reference(watermarkColumn);
         var predicate = hasPreviousWatermark
             ? $"{quotedColumn} > {dialect.ParameterReference(PreviousWatermarkParameter)}"
             : "1 = 1";
@@ -62,7 +77,7 @@ public static class WatermarkStatement
             : "";
 
         return $"""
-            SELECT {limitPrefix}{projection}{position} FROM {dialect.QualifyTable(schema, table)}
+            SELECT {limitPrefix}{projection}{position} FROM {fromTable}{joins}
             WHERE {predicate}{userFilter}
             ORDER BY {quotedColumn}{limitSuffix}
             """;

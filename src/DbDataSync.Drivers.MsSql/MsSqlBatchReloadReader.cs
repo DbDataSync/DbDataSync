@@ -50,7 +50,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         sourceConnection.ChangeDatabase(source.Database);
 
         var relationshipAliases = RelationshipAliases.Assign(relationships, columnMappings);
-        var primaryReference = PrimaryTableReference(relationshipAliases);
+        var primaryReference = RelationshipAliases.PrimaryReference(MsSqlDialect.Instance, relationshipAliases);
 
         var segment = SegmentSerializer.ReadOptional(options);
         var columns = await MsSqlSchemaQueries.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
@@ -74,7 +74,7 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         request.Connection.ChangeDatabase(request.Source.Database);
 
         var relationshipAliases = RelationshipAliases.Assign(request.Relationships, request.ColumnMappings);
-        var primaryReference = PrimaryTableReference(relationshipAliases);
+        var primaryReference = RelationshipAliases.PrimaryReference(MsSqlDialect.Instance, relationshipAliases);
 
         var segment = SegmentSerializer.ReadOptional(request.Options);
         var columns = await MsSqlSchemaQueries.GetColumnsAsync(
@@ -97,13 +97,6 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
                     : null),
         ];
     }
-
-    /// <summary>See <see cref="BatchReloadReader"/>'s twin note: once a relationship is joined, the
-    /// primary table is aliased <c>base</c>, and every primary-table column reference — SELECT list and
-    /// segment predicate alike — has to go through that alias or risk an ambiguous-column error against
-    /// a same-named joined column ("Id" on both sides being the ordinary case).</summary>
-    private static Func<string, string>? PrimaryTableReference(IReadOnlyDictionary<string, string> relationshipAliases) =>
-        relationshipAliases.Count == 0 ? null : column => $"base.{MsSqlDialect.Instance.QuoteIdentifier(column)}";
 
     public async Task<IReadOnlyList<BatchReloadSegment>> ExpandAutoSegmentsAsync(
         DbConnection sourceConnection,

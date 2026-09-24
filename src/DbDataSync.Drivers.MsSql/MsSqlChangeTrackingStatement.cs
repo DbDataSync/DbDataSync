@@ -1,4 +1,6 @@
+using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
+using DbDataSync.Drivers.Generic;
 using DbDataSync.Core.Sql;
 
 namespace DbDataSync.Drivers.MsSql;
@@ -65,9 +67,24 @@ public static class MsSqlChangeTrackingStatement
     /// <see cref="FirstKeyOrdinal"/> and the whole ordinal arithmetic below it are unchanged.
     /// </para>
     /// </param>
+    /// <param name="columnMappings">
+    /// Phase 188J: the mapping's own columns, consulted only for its relationship-sourced entries (see
+    /// <see cref="RelationshipColumns.Distinct"/>) — every primary-table column still comes from
+    /// <paramref name="primaryKeyColumns"/>/<paramref name="nonKeyColumns"/> unchanged, exactly as
+    /// before this parameter existed. Omitted (or empty) renders no relationship columns at all.
+    /// </param>
+    /// <param name="relationships">
+    /// Renders one additional <c>LEFT JOIN</c> per relationship actually referenced, alongside the
+    /// existing <c>CHANGETABLE ... LEFT JOIN ... AS base</c> join this statement already has — a
+    /// relationship join composes with it rather than replacing it, since <c>base</c> already exists
+    /// here for every mapping, not only ones using this feature.
+    /// </param>
     public static string BuildIncremental(
         string schema, string table, IReadOnlyList<string> primaryKeyColumns, IReadOnlyList<string> nonKeyColumns,
-        Func<string, string>? renderNonKeyColumn = null, bool bounded = false)
+        Func<string, string>? renderNonKeyColumn = null, bool bounded = false,
+        IReadOnlyList<ColumnMapping>? columnMappings = null,
+        IReadOnlyList<RelationshipConfig>? relationships = null,
+        IReadOnlyDictionary<string, string>? relationshipAliases = null)
     {
         renderNonKeyColumn ??= c => $"base.{SqlIdentifier.Quote(c)}";
         var quotedSchema = SqlIdentifier.Quote(schema);
@@ -85,6 +102,16 @@ public static class MsSqlChangeTrackingStatement
         selected.AddRange(primaryKeyColumns.Select(pk => $"CT.{SqlIdentifier.Quote(pk)}"));
         selected.AddRange(nonKeyColumns.Select(renderNonKeyColumn));
 
+        // Appended after the primary table's own columns, never woven in among them — this keeps
+        // FirstKeyOrdinal and every ordinal computed relative to it (in ReadIncrementalAsync) unaffected
+        // by whether a mapping uses relationships at all.
+        foreach (var mapping in RelationshipColumns.Distinct(columnMappings ?? []))
+        {
+            var alias = relationshipAliases![mapping.Relationship!];
+            var expression = SourceProjection.RenderExpression(mapping, column => $"{alias}.{SqlIdentifier.Quote(column)}");
+            selected.Add($"{expression} AS {SqlIdentifier.Quote(mapping.SourceColumn)}");
+        }
+
         var limit = "";
         if (bounded)
         {
@@ -93,10 +120,12 @@ public static class MsSqlChangeTrackingStatement
             selected.Add($"CT.SYS_CHANGE_VERSION AS {SqlIdentifier.Quote(BoundedRead.PositionColumn)}");
         }
 
+        var relationshipJoins = RelationshipJoins.Render(MsSqlDialect.Instance, relationships, relationshipAliases, baseAlias: "base");
+
         return $"""
             SELECT {limit}{SelectListFormatting.JoinSelectList(selected)}
             FROM CHANGETABLE(CHANGES {quotedSchema}.{quotedTable}, @previousVersion) AS CT
-            LEFT JOIN {quotedSchema}.{quotedTable} AS base ON {joinCondition}
+            LEFT JOIN {quotedSchema}.{quotedTable} AS base ON {joinCondition}{relationshipJoins}
             WHERE CT.SYS_CHANGE_VERSION <= @targetVersion
             ORDER BY CT.SYS_CHANGE_VERSION;
             """;

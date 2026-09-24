@@ -1,8 +1,6 @@
 # Phase 188J — Relationship joins in the change (incremental) readers
 
-**Status**: Planned, not started. Depends on `architecture/implementation/done/phase-186J-relationship-config-and-shared-reader-plumbing.md` (built).
-Independent of `phase-187J-relationship-joins-in-the-batch-readers.md` (no shared code path beyond what
-186J already provides — can be built in either order, or in parallel).
+**Status**: Built. See Retrospective.
 **Plan reference**: `phase-185J-declared-relationships-and-foreign-column-lookups.md` (superseded — that
 doc had deferred CDC specifically; scope confirmed in conversation to include it here rather than defer it
 a second time: joining against a captured-changes result set is mechanically the same as joining against
@@ -105,3 +103,72 @@ a bug.
   current-state semantics named above are real, not assumed.
 - Existing tests for all three readers, with zero relationships declared, pass unchanged — behaviorally
   invisible to every mapping that doesn't use this feature, same bar 187J holds itself to.
+
+## Retrospective
+
+Built as designed for all three readers, with the open questions resolved along the way and one real
+deviation each phase-comparable to what 187J found — not assumed up front, found by writing the code and
+the tests it called for.
+
+**Open questions, resolved:**
+
+1. **`WatermarkReader`'s statement class is `WatermarkStatement`, in the same file/namespace as
+   guessed** (`src/DbDataSync.Drivers.Generic/WatermarkStatement.cs`) — `BuildRead` took the same
+   `relationships`/`relationshipAliases` parameters `BatchReloadStatement.BuildRead` did, reusing the same
+   shared `RelationshipJoins.Render` helper (see below). `BuildMaxWatermark` untouched, exactly as planned
+   — it aggregates the primary table's own column, never a joined one.
+2. **The CT/CDC readers' column-rendering helpers do *not* share code with `SourceProjection.Render`
+   directly** — they're structurally different (CT/CDC always select every primary-table column their own
+   way; only relationship columns are new), but they share the *values* it computes:
+   `SourceProjection.RenderExpression` (already public) renders a relationship column's Transform, and a
+   new `RelationshipColumns.Distinct` (mirroring `SourceProjection.Render`'s own SELECT-list dedupe) picks
+   out which `ColumnMapping`s to append. Both new readers call these rather than reimplementing them.
+3. **Alias numbering stays consistent** the same way 187J's did: `RelationshipAliases.Assign` is called
+   once per read/preview and its result threaded into both the SELECT list and the JOIN clause — extended
+   this phase into a shared `RelationshipJoins.Render` (used by `BatchReloadStatement`, `WatermarkStatement`,
+   `MsSqlChangeTrackingStatement`, and `MsSqlCdcStatement` alike, parameterised on the join condition's own
+   base-side alias — `base` for the batch/watermark/CT readers, `ct` for CDC's own function-call alias) —
+   extracted out of `BatchReloadStatement` in this phase rather than duplicated a third and fourth time.
+
+**Real deviations, found by testing, not assumed:**
+
+- **A second name-collision hazard, worse than 187J's, specific to CT/CDC's whole-row schema.** 187J's own
+  ambiguity fix was a SQL-level "which table's Id did you mean" error. CT and CDC build `ChangeSchema` as a
+  flat list of column *names* with no dedupe at all (unlike the mapping-driven batch/watermark readers) —
+  a relationship column sharing a name with a column the schema already has would not error, it would
+  silently have `ChangeSchema`'s own name-to-ordinal dictionary let the later entry win, handing one of the
+  two columns the other's slot. New `RelationshipColumns.EnsureNoNameCollision` throws a named, actionable
+  error the moment this would happen, in both readers, rather than letting it silently misdeliver a value.
+  Not found by the integration tests (neither test's fixture happened to create the collision) — found by
+  tracing what `ChangeSchema`'s constructor actually does with a duplicate name before writing the reader
+  code, the same way 186J's own retrospective found its "no helper needed" conclusion by tracing the actual
+  consumer rather than assuming.
+- **`MsSqlCdcReader.ColumnsFor` had to stop treating a relationship-sourced mapping as a wanted CDC column.**
+  Its own "wanted" set previously came straight from every `ColumnMapping.SourceColumn` — a relationship
+  column names a column on the *foreign* table, not one this capture instance ever captured, and without
+  the fix it would fail with a false "does not capture" error the moment a mapping used a relationship at
+  all. Caught the same way: read what the method actually computes before writing the caller.
+- **CDC's own bounded-read shape (a capping derived table with a separately-rebuilt outer `SELECT`) meant
+  the relationship join has to live *inside* the derived table, not outside it** — joining outside would
+  either need to repeat the join per output row after capping (correct but wasteful) or, worse, joining
+  against an already-capped table with no path back to the relationship's local column. Joined inside, the
+  outer query just re-selects the already-joined column by its own alias, the same pattern it already used
+  for `OrderingColumn`/`ChangedAtColumn`.
+- **Verified for real**: unit tests for all three statement builders (single/multiple join keys, multiple
+  relationships aliased `r0`/`r1`, an unreferenced relationship rendering no join, a self-join, and — for
+  CT/CDC specifically — the position/ordinal-preserving append order under both bounded and unbounded
+  shapes) — 8 in `WatermarkStatementTests`/new, 3 in `MsSqlChangeTrackingStatementTests`, 3 in
+  `MsSqlCdcStatementTests`. Integration tests against real servers, one per reader plus the CDC-specific
+  current-state proof: `PostgresPipelineTests.Watermark_WithARelationship_...` (proving the shared
+  `Drivers.Generic` `WatermarkReader` path), `MsSqlChangeTrackingReaderTests.Reader_WithARelationship_...`,
+  and two on `MsSqlCdcReaderTests` — the ordinary matched/unmatched proof, plus
+  `Reader_WithARelationship_ReflectsTheForeignRowsCurrentState_NotItsStateAsOfTheChange`, which updates the
+  foreign row *after* the source change was captured and confirms the next read reflects the new value, not
+  the one live at capture time — proving the "current state, not as-of-change" semantics named above are
+  real rather than assumed. Full suites re-run clean: `DbDataSync.Drivers.MsSql.Tests` 271/271,
+  `.Postgres.Tests` 120/134 (the same pre-existing `PgLogicalSlotTests`/`wal_level = replica` container
+  misconfiguration 186J/187J's own retrospectives already name, nothing this phase's diff touches),
+  `.MySql.Tests` 62/62, `.Oracle.Tests` 58/58, `.Jdbc.Tests` 32/32, `.DuckDb.Tests` 33/33, `.Generic.Tests`
+  225/225, `.Descriptor.Tests` 33/33, and a full solution build clean.
+- **Not built**: Postgres logical replication / MySQL binlog reader support, and the frontend (189J) — both
+  explicitly out of scope per this doc, unchanged.

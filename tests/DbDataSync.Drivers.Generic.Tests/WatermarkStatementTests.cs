@@ -1,3 +1,5 @@
+using DbDataSync.Core.Config;
+
 namespace DbDataSync.Drivers.Generic.Tests;
 
 /// <summary>
@@ -131,6 +133,91 @@ public sealed class WatermarkStatementTests
             """,
             WatermarkStatement.BuildRead(
                 BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: true, filter: null));
+    }
+
+    private static RelationshipConfig Rel(string name, string table, params (string Local, string Foreign)[] joinKeys) =>
+        new()
+        {
+            Name = name,
+            Table = table,
+            JoinKeys = joinKeys.Select(k => new RelationshipJoinKey { LocalColumn = k.Local, ForeignColumn = k.Foreign }).ToList(),
+        };
+
+    [Fact]
+    public void Read_WithARelationship_JoinsAndQualifiesTheWatermarkColumn()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            """
+            SELECT [Id],
+                r0.[Name] FROM [dbo].[Orders] AS base
+            LEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]
+            WHERE base.[ModifiedAt] > @previousWatermark
+            ORDER BY base.[ModifiedAt]
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: true, filter: null,
+                projection: "[Id],\n    r0.[Name]", relationships: relationships, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void Read_WithMultipleRelationships_AliasesEachR0R1()
+    {
+        var relationships = new List<RelationshipConfig>
+        {
+            Rel("region", "Region", ("RegionId", "Id")),
+            Rel("manager", "Employee", ("ManagerId", "Id")),
+        };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0", ["manager"] = "r1" };
+
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders] AS base
+            LEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]
+            LEFT JOIN [dbo].[Employee] AS r1 ON base.[ManagerId] = r1.[Id]
+            WHERE 1 = 1
+            ORDER BY base.[ModifiedAt]
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: false, filter: null,
+                relationships: relationships, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void Read_ARelationshipDeclaredButNotReferenced_RendersNoJoinAtAll_AndLeavesTheColumnUnqualified()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string>();
+
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders]
+            WHERE 1 = 1
+            ORDER BY [ModifiedAt]
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "ModifiedAt", hasPreviousWatermark: false, filter: null,
+                relationships: relationships, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void Read_ASelfJoinRelationship_AliasesTheSameTableUnderADifferentName()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("manager", "Employee", ("ManagerId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["manager"] = "r0" };
+
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Employee] AS base
+            LEFT JOIN [dbo].[Employee] AS r0 ON base.[ManagerId] = r0.[Id]
+            WHERE 1 = 1
+            ORDER BY base.[ModifiedAt]
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Employee", "ModifiedAt", hasPreviousWatermark: false, filter: null,
+                relationships: relationships, relationshipAliases: aliases));
     }
 
     [Fact]

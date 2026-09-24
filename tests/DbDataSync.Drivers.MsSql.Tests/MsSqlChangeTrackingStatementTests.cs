@@ -1,3 +1,4 @@
+using DbDataSync.Core.Config;
 using Xunit;
 
 namespace DbDataSync.Drivers.MsSql.Tests;
@@ -127,5 +128,54 @@ public sealed class MsSqlChangeTrackingStatementTests
 
         Assert.DoesNotContain("TOP", sql);
         Assert.DoesNotContain("__DS_Position", sql);
+    }
+
+    private static RelationshipConfig Rel(string name, string table, params (string Local, string Foreign)[] joinKeys) =>
+        new()
+        {
+            Name = name,
+            Table = table,
+            JoinKeys = joinKeys.Select(k => new RelationshipJoinKey { LocalColumn = k.Local, ForeignColumn = k.Foreign }).ToList(),
+        };
+
+    [Fact]
+    public void Relationship_JoinsAlongsideTheExistingBaseJoin_AndAppendsItsColumnLast()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+        var mappings = new List<ColumnMapping> { new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" } };
+
+        var sql = MsSqlChangeTrackingStatement.BuildIncremental(
+            "dbo", "Orders", ["Id"], ["Region"], columnMappings: mappings, relationships: relationships, relationshipAliases: aliases);
+
+        Assert.Contains("LEFT JOIN [dbo].[Orders] AS base ON CT.[Id] = base.[Id]\nLEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]", sql);
+        Assert.Contains("base.[Region],\n    r0.[Label] AS [Label]\nFROM", sql);
+    }
+
+    [Fact]
+    public void Relationship_DeclaredButNotReferenced_RendersNoJoinAtAll()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string>();
+
+        var sql = MsSqlChangeTrackingStatement.BuildIncremental(
+            "dbo", "Orders", ["Id"], ["Region"], columnMappings: [], relationships: relationships, relationshipAliases: aliases);
+
+        Assert.DoesNotContain("Region] AS r0", sql);
+        Assert.DoesNotContain("[dbo].[Region] AS", sql);
+    }
+
+    [Fact]
+    public void Relationship_WithABoundedRead_KeepsThePositionColumnLast()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+        var mappings = new List<ColumnMapping> { new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" } };
+
+        var sql = MsSqlChangeTrackingStatement.BuildIncremental(
+            "dbo", "Orders", ["Id"], ["Region"], bounded: true,
+            columnMappings: mappings, relationships: relationships, relationshipAliases: aliases);
+
+        Assert.Contains("base.[Region],\n    r0.[Label] AS [Label],\n    CT.SYS_CHANGE_VERSION AS [__DS_Position]\nFROM", sql);
     }
 }

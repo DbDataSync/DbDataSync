@@ -1,3 +1,4 @@
+using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.MsSql;
 
@@ -284,5 +285,70 @@ public sealed class MsSqlCdcStatementTests
         Assert.Equal(2, orderingOrdinal);
         Assert.True(schema.TryGetOrdinal(ChangeOrdering.ChangedAtColumn, out var changedAtOrdinal));
         Assert.Equal(3, changedAtOrdinal);
+    }
+
+    // ---- Phase 188J: relationship joins ------------------------------------------------------------
+
+    private static RelationshipConfig Rel(string name, string table, params (string Local, string Foreign)[] joinKeys) =>
+        new()
+        {
+            Name = name,
+            Table = table,
+            JoinKeys = joinKeys.Select(k => new RelationshipJoinKey { LocalColumn = k.Local, ForeignColumn = k.Foreign }).ToList(),
+        };
+
+    [Fact]
+    public void Relationship_AliasesTheChangeTableFunctionCall_AndJoinsAgainstIt()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+        var mappings = new List<ColumnMapping> { new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" } };
+
+        var sql = MsSqlCdcStatement.BuildRead(
+            "dbo_Orders", MsSqlCdcStatement.CdcFunction.NetChanges, ["Id", "RegionId"],
+            column => $"ct.[{column}]", columnMappings: mappings, relationships: relationships, relationshipAliases: aliases);
+
+        Assert.Contains(
+            "FROM cdc.fn_cdc_get_net_changes_dbo_Orders(@from, @toLsn, N'all') AS ct\nLEFT JOIN [dbo].[Region] AS r0 ON ct.[RegionId] = r0.[Id]",
+            sql);
+        Assert.Contains("r0.[Label] AS [Label]", sql);
+    }
+
+    [Fact]
+    public void Relationship_DeclaredButNotReferenced_RendersNoJoinAtAll()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string>();
+
+        var sql = MsSqlCdcStatement.BuildRead(
+            "dbo_Orders", MsSqlCdcStatement.CdcFunction.NetChanges, ["Id"],
+            columnMappings: [], relationships: relationships, relationshipAliases: aliases);
+
+        Assert.DoesNotContain("AS ct", sql);
+        Assert.DoesNotContain("Region", sql);
+    }
+
+    /// <summary>The join lives inside the capping derived table, so it runs once per underlying CDC row
+    /// — the outer query just re-selects the already-joined column by its own alias, same as it already
+    /// does for the ordering/changed-at columns.</summary>
+    [Fact]
+    public void Relationship_WithABoundedRead_JoinsInsideTheDerivedTable_AndReselectsOutside()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+        var mappings = new List<ColumnMapping> { new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" } };
+
+        var sql = MsSqlCdcStatement.BuildRead(
+            "dbo_Orders", MsSqlCdcStatement.CdcFunction.NetChanges, ["Id", "RegionId"], bounded: true,
+            columnMappings: mappings, relationships: relationships, relationshipAliases: aliases);
+
+        var inner = InnerQuery(sql);
+        Assert.Contains("LEFT JOIN [dbo].[Region] AS r0 ON ct.[RegionId] = r0.[Id]", inner);
+        Assert.Contains("r0.[Label] AS [Label]", inner);
+
+        // Re-selected outside by its plain alias, not re-joined.
+        var outerSelect = sql[..sql.IndexOf("FROM (", StringComparison.Ordinal)];
+        Assert.Contains("[Label]", outerSelect);
+        Assert.DoesNotContain("LEFT JOIN", outerSelect);
     }
 }

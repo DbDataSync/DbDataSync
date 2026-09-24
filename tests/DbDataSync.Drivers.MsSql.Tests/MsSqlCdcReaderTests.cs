@@ -59,14 +59,15 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
                 $"{await CdcCaptureJob.DiagnoseAsync(_connection)}.");
     }
 
-    private async Task EnableCaptureWithRetryAsync()
+    private async Task EnableCaptureWithRetryAsync(string? tableName = null)
     {
+        tableName ??= _tableName;
         for (var attempt = 1; ; attempt++)
         {
             try
             {
                 await ExecuteAsync($"""
-                    EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'{_tableName}',
+                    EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'{tableName}',
                          @role_name = NULL, @supports_net_changes = 1;
                     """);
                 return;
@@ -78,7 +79,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
                 // The failed attempt can still have registered the capture instance before deadlocking
                 // on the job registration, and re-running then fails with "already enabled" instead.
                 if (await MsSqlCdcCatalog.FindCaptureInstanceAsync(
-                        _connection, "dbo", _tableName, CancellationToken.None) is not null)
+                        _connection, "dbo", tableName, CancellationToken.None) is not null)
                     return;
             }
         }
@@ -821,5 +822,121 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         Assert.Empty(await CollectAsync(result.Rows));
         Assert.Equal(start, result.WatermarkAfterRead);
         Assert.NotNull(result.WatermarkTimeAfterRead);
+    }
+
+    /// <summary>
+    /// Phase 188J, end to end: the change-table function call is aliased and joined against exactly
+    /// like any other queryable rowset — a matched foreign key gets the looked-up value, and a change
+    /// whose foreign key has no match (including <c>NULL</c>) still arrives as its own change, with the
+    /// looked-up column <c>null</c> rather than the row silently disappearing.
+    /// <para>
+    /// Uses its own source table, created with the relationship's local column already present —
+    /// <c>RegionId</c> has to exist *before* <c>sp_cdc_enable_table</c> runs, since a capture instance
+    /// only ever covers the columns that existed when it was created (see <c>ColumnsFor</c>'s own doc
+    /// comment), which the shared fixture table can't offer after the fact.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Reader_WithARelationship_LeftJoinsTheForeignTable_KeepingUnmatchedRows()
+    {
+        var lookup = $"CdcLookup_{Guid.NewGuid():N}";
+        var src = $"CdcRelSrc_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE TABLE dbo.[{lookup}] (Id INT NOT NULL PRIMARY KEY, Label NVARCHAR(50) NOT NULL);");
+        await ExecuteAsync($"INSERT INTO dbo.[{lookup}] (Id, Label) VALUES (1, 'North');");
+        await ExecuteAsync($"""
+            CREATE TABLE dbo.[{src}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL, RegionId INT NULL);
+            """);
+        await EnableCaptureWithRetryAsync(src);
+
+        var source = new SourceTableRef { ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = src };
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var initial = await capturing.CapturePositionAsync(_connection, source, new Dictionary<string, string>(), CancellationToken.None);
+        var start = await SettleAsync(initial.Position, source);
+
+        await ExecuteAsync($"""
+            INSERT INTO dbo.[{src}] (Id, Name, RegionId) VALUES (1, 'Alice', 1), (2, 'Bob', NULL), (3, 'Carol', 99);
+            """);
+        await WaitForCaptureAsync(start);
+
+        var relationships = new List<RelationshipConfig>
+        {
+            new()
+            {
+                Name = "region",
+                Schema = "dbo",
+                Table = lookup,
+                JoinKeys = [new RelationshipJoinKey { LocalColumn = "RegionId", ForeignColumn = "Id" }],
+            },
+        };
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Id", TargetColumn = "Id" },
+            new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" },
+        };
+
+        var result = await _reader.ReadChangesAsync(
+            _connection, source, start, ReadIntent.Changes, mappings, "mapping", [], relationships,
+            new Dictionary<string, string>(), CancellationToken.None);
+        var rows = await CollectAsync(result.Rows);
+
+        var byId = rows.ToDictionary(r => (int)r["Id"]!, r => (string?)r["Label"]);
+        Assert.Equal(3, byId.Count);
+        Assert.Equal("North", byId[1]); // matched: the looked-up value comes through
+        Assert.Null(byId[2]);           // RegionId is NULL: no match, row still present, looked-up column null
+        Assert.Null(byId[3]);           // RegionId points at nothing: no match, row still present
+    }
+
+    /// <summary>
+    /// Named plainly in the phase doc, proven here rather than assumed: the relationship's looked-up
+    /// columns reflect the foreign table's state *at scan time*, not as of the change — unlike CDC's own
+    /// natively captured columns, which keep their as-of-change values. Changing the foreign row *after*
+    /// the change was captured and re-reading (a fresh <see cref="MsSqlCdcReader"/> read is a fresh
+    /// query, not a replay of a cached one) shows the new value, not the one live when the change happened.
+    /// </summary>
+    [Fact]
+    public async Task Reader_WithARelationship_ReflectsTheForeignRowsCurrentState_NotItsStateAsOfTheChange()
+    {
+        var lookup = $"CdcLookup_{Guid.NewGuid():N}";
+        var src = $"CdcRelSrc_{Guid.NewGuid():N}";
+        await ExecuteAsync($"CREATE TABLE dbo.[{lookup}] (Id INT NOT NULL PRIMARY KEY, Label NVARCHAR(50) NOT NULL);");
+        await ExecuteAsync($"INSERT INTO dbo.[{lookup}] (Id, Label) VALUES (1, 'Original');");
+        await ExecuteAsync($"""
+            CREATE TABLE dbo.[{src}] (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL, RegionId INT NULL);
+            """);
+        await EnableCaptureWithRetryAsync(src);
+
+        var source = new SourceTableRef { ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = src };
+        var capturing = Assert.IsAssignableFrom<IPositionCapturing>(_reader);
+        var initial = await capturing.CapturePositionAsync(_connection, source, new Dictionary<string, string>(), CancellationToken.None);
+        var start = await SettleAsync(initial.Position, source);
+
+        await ExecuteAsync($"INSERT INTO dbo.[{src}] (Id, Name, RegionId) VALUES (1, 'Alice', 1);");
+        await WaitForCaptureAsync(start);
+
+        // The lookup table changes after the source row's own change was already captured.
+        await ExecuteAsync($"UPDATE dbo.[{lookup}] SET Label = 'Updated' WHERE Id = 1;");
+
+        var relationships = new List<RelationshipConfig>
+        {
+            new()
+            {
+                Name = "region",
+                Schema = "dbo",
+                Table = lookup,
+                JoinKeys = [new RelationshipJoinKey { LocalColumn = "RegionId", ForeignColumn = "Id" }],
+            },
+        };
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Id", TargetColumn = "Id" },
+            new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" },
+        };
+
+        var result = await _reader.ReadChangesAsync(
+            _connection, source, start, ReadIntent.Changes, mappings, "mapping", [], relationships,
+            new Dictionary<string, string>(), CancellationToken.None);
+        var row = Assert.Single(await CollectAsync(result.Rows));
+
+        Assert.Equal("Updated", (string?)row["Label"]);
     }
 }

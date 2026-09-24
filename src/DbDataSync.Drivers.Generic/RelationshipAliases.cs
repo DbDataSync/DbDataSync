@@ -1,4 +1,5 @@
 using DbDataSync.Core.Config;
+using DbDataSync.Core.Sql;
 
 namespace DbDataSync.Drivers.Generic;
 
@@ -35,4 +36,17 @@ public static class RelationshipAliases
 
         return aliases;
     }
+
+    /// <summary>
+    /// How a *primary-table* (or, for the Change Tracking/CDC readers, an already-aliased base rowset's)
+    /// column is written once at least one relationship is actually joined: qualified through
+    /// <paramref name="baseAlias"/>, because an unqualified reference becomes ambiguous the moment a
+    /// joined table happens to share that column's name — a foreign lookup table's own "Id" colliding
+    /// with the primary table's being the ordinary case, not a contrived one (found for real in 187J's
+    /// own integration tests). <c>null</c> — meaning "render exactly as before" — when nothing is
+    /// actually joined, so every mapping without a relationship is unaffected.
+    /// </summary>
+    public static Func<string, string>? PrimaryReference(
+        SqlDialect dialect, IReadOnlyDictionary<string, string> relationshipAliases, string baseAlias = "base") =>
+        relationshipAliases.Count == 0 ? null : column => $"{baseAlias}.{dialect.QuoteIdentifier(column)}";
 }

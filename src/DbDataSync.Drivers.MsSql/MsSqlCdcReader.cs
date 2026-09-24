@@ -186,8 +186,8 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
 
         return new ReadResult(
             ReadIncrementalAsync(
-                sourceConnection, instance, fromLsn, maxLsn, columnMappings, maxRows, bounded, inclusiveFloor,
-                cancellationToken),
+                sourceConnection, instance, fromLsn, maxLsn, columnMappings, relationships, maxRows, bounded,
+                inclusiveFloor, cancellationToken),
             MsSqlCdcCatalog.ToWatermark(maxLsn),
             diagnostics,
             bounded,
@@ -309,6 +309,7 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
         }
 
         var maxRows = BoundedRead.Read(request.Options, BoundedRead.DefaultMaxRows);
+        var relationshipAliases = RelationshipAliases.Assign(request.Relationships, request.ColumnMappings);
         List<PreviewParameter> parameters =
         [
             new PreviewParameter(
@@ -353,7 +354,9 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
                 $"Incremental read of changes after LSN {request.PreviousWatermark}",
                 MsSqlCdcStatement.BuildRead(
                     instance.CaptureInstance, function, ColumnsFor(instance, request.ColumnMappings),
-                    column => RenderColumn(column, request.ColumnMappings), bounded: maxRows is not null),
+                    column => RenderColumn(column, request.ColumnMappings, qualified: relationshipAliases.Count > 0),
+                    bounded: maxRows is not null, columnMappings: request.ColumnMappings,
+                    relationships: request.Relationships, relationshipAliases: relationshipAliases),
                 PreviewOrigin.BuiltIn,
                 string.Join(" ", notes),
                 declaredParameters),
@@ -373,9 +376,12 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
         CdcCaptureInstance instance, IReadOnlyList<ColumnMapping> columnMappings)
     {
         var captured = instance.CapturedColumns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // A relationship-sourced mapping names a column on its *foreign* table, never one this capture
+        // instance captures — excluded here the same way it would otherwise wrongly fail the "does this
+        // instance capture it" check below. See phase 188J.
         var wanted = columnMappings.Count == 0
             ? instance.CapturedColumns
-            : [.. columnMappings.Select(m => m.SourceColumn)];
+            : [.. columnMappings.Where(m => m.Relationship is null).Select(m => m.SourceColumn)];
 
         var missing = wanted.Where(c => !captured.Contains(c)).ToList();
         if (missing.Count > 0)
@@ -390,17 +396,26 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
         return wanted;
     }
 
-    private static string RenderColumn(string column, IReadOnlyList<ColumnMapping> columnMappings)
+    /// <param name="qualified">
+    /// Phase 188J: once a relationship is actually joined, the change-table function call is aliased
+    /// <c>ct</c> (see <see cref="MsSqlCdcStatement.BuildRead"/>), and every one of its own columns has
+    /// to be referenced through that alias too — an unqualified reference becomes ambiguous the moment
+    /// the joined table happens to share its name. <c>false</c> — bare quoted names, exactly as before
+    /// this parameter existed — for every mapping with no relationships, which is every mapping before
+    /// this phase.
+    /// </param>
+    private static string RenderColumn(string column, IReadOnlyList<ColumnMapping> columnMappings, bool qualified = false)
     {
         var mapping = columnMappings.FirstOrDefault(
             m => string.Equals(m.SourceColumn, column, StringComparison.OrdinalIgnoreCase));
 
-        // No join here, so {{column}} resolves to the bare quoted name — unlike the CT reader, where
-        // it has to be `base.[Col]` to be unambiguous against CHANGETABLE's own copy of the key.
+        // No join here (unless a relationship makes one), so {{column}} resolves to the bare quoted name
+        // by default — unlike the CT reader, where it has to be `base.[Col]` to be unambiguous against
+        // CHANGETABLE's own copy of the key.
+        var reference = qualified ? $"ct.{SqlIdentifier.Quote(column)}" : SqlIdentifier.Quote(column);
         return string.IsNullOrWhiteSpace(mapping?.Transform)
-            ? SqlIdentifier.Quote(column)
-            : $"{mapping!.Transform!.Replace(ColumnMapping.ColumnToken, SqlIdentifier.Quote(column))} " +
-              $"AS {SqlIdentifier.Quote(column)}";
+            ? reference
+            : $"{mapping!.Transform!.Replace(ColumnMapping.ColumnToken, reference)} AS {SqlIdentifier.Quote(column)}";
     }
 
     private static async IAsyncEnumerable<ChangeRow> Empty()
@@ -415,23 +430,35 @@ public sealed class MsSqlCdcReader : IChangeReader, IStatementPreview, IReadInte
         byte[] storedLsn,
         byte[] maxLsn,
         IReadOnlyList<ColumnMapping> columnMappings,
+        IReadOnlyList<RelationshipConfig> relationships,
         int? maxRows,
         BoundedReadPosition? bounded,
         bool inclusiveFloor,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var columns = ColumnsFor(instance, columnMappings);
+        var relationshipAliases = RelationshipAliases.Assign(relationships, columnMappings);
+        var relationshipMappings = RelationshipColumns.Distinct(columnMappings);
+        RelationshipColumns.EnsureNoNameCollision(
+            [.. columns, ChangeOrdering.OrderingColumn, ChangeOrdering.ChangedAtColumn], relationshipMappings,
+            $"capture instance '{instance.CaptureInstance}'");
+
         // The two ordering columns are appended after the mapped ones and before any bounded position
         // column — see BuildRead — and are real, schema-visible data (unlike the position column,
         // which stays out-of-band): this is what lets a staging provider find them by name and what
-        // lets Scd2Writer process a key with more than one staged row in true source order.
-        var schema = new ChangeSchema([.. columns, ChangeOrdering.OrderingColumn, ChangeOrdering.ChangedAtColumn]);
+        // lets Scd2Writer process a key with more than one staged row in true source order. Relationship
+        // columns (phase 188J) come after those, in the exact order BuildRead's own select list does.
+        var schema = new ChangeSchema([
+            .. columns, ChangeOrdering.OrderingColumn, ChangeOrdering.ChangedAtColumn,
+            .. relationshipMappings.Select(m => m.SourceColumn),
+        ]);
 
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = MsSqlCdcStatement.BuildRead(
             instance.CaptureInstance, FunctionFor(instance), columns,
-            column => RenderColumn(column, columnMappings), bounded: maxRows is not null,
-            inclusiveFloor: inclusiveFloor);
+            column => RenderColumn(column, columnMappings, qualified: relationshipAliases.Count > 0),
+            bounded: maxRows is not null, inclusiveFloor: inclusiveFloor,
+            columnMappings: columnMappings, relationships: relationships, relationshipAliases: relationshipAliases);
         cmd.AddParameter("@storedLsn", storedLsn);
         cmd.AddParameter("@toLsn", maxLsn);
         if (maxRows is { } limit)
