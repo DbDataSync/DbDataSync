@@ -26,7 +26,6 @@ export function useMappingTabs(
 
   const tabs: SubTab[] = [
     { path: null, label: 'Notes', testId: 'mapping-tab-notes' },
-    { path: 'relationships', label: 'Relationships', testId: 'mapping-tab-relationships' },
     { path: 'columns', label: 'Column Mapping', testId: 'mapping-tab-columns' },
     { path: 'transforms', label: 'Custom Transforms', testId: 'mapping-tab-transforms' },
     { path: 'segmenting', label: 'Bulk Load', testId: 'mapping-tab-segmenting' },

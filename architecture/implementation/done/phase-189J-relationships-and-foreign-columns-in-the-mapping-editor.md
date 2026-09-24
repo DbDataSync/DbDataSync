@@ -125,8 +125,11 @@ existing Playwright suite — not assumed up front.
    the UI on reader Kind would have been speculative complexity for a gap that closed before this phase
    started.
 
-**What was built, concretely**: `RelationshipsCard.tsx` (new) — a list editor, its own tab ahead of
-Column Mapping (a relationship has to exist before a column can be mapped through it). Each relationship
+**What was built, concretely**: `RelationshipsCard.tsx` (new) — a list editor. Placed on the Column
+Mapping tab itself, between `ColumnMappingEditor` and `CachedMetadataCard`, not a tab of its own as first
+built and as this doc originally said here — moved same-session, on the judgment that a relationship has
+no reason to exist except to be picked from in the column mapping right above it, so a separate tab read
+as managing something unrelated rather than a step in the same task. Each relationship
 row picks a foreign table from the same connection/database the primary source resolved to, and a
 repeatable join-key editor (local column from the primary table's own `sourceColumns`, foreign column
 fetched live for that specific relationship's table — via a new `useRelationshipColumns` hook,
@@ -161,7 +164,7 @@ before wiring the `<select>`, not discovered as a live bug.
 86/86 (all pre-existing — no new unit tests were the right level for this feature; the round-trip claim is
 what a browser-driven test can prove and a unit test can only assert about internals). A new Playwright
 spec, `mapping-relationships.spec.ts`, stubbed at the network boundary like `mapping-column-add.spec.ts`'s
-own precedent: declares a relationship (name, foreign table, one join key) in the new card, maps a target
+own precedent: declares a relationship (name, foreign table, one join key) in the card, maps a target
 column through it in Column Mapping, saves, and asserts on the actual PUT body — both the relationship
 declaration and the column mapping's `relationship` field survive, which is the thing "round-trips on
 reopening" actually has to prove, not something to infer from what the screen shows before a save.

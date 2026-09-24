@@ -127,8 +127,12 @@ async function stub(page: Page): Promise<Saved> {
 test('declaring a relationship and mapping a column through it round-trips through a save', async ({ page }) => {
   const saved = await stub(page)
 
-  await page.goto(`/replications/${REPLICATION_NAME}/mappings/${encodeURIComponent(MAPPING)}/relationships`)
-  await expect(page.getByTestId('relationships-card')).toBeVisible({ timeout: 20_000 })
+  // The Relationships card lives on the Column Mapping tab itself now — between the editor and the
+  // cached-metadata card — not a tab of its own (186J/189J): a relationship only ever exists to be
+  // picked from in the column mapping right above it.
+  await page.goto(`/replications/${REPLICATION_NAME}/mappings/${encodeURIComponent(MAPPING)}/columns`)
+  await expect(page.getByTestId('column-mappings-table')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId('relationships-card')).toBeVisible()
 
   // Declare the relationship: name, foreign table, one join key.
   await page.getByTestId('add-relationship-button').click()
@@ -139,10 +143,7 @@ test('declaring a relationship and mapping a column through it round-trips throu
 
   await page.screenshot({ path: `${screenshotsDir}/01-relationship-declared.png`, fullPage: true })
 
-  // Map RegionLabel through it, on the Column Mapping tab.
-  await page.getByTestId('mapping-tab-columns').click()
-  await expect(page.getByTestId('column-mappings-table')).toBeVisible()
-
+  // Map RegionLabel through it, right there on the same tab.
   await page.getByTestId('add-target-column-input').fill('RegionLabel')
   await page.getByTestId('add-target-column-button').click()
   await page.getByTestId('column-mapping-source-1').selectOption({ label: 'Label' })

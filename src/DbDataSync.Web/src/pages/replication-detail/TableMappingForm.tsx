@@ -457,7 +457,7 @@ export function MappingNotesTab() {
 export function ColumnMappingTab() {
   const {
     replicationName, existing, resolvedSource, resolvedTarget, columnMappings, setColumnMappings,
-    targetExists, sourceColumns, querySource, relationships,
+    targetExists, sourceColumns, querySource, relationships, setRelationships,
   } = useOutletContext<MappingEditorContext>()
 
   return (
@@ -476,29 +476,20 @@ export function ColumnMappingTab() {
         targetExists={targetExists}
         relationships={relationships}
       />
-      {/* Below the editor rather than on a tab of its own: the cache is the same five facts about
-          the same two tables that this grid is showing, and a screen an operator has to go looking
-          for is one they will not think to refresh. */}
+      {/* Between the editor and the cache rather than its own tab (186J/189J): a relationship only
+          ever exists to be picked from in the column mapping above it, so managing it anywhere else
+          read as managing something unrelated. */}
+      <RelationshipsCard
+        resolvedSource={resolvedSource}
+        sourceColumns={sourceColumns}
+        relationships={relationships}
+        onChange={setRelationships}
+      />
+      {/* Below both rather than on a tab of its own: the cache is the same facts about the same
+          tables (now including each relationship's) that this grid is showing, and a screen an
+          operator has to go looking for is one they will not think to refresh. */}
       <CachedMetadataCard replicationName={replicationName} existing={existing} />
     </div>
-  )
-}
-
-/**
- * Declaring named joins to other tables on the same connection — phase 186J/189J. Its own tab, ahead
- * of Column Mapping: a relationship has to exist before a column mapping can be picked through it, the
- * same ordering the tab list itself follows.
- */
-export function MappingRelationshipsTab() {
-  const { resolvedSource, sourceColumns, relationships, setRelationships } = useOutletContext<MappingEditorContext>()
-
-  return (
-    <RelationshipsCard
-      resolvedSource={resolvedSource}
-      sourceColumns={sourceColumns}
-      relationships={relationships}
-      onChange={setRelationships}
-    />
   )
 }
 

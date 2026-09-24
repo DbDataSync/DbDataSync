@@ -27,7 +27,7 @@ import {
 import { MappingEditorRoute, MappingsIndex } from './pages/replication-detail/TableMappingsPanel'
 import {
   ColumnMappingTab, MappingDiagnosticsTab, MappingNotesTab, MappingPipelineTab,
-  MappingProvisioningTab, MappingRelationshipsTab, MappingSegmentingTab, MappingTransformsTab,
+  MappingProvisioningTab, MappingSegmentingTab, MappingTransformsTab,
 } from './pages/replication-detail/TableMappingForm'
 import { MappingsOverview } from './pages/replication-detail/MappingsOverview'
 import { MappingPreview } from './pages/replication-detail/MappingPreview'
@@ -44,7 +44,6 @@ import { VerificationResultPage } from './pages/replication-detail/VerificationR
 const MAPPING_EDITOR_TABS = (
   <>
     <Route index element={<MappingNotesTab />} />
-    <Route path="relationships" element={<MappingRelationshipsTab />} />
     <Route path="columns" element={<ColumnMappingTab />} />
     <Route path="transforms" element={<MappingTransformsTab />} />
     <Route path="segmenting" element={<MappingSegmentingTab />} />
