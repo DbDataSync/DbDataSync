@@ -369,7 +369,7 @@ public sealed class ConnectionsController(
         try
         {
             return Ok(await testService.PreviewQueryAsync(
-                new QueryPreviewRequest(name, body.Query, body.SampleRows), cancellationToken));
+                new QueryPreviewRequest(name, body.Query, body.MaxRows, body.AllowSubquery), cancellationToken));
         }
         catch (FileNotFoundException)
         {
@@ -430,4 +430,10 @@ public sealed record CredentialSource(string Store, string SecretRef, string Env
 public sealed record LibraryValidationReport(bool Succeeded, string LibraryId, string Output);
 
 /// <summary>The body of a query preview. The connection is the route's, so it is not repeated here.</summary>
-public sealed record QueryPreviewBody(string Query, int SampleRows = 20);
+/// <param name="MaxRows">One of a fixed choice the SPA offers — 0, 10, or 50. 0 means "shape only, no
+/// data", which is how metadata capture uses this same endpoint without reading through a large source
+/// query's result. See <see cref="QueryPreviewRequest.MaxRows"/>.</param>
+/// <param name="AllowSubquery">Whether the query may be wrapped to apply the cap as a real SQL clause —
+/// see <see cref="QueryPreviewRequest.AllowSubquery"/>. Defaults <c>true</c>; the SPA sends the draft
+/// mapping's own current value.</param>
+public sealed record QueryPreviewBody(string Query, int MaxRows = 10, bool AllowSubquery = true);

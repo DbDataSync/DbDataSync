@@ -41,7 +41,22 @@ public sealed record ScriptTestResult(
 /// SQL would mean committing a query to config history to find out whether it was the query you
 /// meant — the same reason <c>ScriptsController.Test</c> takes the definition in its body.
 /// </param>
-public sealed record QueryPreviewRequest(string ConnectionName, string Query, int SampleRows = 20);
+/// <param name="MaxRows">
+/// One of a fixed choice the SPA offers — 0, 10, or 50 (phase 193S) — not an arbitrary sample size.
+/// <c>0</c> means "shape only, no data": this is what serves metadata capture for a query-shaped
+/// source directly, with no separate describe mechanism. Clamped server-side to a small, fixed
+/// ceiling regardless of what's sent, the same defensive posture the rest of this class already takes.
+/// </param>
+/// <param name="AllowSubquery">
+/// Whether the query may be wrapped as <c>(&lt;query&gt;) AS base</c> to apply <see cref="MaxRows"/> as
+/// a real SQL clause (<c>TOP</c>/<c>LIMIT</c>/<c>FETCH FIRST</c>, or an unsatisfiable predicate for
+/// <c>0</c>) — mirrors <c>SourceTableSpec.AllowSubquery</c>, and the SPA sends the draft mapping's own
+/// current value. <b>Regardless of this flag</b>, the reader always stops consuming after
+/// <see cref="MaxRows"/> rows and disposes — the SQL-level clause is an optimization for a large source
+/// query, not the only limit; when this is <c>false</c> (or no dialect is known for the connection),
+/// that reader-side stop is the only thing bounding the read.
+/// </param>
+public sealed record QueryPreviewRequest(string ConnectionName, string Query, int MaxRows = 10, bool AllowSubquery = true);
 
 /// <param name="Source">Where the rows came from, in the operator's words. The same safety property
 /// <see cref="ScriptTestResult.Source"/> carries: this touched a real system, and says which.</param>
@@ -164,9 +179,11 @@ public sealed class ScriptTestService(
     /// keep agreeing with it.
     /// </para>
     /// <para>
-    /// This is what makes a query-first reader configurable at all: <c>DuckDbQueryReader</c>'s entire
-    /// configuration is one statement, and a mapping editor that could not run it would be asking an
-    /// operator to write SQL blind and find out on the first pass.
+    /// This is what makes a query-shaped source configurable at all: <c>SourceTableSpec.Query</c> is one
+    /// statement and has no catalog behind it, and a mapping editor that could not run it would be
+    /// asking an operator to write SQL blind and find out on the first pass. It is also the *only* way
+    /// a query-shaped source's metadata is ever captured — see phase 190S's decision to add no separate
+    /// describe mechanism; the shape this returns is what a save writes into the mapping's own cache.
     /// </para>
     /// </summary>
     public async Task<QueryPreviewResult> PreviewQueryAsync(
@@ -177,14 +194,15 @@ public sealed class ScriptTestService(
         if (string.IsNullOrWhiteSpace(request.Query))
             return new QueryPreviewResult(source, [], [], Error: "There is no query to run.");
 
-        var limit = Math.Clamp(request.SampleRows, 1, MaxLiveRows);
+        var limit = Math.Clamp(request.MaxRows, 0, MaxQueryPreviewRows);
 
         try
         {
-            var (connection, _) = await connections.OpenAsync(request.ConnectionName, cancellationToken);
+            var (connection, driver) = await connections.OpenAsync(request.ConnectionName, cancellationToken);
             await using (connection)
             {
-                return await RunCappedQueryAsync(connection, source, request.Query, limit, maxColumns: null, cancellationToken);
+                var statement = request.AllowSubquery ? WrapForPreview(driver, request.Query, limit) : request.Query;
+                return await RunCappedQueryAsync(connection, source, statement, limit, maxColumns: null, cancellationToken);
             }
         }
         // The same reasoning the script test uses, for the same reason: a query that does not parse,
@@ -195,6 +213,41 @@ public sealed class ScriptTestService(
         {
             return new QueryPreviewResult(source, [], [], Error: $"{ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    private const int MaxQueryPreviewRows = 50;
+
+    /// <summary>
+    /// Wraps the operator's own query as a derived table so <paramref name="limit"/> becomes a real SQL
+    /// clause instead of relying only on <see cref="RunCappedQueryAsync"/>'s reader-side stop — worth
+    /// doing for a large source query, where reading and discarding rows the engine didn't need to
+    /// produce at all is real, avoidable cost. Falls back to the query unwrapped when the driver names
+    /// no <see cref="SqlDialect"/> to wrap with; the reader-side stop still bounds the read either way.
+    /// <para>
+    /// Zero rows is spelled as an unsatisfiable predicate rather than a row-limit clause of zero — the
+    /// shape (<see cref="TryReadColumnMetadata"/>) comes back identically either way, and <c>WHERE
+    /// 1 = 0</c> needs no per-dialect row-limit syntax at all.
+    /// </para>
+    /// <para>
+    /// Wraps at <paramref name="limit"/> **plus one**, not <paramref name="limit"/> itself —
+    /// <see cref="RunCappedQueryAsync"/>'s own truncation check works by reading one row past its
+    /// display cap and seeing whether it existed; a SQL-level <c>LIMIT n</c> would make the engine
+    /// itself the reason that row never arrives, which is indistinguishable from a query that only ever
+    /// had <paramref name="limit"/> rows. Capping the wrap one higher restores that check while still
+    /// sparing the engine from producing the query's *entire* result.
+    /// </para>
+    /// </summary>
+    private static string WrapForPreview(IDriver driver, string query, int limit)
+    {
+        if (driver is not IDialectProvider provider)
+            return query;
+
+        var dialect = provider.Dialect;
+        if (limit == 0)
+            return $"SELECT * FROM ({query}) AS base WHERE 1 = 0";
+
+        var (prefix, suffix) = dialect.RenderRowLimit(limit + 1);
+        return $"SELECT {prefix}* FROM ({query}) AS base{suffix}";
     }
 
     /// <summary>
@@ -246,9 +299,11 @@ public sealed class ScriptTestService(
             // silently ran something other than what is in the editor would defeat its own purpose.
             // Stopping early costs nothing: the reader streams, so the engine is never asked for
             // the rest.
+            // maxRows == 0 (phase 193S's "shape only" choice) reads no row at all — GetColumnSchema
+            // above already has the shape, and the point of 0 is not touching the query's actual result.
             var rows = new List<IReadOnlyList<string?>>();
             var rowsTruncated = false;
-            while (await reader.ReadAsync(cancellationToken))
+            while (maxRows > 0 && await reader.ReadAsync(cancellationToken))
             {
                 if (rows.Count == maxRows)
                 {

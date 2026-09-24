@@ -51,14 +51,6 @@ driverRegistry.RegisterWithScripting(postgresDriver, scriptHost);
 driverRegistry.RegisterWithScripting(mySqlDriver, scriptHost);
 driverRegistry.RegisterWithScripting(oracleDriver, scriptHost);
 driverRegistry.RegisterWithScripting(duckDbDriver, scriptHost);
-// A raw-query source ("a mapping's source is a query I wrote, not a table") — DuckDb is skipped by
-// this call itself (RawQueryRegistration's own doc comment): it already offers the identical
-// capability under its own DuckDbQueryReader/"DuckDbQuery" Kind.
-driverRegistry.RegisterWithRawQuery(msSqlDriver);
-driverRegistry.RegisterWithRawQuery(postgresDriver);
-driverRegistry.RegisterWithRawQuery(mySqlDriver);
-driverRegistry.RegisterWithRawQuery(oracleDriver);
-driverRegistry.RegisterWithRawQuery(duckDbDriver);
 DriverLoader.LoadDescriptorDrivers(options.RepoRoot, libraryRegistry, driverRegistry);
 DriverLoader.LoadCompiledDrivers(options.RepoRoot, driverRegistry);
 

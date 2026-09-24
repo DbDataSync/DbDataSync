@@ -42,7 +42,7 @@ public static class DriverLoader
             try
             {
                 var descriptor = DriverDescriptorReader.Read(yamlPath);
-                driverRegistry.RegisterWithRawQuery(DriverDescriptorReader.BuildDriver(descriptor, libraryRegistry, repoRoot));
+                driverRegistry.Register(DriverDescriptorReader.BuildDriver(descriptor, libraryRegistry, repoRoot));
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException
                 or YamlDotNet.Core.YamlException)
@@ -121,6 +121,6 @@ public static class DriverLoader
                 "Use a build of the plugin that targets this DbDataSync version.");
         }
 
-        driverRegistry.RegisterWithRawQuery(driver);
+        driverRegistry.Register(driver);
     }
 }

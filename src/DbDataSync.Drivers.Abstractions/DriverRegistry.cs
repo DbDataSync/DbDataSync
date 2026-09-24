@@ -16,16 +16,13 @@ public sealed class DriverRegistry
     /// <param name="hostReaders">
     /// Readers the *host* supplies for this driver rather than the driver supplying itself — phase 30's
     /// <c>ScriptedQuery</c>, which needs the script host and so cannot be constructed inside a driver
-    /// project without dragging Roslyn in with it, and <c>RawQuery</c> (<c>RawQueryRegistration</c>),
-    /// which composes for the same "not the driver's own job to build" reason. Composed here because
-    /// this is the composition root's job; from every caller's point of view they are simply readers
-    /// this driver has.
+    /// project without dragging Roslyn in with it. Composed here because this is the composition root's
+    /// job; from every caller's point of view it is simply a reader this driver has.
     /// <para>
-    /// **Additive across calls**, not a replacement — a driver commonly gets host readers from more
-    /// than one registration helper (<c>RegisterWithScripting</c> then <c>RegisterWithRawQuery</c>,
-    /// say), and a second call replacing the first's list would silently drop it. Register the same
-    /// driver instance twice with the same reader and it appears twice; nothing here de-duplicates,
-    /// because nothing today has a reason to call this more than once per driver with the same list.
+    /// **Additive across calls**, not a replacement — a second call would otherwise silently drop
+    /// whatever the first one added. Register the same driver instance twice with the same reader and
+    /// it appears twice; nothing here de-duplicates, because nothing today has a reason to call this
+    /// more than once per driver with the same list.
     /// </para>
     /// </param>
     public void Register(IDriver driver, IReadOnlyList<IChangeReader>? hostReaders = null)

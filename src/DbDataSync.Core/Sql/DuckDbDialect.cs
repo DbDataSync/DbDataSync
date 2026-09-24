@@ -48,6 +48,12 @@ public sealed class DuckDbDialect : SqlDialect
     public override string QualifyTable(string schema, string table) =>
         base.QualifyTable(string.IsNullOrWhiteSpace(schema) ? "main" : schema, table);
 
+    /// <summary>Plain <c>LIMIT n</c> rather than the ANSI base's <c>FETCH FIRST … ROWS ONLY</c> —
+    /// DuckDB definitely supports the former; whether it accepts the latter was not confirmed against a
+    /// live instance, and a query preview's own cap (phase 193S, the one caller today) isn't worth
+    /// guessing on.</summary>
+    public override (string Prefix, string Suffix) RenderRowLimit(int n) => ("", $" LIMIT {n}");
+
     public override BucketableKind ClassifyForBucketing(string baseTypeName) => baseTypeName switch
     {
         "tinyint" or "smallint" or "integer" or "bigint" or "hugeint"

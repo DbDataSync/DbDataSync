@@ -55,6 +55,8 @@ public sealed class MySqlDialect : SqlDialect
     public override (string Prefix, string Suffix) RenderTieSafeRowLimit(string parameterName) =>
         ("", $" LIMIT {ParameterReference(parameterName)}");
 
+    public override (string Prefix, string Suffix) RenderRowLimit(int n) => ("", $" LIMIT {n}");
+
     /// <summary>MySQL's identity column, the same role Postgres's <c>BIGSERIAL</c>/
     /// <c>GENERATED ALWAYS AS IDENTITY</c> plays.</summary>
     public override string RenderStagingOrdinalColumn(string column) =>

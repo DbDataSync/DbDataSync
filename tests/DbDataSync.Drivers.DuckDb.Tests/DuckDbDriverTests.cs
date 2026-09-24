@@ -1,6 +1,7 @@
 using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Drivers.DuckDb;
+using DbDataSync.Drivers.Generic;
 
 namespace DbDataSync.Drivers.DuckDb.Tests;
 
@@ -94,42 +95,36 @@ public sealed class DuckDbDriverTests
     /// <summary>
     /// Source-only, and this is the assertion that keeps it honest: a writer added later has to be a
     /// decision somebody made rather than something that arrived with a copied constructor.
+    /// <para>
+    /// Phase 193S: the generic <see cref="BatchReloadReader"/>, not a DuckDB-specific one —
+    /// <c>DuckDbQueryReader</c> is retired now that a query-shaped source is a property of
+    /// <c>SourceTableSpec</c> rather than a reader Kind of its own.
+    /// </para>
     /// </summary>
     [Fact]
     public void OffersOneReaderAndNoWriteSide()
     {
         var driver = new DuckDbDriver();
 
-        Assert.Equal(DuckDbQueryReader.ReaderKind, Assert.Single(driver.Readers).Kind);
+        Assert.Equal(GenericDriverKinds.BatchReload, Assert.Single(driver.Readers).Kind);
         Assert.Empty(driver.StagingProviders);
         Assert.Empty(driver.Writers);
     }
 
     /// <summary>
-    /// Auto-segment discovery is not implemented, and the capability endpoint derives that from the
-    /// interface rather than from a list — so this is what the SPA's reader picker will say about it.
+    /// The generic reload reader implements auto-segment expansion (unlike the retired
+    /// <c>DuckDbQueryReader</c>, which had no equivalent) — the capability endpoint derives this from
+    /// the interface rather than from a list, so this is what the SPA's reader picker will say about it.
     /// </summary>
     [Fact]
-    public void TheQueryReader_DoesNotExpandSegments()
+    public void TheReader_CanExpandSegments()
     {
         var registry = new DriverRegistry();
         registry.Register(new DuckDbDriver());
 
         var capability = Assert.Single(registry.Describe(DriverIds.DuckDb)!.Readers);
 
-        Assert.False(capability.SupportsSegmentation);
+        Assert.True(capability.SupportsSegmentation);
         Assert.False(capability.DetectsDeletes);
-    }
-
-    /// <summary>The one setting, declared as SQL — which is what puts an editor on the mapping's
-    /// source tab instead of a one-line box.</summary>
-    [Fact]
-    public void TheQueryOption_IsDeclaredAsSql()
-    {
-        var parameter = Assert.Single(new DuckDbQueryReader().Parameters);
-
-        Assert.Equal(DuckDbQueryReader.QueryOption, parameter.Name);
-        Assert.Equal(ParameterType.Sql, parameter.Type);
-        Assert.True(parameter.Required);
     }
 }

@@ -41,7 +41,6 @@ public sealed class PositionCapturingContractTests
     /// </summary>
     [Theory]
     [InlineData(typeof(BatchReloadReader))]
-    [InlineData(typeof(DuckDbQueryReader))]
     [InlineData(typeof(ScriptedQueryReader))]
     public void ReadersWithNoPositionOfTheirOwn_DoNotImplementIt(Type readerType)
     {

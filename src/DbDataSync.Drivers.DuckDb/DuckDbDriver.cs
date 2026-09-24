@@ -33,7 +33,16 @@ public sealed class DuckDbDriver : IDriver, IConnectionTester, IDialectProvider
     /// 109j has nothing to drive for this engine, but the static IL-surface check still applies.</summary>
     public string? RequiredLibraryId => "duckdb";
 
-    public IReadOnlyList<IChangeReader> Readers { get; } = [new DuckDbQueryReader()];
+    /// <summary>
+    /// The generic reload reader (phase 193S), not a DuckDB-specific one — <c>DuckDbQueryReader</c> is
+    /// retired along with every other driver's own hand-rolled query-source reader now that a
+    /// query-shaped source is a property of <c>SourceTableSpec</c> (phase 190S/191S) rather than a
+    /// reader Kind of its own. DuckDB has no catalog to browse (see <see cref="ListColumnsAsync"/>
+    /// below), so every one of its mappings is query-shaped in practice — but the reader itself needs
+    /// no special-casing for that, the same way no other driver's does.
+    /// </summary>
+    public IReadOnlyList<IChangeReader> Readers { get; } =
+        [new BatchReloadReader(DuckDbDialect.Instance, DuckDbValueBinding.Instance)];
 
     public IReadOnlyList<IStagingProvider> StagingProviders { get; } = [];
 

@@ -177,6 +177,18 @@ public abstract class SqlDialect
         ("", $"\nFETCH FIRST {ParameterReference(parameterName)} ROWS WITH TIES");
 
     /// <summary>
+    /// The plain, non-tie-safe sibling of <see cref="RenderTieSafeRowLimit"/> — "show me up to
+    /// <paramref name="n"/> rows," with no promise about a row sharing the boundary value, because
+    /// nothing here depends on the boundary being exact. A query preview's own cap (phase 193S) is the
+    /// one caller: it isn't reading a position to resume from, so there's no tie to protect. Takes a
+    /// literal count rather than a bound parameter — the caller always supplies one of a small, fixed
+    /// set of values it controls, never operator input, so splicing it directly is safe and needs no
+    /// command to bind a parameter against.
+    /// </summary>
+    public virtual (string Prefix, string Suffix) RenderRowLimit(int n) =>
+        ("", $"\nFETCH FIRST {n} ROWS ONLY");
+
+    /// <summary>
     /// The staging table's ordinal column, definition and all: an engine-assigned, monotonically
     /// increasing number per staged row, which is what a chunked apply ranges over.
     /// <para>

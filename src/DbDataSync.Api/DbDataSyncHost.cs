@@ -204,15 +204,6 @@ public static class DbDataSyncHost
             // registration shape rather than a special case to keep in step.
             registry.RegisterWithScripting(duckDbDriver, scriptHost);
 
-            // A raw-query source ("a mapping's source is a query I wrote, not a table") — DuckDb is
-            // skipped by this call itself (RawQueryRegistration's own doc comment): it already offers
-            // the identical capability under its own DuckDbQueryReader/"DuckDbQuery" Kind.
-            registry.RegisterWithRawQuery(msSqlDriver);
-            registry.RegisterWithRawQuery(postgresDriver);
-            registry.RegisterWithRawQuery(mySqlDriver);
-            registry.RegisterWithRawQuery(oracleDriver);
-            registry.RegisterWithRawQuery(duckDbDriver);
-
             // A descriptor-defined driver's library (resolved above) is already loadable; this is
             // what actually stands one up and puts it beside the built-ins.
             var libraryRegistry = sp.GetRequiredService<LibraryRegistry>();

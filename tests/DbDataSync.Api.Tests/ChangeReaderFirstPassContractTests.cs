@@ -72,11 +72,6 @@ public sealed class ChangeReaderFirstPassContractTests
             "A query source has no change feed to have been switched on, and no catalog behind it. The "
             + "watermark is handed to the script, which decides what it means — there is no first-pass "
             + "branch for this reader to get wrong, and no intent for it to honestly declare.",
-        [typeof(DuckDbQueryReader)] =
-            "As ScriptedQueryReader: a query source, not a feed over a table with pre-existing rows.",
-        [typeof(RawQueryReader)] =
-            "As DuckDbQueryReader, whose own design this generalized to every other driver: a query "
-            + "source, not a feed over a table with pre-existing rows.",
         [typeof(KeyReconcileReader)] =
             "A delete-diff key sweep reads every key in scope by definition, same as BatchReloadReader — "
             + "it ignores the watermark rather than branching on it, so there is nothing honest to "
