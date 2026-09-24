@@ -84,6 +84,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
+        IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

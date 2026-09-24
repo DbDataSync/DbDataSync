@@ -110,7 +110,7 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
         };
 
         var result = await reader.ReadChangesAsync(
-            connection, source, null, ReadIntent.InitialLoad, mappings, "descriptor-test", [],
+            connection, source, null, ReadIntent.InitialLoad, mappings, "descriptor-test", [], [],
             new Dictionary<string, string>(), CancellationToken.None);
 
         var rows = new List<ChangeRow>();
@@ -321,7 +321,7 @@ public sealed class JdbcDescriptorTests(JdbcTestDatabase db) : IClassFixture<Jdb
         var options = new Dictionary<string, string> { [SegmentSerializer.SegmentOptionKey] = SegmentSerializer.Serialize(segment) };
 
         var result = await reader.ReadChangesAsync(
-            connection, source, null, ReadIntent.InitialLoad, mappings, "descriptor-segment-test", sourceColumns,
+            connection, source, null, ReadIntent.InitialLoad, mappings, "descriptor-segment-test", sourceColumns, [],
             options, CancellationToken.None);
 
         var rows = new List<ChangeRow>();

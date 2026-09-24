@@ -79,6 +79,11 @@ public sealed record GeneratedColumnExpression(string Column, string Expression)
 /// <param name="TargetColumns">As <paramref name="SourceColumns"/>, for the target side — what a writer's
 /// own <c>DescribeAsync</c> reads instead of asking its catalog, via
 /// <c>DbDataSync.Drivers.Generic.TargetShape.FromColumns</c>.</param>
+/// <param name="Relationships">This mapping's own declared <see cref="RelationshipConfig"/>s — phase
+/// 186J, the same list <see cref="IChangeReader.ReadChangesAsync"/> receives. A reader's own preview has
+/// to show the real statement it would run, joins included, so it needs the same input the real read
+/// does. Ignored by every non-reader implementer (staging providers, writers) and by every reader that
+/// doesn't support relationship joins.</param>
 public sealed record PreviewRequest(
     DbConnection Connection,
     SourceTableRef Source,
@@ -87,7 +92,8 @@ public sealed record PreviewRequest(
     IReadOnlyDictionary<string, string> Options,
     string? PreviousWatermark,
     IReadOnlyList<ColumnMetadata> SourceColumns,
-    IReadOnlyList<ColumnMetadata> TargetColumns);
+    IReadOnlyList<ColumnMetadata> TargetColumns,
+    IReadOnlyList<RelationshipConfig> Relationships);
 
 /// <summary>
 /// A reader, staging provider or writer that can say what it would run without running it.

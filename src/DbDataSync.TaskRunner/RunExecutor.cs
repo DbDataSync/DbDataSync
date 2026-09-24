@@ -914,7 +914,7 @@ public sealed class RunExecutor(
                 {
                     read = await reader.ReadChangesAsync(
                         sourceConnection, source, previousWatermark, intent, columnMappings, mapping.Name,
-                        mapping.SourceColumns, readerOptions, cancellationToken);
+                        mapping.SourceColumns, mapping.Relationships, readerOptions, cancellationToken);
                 }
                 catch (PositionExpiredException)
                 {

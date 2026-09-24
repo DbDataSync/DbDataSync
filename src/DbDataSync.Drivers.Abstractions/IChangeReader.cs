@@ -106,6 +106,15 @@ public interface IChangeReader
     /// <c>ChangeReaderFirstPassContractTests</c> fails until a new reader's supported intents are
     /// declared, or it is named as exempt from declaring them and why.
     /// </param>
+    /// <param name="relationships">
+    /// This mapping's own declared <see cref="RelationshipConfig"/>s — phase 186J. A reader that
+    /// supports relationship joins renders one <c>LEFT JOIN</c> per entry actually referenced by
+    /// <paramref name="columnMappings"/> (via <see cref="ColumnMapping.Relationship"/>) into whatever
+    /// statement it builds. Most readers ignore this entirely, the same way most already ignore
+    /// <paramref name="columnMappings"/>/<paramref name="sourceColumns"/> today — as of phase 186J no
+    /// reader consumes it yet; see phase 187J (the reload readers) and phase 188J (the incremental
+    /// readers) for the ones that will.
+    /// </param>
     Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
@@ -114,6 +123,7 @@ public interface IChangeReader
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
+        IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken);
 }

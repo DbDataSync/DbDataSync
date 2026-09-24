@@ -325,4 +325,39 @@ public static class ConfigValidation
                 "allows, so a cadence has to be set even when the after-change trigger is the one that " +
                 "actually matters.");
     }
+
+    /// <summary>
+    /// Phase 186J. Three checks, all shape-level — whether a <see cref="RelationshipConfig"/>'s
+    /// <see cref="RelationshipJoinKey"/> columns actually exist is a save-time metadata-refresh concern,
+    /// the same way <see cref="ColumnMapping.SourceColumn"/>/<see cref="ColumnMapping.TargetColumn"/>
+    /// are never checked against a live catalog here either.
+    /// </summary>
+    public static void ValidateRelationships(TableMappingConfig mapping)
+    {
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var relationship in mapping.Relationships)
+        {
+            if (!seenNames.Add(relationship.Name))
+                throw new ConfigValidationException(
+                    $"Table mapping '{mapping.Name}' declares more than one relationship named " +
+                    $"'{relationship.Name}'. Relationship names must be unique within a mapping.");
+
+            if (relationship.JoinKeys.Count == 0)
+                throw new ConfigValidationException(
+                    $"Table mapping '{mapping.Name}' declares relationship '{relationship.Name}' with no " +
+                    "join keys. A relationship needs at least one local/foreign column pair to join on.");
+        }
+
+        var declaredNames = mapping.Relationships.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unknown = mapping.ColumnMappings
+            .Where(c => c.Relationship is not null && !declaredNames.Contains(c.Relationship))
+            .Select(c => c.Relationship!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (unknown.Count > 0)
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' has a column mapping referencing relationship(s) " +
+                $"{string.Join(", ", unknown.Select(n => $"'{n}'"))}, which {(unknown.Count == 1 ? "is" : "are")} " +
+                "not declared on this mapping.");
+    }
 }

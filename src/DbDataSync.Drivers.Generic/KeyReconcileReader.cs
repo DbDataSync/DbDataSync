@@ -73,6 +73,7 @@ public sealed class KeyReconcileReader(SqlDialect dialect, ISegmentValueBinder b
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
+        IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

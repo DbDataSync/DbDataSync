@@ -32,8 +32,10 @@ public sealed class MappingMetadataService(ConfigRepository configRepository, Ma
         var task = configRepository.LoadReplicationTask(replicationName);
         var mapping = configRepository.LoadTableMapping(replicationName, mappingName);
 
-        var source = mapping.Sources.Count == 1
-            ? await reader.ReadAsync(EndpointResolution.ResolveSource(task, mapping.Sources[0]), cancellationToken)
+        var resolvedSource = mapping.Sources.Count == 1 ? EndpointResolution.ResolveSource(task, mapping.Sources[0]) : null;
+
+        var source = resolvedSource is not null
+            ? await reader.ReadAsync(resolvedSource, cancellationToken)
             : MappingColumnReader.Unreadable("This mapping does not have exactly one source table to introspect.");
 
         var target = mapping.Targets.Count == 1
@@ -52,6 +54,28 @@ public sealed class MappingMetadataService(ConfigRepository configRepository, Ma
         // would date a picture nobody took.
         if (source.Columns is not null || target.Columns is not null)
             mapping.ColumnsCapturedUtc = DateTime.UtcNow;
+
+        // Each declared relationship's own foreign table — phase 186J. Same connection/database as the
+        // mapping's own primary source (185J's confirmed constraint), so nothing beyond the relationship's
+        // own Schema/Table is needed to resolve it. Same "leave it alone if unreadable" rule as
+        // source/target: a relationship's foreign table being unreachable this minute doesn't erase what
+        // was captured last time.
+        if (resolvedSource is not null)
+        {
+            foreach (var relationship in mapping.Relationships)
+            {
+                var foreignTable = new TableRef
+                {
+                    ConnectionName = resolvedSource.ConnectionName,
+                    Database = resolvedSource.Database,
+                    Schema = relationship.Schema,
+                    Table = relationship.Table,
+                };
+                var read = await reader.ReadAsync(foreignTable, cancellationToken);
+                if (read.Columns is not null)
+                    mapping.RelationshipColumns[relationship.Name] = read.Columns;
+            }
+        }
 
         var saved = configRepository.SaveTableMapping(replicationName, mapping, author);
         return new MetadataRefreshResult(saved, sourceSide, targetSide);

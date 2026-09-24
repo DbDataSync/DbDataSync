@@ -117,7 +117,7 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
     {
         // Reading from the pre-seed baseline makes every seeded row an outstanding insert, so the
         // reader has a large stream to work through while the deleter runs against it.
-        var read = await _reader.ReadChangesAsync(_connection, Source(), _baselineWatermark, ReadIntent.Changes, [], "mapping", [], options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_connection, Source(), _baselineWatermark, ReadIntent.Changes, [], "mapping", [], [], options, CancellationToken.None);
 
         using var stop = new CancellationTokenSource();
         var deleting = DeleteConcurrentlyAsync(stop.Token);
@@ -200,7 +200,7 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
     public async Task SnapshotIsolation_WithoutTheDatabaseSetting_ExplainsWhatToEnable()
     {
         var options = new Dictionary<string, string> { [MsSqlChangeTrackingReader.SnapshotIsolationOption] = "true" };
-        var read = await _reader.ReadChangesAsync(_connection, Source(), _baselineWatermark, ReadIntent.Changes, [], "mapping", [], options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_connection, Source(), _baselineWatermark, ReadIntent.Changes, [], "mapping", [], [], options, CancellationToken.None);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
@@ -218,7 +218,7 @@ public sealed class MsSqlChangeTrackingConsistencyTests(MsSqlTestDatabase db) : 
     {
         var stopwatch = Stopwatch.StartNew();
         var read = await _reader.ReadChangesAsync(
-            _connection, Source(), _baselineWatermark, ReadIntent.Changes, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), _baselineWatermark, ReadIntent.Changes, [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
 
         var count = 0;
         await foreach (var row in read.Rows)

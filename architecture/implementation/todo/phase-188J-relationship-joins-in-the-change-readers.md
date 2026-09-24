@@ -1,6 +1,6 @@
 # Phase 188J — Relationship joins in the change (incremental) readers
 
-**Status**: Planned, not started. Depends on `phase-186J-relationship-config-and-shared-reader-plumbing.md`.
+**Status**: Planned, not started. Depends on `architecture/implementation/done/phase-186J-relationship-config-and-shared-reader-plumbing.md` (built).
 Independent of `phase-187J-relationship-joins-in-the-batch-readers.md` (no shared code path beyond what
 186J already provides — can be built in either order, or in parallel).
 **Plan reference**: `phase-185J-declared-relationships-and-foreign-column-lookups.md` (superseded — that

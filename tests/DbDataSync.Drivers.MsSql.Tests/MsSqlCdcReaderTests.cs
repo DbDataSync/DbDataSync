@@ -138,7 +138,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
 
         return await _reader.ReadChangesAsync(
             _connection, source ?? Source(), watermark, ReadIntent.Changes,
-            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
     }
 
     private static async IAsyncEnumerable<ChangeRow> EmptyRows()
@@ -345,7 +345,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         Assert.False(string.IsNullOrEmpty(captured.Position));
 
         var next = await _reader.ReadChangesAsync(
-            _connection, Source(), captured.Position, ReadIntent.Changes, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), captured.Position, ReadIntent.Changes, [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
         Assert.Empty(await CollectAsync(next.Rows));
     }
 
@@ -362,7 +362,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         };
 
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => _reader.ReadChangesAsync(
-            _connection, source, null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
+            _connection, source, null, ReadIntent.InitialLoad, [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains("Change Data Capture is not enabled", problem.Message);
     }
@@ -416,7 +416,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
 
         var earliest = await _reader.ReadChangesAsync(
             _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromEarliest,
-            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
         var earliestRows = await CollectAsync(earliest.Rows);
 
         // The row count is a proxy for inclusivity, not the property itself, and the guard above already
@@ -438,7 +438,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         // design exists to stop losing comes back as nothing.
         var rejected = await _reader.ReadChangesAsync(
             _connection, Source(), previousWatermark: afterSecond, ReadIntent.Changes,
-            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
         Assert.Empty(await CollectAsync(rejected.Rows));
     }
 
@@ -457,7 +457,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
 
         var result = await _reader.ReadChangesAsync(
             _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromLatest,
-            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
 
         Assert.Empty(await CollectAsync(result.Rows));
         Assert.Equal(MsSqlCdcCatalog.ToWatermark(maxLsn!), result.NewWatermark);
@@ -466,7 +466,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         // nothing behind it, because nothing before it was ever asked to be read.
         var next = await _reader.ReadChangesAsync(
             _connection, Source(), result.NewWatermark, ReadIntent.Changes,
-            [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
         Assert.Empty(await CollectAsync(next.Rows));
     }
 
@@ -494,7 +494,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             var result = await _reader.ReadChangesAsync(
-                _connection, Source(), start, ReadIntent.Changes, mappings, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+                _connection, Source(), start, ReadIntent.Changes, mappings, "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
             await CollectAsync(result.Rows);
         });
 
@@ -560,7 +560,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
                 {
                     ConnectionName = "test", Database = db.DatabaseName, Schema = "dbo", Table = "Target",
                 },
-                [], new Dictionary<string, string>(), start, SourceColumns: [], TargetColumns: []),
+                [], new Dictionary<string, string>(), start, SourceColumns: [], TargetColumns: [], Relationships: []),
             CancellationToken.None);
 
         Assert.Equal(2, statements.Count);
@@ -587,7 +587,7 @@ public sealed class MsSqlCdcReaderTests(MsSqlTestDatabase db) : IClassFixture<Ms
         _reader.ReadChangesAsync(
             _connection, source ?? Source(), watermark,
             watermark is null ? ReadIntent.InitialLoad : ReadIntent.Changes,
-            [], "mapping", [], options, CancellationToken.None);
+            [], "mapping", [], [], options, CancellationToken.None);
 
     /// <summary>
     /// Scans the log and confirms all <paramref name="expected"/> pending changes are now captured, by

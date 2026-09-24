@@ -95,6 +95,7 @@ public sealed class TriggerAuditReader(SqlDialect dialect, ITableCatalog catalog
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
+        IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

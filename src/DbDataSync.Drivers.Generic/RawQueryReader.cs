@@ -85,6 +85,7 @@ public class RawQueryReader(string kind, SqlDialect dialect) : IChangeReader, IS
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
+        IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

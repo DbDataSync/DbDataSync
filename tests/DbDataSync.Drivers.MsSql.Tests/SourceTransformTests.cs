@@ -94,7 +94,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
         var reader = new MsSqlBatchReloadReader();
 
         var read = await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
 
         AssertTransformed(Assert.Single(await CollectAsync(read.Rows)));
     }
@@ -107,7 +107,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "ModifiedAt" };
 
         var read = await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, MappingName, Columns(), options, CancellationToken.None);
+            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, MappingName, Columns(), [], options, CancellationToken.None);
 
         AssertTransformed(Assert.Single(await CollectAsync(read.Rows)));
     }
@@ -119,7 +119,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
         var reader = new BatchReloadReader(MsSqlDialect.Instance, MsSqlValueBinding.Instance);
 
         var read = await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, MappingName, Columns(), [], new Dictionary<string, string>(), CancellationToken.None);
 
         AssertTransformed(Assert.Single(await CollectAsync(read.Rows)));
     }
@@ -143,7 +143,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
         await SeedAsync();
 
         var read = await reader.ReadChangesAsync(
-            _connection, Source(), captured.Position, ReadIntent.Changes, Transformed, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), captured.Position, ReadIntent.Changes, Transformed, "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
 
         AssertTransformed(Assert.Single(await CollectAsync(read.Rows)));
     }
@@ -157,7 +157,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
         var reader = new MsSqlBatchReloadReader();
 
         var read = await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), null, ReadIntent.InitialLoad, Transformed, "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
         var row = Assert.Single(await CollectAsync(read.Rows));
 
         Assert.Equal(["Id", "Region", "Amount"], row.Schema.ColumnNames);
@@ -171,7 +171,7 @@ public sealed class SourceTransformTests(MsSqlTestDatabase db) : IClassFixture<M
         var reader = new MsSqlBatchReloadReader();
 
         var read = await reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
         var row = Assert.Single(await CollectAsync(read.Rows));
 
         Assert.Contains("Ignored", row.Schema.ColumnNames);

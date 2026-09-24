@@ -79,6 +79,7 @@ public sealed class ScriptedQueryReader(ScriptHost scriptHost, SqlDialect dialec
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
+        IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

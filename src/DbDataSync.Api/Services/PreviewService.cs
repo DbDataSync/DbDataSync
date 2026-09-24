@@ -104,7 +104,7 @@ public sealed class PreviewService(
                 $"reader '{processing.Reader.Kind}'", PreviewStages.SourceRead,
                 new PreviewRequest(
                     sourceConnection, source, target, columnMappings, processing.Reader.Options, previousWatermark,
-                    sourceColumns, targetColumns),
+                    sourceColumns, targetColumns, mapping.Relationships),
                 statements, problems, cancellationToken);
 
             await DescribeAsync(
@@ -112,7 +112,7 @@ public sealed class PreviewService(
                 $"staging provider '{processing.Cache.Kind}'", PreviewStages.Staging,
                 new PreviewRequest(
                     targetConnection, source, target, columnMappings, processing.Cache.Options, previousWatermark,
-                    sourceColumns, targetColumns),
+                    sourceColumns, targetColumns, mapping.Relationships),
                 statements, problems, cancellationToken);
 
             await DescribeAsync(
@@ -120,7 +120,7 @@ public sealed class PreviewService(
                 $"writer '{processing.Writer.Kind}'", PreviewStages.Write,
                 new PreviewRequest(
                     targetConnection, source, target, columnMappings, processing.Writer.Options, previousWatermark,
-                    sourceColumns, targetColumns),
+                    sourceColumns, targetColumns, mapping.Relationships),
                 statements, problems, cancellationToken);
         }
         finally

@@ -104,12 +104,12 @@ public sealed class JdbcReaderParityTests(JdbcTestDatabase db) : IClassFixture<J
 
         var npgsqlReader = PostgresReaders.OfType<BatchReloadReader>().Single();
         var npgsqlResult = await npgsqlReader.ReadChangesAsync(
-            _npgsql, Source(), null, ReadIntent.InitialLoad, Mappings, "parity", Columns(), options, CancellationToken.None);
+            _npgsql, Source(), null, ReadIntent.InitialLoad, Mappings, "parity", Columns(), [], options, CancellationToken.None);
         var expected = await MaterializeAsync(npgsqlResult.Rows);
 
         var jdbcReader = new BatchReloadReader(JdbcDialect.Instance, new GenericValueBinder(JdbcDialect.Instance, new JdbcProviderFactoryHandle()));
         var jdbcResult = await jdbcReader.ReadChangesAsync(
-            _jdbc, Source(), null, ReadIntent.InitialLoad, Mappings, "parity", Columns(), options, CancellationToken.None);
+            _jdbc, Source(), null, ReadIntent.InitialLoad, Mappings, "parity", Columns(), [], options, CancellationToken.None);
         var actual = await MaterializeAsync(jdbcResult.Rows);
 
         AssertSameRows(expected, actual);
@@ -132,11 +132,11 @@ public sealed class JdbcReaderParityTests(JdbcTestDatabase db) : IClassFixture<J
         // First batch: no previous watermark, no PreparedStatement parameter yet — establishes a
         // matching starting watermark on both sides.
         var npgsqlFirst = await npgsqlReader.ReadChangesAsync(
-            _npgsql, Source(), null, ReadIntent.Changes, Mappings, "parity", Columns(), options, CancellationToken.None);
+            _npgsql, Source(), null, ReadIntent.Changes, Mappings, "parity", Columns(), [], options, CancellationToken.None);
         var expectedFirst = await MaterializeAsync(npgsqlFirst.Rows);
 
         var jdbcFirst = await jdbcReader.ReadChangesAsync(
-            _jdbc, Source(), null, ReadIntent.Changes, Mappings, "parity", Columns(), options, CancellationToken.None);
+            _jdbc, Source(), null, ReadIntent.Changes, Mappings, "parity", Columns(), [], options, CancellationToken.None);
         var actualFirst = await MaterializeAsync(jdbcFirst.Rows);
 
         AssertSameRows(expectedFirst, actualFirst);
@@ -149,11 +149,11 @@ public sealed class JdbcReaderParityTests(JdbcTestDatabase db) : IClassFixture<J
             """);
 
         var npgsqlSecond = await npgsqlReader.ReadChangesAsync(
-            _npgsql, Source(), npgsqlFirst.NewWatermark, ReadIntent.Changes, Mappings, "parity", Columns(), options, CancellationToken.None);
+            _npgsql, Source(), npgsqlFirst.NewWatermark, ReadIntent.Changes, Mappings, "parity", Columns(), [], options, CancellationToken.None);
         var expectedSecond = await MaterializeAsync(npgsqlSecond.Rows);
 
         var jdbcSecond = await jdbcReader.ReadChangesAsync(
-            _jdbc, Source(), jdbcFirst.NewWatermark, ReadIntent.Changes, Mappings, "parity", Columns(), options, CancellationToken.None);
+            _jdbc, Source(), jdbcFirst.NewWatermark, ReadIntent.Changes, Mappings, "parity", Columns(), [], options, CancellationToken.None);
         var actualSecond = await MaterializeAsync(jdbcSecond.Rows);
 
         AssertSameRows(expectedSecond, actualSecond);

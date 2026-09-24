@@ -103,7 +103,7 @@ public sealed class OraclePipelineTests(OracleTestDatabase db) : IClassFixture<O
     {
         options ??= new Dictionary<string, string>();
         var read = await _reader.ReadChangesAsync(
-            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), options, CancellationToken.None);
+            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [], options, CancellationToken.None);
         var staged = await _staging.StageAsync(
             _target, Target(), read.Rows, Mappings, MappingName, Columns(), options, CancellationToken.None);
         try
@@ -212,13 +212,13 @@ public sealed class OraclePipelineTests(OracleTestDatabase db) : IClassFixture<O
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "MODIFIED_AT" };
 
         var first = await _watermark.ReadChangesAsync(
-            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), options, CancellationToken.None);
+            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [], options, CancellationToken.None);
         Assert.Single(await CollectAsync(first.Rows));
 
         await ExecuteAsync(_source, $"INSERT INTO \"{_sourceTable}\" VALUES (2, 'b', 2, TIMESTAMP '2026-02-01 00:00:00')");
 
         var second = await _watermark.ReadChangesAsync(
-            _source, Source(), first.NewWatermark, ReadIntent.Changes, Mappings, MappingName, Columns(), options, CancellationToken.None);
+            _source, Source(), first.NewWatermark, ReadIntent.Changes, Mappings, MappingName, Columns(), [], options, CancellationToken.None);
         var rows = await CollectAsync(second.Rows);
 
         Assert.Equal(2m, Convert.ToDecimal(Assert.Single(rows)["ID"]));

@@ -1,6 +1,6 @@
 # Phase 189J — Relationships and foreign columns in the mapping editor
 
-**Status**: Planned, not started. Depends on `phase-186J-relationship-config-and-shared-reader-plumbing.md`
+**Status**: Planned, not started. Depends on `architecture/implementation/done/phase-186J-relationship-config-and-shared-reader-plumbing.md` (built)
 (needs `RelationshipConfig`, `ColumnMapping.Relationship`, and `RelationshipColumns` metadata to exist and
 be reachable through the API before there's anything real for this UI to read or write). Does not depend on
 187J/188J — the editor can be built and reviewed against saved config alone; the *result* of running a

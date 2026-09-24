@@ -1,6 +1,6 @@
 # Phase 187J — Relationship joins in the batch (reload) readers
 
-**Status**: Planned, not started. Depends on `phase-186J-relationship-config-and-shared-reader-plumbing.md`
+**Status**: Planned, not started. Depends on `architecture/implementation/done/phase-186J-relationship-config-and-shared-reader-plumbing.md` (built)
 (needs `RelationshipConfig`, `ColumnMapping.Relationship`, and the `relationships` parameter on
 `IChangeReader.ReadChangesAsync`/`IStatementPreview.DescribeAsync` to exist first).
 **Plan reference**: `phase-185J-declared-relationships-and-foreign-column-lookups.md` (superseded — this

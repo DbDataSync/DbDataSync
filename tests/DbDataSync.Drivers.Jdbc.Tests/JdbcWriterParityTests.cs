@@ -123,7 +123,7 @@ public sealed class JdbcWriterParityTests(JdbcTestDatabase db) : IClassFixture<J
     {
         options ??= new Dictionary<string, string>();
         var read = await _reader.ReadChangesAsync(
-            _source, Source(), null, ReadIntent.InitialLoad, Mappings, "writer-parity", Columns(), options, CancellationToken.None);
+            _source, Source(), null, ReadIntent.InitialLoad, Mappings, "writer-parity", Columns(), [], options, CancellationToken.None);
         var staged = await _nativeStaging.StageAsync(
             _nativeTarget, NativeTarget(), read.Rows, Mappings, "writer-parity", Columns(), options, CancellationToken.None);
         try
@@ -141,7 +141,7 @@ public sealed class JdbcWriterParityTests(JdbcTestDatabase db) : IClassFixture<J
     {
         options ??= new Dictionary<string, string>();
         var read = await _reader.ReadChangesAsync(
-            _source, Source(), null, ReadIntent.InitialLoad, Mappings, "writer-parity", Columns(), options, CancellationToken.None);
+            _source, Source(), null, ReadIntent.InitialLoad, Mappings, "writer-parity", Columns(), [], options, CancellationToken.None);
         var staged = await _jdbcStaging.StageAsync(
             _jdbc, JdbcTarget(), read.Rows, Mappings, "writer-parity", Columns(), options, CancellationToken.None);
         try

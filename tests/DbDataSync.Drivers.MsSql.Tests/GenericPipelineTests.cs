@@ -85,7 +85,7 @@ public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<M
     {
         options ??= new Dictionary<string, string>();
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(filter), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), options, CancellationToken.None);
+            _sourceConnection, Source(filter), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [], options, CancellationToken.None);
         var staged = await _staging.StageAsync(
             _targetConnection, Target(), read.Rows, Mappings, MappingName, Columns(), options, CancellationToken.None);
         try
@@ -251,7 +251,7 @@ public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<M
         var options = new Dictionary<string, string>();
 
         var read = await reader.ReadChangesAsync(
-            _sourceConnection, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), options, CancellationToken.None);
+            _sourceConnection, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [], options, CancellationToken.None);
         var staged = await staging.StageAsync(
             _targetConnection, Target(), read.Rows, Mappings, MappingName, Columns(), options, CancellationToken.None);
         try
@@ -277,7 +277,7 @@ public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<M
 
         await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{_sourceTable}] VALUES (1, 'Alice', 10.50);");
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), new Dictionary<string, string>(), CancellationToken.None);
+            _sourceConnection, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [], new Dictionary<string, string>(), CancellationToken.None);
 
         // Missing "Amount", which Mappings writes to the target — MetadataNotCachedException, not the
         // ThrowingTableCatalog's InvalidOperationException, is what proves no live query ran first.

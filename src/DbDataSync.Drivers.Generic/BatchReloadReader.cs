@@ -46,6 +46,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         IReadOnlyList<ColumnMapping> columnMappings,
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
+        IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

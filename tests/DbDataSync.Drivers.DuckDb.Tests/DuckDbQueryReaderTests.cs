@@ -36,7 +36,7 @@ public sealed class DuckDbQueryReaderTests
         DbConnection connection, Dictionary<string, string> options, string? previousWatermark = null)
     {
         var result = await new DuckDbQueryReader().ReadChangesAsync(
-            connection, Source, previousWatermark, ReadIntent.InitialLoad, [], "mapping", [], options, CancellationToken.None);
+            connection, Source, previousWatermark, ReadIntent.InitialLoad, [], "mapping", [], [], options, CancellationToken.None);
 
         var rows = new List<ChangeRow>();
         await foreach (var row in result.Rows)
@@ -160,7 +160,7 @@ public sealed class DuckDbQueryReaderTests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => new DuckDbQueryReader().ReadChangesAsync(
-                connection, Source, null, ReadIntent.InitialLoad, [], "mapping", [], new Dictionary<string, string>(), CancellationToken.None));
+                connection, Source, null, ReadIntent.InitialLoad, [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains(DuckDbQueryReader.QueryOption, ex.Message);
     }
@@ -200,6 +200,6 @@ public sealed class DuckDbQueryReaderTests
             new PreviewRequest(
                 connection, Source,
                 new TableRef { ConnectionName = "t", Database = "", Schema = "", Table = "" },
-                [], options, PreviousWatermark: null, SourceColumns: [], TargetColumns: []),
+                [], options, PreviousWatermark: null, SourceColumns: [], TargetColumns: [], Relationships: []),
             CancellationToken.None);
 }

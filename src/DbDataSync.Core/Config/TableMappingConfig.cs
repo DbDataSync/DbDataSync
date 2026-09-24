@@ -135,6 +135,49 @@ public sealed class ColumnMapping
     /// </para>
     /// </summary>
     public const string ColumnToken = "{{column}}";
+
+    /// <summary>
+    /// Which <see cref="RelationshipConfig"/> (by <see cref="RelationshipConfig.Name"/>) this column
+    /// comes from — null (the default, and every mapping saved before this existed) means
+    /// <see cref="SourceColumn"/> names a column on the mapping's own primary source table, exactly as
+    /// before. Set, <see cref="SourceColumn"/> instead names a column on that relationship's foreign
+    /// table. See phase 186J.
+    /// </summary>
+    public string? Relationship { get; set; }
+}
+
+/// <summary>
+/// One equality condition a relationship's <c>JOIN</c> is built from — the mapping's own primary source
+/// column on the left, the foreign table's column on the right. A <see cref="RelationshipConfig"/> ANDs
+/// however many of these it lists, so a composite key is expressed as more than one entry rather than a
+/// delimited string.
+/// </summary>
+public sealed class RelationshipJoinKey
+{
+    public required string LocalColumn { get; set; }
+    public required string ForeignColumn { get; set; }
+}
+
+/// <summary>
+/// A named relationship from this mapping's own primary source table to a foreign table on the same
+/// connection and database — phase 186J/187J/188J. Declared per mapping (not reusable across mappings),
+/// and only ever joined via a plain <c>LEFT JOIN</c> the reader renders itself: no runtime per-row
+/// lookup, no query the reader issues a second time.
+/// <para>
+/// <see cref="ColumnMapping.Relationship"/> references this by <see cref="Name"/> to pull a target
+/// column from the foreign table instead of the primary source. A self-join — <see cref="Schema"/>/
+/// <see cref="Table"/> equal to the mapping's own primary source — is a deliberately ordinary case, not
+/// a special one: nothing here or in the reader's own join rendering treats it differently.
+/// </para>
+/// </summary>
+public sealed class RelationshipConfig
+{
+    public required string Name { get; set; }
+    public string Schema { get; set; } = "dbo";
+    public required string Table { get; set; }
+
+    /// <summary>ANDed together. At least one is required — see <see cref="ConfigValidation.ValidateRelationships"/>.</summary>
+    public List<RelationshipJoinKey> JoinKeys { get; set; } = new();
 }
 
 /// <summary>
@@ -148,6 +191,14 @@ public sealed class TableMappingConfig
     public required List<SourceTableSpec> Sources { get; set; }
     public required List<TableSpec> Targets { get; set; }
     public List<ColumnMapping> ColumnMappings { get; set; } = new();
+
+    /// <summary>
+    /// Named joins from this mapping's own primary source table to a foreign table, for a
+    /// <see cref="ColumnMapping"/> to pull a column through via <see cref="ColumnMapping.Relationship"/>
+    /// — phase 186J. Empty for every mapping that doesn't use this feature, including every mapping
+    /// saved before it existed.
+    /// </summary>
+    public List<RelationshipConfig> Relationships { get; set; } = new();
 
     /// <summary>Scripts bound at this level, keyed by slot (see <c>ScriptSlots</c>). An absent key
     /// inherits from a broader level; a key present with a null value is "explicitly none" and
@@ -274,6 +325,18 @@ public sealed class TableMappingConfig
     /// <summary>The target table's shape, on the same terms as <see cref="SourceColumns"/>. Empty for
     /// a target that provisioning has yet to create — there is no catalog entry to capture.</summary>
     public List<CachedColumn> TargetColumns { get; set; } = new();
+
+    /// <summary>
+    /// Each declared <see cref="RelationshipConfig"/>'s own foreign table's shape, keyed by
+    /// <see cref="RelationshipConfig.Name"/> — the same cache-on-refresh treatment
+    /// <see cref="SourceColumns"/> gets, so the mapping editor's column picker (phase 189J) can show a
+    /// relationship's real columns without a live catalog call on every render. Unlike
+    /// <see cref="SourceColumns"/>, nothing in the read/write pipeline itself consults this: a
+    /// relationship's <c>JOIN</c> is built from <see cref="RelationshipConfig.JoinKeys"/>'s own column
+    /// names, which need no type information to render. Empty for a mapping with no relationships, and
+    /// for a relationship not yet refreshed since it was declared.
+    /// </summary>
+    public Dictionary<string, List<CachedColumn>> RelationshipColumns { get; set; } = new();
 
     /// <summary>
     /// When <see cref="SourceColumns"/>/<see cref="TargetColumns"/> were last written. Null while

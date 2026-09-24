@@ -147,7 +147,7 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
         string? watermark, ReadIntent intent)
     {
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(), watermark, intent, Mappings, MappingName, [],
+            _sourceConnection, Source(), watermark, intent, Mappings, MappingName, [], [],
             new Dictionary<string, string>(), CancellationToken.None);
         var staged = await _staging.StageAsync(
             _targetConnection, Target(), read.Rows, Mappings, MappingName, TargetColumns(),

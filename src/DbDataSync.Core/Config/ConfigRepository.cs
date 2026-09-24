@@ -325,6 +325,7 @@ public sealed class ConfigRepository
         // at the first run, where it surfaces as a failed run instead of a rejected edit.
         EndpointResolution.Validate(task, mapping);
         ValidateHooks(mapping.Hooks);
+        ConfigValidation.ValidateRelationships(mapping);
 
         // The mapping's own primary writer — computed once and reused below, both for the
         // already-existing historized-target check and for phase 129's Scd2-specific reconcile checks,

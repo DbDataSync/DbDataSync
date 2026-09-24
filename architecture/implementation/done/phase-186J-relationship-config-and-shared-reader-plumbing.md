@@ -1,6 +1,6 @@
 # Phase 186J — Relationship config shape, validation, and shared reader plumbing
 
-**Status**: Planned, not started.
+**Status**: Built. See Retrospective.
 **Plan reference**: `phase-185J-declared-relationships-and-foreign-column-lookups.md` (superseded by this
 doc and its three siblings — see that doc's own Status line). This doc covers the foundation every other
 split depends on: the config shape, its validation, catalog metadata for the foreign side, and the
@@ -94,11 +94,12 @@ parameters (e.g. `RawQueryReader` ignores `columnMappings`/`sourceColumns` today
 signature change and updates every call site to compile and pass `mapping.Relationships` through — it does
 not make any reader *use* the parameter. That's 187J (batch readers) and 188J (change readers).
 
-Also gains a relationship-aware foreign-column resolution helper, likely alongside
-`CachedColumn`'s existing `RequireColumn`/`RequireAll` extension methods (`src/DbDataSync.Drivers.Generic/`
-— exact file not identified this session), so 187J/188J's readers can resolve
-`(RelationshipName, ColumnName) → ColumnMetadata` the same disciplined, cache-only way `RequireColumn`
-already resolves a primary-table column.
+**Not built, on reflection**: a relationship-aware foreign-column resolution helper alongside
+`CachedColumn`'s `RequireColumn`/`RequireAll`. Tracing what 187J/188J's own `JOIN` rendering actually needs
+— `RelationshipConfig.JoinKeys`' own `LocalColumn`/`ForeignColumn` strings, and `ColumnMapping.SourceColumn`
+for the projected alias — neither needs a column's *type*, only its *name*, both already sitting on the
+config objects with no lookup required. `RelationshipColumns` (the cache below) turned out to be read
+infrastructure for 189J's picker, not something the read/write pipeline itself consults — see Retrospective.
 
 ## What this phase does not build
 
@@ -110,16 +111,15 @@ already resolves a primary-table column.
   from the mapping's primary source — both remain out of scope, per 185J's own confirmed decisions.
 - No cross-mapping relationship reuse (a per-connection catalog) — per-mapping only, per 185J.
 
-## Open questions
+## Open questions — resolved during implementation
 
-1. **Exact uniqueness-check precedent to mirror** for `RelationshipConfig.Name` collisions — not identified
-   this session; whoever implements should find and match the existing pattern for
-   `ColumnMapping.TargetColumn` (or wherever else this file already enforces a same-mapping name
-   uniqueness) rather than inventing a new validation idiom.
-2. **`RelationshipColumns` storage shape** on `TableMappingConfig` — dictionary vs. list of records; no
-   behavioral difference, pick whichever round-trips more naturally through the existing YAML converter.
-3. **Where the new foreign-column resolution helper lives** — alongside `CachedColumn`'s existing
-   extensions, or a new small type; not identified this session.
+1. **Uniqueness-check precedent**: no existing precedent needed mirroring — a plain
+   `HashSet<string>(StringComparer.OrdinalIgnoreCase)` walk over `mapping.Relationships` in
+   `ConfigValidation.ValidateRelationships`, same shape every other check in that file already uses.
+2. **`RelationshipColumns` storage shape**: `Dictionary<string, List<CachedColumn>>` keyed by relationship
+   name, on `TableMappingConfig`. Round-trips through YamlDotNet with no special handling.
+3. **Foreign-column resolution helper**: not built — see the "Not built, on reflection" note above. Nothing
+   in this phase's own scope, nor 187J/188J's planned `JOIN` rendering, ends up needing one.
 
 ## How to verify when built
 
@@ -132,3 +132,40 @@ already resolves a primary-table column.
 - Every existing `IChangeReader`/`IStatementPreview` implementer still compiles and its existing tests still
   pass unchanged — this phase's interface change should be behaviorally invisible to every reader except
   the two/three that 187J/188J modify.
+
+## Retrospective
+
+Built as designed, with two real deviations found along the way rather than assumed up front:
+
+- **The foreign-column resolution helper was dropped.** The doc's own draft assumed 187J/188J's `JOIN`
+  rendering would need to look up a relationship column's *type* the way `RequireColumn` looks up a
+  primary-table column's. Reading what a `JOIN ... ON base.[Local] = r0.[Foreign]` clause and a `SELECT
+  ... AS r0.[Col]` projection actually need — both are string column *names*, straight off
+  `RelationshipConfig.JoinKeys` and `ColumnMapping.SourceColumn`, no type required — showed there is
+  nothing to resolve. `RelationshipColumns` (the cache this phase does build) turned out to exist purely
+  for 189J's mapping-editor picker, not for anything the read/write pipeline consults. Caught by tracing
+  the actual consumer before writing a helper nothing would call, rather than building it speculatively.
+- **`IChangeReader.ReadChangesAsync` got a required parameter, not an optional one**, despite briefly
+  considering optional-with-a-default (this session's own `DriverRegistry.Register(..., hostReaders =
+  null)` is a real, recent precedent for exactly that shape). Ruled out because `CancellationToken
+  cancellationToken` — required, no default — already sits last in the parameter list; C# requires every
+  optional parameter to follow every required one, so an optional `relationships` would have had to sit
+  *after* `cancellationToken`, breaking this codebase's own convention of `CancellationToken` always being
+  last. Went required instead, positioned with the other mapping-level parameters as originally planned,
+  and fixed every call site (119 across 27 test files, plus `RunExecutor`/`PreviewService`/two hand-written
+  `IChangeReader` test doubles) with a small paren-and-angle-bracket-aware Python script rather than by
+  hand — one real bug in the first version (treated a comma inside `Dictionary<string, string>`'s own
+  generic argument list as a top-level argument separator, corrupting one call site) was caught by reading
+  the diff before building, reverted via `git checkout` on the affected files, and fixed by tracking `<`/`>`
+  depth too before re-running.
+- **Verified for real, not just compiled**: full `DbDataSync.Core.Tests` (289/289, 13 new), every driver
+  project's own test suite against its real container (MsSql 259/261 + 2 pre-existing skips, Postgres
+  118/132 — the 14 failures are `PgLogicalSlotTests`, confirmed via `SHOW wal_level` on the container itself
+  to be a pre-existing `wal_level = replica` local container misconfiguration, nothing this phase's diff
+  touches — MySQL 62/62, Oracle 58/58, JDBC 32/32, plus Generic/DuckDb/Descriptor/Loader/Scripting/State/
+  Libraries/Verification all green), `DbDataSync.Api.Tests` (659/682, 23 Windows-only skips, including the
+  two new `RelationshipMetadataRefreshTests` against a real MsSql database), `DbDataSync.TaskRunner.Tests`
+  (80/80), and a frontend `tsc --noEmit` (clean, confirming zero frontend impact even though none was
+  touched).
+- **Not proven, on purpose**: no reader yet does anything with `relationships` beyond receiving it — that's
+  187J (batch readers) and 188J (change readers), both still open in `todo/`.
