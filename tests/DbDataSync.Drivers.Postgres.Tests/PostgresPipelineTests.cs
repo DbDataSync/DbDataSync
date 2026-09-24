@@ -232,6 +232,54 @@ public sealed class PostgresPipelineTests(PostgresTestDatabase db) : IClassFixtu
         Assert.Equal(2, written.RowsWritten);
     }
 
+    /// <summary>
+    /// Phase 187J, end to end against a real server — proving the shared <c>Drivers.Generic</c> path
+    /// every non-MsSql engine uses: a relationship's foreign table is <c>LEFT JOIN</c>ed in, not
+    /// inner-joined. A row whose foreign key matches gets the looked-up value; a row whose foreign key
+    /// has no match (including <c>NULL</c>) is still read, with the looked-up column <c>null</c> rather
+    /// than silently disappearing.
+    /// </summary>
+    [Fact]
+    public async Task Reader_WithARelationship_LeftJoinsTheForeignTable_KeepingUnmatchedRows()
+    {
+        var src = $"rel_src_{Guid.NewGuid():N}";
+        var lookup = $"rel_lookup_{Guid.NewGuid():N}";
+        await ExecuteAsync(_source, $"CREATE TABLE public.\"{lookup}\" (id integer primary key, label text not null);");
+        await ExecuteAsync(_source, $"CREATE TABLE public.\"{src}\" (id integer primary key, region_id integer);");
+        await ExecuteAsync(_source, $"INSERT INTO public.\"{lookup}\" VALUES (1, 'North');");
+        await ExecuteAsync(_source, $"INSERT INTO public.\"{src}\" VALUES (1, 1), (2, NULL), (3, 99);");
+
+        var relationships = new List<RelationshipConfig>
+        {
+            new()
+            {
+                Name = "region",
+                Schema = "public",
+                Table = lookup,
+                JoinKeys = [new RelationshipJoinKey { LocalColumn = "region_id", ForeignColumn = "id" }],
+            },
+        };
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "id", TargetColumn = "id" },
+            new() { SourceColumn = "label", TargetColumn = "region_label", Relationship = "region" },
+        };
+        var sourceRef = new SourceTableRef { ConnectionName = "src", Database = db.DatabaseName, Schema = "public", Table = src };
+
+        var read = await _reader.ReadChangesAsync(
+            _source, sourceRef, null, ReadIntent.InitialLoad,
+            mappings, MappingName, [], relationships, new Dictionary<string, string>(), CancellationToken.None);
+
+        var byId = new Dictionary<int, string?>();
+        await foreach (var row in read.Rows)
+            byId[(int)row["id"]!] = (string?)row["label"];
+
+        Assert.Equal(3, byId.Count);
+        Assert.Equal("North", byId[1]); // matched: the looked-up value comes through
+        Assert.Null(byId[2]);           // region_id is NULL: no match, row still present, looked-up column null
+        Assert.Null(byId[3]);           // region_id points at nothing: no match, row still present
+    }
+
     [Fact]
     public async Task ChangingDatabase_IsRejectedRatherThanSilentlyReconnecting()
     {

@@ -15,17 +15,30 @@ namespace DbDataSync.Drivers.Generic;
 /// </summary>
 public static class SourceProjection
 {
+    private static readonly IReadOnlyDictionary<string, string> NoRelationships =
+        new Dictionary<string, string>();
+
     /// <summary>
     /// The SELECT list, or <c>*</c> when there is nothing to project.
     /// </summary>
     /// <param name="reference">
-    /// How a source column is written *in this statement*. A reader selecting straight from the table
-    /// passes <c>dialect.QuoteIdentifier</c>; the Change Tracking reader, whose statement joins the
-    /// table under an alias, passes something that produces <c>base.[Region]</c>. Getting this wrong
-    /// is how a transform on a primary key column becomes an ambiguous-column error.
+    /// How a *primary-table* source column is written *in this statement*. A reader selecting straight
+    /// from the table passes <c>dialect.QuoteIdentifier</c>; the Change Tracking reader, whose
+    /// statement joins the table under an alias, passes something that produces <c>base.[Region]</c>.
+    /// Getting this wrong is how a transform on a primary key column becomes an ambiguous-column error.
+    /// </param>
+    /// <param name="relationshipAliases">
+    /// From <see cref="RelationshipAliases.Assign"/> — omitted (or empty) for a reader that doesn't
+    /// support relationships at all, or a mapping that declares none. A <see cref="ColumnMapping"/>
+    /// whose <see cref="ColumnMapping.Relationship"/> is set is always rendered against that
+    /// relationship's own join alias (e.g. <c>r0.[Region]</c>), never through <paramref name="reference"/>
+    /// — that callback is for the primary table only. See phase 187J.
     /// </param>
     public static string Render(
-        SqlDialect dialect, IReadOnlyList<ColumnMapping> columnMappings, Func<string, string>? reference = null)
+        SqlDialect dialect,
+        IReadOnlyList<ColumnMapping> columnMappings,
+        Func<string, string>? reference = null,
+        IReadOnlyDictionary<string, string>? relationshipAliases = null)
     {
         // No mappings means no projection was specified, which is not the same as "project nothing".
         // A reload triggered before any mapping exists, and every driver test that reads directly,
@@ -34,6 +47,7 @@ public static class SourceProjection
             return "*";
 
         reference ??= dialect.QuoteIdentifier;
+        relationshipAliases ??= NoRelationships;
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var entries = new List<string>(columnMappings.Count);
@@ -42,21 +56,47 @@ public static class SourceProjection
         {
             // Two target columns fed from one source column is legitimate — the same value written
             // twice — but selecting it twice is not, and would give ChangeSchema a duplicate name.
-            if (!seen.Add(mapping.SourceColumn))
+            // Keyed on (Relationship, SourceColumn) together, not SourceColumn alone — a relationship's
+            // foreign table can easily share a column name with the primary table (or with another
+            // relationship's foreign table); keying on the bare name would wrongly treat those as the
+            // same physical column and silently drop one of them.
+            if (!seen.Add((mapping.Relationship ?? "") + "\u0000" + mapping.SourceColumn))
                 continue;
 
-            entries.Add(RenderColumn(dialect, mapping, reference));
+            entries.Add(RenderColumn(dialect, mapping, reference, relationshipAliases));
         }
 
         return SelectListFormatting.JoinSelectList(entries);
     }
 
-    private static string RenderColumn(SqlDialect dialect, ColumnMapping mapping, Func<string, string> reference)
+    private static string RenderColumn(
+        SqlDialect dialect, ColumnMapping mapping, Func<string, string> reference,
+        IReadOnlyDictionary<string, string> relationshipAliases)
     {
-        var expression = RenderExpression(mapping, reference);
+        var columnReference = ResolveReference(dialect, mapping, reference, relationshipAliases);
+        var expression = RenderExpression(mapping, columnReference);
         return string.IsNullOrWhiteSpace(mapping.Transform)
             ? expression
             : $"{expression} AS {dialect.QuoteIdentifier(mapping.SourceColumn)}";
+    }
+
+    /// <summary>A relationship-sourced mapping is always read off its own join alias — the primary
+    /// table's <paramref name="reference"/> callback has no way to reach a joined table's column, and
+    /// isn't asked to.</summary>
+    private static Func<string, string> ResolveReference(
+        SqlDialect dialect, ColumnMapping mapping, Func<string, string> reference,
+        IReadOnlyDictionary<string, string> relationshipAliases)
+    {
+        if (mapping.Relationship is null)
+            return reference;
+
+        if (!relationshipAliases.TryGetValue(mapping.Relationship, out var alias))
+            throw new InvalidOperationException(
+                $"Column '{mapping.SourceColumn}' names relationship '{mapping.Relationship}', which has " +
+                "no assigned join alias — either it isn't declared on this mapping, or the caller built " +
+                "relationshipAliases from a different columnMappings list than this one.");
+
+        return column => $"{alias}.{dialect.QuoteIdentifier(column)}";
     }
 
     /// <summary>

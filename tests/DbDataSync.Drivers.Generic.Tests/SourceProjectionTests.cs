@@ -90,4 +90,68 @@ public sealed class SourceProjectionTests
 
         Assert.Equal("[Region]", SourceProjection.Render(BracketDialect.Instance, mappings));
     }
+
+    private static ColumnMapping RelMap(string relationship, string source, string? transform = null) =>
+        new() { SourceColumn = source, TargetColumn = source, Relationship = relationship, Transform = transform };
+
+    [Fact]
+    public void ARelationshipSourcedColumn_IsReadOffItsOwnJoinAlias()
+    {
+        var mappings = new List<ColumnMapping> { Map("Id"), RelMap("region", "Name") };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            "[Id],\n    r0.[Name]",
+            SourceProjection.Render(BracketDialect.Instance, mappings, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void ARelationshipSourcedColumn_WithATransform_SubstitutesTheJoinAliasReference()
+    {
+        var mappings = new List<ColumnMapping> { RelMap("region", "Name", "UPPER({{column}})") };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            "UPPER(r0.[Name]) AS [Name]",
+            SourceProjection.Render(BracketDialect.Instance, mappings, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void TwoRelationships_EachUseTheirOwnAssignedAlias()
+    {
+        var mappings = new List<ColumnMapping> { RelMap("region", "Name"), RelMap("manager", "Name") };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0", ["manager"] = "r1" };
+
+        Assert.Equal(
+            "r0.[Name],\n    r1.[Name]",
+            SourceProjection.Render(BracketDialect.Instance, mappings, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void APrimaryColumnAndARelationshipColumn_SharingATextualName_AreBothSelectedNotDeduped()
+    {
+        // A foreign lookup table sharing a column name with the primary table (both have "Name") is a
+        // real, common case, not a contrived one — keying the SELECT-list dedupe on SourceColumn alone
+        // would treat these as "the same source column" and silently drop the relationship's, feeding
+        // both target columns the primary table's value instead.
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Name", TargetColumn = "Name" },
+            new() { SourceColumn = "Name", TargetColumn = "RegionName", Relationship = "region" },
+        };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            "[Name],\n    r0.[Name]",
+            SourceProjection.Render(BracketDialect.Instance, mappings, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void ARelationshipNotInTheAliasMap_ThrowsRatherThanRenderingWrongSql()
+    {
+        var mappings = new List<ColumnMapping> { RelMap("region", "Name") };
+
+        Assert.Throws<InvalidOperationException>(
+            () => SourceProjection.Render(BracketDialect.Instance, mappings));
+    }
 }

@@ -48,17 +48,26 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
     /// segmented on a renamed column scopes the same rows on both sides instead of failing to find the
     /// column (or, worse, finding an unrelated target column that happens to share the source name).
     /// </param>
+    /// <param name="reference">
+    /// How the segmented column is written *in this statement* — bare <c>dialect.QuoteIdentifier</c> by
+    /// default. A reader that joins the primary table under an alias (phase 187J's relationship joins)
+    /// passes something that produces <c>base.[Id]</c> instead: segmenting always names a column on the
+    /// primary table, and once a joined table is present, an unqualified reference is ambiguous the
+    /// moment the joined table happens to share that column's name — "Id" on both sides being the
+    /// obvious, common case.
+    /// </param>
     public static SegmentScope Build(
         SqlDialect dialect,
         ISegmentValueBinder binder,
         BatchReloadSegment? segment,
         IReadOnlyList<ColumnMetadata> columns,
-        IReadOnlyList<ColumnMapping>? columnMappings = null) =>
+        IReadOnlyList<ColumnMapping>? columnMappings = null,
+        Func<string, string>? reference = null) =>
         segment switch
         {
             null or FullSegment => All,
-            ListSegment list => BuildList(dialect, binder, list, ResolveColumn(list.Column, columns, columnMappings)),
-            RangeSegment range => BuildRange(dialect, binder, range, ResolveColumn(range.Column, columns, columnMappings)),
+            ListSegment list => BuildList(dialect, binder, list, ResolveColumn(list.Column, columns, columnMappings), reference),
+            RangeSegment range => BuildRange(dialect, binder, range, ResolveColumn(range.Column, columns, columnMappings), reference),
             AutoSegment auto => throw new InvalidOperationException(
                 $"Auto segment on '{auto.Column}' reached execution unexpanded. Auto segments must be " +
                 "expanded into concrete ranges (ISegmentExpandingReader.ExpandAutoSegmentsAsync) when " +
@@ -72,7 +81,8 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
     // underscores this used to carry bought nothing on any other engine, so it is a portability fix.
 
     private static SegmentScope BuildList(
-        SqlDialect dialect, ISegmentValueBinder binder, ListSegment list, ColumnMetadata column)
+        SqlDialect dialect, ISegmentValueBinder binder, ListSegment list, ColumnMetadata column,
+        Func<string, string>? reference = null)
     {
         if (list.Values.Count == 0)
             throw new InvalidOperationException(
@@ -88,13 +98,15 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
         // the same string on SQL Server, but not on an engine whose bound parameter name drops the
         // sigil its statement text requires.
         var placeholders = string.Join(", ", Enumerable.Range(0, parameters.Count).Select(i => dialect.ParameterReference($"seg{i}")));
-        return new SegmentScope($"{dialect.QuoteIdentifier(column.Name)} IN ({placeholders})", parameters);
+        var columnRef = (reference ?? dialect.QuoteIdentifier)(column.Name);
+        return new SegmentScope($"{columnRef} IN ({placeholders})", parameters);
     }
 
     private static SegmentScope BuildRange(
-        SqlDialect dialect, ISegmentValueBinder binder, RangeSegment range, ColumnMetadata column)
+        SqlDialect dialect, ISegmentValueBinder binder, RangeSegment range, ColumnMetadata column,
+        Func<string, string>? reference = null)
     {
-        var quoted = dialect.QuoteIdentifier(column.Name);
+        var quoted = (reference ?? dialect.QuoteIdentifier)(column.Name);
         // Half-open: consecutive ranges tile a value space with no gap and no row processed twice.
         return new SegmentScope(
             $"{quoted} >= {dialect.ParameterReference("segMin")} AND {quoted} < {dialect.ParameterReference("segMax")}",

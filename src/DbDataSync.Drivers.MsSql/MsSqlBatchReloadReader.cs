@@ -49,12 +49,16 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
     {
         sourceConnection.ChangeDatabase(source.Database);
 
+        var relationshipAliases = RelationshipAliases.Assign(relationships, columnMappings);
+        var primaryReference = PrimaryTableReference(relationshipAliases);
+
         var segment = SegmentSerializer.ReadOptional(options);
         var columns = await MsSqlSchemaQueries.GetColumnsAsync(sourceConnection, source.Schema, source.Table, cancellationToken);
-        var scope = MsSqlSegmentScope.Build(segment, columns);
+        var scope = MsSqlSegmentScope.Build(segment, columns, reference: primaryReference);
 
+        var projection = SourceProjection.Render(MsSqlDialect.Instance, columnMappings, primaryReference, relationshipAliases);
         var rows = ReadRowsAsync(
-            sourceConnection, source, scope, SourceProjection.Render(MsSqlDialect.Instance, columnMappings), cancellationToken);
+            sourceConnection, source, scope, projection, relationships, relationshipAliases, cancellationToken);
 
         // This reader has no watermark of its own to report. It echoes the previous one back rather
         // than inventing a value, so that a standalone reload replication — which runs as a Primary
@@ -69,10 +73,13 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
     {
         request.Connection.ChangeDatabase(request.Source.Database);
 
+        var relationshipAliases = RelationshipAliases.Assign(request.Relationships, request.ColumnMappings);
+        var primaryReference = PrimaryTableReference(relationshipAliases);
+
         var segment = SegmentSerializer.ReadOptional(request.Options);
         var columns = await MsSqlSchemaQueries.GetColumnsAsync(
             request.Connection, request.Source.Schema, request.Source.Table, cancellationToken);
-        var scope = MsSqlSegmentScope.Build(segment, columns);
+        var scope = MsSqlSegmentScope.Build(segment, columns, reference: primaryReference);
 
         return
         [
@@ -81,7 +88,8 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
                 segment is null ? "Reload every row" : $"Reload the segment {segment.Describe()}",
                 BatchReloadStatement.BuildRead(
                     MsSqlDialect.Instance, request.Source.Schema, request.Source.Table, scope.Predicate,
-                    request.Source.Filter, SourceProjection.Render(MsSqlDialect.Instance, request.ColumnMappings)),
+                    request.Source.Filter, SourceProjection.Render(MsSqlDialect.Instance, request.ColumnMappings, primaryReference, relationshipAliases),
+                    request.Relationships, relationshipAliases),
                 PreviewOrigin.BuiltIn,
                 segment is null
                     ? "A bulk load supplies its own segment, which narrows this further — this is the " +
@@ -89,6 +97,13 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
                     : null),
         ];
     }
+
+    /// <summary>See <see cref="BatchReloadReader"/>'s twin note: once a relationship is joined, the
+    /// primary table is aliased <c>base</c>, and every primary-table column reference — SELECT list and
+    /// segment predicate alike — has to go through that alias or risk an ambiguous-column error against
+    /// a same-named joined column ("Id" on both sides being the ordinary case).</summary>
+    private static Func<string, string>? PrimaryTableReference(IReadOnlyDictionary<string, string> relationshipAliases) =>
+        relationshipAliases.Count == 0 ? null : column => $"base.{MsSqlDialect.Instance.QuoteIdentifier(column)}";
 
     public async Task<IReadOnlyList<BatchReloadSegment>> ExpandAutoSegmentsAsync(
         DbConnection sourceConnection,
@@ -149,13 +164,16 @@ public sealed class MsSqlBatchReloadReader : IChangeReader, ISegmentExpandingRea
         SourceTableRef source,
         SegmentScope scope,
         string projection,
+        IReadOnlyList<RelationshipConfig> relationships,
+        IReadOnlyDictionary<string, string> relationshipAliases,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         // The shared builder rather than a second copy of the same SQL: this reader differs from the
         // generic one in how it discovers columns and binds segment values, not in what it selects.
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = BatchReloadStatement.BuildRead(
-            MsSqlDialect.Instance, source.Schema, source.Table, scope.Predicate, source.Filter, projection);
+            MsSqlDialect.Instance, source.Schema, source.Table, scope.Predicate, source.Filter, projection,
+            relationships, relationshipAliases);
         scope.AddTo(cmd);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);

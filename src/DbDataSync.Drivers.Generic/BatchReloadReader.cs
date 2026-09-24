@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Runtime.CompilerServices;
+using System.Text;
 using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using DbDataSync.Core.Sql;
@@ -52,6 +53,9 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
     {
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
 
+        var relationshipAliases = RelationshipAliases.Assign(relationships, columnMappings);
+        var primaryReference = PrimaryTableReference(dialect, relationshipAliases);
+
         var segment = SegmentSerializer.ReadOptional(options);
         // Cache-only as of phase 91 — ExpandAutoSegmentsAsync (a different method entirely) is the one
         // place in this reader that still asks the live catalog, because it samples the column's actual
@@ -62,9 +66,11 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         IReadOnlyList<ColumnMetadata> columns = segment is ListSegment or RangeSegment
             ? sourceColumns.RequireAll(mappingName, "source")
             : [];
-        var scope = SegmentScope.Build(dialect, binder, segment, columns);
+        var scope = SegmentScope.Build(dialect, binder, segment, columns, reference: primaryReference);
 
-        var rows = ReadRowsAsync(sourceConnection, source, scope, SourceProjection.Render(dialect, columnMappings), cancellationToken);
+        var projection = SourceProjection.Render(dialect, columnMappings, primaryReference, relationshipAliases);
+        var rows = ReadRowsAsync(
+            sourceConnection, source, scope, projection, relationships, relationshipAliases, cancellationToken);
 
         // This reader has no watermark of its own to report. It echoes the previous one back rather
         // than inventing a value, so that a standalone reload replication — which runs as a Primary
@@ -83,10 +89,13 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
     {
         await dialect.UseDatabaseAsync(request.Connection, request.Source.Database, cancellationToken);
 
+        var relationshipAliases = RelationshipAliases.Assign(request.Relationships, request.ColumnMappings);
+        var primaryReference = PrimaryTableReference(dialect, relationshipAliases);
+
         var segment = SegmentSerializer.ReadOptional(request.Options);
         // request.SourceColumns — phase 167V. Resolved once by PreviewService through ScriptedMetadata
         // (so a bound metadataProvider script is honoured), not a live catalog.GetColumnsAsync call here.
-        var scope = SegmentScope.Build(dialect, binder, segment, request.SourceColumns);
+        var scope = SegmentScope.Build(dialect, binder, segment, request.SourceColumns, reference: primaryReference);
 
         return
         [
@@ -95,7 +104,8 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
                 segment is null ? "Reload every row" : $"Reload the segment {segment.Describe()}",
                 BatchReloadStatement.BuildRead(
                     dialect, request.Source.Schema, request.Source.Table, scope.Predicate, request.Source.Filter,
-                    SourceProjection.Render(dialect, request.ColumnMappings)),
+                    SourceProjection.Render(dialect, request.ColumnMappings, primaryReference, relationshipAliases),
+                    request.Relationships, relationshipAliases),
                 PreviewOrigin.BuiltIn,
                 segment is null
                     ? "A bulk load supplies its own segment, which narrows this further — this is the " +
@@ -103,6 +113,19 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
                     : null),
         ];
     }
+
+    /// <summary>
+    /// Bare <c>dialect.QuoteIdentifier</c> when nothing is joined — <c>null</c>, so every other caller
+    /// keeps today's exact rendering. Once a relationship is actually joined, the primary table is
+    /// aliased <c>base</c> (see <see cref="BatchReloadStatement.BuildRead"/>), and *every* primary-table
+    /// reference in the statement — the SELECT list and the segment predicate alike — has to go through
+    /// that alias too: an unqualified column reference becomes ambiguous the moment a joined table
+    /// happens to share its name, "Id" on both sides being the ordinary case, not a contrived one (see
+    /// this phase's own retrospective for the real ambiguous-column error this closes).
+    /// </summary>
+    private static Func<string, string>? PrimaryTableReference(
+        SqlDialect dialect, IReadOnlyDictionary<string, string> relationshipAliases) =>
+        relationshipAliases.Count == 0 ? null : column => $"base.{dialect.QuoteIdentifier(column)}";
 
     public async Task<IReadOnlyList<BatchReloadSegment>> ExpandAutoSegmentsAsync(
         DbConnection sourceConnection,
@@ -165,10 +188,14 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         SourceTableRef source,
         SegmentScope scope,
         string projection,
+        IReadOnlyList<RelationshipConfig> relationships,
+        IReadOnlyDictionary<string, string> relationshipAliases,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateTimedCommand();
-        cmd.CommandText = BatchReloadStatement.BuildRead(dialect, source.Schema, source.Table, scope.Predicate, source.Filter, projection);
+        cmd.CommandText = BatchReloadStatement.BuildRead(
+            dialect, source.Schema, source.Table, scope.Predicate, source.Filter, projection,
+            relationships, relationshipAliases);
         scope.AddTo(cmd);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -185,15 +212,51 @@ public static class BatchReloadStatement
     /// <summary>
     /// The segment predicate and the mapping's own static Filter compose — a segment narrows a reload
     /// within whatever subset of the table the mapping was always scoped to, it doesn't replace it.
+    /// <para>
+    /// <paramref name="relationships"/>/<paramref name="relationshipAliases"/> (phase 187J) add one
+    /// <c>LEFT JOIN</c> per relationship actually referenced by a <see cref="ColumnMapping"/> — see
+    /// <see cref="RelationshipAliases.Assign"/>. The primary table only gets its own <c>AS base</c>
+    /// alias once at least one join is present, so a mapping with no relationships renders byte-for-byte
+    /// what it always has.
+    /// </para>
     /// </summary>
     public static string BuildRead(
-        SqlDialect dialect, string schema, string table, string scopePredicate, string? filter, string projection = "*")
+        SqlDialect dialect, string schema, string table, string scopePredicate, string? filter,
+        string projection = "*",
+        IReadOnlyList<RelationshipConfig>? relationships = null,
+        IReadOnlyDictionary<string, string>? relationshipAliases = null)
     {
         var userFilter = string.IsNullOrWhiteSpace(filter) ? "" : $" AND ({filter})";
+        var joins = BuildJoins(dialect, relationships, relationshipAliases);
+        var fromTable = joins.Length == 0
+            ? dialect.QualifyTable(schema, table)
+            : $"{dialect.QualifyTable(schema, table)} AS base";
+
         return $"""
-            SELECT {projection} FROM {dialect.QualifyTable(schema, table)}
+            SELECT {projection} FROM {fromTable}{joins}
             WHERE {scopePredicate}{userFilter}
             """;
+    }
+
+    private static string BuildJoins(
+        SqlDialect dialect, IReadOnlyList<RelationshipConfig>? relationships,
+        IReadOnlyDictionary<string, string>? relationshipAliases)
+    {
+        if (relationships is null || relationshipAliases is null || relationshipAliases.Count == 0)
+            return "";
+
+        var joins = new StringBuilder();
+        foreach (var relationship in relationships)
+        {
+            if (!relationshipAliases.TryGetValue(relationship.Name, out var alias))
+                continue;
+
+            var condition = string.Join(" AND ", relationship.JoinKeys.Select(key =>
+                $"base.{dialect.QuoteIdentifier(key.LocalColumn)} = {alias}.{dialect.QuoteIdentifier(key.ForeignColumn)}"));
+            joins.Append($"\nLEFT JOIN {dialect.QualifyTable(relationship.Schema, relationship.Table)} AS {alias} ON {condition}");
+        }
+
+        return joins.ToString();
     }
 
     /// <summary>The observed extent of the column an auto segment divides up.</summary>

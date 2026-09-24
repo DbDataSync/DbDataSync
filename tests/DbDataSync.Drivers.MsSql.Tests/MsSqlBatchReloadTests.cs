@@ -398,6 +398,58 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         Assert.Equal(10, (await GetTargetRowsAsync()).Count);
     }
 
+    /// <summary>
+    /// Phase 187J, end to end against a real server: a relationship's foreign table is <c>LEFT JOIN</c>ed
+    /// in, not inner-joined — a row whose foreign key matches gets the looked-up value, and a row whose
+    /// foreign key has no match (including <c>NULL</c>) is still read, with the looked-up column
+    /// <c>null</c> rather than the row silently disappearing.
+    /// </summary>
+    [Fact]
+    public async Task Reader_WithARelationship_LeftJoinsTheForeignTable_KeepingUnmatchedRows()
+    {
+        var src = $"ReloadRelSrc_{Guid.NewGuid():N}";
+        var lookup = $"ReloadRelLookup_{Guid.NewGuid():N}";
+        await ExecuteAsync(_sourceConnection, $"""
+            CREATE TABLE dbo.[{lookup}] (Id INT NOT NULL PRIMARY KEY, Label NVARCHAR(50) NOT NULL);
+            """);
+        await ExecuteAsync(_sourceConnection, $"""
+            CREATE TABLE dbo.[{src}] (Id INT NOT NULL PRIMARY KEY, RegionId INT NULL);
+            """);
+        await ExecuteAsync(_sourceConnection, $"INSERT INTO dbo.[{lookup}] (Id, Label) VALUES (1, 'North');");
+        await ExecuteAsync(_sourceConnection, $"""
+            INSERT INTO dbo.[{src}] (Id, RegionId) VALUES (1, 1), (2, NULL), (3, 99);
+            """);
+
+        var relationships = new List<RelationshipConfig>
+        {
+            new()
+            {
+                Name = "region",
+                Schema = "dbo",
+                Table = lookup,
+                JoinKeys = [new RelationshipJoinKey { LocalColumn = "RegionId", ForeignColumn = "Id" }],
+            },
+        };
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Id", TargetColumn = "Id" },
+            new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" },
+        };
+
+        var read = await _reader.ReadChangesAsync(
+            _sourceConnection, Source(src), previousWatermark: null, ReadIntent.InitialLoad, mappings,
+            MappingName, [], relationships, new Dictionary<string, string>(), CancellationToken.None);
+
+        var byId = new Dictionary<int, string?>();
+        await foreach (var row in read.Rows)
+            byId[(int)row["Id"]!] = (string?)row["Label"];
+
+        Assert.Equal(3, byId.Count);
+        Assert.Equal("North", byId[1]); // matched: the looked-up value comes through
+        Assert.Null(byId[2]);           // RegionId is NULL: no match, row still present, looked-up column null
+        Assert.Null(byId[3]);           // RegionId points at nothing: no match, row still present
+    }
+
     [Fact]
     public async Task ExpandAutoSegments_LeavesOtherSegmentModesUntouched()
     {

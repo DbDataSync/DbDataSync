@@ -20,8 +20,9 @@ internal static class MsSqlSegmentScope
     public static SegmentScope Build(
         BatchReloadSegment? segment,
         IReadOnlyList<ColumnMetadata> columns,
-        IReadOnlyList<ColumnMapping>? columnMappings = null) =>
-        SegmentScope.Build(MsSqlDialect.Instance, MsSqlValueBinding.Instance, segment, columns, columnMappings);
+        IReadOnlyList<ColumnMapping>? columnMappings = null,
+        Func<string, string>? reference = null) =>
+        SegmentScope.Build(MsSqlDialect.Instance, MsSqlValueBinding.Instance, segment, columns, columnMappings, reference);
 }
 
 /// <summary>

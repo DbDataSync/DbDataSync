@@ -1,3 +1,5 @@
+using DbDataSync.Core.Config;
+
 namespace DbDataSync.Drivers.Generic.Tests;
 
 /// <summary>The reader's and writer's generated SQL, per dialect, with no server.</summary>
@@ -28,6 +30,112 @@ public sealed class PipelineStatementTests
             WHERE 1 = 1
             """,
             BatchReloadStatement.BuildRead(BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null));
+    }
+
+    private static RelationshipConfig Rel(string name, string table, params (string Local, string Foreign)[] joinKeys) =>
+        new()
+        {
+            Name = name,
+            Table = table,
+            JoinKeys = joinKeys.Select(k => new RelationshipJoinKey { LocalColumn = k.Local, ForeignColumn = k.Foreign }).ToList(),
+        };
+
+    [Fact]
+    public void BatchRead_WithARelationship_JoinsAndAliasesThePrimaryTable()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            """
+            SELECT [Id],
+                r0.[Name] FROM [dbo].[Orders] AS base
+            LEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]
+            WHERE 1 = 1
+            """,
+            BatchReloadStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null,
+                projection: "[Id],\n    r0.[Name]", relationships: relationships, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void BatchRead_WithMultipleJoinKeys_AndsThemTogether()
+    {
+        var relationships = new List<RelationshipConfig>
+        {
+            Rel("region", "Region", ("CountryCode", "CountryCode"), ("RegionId", "Id")),
+        };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders] AS base
+            LEFT JOIN [dbo].[Region] AS r0 ON base.[CountryCode] = r0.[CountryCode] AND base.[RegionId] = r0.[Id]
+            WHERE 1 = 1
+            """,
+            BatchReloadStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null,
+                relationships: relationships, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void BatchRead_WithMultipleRelationships_AliasesEachR0R1()
+    {
+        var relationships = new List<RelationshipConfig>
+        {
+            Rel("region", "Region", ("RegionId", "Id")),
+            Rel("manager", "Employee", ("ManagerId", "Id")),
+        };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0", ["manager"] = "r1" };
+
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders] AS base
+            LEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]
+            LEFT JOIN [dbo].[Employee] AS r1 ON base.[ManagerId] = r1.[Id]
+            WHERE 1 = 1
+            """,
+            BatchReloadStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null,
+                relationships: relationships, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void BatchRead_ARelationshipDeclaredButNotReferenced_RendersNoJoinAtAll()
+    {
+        // Assign leaves an unmapped relationship out of the alias dictionary entirely — this is what
+        // that looks like downstream: the declared relationship exists in `relationships`, but with no
+        // alias assigned for it, no JOIN is rendered — same statement as no relationships at all.
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string>();
+
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders]
+            WHERE 1 = 1
+            """,
+            BatchReloadStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", "1 = 1", filter: null,
+                relationships: relationships, relationshipAliases: aliases));
+    }
+
+    [Fact]
+    public void BatchRead_ASelfJoinRelationship_AliasesTheSameTableUnderADifferentName()
+    {
+        // The primary table and the relationship's own table are identical ("Employee") — base and r0
+        // must still be two distinct references, not a self-referencing ambiguity.
+        var relationships = new List<RelationshipConfig> { Rel("manager", "Employee", ("ManagerId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["manager"] = "r0" };
+
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Employee] AS base
+            LEFT JOIN [dbo].[Employee] AS r0 ON base.[ManagerId] = r0.[Id]
+            WHERE 1 = 1
+            """,
+            BatchReloadStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Employee", "1 = 1", filter: null,
+                relationships: relationships, relationshipAliases: aliases));
     }
 
     [Fact]
