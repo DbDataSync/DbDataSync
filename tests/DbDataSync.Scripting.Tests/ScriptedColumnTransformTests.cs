@@ -30,14 +30,26 @@ public sealed class ScriptedColumnTransformTests : IDisposable
             Code = code,
         }).CreateInstance<ISqlColumnExpression>("x");
 
-    private static ColumnMapping Map(string source, string? transform = null) =>
-        new() { SourceColumn = source, TargetColumn = source, Transform = transform };
+    private static ColumnMapping Map(
+        string source, string? transform = null, string? relationship = null, string? targetType = null,
+        List<RenameStep>? renames = null) =>
+        new()
+        {
+            SourceColumn = source,
+            TargetColumn = source,
+            Transform = transform,
+            Relationship = relationship,
+            TargetType = targetType,
+            Renames = renames ?? new(),
+        };
 
     private static IReadOnlyList<ColumnMapping> Apply(
         IReadOnlyList<ColumnMapping> mappings, ISqlColumnExpression expression,
-        ScriptParameters? parameters = null, IReadOnlyList<ColumnMetadata>? metadata = null) =>
+        ScriptParameters? parameters = null, IReadOnlyList<ColumnMetadata>? metadata = null,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnMetadata>>? relationshipMetadata = null) =>
         ScriptedColumnTransforms.Apply(
-            mappings, expression, parameters ?? ScriptParameters.Empty, new FakeDialect(), metadata);
+            mappings, expression, parameters ?? ScriptParameters.Empty, new FakeDialect(), metadata,
+            relationshipMetadata);
 
     private const string UpperEverything = """
         using DbDataSync.Scripting.Abstractions;
@@ -180,6 +192,50 @@ public sealed class ScriptedColumnTransformTests : IDisposable
             """, "NeedsIt")));
 
         Assert.Contains("width", ex.Message);
+    }
+
+    [Fact]
+    public void ARelationshipSourcedColumn_ResolvesMetadataFromItsOwnRelationshipCache_NotThePrimaryOne()
+    {
+        var byType = Compile("""
+            using DbDataSync.Scripting.Abstractions;
+
+            public sealed class ByType : ISqlColumnExpression
+            {
+                public string? RenderSql(SqlColumnExpressionContext c) =>
+                    c.Column is null ? null : $"/* {c.Column.NativeType} */ {c.ColumnReference}";
+            }
+            """, "ByType");
+
+        // Same column name, "Amount", on both the primary source and the "Customer" relationship — a
+        // bare-name lookup would find whichever came first; the relationship-sourced mapping must find
+        // *its own* relationship's metadata, not the primary source's.
+        var result = Apply(
+            [Map("Amount", relationship: "Customer")],
+            byType,
+            metadata: [new ColumnMetadata("Amount", "int", IsNullable: false, IsPrimaryKey: false, IsIdentity: false)],
+            relationshipMetadata: new Dictionary<string, IReadOnlyList<ColumnMetadata>>
+            {
+                ["Customer"] =
+                    [new ColumnMetadata("Amount", "decimal(18,2)", IsNullable: false, IsPrimaryKey: false, IsIdentity: false)],
+            });
+
+        Assert.Equal("/* decimal(18,2) */ {{column}}", Assert.Single(result).Transform);
+    }
+
+    [Fact]
+    public void AGeneratedTransform_PreservesRelationshipTargetTypeAndRenames()
+    {
+        var renames = new List<RenameStep> { new() { From = "Old", To = "Region" } };
+        var result = Apply(
+            [Map("Region", relationship: "Customer", targetType: "nvarchar(50)", renames: renames)],
+            Compile(UpperEverything, "Upper"));
+
+        var mapping = Assert.Single(result);
+        Assert.Equal("UPPER({{column}})", mapping.Transform);
+        Assert.Equal("Customer", mapping.Relationship);
+        Assert.Equal("nvarchar(50)", mapping.TargetType);
+        Assert.Same(renames, mapping.Renames);
     }
 
     private sealed class FakeDialect : IScriptDialect

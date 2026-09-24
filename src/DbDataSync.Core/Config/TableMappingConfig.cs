@@ -144,6 +144,23 @@ public sealed class ColumnMapping
     /// table. See phase 186J.
     /// </summary>
     public string? Relationship { get; set; }
+
+    /// <summary>
+    /// A copy with <see cref="Transform"/> replaced and every other field carried over unchanged. What a
+    /// generated (scripted) transform must use instead of a fresh object initializer — the latter has
+    /// silently dropped <see cref="Relationship"/>/<see cref="TargetType"/>/<see cref="Renames"/> in the
+    /// past, since it's easy to list only the fields a transform-generation code path happens to care
+    /// about and forget the rest exist.
+    /// </summary>
+    public ColumnMapping WithTransform(string transform) => new()
+    {
+        SourceColumn = SourceColumn,
+        TargetColumn = TargetColumn,
+        Transform = transform,
+        TargetType = TargetType,
+        Renames = Renames,
+        Relationship = Relationship,
+    };
 }
 
 /// <summary>

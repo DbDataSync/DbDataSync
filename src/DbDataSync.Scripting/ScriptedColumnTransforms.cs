@@ -26,6 +26,12 @@ public static class ScriptedColumnTransforms
     /// Returns <paramref name="columnMappings"/> unchanged when nothing is bound or nothing is
     /// generated, so the common case allocates nothing and the caller needs no branch.
     /// </summary>
+    /// <param name="columnMetadata">The mapping's own primary-source columns — consulted for a
+    /// <see cref="ColumnMapping"/> whose <see cref="ColumnMapping.Relationship"/> is null.</param>
+    /// <param name="relationshipColumnMetadata">One column list per declared relationship, keyed by
+    /// <see cref="RelationshipConfig.Name"/> (ordinal-insensitive) — consulted instead of
+    /// <paramref name="columnMetadata"/> for a <see cref="ColumnMapping"/> whose
+    /// <see cref="ColumnMapping.Relationship"/> names one.</param>
     /// <param name="log">Called once per column a script actually generated something for, with the
     /// source column's name and the SQL generated for it — structured rather than a single pre-joined
     /// line, so a caller with a hundred-plus columns to report (<c>PreviewService</c>'s own "Generated
@@ -36,6 +42,7 @@ public static class ScriptedColumnTransforms
         ScriptParameters parameters,
         IScriptDialect dialect,
         IReadOnlyList<ColumnMetadata>? columnMetadata = null,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnMetadata>>? relationshipColumnMetadata = null,
         Action<string, string>? log = null)
     {
         if (expression is null || columnMappings.Count == 0)
@@ -52,7 +59,16 @@ public static class ScriptedColumnTransforms
             if (!string.IsNullOrWhiteSpace(mapping.Transform))
                 continue;
 
-            var column = columnMetadata?.FirstOrDefault(
+            // A relationship-sourced column's metadata lives in a different cache slice than the
+            // primary source's — see TableMappingConfig.RelationshipColumns.
+            var candidates = mapping.Relationship is null
+                ? columnMetadata
+                : relationshipColumnMetadata is not null &&
+                  relationshipColumnMetadata.TryGetValue(mapping.Relationship, out var found)
+                    ? found
+                    : null;
+
+            var column = candidates?.FirstOrDefault(
                 c => string.Equals(c.Name, mapping.SourceColumn, StringComparison.OrdinalIgnoreCase));
 
             string? generated;
@@ -78,12 +94,7 @@ public static class ScriptedColumnTransforms
                 continue;
 
             result ??= [.. columnMappings];
-            result[i] = new ColumnMapping
-            {
-                SourceColumn = mapping.SourceColumn,
-                TargetColumn = mapping.TargetColumn,
-                Transform = generated,
-            };
+            result[i] = mapping.WithTransform(generated);
             log?.Invoke(mapping.SourceColumn, generated);
         }
 

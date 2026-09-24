@@ -19,15 +19,17 @@ public interface ISqlColumnExpression
 }
 
 /// <param name="Column">
-/// The column's metadata as the source catalog reports it, or null when the catalog was not consulted —
-/// a reader that projects without reading metadata first still has to be able to call this.
+/// The column's *cached* metadata — the mapping's own <c>SourceColumns</c> cache for a primary-sourced
+/// column, or the matching <c>RelationshipColumns</c> entry when this mapping is relationship-sourced —
+/// or null when nothing cached matches. Never a live catalog call: a run operates on cached metadata
+/// only, the same as every other reader/writer consumer of it.
 /// </param>
 /// <param name="ColumnReference">
-/// The column, already quoted and already qualified **for the statement being built**. This is the
-/// string a literal transform's <c>{{column}}</c> is replaced with, and for the same reason: the
-/// Change Tracking reader's statement joins the source table under an alias, so the correct reference
-/// there is <c>base.[Region]</c> and not <c>[Region]</c>. A script that builds its own reference from
-/// the column name will be wrong in exactly that reader.
+/// **Not a resolved reference — always the literal <c>{{column}}</c> token**, substituted later by
+/// whatever projection renders the actual statement. The Change Tracking reader's statement joins the
+/// source table under an alias, so the reference it substitutes there is <c>base.[Region]</c> and not
+/// <c>[Region]</c>; a script that builds its own reference from the column name instead of returning an
+/// expression built around this token will be wrong in exactly that reader.
 /// </param>
 public sealed record SqlColumnExpressionContext(
     string SourceColumn,
