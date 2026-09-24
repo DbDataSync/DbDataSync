@@ -281,7 +281,7 @@ public sealed class BulkLoadService(
                     "it. Pick a reader that supports segmentation, or specify explicit list/range segments.");
 
             return await expanding.ExpandAutoSegmentsAsync(
-                connection, source, segments, mapping.SourceColumns, mapping.Name, cancellationToken);
+                connection, source, segments, mapping.SourceColumns, mapping.Name, mapping.ColumnMappings, cancellationToken);
         }
     }
 }

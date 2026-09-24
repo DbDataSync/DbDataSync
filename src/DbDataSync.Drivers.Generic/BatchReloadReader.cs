@@ -38,6 +38,16 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
     /// rest. Stated so the UI can say so rather than infer it.</summary>
     public bool DetectsDeletes => false;
 
+    /// <summary>The column a segment predicate scopes, or null for a full/no segment — <see
+    /// cref="AutoSegment"/> never reaches this reader unexpanded (see <see cref="ExpandAutoSegmentsAsync"/>),
+    /// so it isn't a case here.</summary>
+    private static string? SegmentColumnOf(BatchReloadSegment? segment) => segment switch
+    {
+        ListSegment list => list.Column,
+        RangeSegment range => range.Column,
+        _ => null,
+    };
+
     // No IReadIntentDeclaring: this reader has no incremental mode at all — every pass reloads,
     // whatever intent it is asked for. Its only checkmark in phase 101's original §1 table was
     // InitialLoad, which stopped being a per-reader question when the bulk-load retarget made it
@@ -74,6 +84,9 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
             columnMappings.Any(m => !string.IsNullOrWhiteSpace(m.Transform));
         var willWrap = source.Query is not null && (wrapForFeatures || relationshipAliases.Count > 0);
         var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases, sourceIsQuery: willWrap);
+        var segmentReference = SegmentColumnOf(effectiveSegment) is { } segmentColumn
+            ? SegmentScope.TransformAwareReference(segmentColumn, columnMappings, primaryReference ?? dialect.QuoteIdentifier)
+            : primaryReference;
 
         // Cache-only as of phase 91 — ExpandAutoSegmentsAsync (a different method entirely) is the one
         // place in this reader that still asks the live catalog, because it samples the column's actual
@@ -84,7 +97,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         IReadOnlyList<ColumnMetadata> columns = effectiveSegment is ListSegment or RangeSegment
             ? sourceColumns.RequireAll(mappingName, "source")
             : [];
-        var scope = SegmentScope.Build(dialect, binder, effectiveSegment, columns, reference: primaryReference);
+        var scope = SegmentScope.Build(dialect, binder, effectiveSegment, columns, reference: segmentReference);
 
         var projection = SourceProjection.Render(dialect, columnMappings, primaryReference, relationshipAliases);
         var rows = ReadRowsAsync(
@@ -119,10 +132,13 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
             request.ColumnMappings.Any(m => !string.IsNullOrWhiteSpace(m.Transform));
         var willWrap = source.Query is not null && (wrapForFeatures || relationshipAliases.Count > 0);
         var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases, sourceIsQuery: willWrap);
+        var segmentReference = SegmentColumnOf(effectiveSegment) is { } segmentColumn
+            ? SegmentScope.TransformAwareReference(segmentColumn, request.ColumnMappings, primaryReference ?? dialect.QuoteIdentifier)
+            : primaryReference;
 
         // request.SourceColumns — phase 167V. Resolved once by PreviewService through ScriptedMetadata
         // (so a bound metadataProvider script is honoured), not a live catalog.GetColumnsAsync call here.
-        var scope = SegmentScope.Build(dialect, binder, effectiveSegment, request.SourceColumns, reference: primaryReference);
+        var scope = SegmentScope.Build(dialect, binder, effectiveSegment, request.SourceColumns, reference: segmentReference);
 
         return
         [
@@ -147,6 +163,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         IReadOnlyList<BatchReloadSegment> segments,
         IReadOnlyList<CachedColumn> sourceColumns,
         string mappingName,
+        IReadOnlyList<ColumnMapping> columnMappings,
         CancellationToken cancellationToken)
     {
         if (!segments.OfType<AutoSegment>().Any())
@@ -174,8 +191,10 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
             // of the table (MappingColumnReader captures the whole catalog answer, not just mapped
             // columns), so an auto-segment column that isn't itself individually mapped is still here.
             var column = sourceColumns.RequireColumn(mappingName, "source", auto.Column);
+            var transform = columnMappings.FirstOrDefault(m =>
+                m.Relationship is null && string.Equals(m.SourceColumn, auto.Column, StringComparison.OrdinalIgnoreCase))?.Transform;
 
-            var (min, max) = await GetRangeAsync(sourceConnection, source, column, cancellationToken);
+            var (min, max) = await GetRangeAsync(sourceConnection, source, column, transform, cancellationToken);
             if (min is null || max is null)
             {
                 // No rows to divide up. One Full segment, not zero segments: an empty source still has
@@ -191,11 +210,12 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
     }
 
     private async Task<(object? Min, object? Max)> GetRangeAsync(
-        DbConnection connection, SourceTableRef source, ColumnMetadata column, CancellationToken cancellationToken)
+        DbConnection connection, SourceTableRef source, ColumnMetadata column, string? transform,
+        CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = BatchReloadStatement.BuildRange(
-            dialect, source.Schema, source.Table, source.Query, column.Name, source.Filter);
+            dialect, source.Schema, source.Table, source.Query, column.Name, source.Filter, transform);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -284,14 +304,23 @@ public static class BatchReloadStatement
     /// there is no "run the operator's own statement unwrapped" alternative for an aggregate: the whole
     /// point of this statement is the <c>MIN</c>/<c>MAX</c> it computes, which is not something a raw
     /// passthrough could produce. Relationship joins are not threaded through this statement yet — segmenting
-    /// (auto or otherwise) by a relationship column is phase 192S's own work.
+    /// (auto or otherwise) by a relationship column is deferred, tracked in phase 195S.
+    /// </para>
+    /// <para>
+    /// **Phase 192S**: <paramref name="transform"/>, when the auto-segmented column also carries a
+    /// <see cref="ColumnMapping.Transform"/>, makes the sampled range agree with what the target actually
+    /// stores — bucket boundaries computed against the raw column would land in the wrong value-space
+    /// once <see cref="SourceProjection"/> starts projecting the transformed one.
     /// </para>
     /// </summary>
-    public static string BuildRange(SqlDialect dialect, string schema, string table, string? query, string column, string? filter)
+    public static string BuildRange(
+        SqlDialect dialect, string schema, string table, string? query, string column, string? filter,
+        string? transform = null)
     {
         var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
         var fromTable = query is not null ? $"{sourceExpression} AS base" : sourceExpression;
-        var quoted = query is not null ? $"base.{dialect.QuoteIdentifier(column)}" : dialect.QuoteIdentifier(column);
+        Func<string, string> reference = query is not null ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
+        var quoted = SourceProjection.RenderExpression(column, transform, reference);
         var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
         return $"SELECT MIN({quoted}), MAX({quoted}) FROM {fromTable}{filterClause}";
     }

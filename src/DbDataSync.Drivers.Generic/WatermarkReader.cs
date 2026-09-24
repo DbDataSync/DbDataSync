@@ -55,7 +55,11 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
             throw new InvalidOperationException("The 'watermarkColumn' option is required for the Watermark reader.");
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
-        var latest = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken) ?? "0";
+
+        // No ColumnMappings reach IPositionCapturing, unlike ReadChangesAsync — so a captured position
+        // can't be made transform-aware here. A named gap, not an oversight: see
+        // WatermarkStatement.BuildMaxWatermark's own doc comment.
+        var latest = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, transform: null, cancellationToken) ?? "0";
         return new CapturedPosition(latest, PositionTimeUtc: null);
     }
 
@@ -93,12 +97,19 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
 
         await dialect.UseDatabaseAsync(sourceConnection, source.Database, cancellationToken);
 
+        // Phase 192S: the same expression SourceProjection would project for this column, so the
+        // adopted/refreshed maximum agrees with what a transform actually produces — a bare MAX(raw
+        // column) would record a position in the wrong value-space the moment the watermark column is
+        // also transformed on its way to the target.
+        var watermarkTransform = columnMappings.FirstOrDefault(m =>
+            m.Relationship is null && string.Equals(m.SourceColumn, watermarkColumn, StringComparison.OrdinalIgnoreCase))?.Transform;
+
         // Adopts the table as already-synced: the highest value becomes the new watermark and nothing
         // is read at all — not even a bounded pass that happens to find nothing new, which still issues
         // the row read. See SupportedIntents.
         if (intent == ReadIntent.ChangesFromLatest)
         {
-            var latest = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken)
+            var latest = await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, watermarkTransform, cancellationToken)
                 ?? previousWatermark ?? "0";
             return new ReadResult(EmptyRows(), latest, Diagnostics: null);
         }
@@ -122,7 +133,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
         // than where we already were".
         var newWatermark = maxRows is not null
             ? previousWatermark ?? "0"
-            : await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, cancellationToken)
+            : await GetMaxWatermarkAsync(sourceConnection, source, watermarkColumn, watermarkTransform, cancellationToken)
               ?? previousWatermark
               ?? "0";
 
@@ -142,7 +153,7 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
         var bounded = maxRows is null ? null : new BoundedReadPosition();
         var rows = ReadRowsAsync(
             sourceConnection, source, watermarkColumn, effectivePreviousWatermark, column, projection, maxRows,
-            bounded, relationships, relationshipAliases, cancellationToken);
+            bounded, relationships, relationshipAliases, watermarkTransform, cancellationToken);
         return new ReadResult(rows, newWatermark, Diagnostics: null, Bounded: bounded);
     }
 
@@ -178,6 +189,8 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
         var maxRows = BoundedRead.Read(request.Options);
 
         var statements = new List<PreviewStatement>();
+        var watermarkTransform = request.ColumnMappings.FirstOrDefault(m =>
+            m.Relationship is null && string.Equals(m.SourceColumn, watermarkColumn, StringComparison.OrdinalIgnoreCase))?.Transform;
 
         // A bounded pass genuinely does not issue this one: the row read is its own boundary
         // computation, so showing a MAX here would describe a statement that never runs.
@@ -186,7 +199,8 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
             statements.Add(new PreviewStatement(
                 PreviewStages.SourceRead,
                 $"Read the highest '{watermarkColumn}', which becomes the next pass's watermark",
-                WatermarkStatement.BuildMaxWatermark(dialect, source.Schema, source.Table, source.Query, watermarkColumn, source.Filter),
+                WatermarkStatement.BuildMaxWatermark(
+                    dialect, source.Schema, source.Table, source.Query, watermarkColumn, source.Filter, watermarkTransform),
                 PreviewOrigin.BuiltIn,
                 "Taken before the rows are read, not derived from them — a row written during the pass " +
                 "must be picked up by the next one rather than silently skipped."));
@@ -238,7 +252,8 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
             WatermarkStatement.BuildRead(
                 dialect, source.Schema, source.Table, source.Query, watermarkColumn, incremental, source.Filter,
                 SourceProjection.Render(dialect, request.ColumnMappings, primaryReference, relationshipAliases),
-                bounded: maxRows is not null, relationships: request.Relationships, relationshipAliases: relationshipAliases),
+                bounded: maxRows is not null, relationships: request.Relationships, relationshipAliases: relationshipAliases,
+                transform: watermarkTransform),
             PreviewOrigin.BuiltIn,
             string.IsNullOrEmpty(boundNote + bindingNote) ? null : (boundNote + bindingNote).TrimEnd(),
             dialect.RenderDeclarations(parameters)));
@@ -247,11 +262,12 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
     }
 
     private async Task<string?> GetMaxWatermarkAsync(
-        DbConnection connection, SourceTableRef source, string watermarkColumn, CancellationToken cancellationToken)
+        DbConnection connection, SourceTableRef source, string watermarkColumn, string? transform,
+        CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = WatermarkStatement.BuildMaxWatermark(
-            dialect, source.Schema, source.Table, source.Query, watermarkColumn, source.Filter);
+            dialect, source.Schema, source.Table, source.Query, watermarkColumn, source.Filter, transform);
 
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return result is null or DBNull ? null : WatermarkValue.Format(result);
@@ -268,13 +284,14 @@ public sealed class WatermarkReader(SqlDialect dialect, ISegmentValueBinder bind
         BoundedReadPosition? bounded,
         IReadOnlyList<RelationshipConfig> relationships,
         IReadOnlyDictionary<string, string> relationshipAliases,
+        string? watermarkTransform,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = WatermarkStatement.BuildRead(
             dialect, source.Schema, source.Table, source.Query, watermarkColumn, previousWatermark is not null,
             source.Filter, projection, bounded: maxRows is not null, relationships: relationships,
-            relationshipAliases: relationshipAliases);
+            relationshipAliases: relationshipAliases, transform: watermarkTransform);
         if (maxRows is { } limit)
             cmd.AddParameter(dialect.ParameterName(BoundedRead.RowLimitParameter), limit);
         if (previousWatermark is not null)

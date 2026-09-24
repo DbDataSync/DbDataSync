@@ -239,6 +239,29 @@ public sealed class WatermarkStatementTests
     }
 
     [Fact]
+    public void Read_ATransformedWatermarkColumn_FiltersAndOrdersByTheTransformedExpression()
+    {
+        // The predicate, the ORDER BY, and the bounded position column all have to agree with each
+        // other and with what the target actually stores — they're all built from the same reference.
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders]
+            WHERE UPPER([ModifiedAt]) > @previousWatermark
+            ORDER BY UPPER([ModifiedAt])
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", hasPreviousWatermark: true,
+                filter: null, transform: "UPPER({{column}})"));
+    }
+
+    [Fact]
+    public void MaxWatermark_ATransformedColumn_TakesTheMaximumOfTheTransformedExpression() =>
+        Assert.Equal(
+            "SELECT MAX(UPPER([ModifiedAt])) FROM [dbo].[Orders]",
+            WatermarkStatement.BuildMaxWatermark(
+                BracketDialect.Instance, "dbo", "Orders", null, "ModifiedAt", filter: null, transform: "UPPER({{column}})"));
+
+    [Fact]
     public void MaxWatermark_AQuery_AlwaysWraps() =>
         Assert.Equal(
             "SELECT MAX(base.[ModifiedAt]) FROM (SELECT * FROM Orders) AS base",

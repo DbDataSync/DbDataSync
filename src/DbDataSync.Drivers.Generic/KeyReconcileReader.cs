@@ -127,6 +127,7 @@ public sealed class KeyReconcileReader(SqlDialect dialect, ISegmentValueBinder b
         IReadOnlyList<BatchReloadSegment> segments,
         IReadOnlyList<CachedColumn> sourceColumns,
         string mappingName,
+        IReadOnlyList<ColumnMapping> columnMappings,
         CancellationToken cancellationToken)
     {
         if (!segments.OfType<AutoSegment>().Any())

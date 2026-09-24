@@ -393,6 +393,51 @@ public static class ConfigValidation
     }
 
     /// <summary>
+    /// Phase 192S (190S's own deferred decision 7). A reconciling writer's delete-scope predicate is
+    /// always built by translating the segment/watermark column's *name* to its target-side one and
+    /// reusing the same bound values verbatim — see <c>DeleteInsertWriter</c>/
+    /// <c>KeyReconcileDeleteWriter</c>/<c>MsSqlMergeReconcileWriter</c>/<c>MsSqlDeleteInsertWriter</c>.
+    /// That translation needs a real <see cref="ColumnMapping"/> to translate *through* — a segment or
+    /// watermark column that isn't mapped at all has no target-side name for the writer to bind against.
+    /// Checked against the mapping's own statically-configured reader options only (a default segment, or
+    /// <c>watermarkColumn</c>) — a Bulk Load's own per-work-item segment is assigned at enqueue time, not
+    /// part of this saved config, and isn't reachable here.
+    /// <para>
+    /// These are bare string literals for the same layering reason <see cref="ValidateQuerySourceReader"/>'s
+    /// own are: this project cannot reference the driver projects that define the real Kind constants.
+    /// </para>
+    /// </summary>
+    public static void ValidateReconcileScopeColumn(
+        TableMappingConfig mapping, string readerKind, string writerKind, IReadOnlyDictionary<string, string> readerOptions)
+    {
+        if (writerKind is not
+            ("DeleteInsert" or "KeyReconcileDelete" or "KeyReconcileScd2Close" or "MsSqlMergeReconcile" or "MsSqlDeleteInsert"))
+            return;
+
+        var column = readerKind == "Watermark"
+            ? readerOptions.GetValueOrDefault("watermarkColumn")
+            : SegmentSerializer.ReadOptional(readerOptions) switch
+            {
+                ListSegment list => list.Column,
+                RangeSegment range => range.Column,
+                AutoSegment auto => auto.Column,
+                _ => null,
+            };
+
+        if (column is null)
+            return;
+
+        var mapped = mapping.ColumnMappings.Any(m =>
+            m.Relationship is null && string.Equals(m.SourceColumn, column, StringComparison.OrdinalIgnoreCase));
+        if (!mapped)
+            throw new ConfigValidationException(
+                $"Table mapping '{mapping.Name}' reads with '{readerKind}' scoped by column '{column}', and " +
+                $"writes with the reconciling writer '{writerKind}'. A reconciling writer needs a real target " +
+                $"column to bind its delete-scope predicate against, so '{column}' must also have a column " +
+                "mapping — add one, or choose a non-reconciling writer.");
+    }
+
+    /// <summary>
     /// Phase 186J. Three checks, all shape-level — whether a <see cref="RelationshipConfig"/>'s
     /// <see cref="RelationshipJoinKey"/> columns actually exist is a save-time metadata-refresh concern,
     /// the same way <see cref="ColumnMapping.SourceColumn"/>/<see cref="ColumnMapping.TargetColumn"/>

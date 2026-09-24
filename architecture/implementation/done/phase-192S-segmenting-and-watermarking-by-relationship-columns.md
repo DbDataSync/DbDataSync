@@ -1,6 +1,8 @@
-# Phase 192S — Segmenting and watermarking by a relationship column, with expression-consistent predicates
+# Phase 192S — Expression-consistent segment/watermark predicates (relationship-column segmenting split to 195S)
 
-**Status**: Not built.
+**Status**: Built, narrower than planned. See Retrospective — the relationship-column-segmenting half of
+this doc's original design is split out to
+`phase-195S-segmenting-and-watermarking-by-relationship-columns.md`, deferred rather than dropped.
 **Plan reference**: `phase-191S-shared-from-join-builder-and-retiring-query-readers.md` (the shared FROM/JOIN
 builder and widened qualification this phase's predicates run inside). Corrects an assumption made and then
 retracted earlier in this same design conversation: segment/watermark columns were first assumed to always
@@ -112,3 +114,61 @@ query-shaped sources — it already misbehaves on `main` for any hand-typed tran
 - A save-time validation test for the new reconciling-writer + unmapped-column rejection.
 - A load/stress test (or at minimum a reasoned check against the existing tie-safe implementation) for Open
   Question 1's large-tie-group concern.
+
+## Retrospective
+
+**Split, not fully built as designed.** Implementing decision 4 (transform-consistent predicates) surfaced
+that decisions 1–3 (relationship-column segmenting itself) need a materially bigger interface change than
+this doc anticipated: a segment/watermark column's *type* metadata, when it's relationship-sourced, would
+have to come from `mapping.RelationshipColumns` — a cache field no reader currently receives at all.
+`IChangeReader.ReadChangesAsync`/`IStatementPreview.DescribeAsync` would need a new parameter threaded
+through essentially every reader across every driver project (the same shape 185J's own `relationships`
+parameter took, but that one had exactly two real consumers from the start; this would too, but discovering
+which two, and confirming no third reader secretly wants it, is real work this pass didn't do). Given that,
+relationship-column segmenting/watermarking (decisions 1, 2, 3, and the relationship half of 5) is deferred
+to **195S**, written up fresh with this finding folded in. Decisions 4, 6, and 7 — the parts that don't need
+new cache plumbing — are built here, now, in full.
+
+**What's actually built:**
+- `SourceProjection.RenderExpression` gained a `(string sourceColumn, string? transform, Func<string,string>
+  reference)` overload beside its existing `(ColumnMapping, Func<string,string>)` one, so a caller with a
+  bare column name and transform — not a full `ColumnMapping` — can render the identical expression.
+- `SegmentScope.TransformAwareReference(columnName, columnMappings, reference)` (new): wraps a reference
+  function so a segment/watermark column that also happens to be an (unqualified) `ColumnMapping` with a
+  `Transform` renders through it. Deliberately only ever matches a *primary*-sourced mapping
+  (`Relationship is null`) — confirmed by a test — since relationship-sourced matching is exactly the part
+  deferred to 195S.
+- `BatchReloadStatement.BuildRange` and `WatermarkStatement.BuildRead`/`BuildMaxWatermark` each gained an
+  optional `transform` parameter, applied via `SourceProjection.RenderExpression` instead of a bare
+  qualified reference. `BatchReloadStatement.BuildRead` needed **no change at all** — its `scopePredicate`
+  is already fully rendered by the caller before reaching it, so the transform-awareness lives entirely in
+  what `SegmentScope.Build`'s `reference` parameter is given, not in the statement builder.
+- `BatchReloadReader`/`WatermarkReader` compute the segment's/watermark's own transform (a bare lookup
+  against `columnMappings` by `SourceColumn`, `Relationship is null`) and thread it through every read,
+  preview, range-discovery, and max-watermark call site that has `columnMappings` available.
+- **One named, deliberate gap**: `IPositionCapturing.CapturePositionAsync` (used for `ChangesFromLatest`
+  adoption) has no `ColumnMapping` list in its signature at all — a *second* interface with its own set of
+  implementers (5, per `ChangeReaderFirstPassContractTests`) — so its own `GetMaxWatermarkAsync` call stays
+  untransformed, documented in code and here rather than silently accepted.
+- `ISegmentExpandingReader.ExpandAutoSegmentsAsync` gained a `columnMappings` parameter (two real
+  implementers — `BatchReloadReader`, `KeyReconcileReader`, the latter ignoring it — plus three call sites,
+  all of which already had `mapping` in scope) so auto-segment discovery can find the auto-segmented
+  column's transform the same way.
+- Decision 6 (`ConfigValidation.ValidateReconcileScopeColumn`, new): a reconciling writer's segment/watermark
+  column must resolve to a real, primary-sourced `ColumnMapping` — checked against the mapping's own
+  statically-configured reader options (a default segment, or `watermarkColumn`); a Bulk Load's own
+  per-work-item segment is assigned at enqueue time and isn't reachable from saved config, an accepted,
+  named limitation of what save-time validation can check.
+- Decision 7 (performance warning) — **not built**. Genuinely deferred, no surface decided; tracked as an
+  open question still.
+
+**Verified for real**: full solution build, 0 errors, 0 warnings. Full non-integration suite green
+throughout. New unit tests: `SegmentScopeTests` (transform application, no-match-is-unchanged,
+relationship-sourced-mapping-is-ignored, and the actual regression this phase fixes — a transformed range
+predicate matching what a target's stored value would need); `PipelineStatementTests`/
+`WatermarkStatementTests` (transform-aware `BuildRange`/`BuildRead`/`BuildMaxWatermark`);
+`ReconcileScopeColumnValidationTests` (new file — every combination of reconciling/non-reconciling writer,
+mapped/unmapped column, segment vs. watermark, and the relationship-sourced-mapping-doesn't-count edge
+case). **Not verified**: an actual end-to-end reconciling-writer integration test proving a transformed,
+segmented reload correctly deletes/keeps target rows — this repo's convention tests that class of property
+against a live server (see 191S's own identically-shaped gap), which this sandbox has none of.

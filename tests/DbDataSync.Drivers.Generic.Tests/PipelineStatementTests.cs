@@ -185,6 +185,17 @@ public sealed class PipelineStatementTests
     }
 
     [Fact]
+    public void Range_ATransformedColumn_SamplesTheTransformedExpression()
+    {
+        // Bucket boundaries computed against the raw column would land in the wrong value-space once
+        // SourceProjection starts projecting the transformed one.
+        Assert.Equal(
+            "SELECT MIN([OrderId] * 2), MAX([OrderId] * 2) FROM [dbo].[Orders]",
+            BatchReloadStatement.BuildRange(
+                BracketDialect.Instance, "dbo", "Orders", null, "OrderId", filter: null, transform: "{{column}} * 2"));
+    }
+
+    [Fact]
     public void Range_AQuery_AlwaysWraps()
     {
         // Unlike BuildRead, there is no unwrapped alternative for an aggregate.

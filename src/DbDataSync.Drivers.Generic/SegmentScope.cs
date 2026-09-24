@@ -116,6 +116,33 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
             ]);
     }
 
+    /// <summary>
+    /// Wraps <paramref name="reference"/> so that if <paramref name="columnName"/> also happens to be an
+    /// (unqualified) <see cref="ColumnMapping"/> carrying a <see cref="ColumnMapping.Transform"/>, the
+    /// segment or watermark predicate renders through that transform too — exactly the expression
+    /// <see cref="SourceProjection.Render"/> would emit for that column. This is what keeps a source-side
+    /// predicate and the target's already-*written* value agreeing on what "the column" means: the target
+    /// stores the transformed value, so a predicate comparing the raw one would silently compare two
+    /// different value-spaces. No change is needed on a reconciling writer's own side — it already just
+    /// reuses these bounds verbatim against the target, which is correct once the source filters in the
+    /// same space the target stores. See phase 192S.
+    /// <para>
+    /// Only ever matches a *primary*-sourced <see cref="ColumnMapping"/> (<see
+    /// cref="ColumnMapping.Relationship"/> null) — a segment or watermark naming a relationship's own
+    /// column is a distinct, larger feature (deferred; see
+    /// <c>architecture/implementation/todo/phase-195S-segmenting-and-watermarking-by-relationship-columns.md</c>),
+    /// not something this method guesses at.
+    /// </para>
+    /// </summary>
+    public static Func<string, string> TransformAwareReference(
+        string columnName, IReadOnlyList<ColumnMapping>? columnMappings, Func<string, string> reference)
+    {
+        var transform = columnMappings?.FirstOrDefault(m =>
+            m.Relationship is null && string.Equals(m.SourceColumn, columnName, StringComparison.OrdinalIgnoreCase))?.Transform;
+
+        return transform is null ? reference : name => SourceProjection.RenderExpression(name, transform, reference);
+    }
+
     private static ColumnMetadata ResolveColumn(
         string columnName, IReadOnlyList<ColumnMetadata> columns, IReadOnlyList<ColumnMapping>? columnMappings)
     {

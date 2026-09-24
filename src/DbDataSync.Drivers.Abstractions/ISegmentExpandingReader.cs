@@ -26,11 +26,17 @@ public interface ISegmentExpandingReader
     /// <c>architecture/planning/todo/jdbc-metadata-catalog.md</c>.
     /// </para>
     /// </summary>
+    /// <param name="columnMappings">
+    /// Phase 192S: consulted only to find a matching (unqualified) <see cref="ColumnMapping.Transform"/>
+    /// for the auto-segment's own column, so the sampled range agrees with what the target actually
+    /// stores. A reader with no such concept ignores it.
+    /// </param>
     Task<IReadOnlyList<BatchReloadSegment>> ExpandAutoSegmentsAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
         IReadOnlyList<BatchReloadSegment> segments,
         IReadOnlyList<CachedColumn> sourceColumns,
         string mappingName,
+        IReadOnlyList<ColumnMapping> columnMappings,
         CancellationToken cancellationToken);
 }

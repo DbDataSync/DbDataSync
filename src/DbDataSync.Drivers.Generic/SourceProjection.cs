@@ -106,17 +106,27 @@ public static class SourceProjection
     /// raw value against a target holding the transformed one and reports a difference that is not
     /// one.
     /// </summary>
-    public static string RenderExpression(ColumnMapping mapping, Func<string, string> reference)
+    public static string RenderExpression(ColumnMapping mapping, Func<string, string> reference) =>
+        RenderExpression(mapping.SourceColumn, mapping.Transform, reference);
+
+    /// <summary>
+    /// As the <see cref="ColumnMapping"/> overload above, for a caller that has a bare column name and
+    /// transform rather than a full mapping — <see cref="SegmentScope"/>'s segment/watermark predicates
+    /// (phase 192S), which need the exact same expression this method would render for a
+    /// <see cref="ColumnMapping"/> sharing that column's name, so a source-side predicate and the
+    /// target's already-written value agree on what "the column" means.
+    /// </summary>
+    public static string RenderExpression(string sourceColumn, string? transform, Func<string, string> reference)
     {
-        var columnRef = reference(mapping.SourceColumn);
-        if (string.IsNullOrWhiteSpace(mapping.Transform))
+        var columnRef = reference(sourceColumn);
+        if (string.IsNullOrWhiteSpace(transform))
             return columnRef;
 
         // An expression with no token is used verbatim, which keeps a literal, another column, or a
         // correlated subquery expressible — a transform is not required to be *about* its own column.
-        return mapping.Transform.Contains(ColumnMapping.ColumnToken, StringComparison.Ordinal)
-            ? mapping.Transform.Replace(ColumnMapping.ColumnToken, columnRef, StringComparison.Ordinal)
-            : mapping.Transform;
+        return transform.Contains(ColumnMapping.ColumnToken, StringComparison.Ordinal)
+            ? transform.Replace(ColumnMapping.ColumnToken, columnRef, StringComparison.Ordinal)
+            : transform;
     }
 }
 

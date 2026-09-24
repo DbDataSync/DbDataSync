@@ -21,12 +21,23 @@ public static class WatermarkStatement
     /// <see cref="BatchReloadStatement.BuildRange"/>, there is no unwrapped alternative for an
     /// aggregate.
     /// </para>
+    /// <para>
+    /// **Phase 192S**: <paramref name="transform"/>, when the watermark column also carries a
+    /// <see cref="ColumnMapping.Transform"/>, makes the adopted maximum agree with the transformed value
+    /// <see cref="SourceProjection"/> actually projects — otherwise a fresh <c>ChangesFromLatest</c>
+    /// adoption would record a position in the wrong value-space. **Not applied** by
+    /// <see cref="WatermarkReader"/>'s own <c>IPositionCapturing.CapturePositionAsync</c> path, which has
+    /// no <c>ColumnMapping</c> list to consult — a named, documented gap, not an oversight.
+    /// </para>
     /// </summary>
-    public static string BuildMaxWatermark(SqlDialect dialect, string schema, string table, string? query, string watermarkColumn, string? filter)
+    public static string BuildMaxWatermark(
+        SqlDialect dialect, string schema, string table, string? query, string watermarkColumn, string? filter,
+        string? transform = null)
     {
         var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
         var fromTable = query is not null ? $"{sourceExpression} AS base" : sourceExpression;
-        var quotedColumn = query is not null ? $"base.{dialect.QuoteIdentifier(watermarkColumn)}" : dialect.QuoteIdentifier(watermarkColumn);
+        Func<string, string> reference = query is not null ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
+        var quotedColumn = SourceProjection.RenderExpression(watermarkColumn, transform, reference);
         var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
         return $"SELECT MAX({quotedColumn}) FROM {fromTable}{filterClause}";
     }
@@ -74,14 +85,15 @@ public static class WatermarkStatement
         SqlDialect dialect, string schema, string table, string? query, string watermarkColumn, bool hasPreviousWatermark,
         string? filter, string projection = "*", bool bounded = false,
         IReadOnlyList<RelationshipConfig>? relationships = null,
-        IReadOnlyDictionary<string, string>? relationshipAliases = null)
+        IReadOnlyDictionary<string, string>? relationshipAliases = null,
+        string? transform = null)
     {
         var joins = RelationshipJoins.Render(dialect, relationships, relationshipAliases);
         var needsAlias = joins.Length > 0 || query is not null;
         var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
         var fromTable = needsAlias ? $"{sourceExpression} AS base" : sourceExpression;
         Func<string, string> reference = needsAlias ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
-        var quotedColumn = reference(watermarkColumn);
+        var quotedColumn = SourceProjection.RenderExpression(watermarkColumn, transform, reference);
         var predicate = hasPreviousWatermark
             ? $"{quotedColumn} > {dialect.ParameterReference(PreviousWatermarkParameter)}"
             : "1 = 1";

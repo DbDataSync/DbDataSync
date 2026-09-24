@@ -106,4 +106,52 @@ public sealed class SegmentScopeTests
 
         Assert.Contains("reached execution unexpanded", ex.Message);
     }
+
+    // ---- Phase 192S: transform-consistent predicates ---------------------------------------------
+
+    [Fact]
+    public void TransformAwareReference_AppliesAMatchingColumnMappingsTransform()
+    {
+        var mappings = new List<ColumnMapping> { new() { SourceColumn = "OrderId", TargetColumn = "OrderId", Transform = "{{column}} * 2" } };
+        var reference = SegmentScope.TransformAwareReference("OrderId", mappings, BracketDialect.Instance.QuoteIdentifier);
+
+        Assert.Equal("[OrderId] * 2", reference("OrderId"));
+    }
+
+    [Fact]
+    public void TransformAwareReference_WithNoMatchingMapping_IsUnchanged()
+    {
+        var mappings = new List<ColumnMapping> { new() { SourceColumn = "Region", TargetColumn = "Region", Transform = "UPPER({{column}})" } };
+        var reference = SegmentScope.TransformAwareReference("OrderId", mappings, BracketDialect.Instance.QuoteIdentifier);
+
+        Assert.Equal("[OrderId]", reference("OrderId"));
+    }
+
+    [Fact]
+    public void TransformAwareReference_IgnoresARelationshipSourcedMappingSharingTheSameName()
+    {
+        // A relationship-sourced column segment/watermark isn't supported yet (phase 195S) — this method
+        // must not accidentally apply a relationship's own transform to what is still a primary column.
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Id", TargetColumn = "Id", Relationship = "Customer", Transform = "{{column}} + 1" },
+        };
+        var reference = SegmentScope.TransformAwareReference("Id", mappings, BracketDialect.Instance.QuoteIdentifier);
+
+        Assert.Equal("[Id]", reference("Id"));
+    }
+
+    [Fact]
+    public void TransformConsistentPredicate_MatchesWhatSourceProjectionWouldEmit()
+    {
+        // The actual bug this phase fixes: a segment predicate built from the raw reference would
+        // compare source-side bounds against a target column that stores the transformed value.
+        var mappings = new List<ColumnMapping> { new() { SourceColumn = "OrderId", TargetColumn = "OrderId", Transform = "{{column}} * 2" } };
+        var reference = SegmentScope.TransformAwareReference("OrderId", mappings, BracketDialect.Instance.QuoteIdentifier);
+        var binder = new RecordingBinder();
+
+        var scope = SegmentScope.Build(BracketDialect.Instance, binder, new RangeSegment("OrderId", "1", "1000"), Columns, reference: reference);
+
+        Assert.Equal("[OrderId] * 2 >= @segMin AND [OrderId] * 2 < @segMax", scope.Predicate);
+    }
 }

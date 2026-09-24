@@ -201,7 +201,7 @@ public sealed class ReconcileService(
                     "with it. Specify explicit list/range segments instead.");
 
             return await expanding.ExpandAutoSegmentsAsync(
-                connection, source, segments, mapping.SourceColumns, mapping.Name, cancellationToken);
+                connection, source, segments, mapping.SourceColumns, mapping.Name, mapping.ColumnMappings, cancellationToken);
         }
     }
 }

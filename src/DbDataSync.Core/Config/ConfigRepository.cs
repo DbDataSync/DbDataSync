@@ -327,13 +327,15 @@ public sealed class ConfigRepository
         EndpointResolution.Validate(task, mapping);
         ValidateHooks(mapping.Hooks);
         ConfigValidation.ValidateRelationships(mapping);
-        ConfigValidation.ValidateQuerySourceReader(mapping, PipelineResolution.Reader(task, mapping).Kind);
+        var primaryReader = PipelineResolution.Reader(task, mapping);
+        ConfigValidation.ValidateQuerySourceReader(mapping, primaryReader.Kind);
 
         // The mapping's own primary writer — computed once and reused below, both for the
         // already-existing historized-target check and for phase 129's Scd2-specific reconcile checks,
         // which need to know Kind *and* Options (a stated naturalKey) to validate a KeyReconcileScd2Close
         // pairing.
         var primaryWriter = PipelineResolution.Writer(task, mapping);
+        ConfigValidation.ValidateReconcileScopeColumn(mapping, primaryReader.Kind, primaryWriter.Kind, primaryReader.Options);
 
         // Same reasoning, one step further: a historizing writer pointed at its own source grows the
         // table on every pass, and finding out at run time means finding out after it has.

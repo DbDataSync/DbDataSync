@@ -1521,7 +1521,7 @@ public sealed class RunExecutor(
         // already loaded here, previously unused for this call — phase 167V.
         if (reader is ISegmentExpandingReader expanding)
             segments = await expanding.ExpandAutoSegmentsAsync(
-                sourceConnection, source, segments, mapping.SourceColumns, mapping.Name, cancellationToken);
+                sourceConnection, source, segments, mapping.SourceColumns, mapping.Name, mapping.ColumnMappings, cancellationToken);
 
         return [.. segments];
     }

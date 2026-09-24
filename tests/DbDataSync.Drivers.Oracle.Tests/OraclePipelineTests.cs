@@ -194,7 +194,7 @@ public sealed class OraclePipelineTests(OracleTestDatabase db) : IClassFixture<O
             """);
 
         var expanded = await _reader.ExpandAutoSegmentsAsync(
-            _source, Source(), [new AutoSegment("ID", 4)], Columns(), MappingName, CancellationToken.None);
+            _source, Source(), [new AutoSegment("ID", 4)], Columns(), MappingName, [], CancellationToken.None);
         Assert.Equal(4, expanded.Count);
 
         long total = 0;
