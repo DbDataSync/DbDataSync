@@ -3,5 +3,5 @@ screenshots/golden-path/04-replication-endpoints.png
 screenshots/golden-path/05-table-mapping-form.png
 screenshots/golden-path/07-live-run-in-progress.png
 screenshots/golden-path/10-config-history.png
-screenshots/golden-path/11-backfill-form.png
-screenshots/golden-path/13-run-history-with-backfill.png
+screenshots/golden-path/11-bulk-load-form.png
+screenshots/golden-path/13-run-history-with-bulk-load.png

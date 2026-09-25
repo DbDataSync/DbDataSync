@@ -37,24 +37,24 @@ cannot describe a different release than the one you have. It is there for every
 
    ![Config history — every save is an auto-commit](../screenshots/golden-path/10-config-history.png)
 
-## Backfilling a table
+## Bulk loading a table
 
 Incremental sync only applies changes made at the source. If the target drifts for some other
-reason — a bad deploy, a manual edit, a mapping that was wrong for a while — use a backfill instead.
-Go to **Runs → Backfill…**. It re-reads the source and makes the target match it.
+reason — a bad deploy, a manual edit, a mapping that was wrong for a while — use a bulk load instead.
+Go to **Runs → Bulk Load…**. It re-reads the source and makes the target match it.
 
-![Queuing a backfill](../screenshots/golden-path/11-backfill-form.png)
+![Queuing a bulk load](../screenshots/golden-path/11-bulk-load-form.png)
 
-A backfill applies to one table mapping, and optionally to just one segment of it: a list of values, a
+A bulk load applies to one table mapping, and optionally to just one segment of it: a list of values, a
 range, an even split of a column's range into buckets, or a custom segmenting strategy (below). Each
-segment runs as its own independently queued run. A backfill never advances the incremental watermark,
+segment runs as its own independently queued run. A bulk load never advances the incremental watermark,
 so it can run against a live, scheduled replication without disturbing the ongoing sync. It shows up
-in the same run history as the regular sync, tagged `BACKFILL`.
+in the same run history as the regular sync, tagged `BULKLOAD`.
 
-![A backfill run alongside the regular sync in run history](../screenshots/golden-path/13-run-history-with-backfill.png)
+![A bulk load run alongside the regular sync in run history](../screenshots/golden-path/13-run-history-with-bulk-load.png)
 
 Each mapping has a *Default reload segmenting* setting, in its own editor, that states how it divides
-for a reload. The Backfill form opens pre-filled with that default, and a scheduled `BatchReload` pass
+for a reload. The Bulk Load form opens pre-filled with that default, and a scheduled `BatchReload` pass
 uses it too. Leaving it empty means the whole table, unsegmented.
 
 ### Custom segmenting strategies
@@ -80,7 +80,7 @@ There are four ways to author one:
 - **C#** — a bound `ISegmentingStrategy`, handed both connections and the source's metadata.
 
 `label` names the segment in run history. `range_start`/`range_end` are half-open. `selected` decides
-which candidates start ticked in the Backfill checklist, and, for a mapping whose default is a
+which candidates start ticked in the Bulk Load checklist, and, for a mapping whose default is a
 strategy, which segments a scheduled pass reloads on its own. A strategy such as "the last three
 months" is re-evaluated against the current date every time it runs, so it needs no separate
 scheduling logic.
