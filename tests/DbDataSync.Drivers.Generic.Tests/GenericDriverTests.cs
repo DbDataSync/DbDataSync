@@ -181,7 +181,7 @@ public sealed class GenericDriverTests(GenericDriverTestDatabase db) : IClassFix
 
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "modified_at" };
         var first = await watermark.ReadChangesAsync(
-            connection, Source(), null, ReadIntent.InitialLoad, Mappings, "generic-watermark", Columns(), [], options, CancellationToken.None);
+            connection, Source(), null, ReadIntent.InitialLoad, Mappings, "generic-watermark", Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var rows = await CollectAsync(first.Rows);
 
         Assert.Single(rows);
@@ -195,7 +195,7 @@ public sealed class GenericDriverTests(GenericDriverTestDatabase db) : IClassFix
         }
 
         var second = await watermark.ReadChangesAsync(
-            connection, Source(), first.NewWatermark, ReadIntent.Changes, Mappings, "generic-watermark", Columns(), [], options, CancellationToken.None);
+            connection, Source(), first.NewWatermark, ReadIntent.Changes, Mappings, "generic-watermark", Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var secondRows = await CollectAsync(second.Rows);
 
         Assert.Equal(2, (int)Assert.Single(secondRows)["id"]!);
@@ -238,7 +238,7 @@ public sealed class GenericDriverTests(GenericDriverTestDatabase db) : IClassFix
         var options = new Dictionary<string, string>();
 
         var read = await reader.ReadChangesAsync(
-            source, Source(), null, ReadIntent.InitialLoad, Mappings, "generic-batch", Columns(), [], options, CancellationToken.None);
+            source, Source(), null, ReadIntent.InitialLoad, Mappings, "generic-batch", Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await staging.StageAsync(target, targetRef, read.Rows, Mappings, "generic-batch", Columns(), options, CancellationToken.None);
         try
         {

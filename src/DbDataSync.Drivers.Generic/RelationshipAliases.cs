@@ -17,13 +17,25 @@ namespace DbDataSync.Drivers.Generic;
 /// </summary>
 public static class RelationshipAliases
 {
+    /// <param name="additionalReferences">
+    /// Relationship names referenced by something other than a <see cref="ColumnMapping"/> — a
+    /// segment's or watermark's own <c>Relationship</c> field (phase 195S). A relationship used only to
+    /// scope or order a read, projecting no column at all, still needs a join and an alias rendered for
+    /// it; without this it would render no <c>JOIN</c> at all and the segment/watermark predicate would
+    /// reference an alias nothing declared. Nulls are ignored, so a caller can pass a segment's/
+    /// watermark's <c>Relationship</c> field straight through without checking it first.
+    /// </param>
     public static IReadOnlyDictionary<string, string> Assign(
-        IReadOnlyList<RelationshipConfig> relationships, IReadOnlyList<ColumnMapping> columnMappings)
+        IReadOnlyList<RelationshipConfig> relationships, IReadOnlyList<ColumnMapping> columnMappings,
+        params string?[] additionalReferences)
     {
         var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var mapping in columnMappings)
             if (mapping.Relationship is not null)
                 referenced.Add(mapping.Relationship);
+        foreach (var name in additionalReferences)
+            if (name is not null)
+                referenced.Add(name);
 
         var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var relationship in relationships)

@@ -136,7 +136,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
     };
 
     private Task<ReadResult> ReadAsync(string? watermark) =>
-        _reader.ReadChangesAsync(_connection, Source(), watermark, ReadIntent.InitialLoad, [], "mapping", [], [], Options(), CancellationToken.None);
+        _reader.ReadChangesAsync(_connection, Source(), watermark, ReadIntent.InitialLoad, [], "mapping", [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), Options(), CancellationToken.None);
 
     [Fact]
     public async Task ReadsInsertsUpdatesAndDeletesFromAnAuditTable()
@@ -218,7 +218,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
     {
         var ex = await Assert.ThrowsAsync<ScriptExecutionException>(() =>
             _reader.ReadChangesAsync(
-                _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None));
+                _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains(ScriptedQueryReader.ScriptOption, ex.Message);
     }
@@ -245,7 +245,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
 
         var options = new Dictionary<string, string> { [ScriptedQueryReader.ScriptOption] = "wrong-op" };
         var read = await _reader.ReadChangesAsync(
-            _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], [], options, CancellationToken.None);
+            _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping", [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
 
         var ex = await Assert.ThrowsAsync<ScriptExecutionException>(() => CollectAsync(read.Rows));
         Assert.Contains("NotThere", ex.Message);
@@ -278,7 +278,7 @@ public sealed class ScriptedQueryReaderTests(MsSqlTestDatabase db) : IClassFixtu
 
         var read = await reader.ReadChangesAsync(
             _connection, Source(), null, ReadIntent.InitialLoad, [], "mapping",
-            [new CachedColumn("Id", "int", false, true, false)], [], Options(), CancellationToken.None);
+            [new CachedColumn("Id", "int", false, true, false)], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), Options(), CancellationToken.None);
         var rows = await CollectAsync(read.Rows);
 
         // Reaching here at all is the proof: ThrowingTableCatalog would have failed the test otherwise.

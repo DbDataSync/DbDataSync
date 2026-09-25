@@ -115,6 +115,17 @@ public interface IChangeReader
     /// reader consumes it yet; see phase 187J (the reload readers) and phase 188J (the incremental
     /// readers) for the ones that will.
     /// </param>
+    /// <param name="relationshipColumns">
+    /// <see cref="TableMappingConfig.RelationshipColumns"/>, verbatim, keyed by
+    /// <see cref="RelationshipConfig.Name"/> (case-insensitively) — phase 195S. What
+    /// <paramref name="sourceColumns"/> is for a primary-sourced segment/watermark column, this is for
+    /// a relationship-sourced one: a reader that needs to type-bind a relationship column's range/list
+    /// bounds looks its metadata up here — <see cref="CachedMetadataLookup.RequireAll"/>/<c>RequireColumn</c>
+    /// against whichever relationship's list the segment/watermark actually names — and throws
+    /// <see cref="MetadataNotCachedException"/> if it's missing, the same cache-only rule as
+    /// <paramref name="sourceColumns"/> (phase 91) — never a live catalog call mid-run. Ignored by every
+    /// reader that does not support segmenting or watermarking by a relationship column.
+    /// </param>
     Task<ReadResult> ReadChangesAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
@@ -124,6 +135,7 @@ public interface IChangeReader
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyList<RelationshipConfig> relationships,
+        IReadOnlyDictionary<string, IReadOnlyList<CachedColumn>> relationshipColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken);
 }

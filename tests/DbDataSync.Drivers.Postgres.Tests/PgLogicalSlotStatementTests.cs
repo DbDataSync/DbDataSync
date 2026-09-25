@@ -128,7 +128,8 @@ public sealed class PgLogicalSlotStatementTests
                 new() { SourceColumn = "id", TargetColumn = "id" },
                 new() { SourceColumn = "name", TargetColumn = "name", Transform = "upper(name)" },
             ],
-            "orders-mapping", [], [], new Dictionary<string, string>(), CancellationToken.None));
+            "orders-mapping", [], [], new Dictionary<string, IReadOnlyList<CachedColumn>>(),
+            new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains("'name'", ex.Message);
         Assert.Contains("orders-mapping", ex.Message);

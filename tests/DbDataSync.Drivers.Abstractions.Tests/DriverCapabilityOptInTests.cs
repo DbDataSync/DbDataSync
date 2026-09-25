@@ -135,6 +135,7 @@ public sealed class DriverCapabilityOptInTests
             string mappingName,
             IReadOnlyList<CachedColumn> sourceColumns,
             IReadOnlyList<RelationshipConfig> relationships,
+            IReadOnlyDictionary<string, IReadOnlyList<CachedColumn>> relationshipColumns,
             IReadOnlyDictionary<string, string> options,
             CancellationToken cancellationToken) => throw new NotSupportedException();
     }
@@ -155,6 +156,7 @@ public sealed class DriverCapabilityOptInTests
             string mappingName,
             IReadOnlyList<CachedColumn> sourceColumns,
             IReadOnlyList<RelationshipConfig> relationships,
+            IReadOnlyDictionary<string, IReadOnlyList<CachedColumn>> relationshipColumns,
             IReadOnlyDictionary<string, string> options,
             CancellationToken cancellationToken) => throw new NotSupportedException();
     }

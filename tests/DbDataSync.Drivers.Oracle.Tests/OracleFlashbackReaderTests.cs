@@ -106,7 +106,7 @@ public sealed class OracleFlashbackReaderTests(OracleTestDatabase db) : IClassFi
         await ExecuteAsync($"DELETE FROM {TableName} WHERE id = 1");
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), start, ReadIntent.Changes, Mappings(), "flashback-probe", [], [],
+            _connection, Source(), start, ReadIntent.Changes, Mappings(), "flashback-probe", [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(),
             new Dictionary<string, string>(), CancellationToken.None);
         var rows = await CollectAsync(result.Rows);
 
@@ -130,7 +130,7 @@ public sealed class OracleFlashbackReaderTests(OracleTestDatabase db) : IClassFi
         await ExecuteAsync($"DELETE FROM {TableName} WHERE id = 9");
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), start, ReadIntent.Changes, Mappings(), "flashback-probe", [], [],
+            _connection, Source(), start, ReadIntent.Changes, Mappings(), "flashback-probe", [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(),
             new Dictionary<string, string>(), CancellationToken.None);
         var row = Assert.Single(await CollectAsync(result.Rows));
 
@@ -146,7 +146,7 @@ public sealed class OracleFlashbackReaderTests(OracleTestDatabase db) : IClassFi
 
         var result = await _reader.ReadChangesAsync(
             _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromLatest, Mappings(),
-            "flashback-probe", [], [], new Dictionary<string, string>(), CancellationToken.None);
+            "flashback-probe", [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(), CancellationToken.None);
 
         Assert.Empty(await CollectAsync(result.Rows));
         Assert.True(long.Parse(result.NewWatermark) > 0);
@@ -159,7 +159,7 @@ public sealed class OracleFlashbackReaderTests(OracleTestDatabase db) : IClassFi
         var start = (await capturing.CapturePositionAsync(_connection, Source(), new Dictionary<string, string>(), CancellationToken.None)).Position;
 
         var result = await _reader.ReadChangesAsync(
-            _connection, Source(), start, ReadIntent.Changes, Mappings(), "flashback-probe", [], [],
+            _connection, Source(), start, ReadIntent.Changes, Mappings(), "flashback-probe", [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(),
             new Dictionary<string, string>(), CancellationToken.None);
 
         Assert.Empty(await CollectAsync(result.Rows));

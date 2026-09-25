@@ -124,7 +124,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
 
         var read = await _reader.ReadChangesAsync(
             _sourceConnection, Source(sourceTable), previousWatermark: null, ReadIntent.InitialLoad, [], MappingName,
-            sourceColumns ?? SourceColumns(), [], options, CancellationToken.None);
+            sourceColumns ?? SourceColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await _staging.StageAsync(
             _targetConnection, Target(targetTable), read.Rows, columnMappings, MappingName, [], new Dictionary<string, string>(),
             CancellationToken.None);
@@ -362,7 +362,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
             """);
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(), previousWatermark: "999", ReadIntent.InitialLoad, [], "mapping", [], [], new Dictionary<string, string>(), CancellationToken.None);
+            _sourceConnection, Source(), previousWatermark: "999", ReadIntent.InitialLoad, [], "mapping", [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(), CancellationToken.None);
 
         var rows = new List<ChangeRow>();
         await foreach (var row in read.Rows)
@@ -387,7 +387,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         source.Filter = "Name = 'keep'";
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, source, null, ReadIntent.InitialLoad, [], "mapping", SourceColumns(), [],
+            _sourceConnection, source, null, ReadIntent.InitialLoad, [], "mapping", SourceColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(),
             SegmentOptions(new ListSegment("Region", ["EU"])), CancellationToken.None);
 
         var ids = new List<object?>();
@@ -460,7 +460,7 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
 
         var read = await _reader.ReadChangesAsync(
             _sourceConnection, Source(src), previousWatermark: null, ReadIntent.InitialLoad, mappings,
-            MappingName, [], relationships, new Dictionary<string, string>(), CancellationToken.None);
+            MappingName, [], relationships,new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(), CancellationToken.None);
 
         var byId = new Dictionary<int, string?>();
         await foreach (var row in read.Rows)

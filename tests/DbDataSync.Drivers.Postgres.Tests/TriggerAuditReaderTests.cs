@@ -91,7 +91,7 @@ public sealed class TriggerAuditReaderTests(PostgresTestDatabase db) : IClassFix
 
         return await _reader.ReadChangesAsync(
             _connection, Source(), watermark, ReadIntent.Changes,
-            [], MappingName, Columns(), [], options ?? new Dictionary<string, string>(),
+            [], MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options ?? new Dictionary<string, string>(),
             CancellationToken.None);
     }
 
@@ -252,7 +252,7 @@ public sealed class TriggerAuditReaderTests(PostgresTestDatabase db) : IClassFix
 
             return await _reader.ReadChangesAsync(
                 _connection, source, watermark, ReadIntent.Changes,
-                [], MappingName, compositeColumns, [], new Dictionary<string, string>(),
+                [], MappingName, compositeColumns, [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(),
                 CancellationToken.None);
         }
 

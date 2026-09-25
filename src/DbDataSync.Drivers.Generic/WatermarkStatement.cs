@@ -29,17 +29,32 @@ public static class WatermarkStatement
     /// <see cref="WatermarkReader"/>'s own <c>IPositionCapturing.CapturePositionAsync</c> path, which has
     /// no <c>ColumnMapping</c> list to consult — a named, documented gap, not an oversight.
     /// </para>
+    /// <para>
+    /// **Phase 195S**: <paramref name="relationships"/>/<paramref name="relationshipAliases"/> add one
+    /// <c>LEFT JOIN</c> per relationship actually referenced, mirroring <see cref="BuildRead"/>'s own
+    /// treatment — needed here now that the watermark column itself can be relationship-sourced.
+    /// <paramref name="reference"/> overrides how <paramref name="watermarkColumn"/> is written; the
+    /// caller resolves it (bare, <c>base.</c>-qualified, or a relationship's own join alias) and this
+    /// method only ever calls it once, exactly as <see cref="BuildRead"/>'s own override already does.
+    /// Also not applied by <c>CapturePositionAsync</c>, the same named gap as <paramref name="transform"/>
+    /// above.
+    /// </para>
     /// </summary>
     public static string BuildMaxWatermark(
         SqlDialect dialect, string schema, string table, string? query, string watermarkColumn, string? filter,
-        string? transform = null)
+        string? transform = null,
+        IReadOnlyList<RelationshipConfig>? relationships = null,
+        IReadOnlyDictionary<string, string>? relationshipAliases = null,
+        Func<string, string>? reference = null)
     {
+        var joins = RelationshipJoins.Render(dialect, relationships, relationshipAliases);
+        var needsAlias = joins.Length > 0 || query is not null;
         var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
-        var fromTable = query is not null ? $"{sourceExpression} AS base" : sourceExpression;
-        Func<string, string> reference = query is not null ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
+        var fromTable = needsAlias ? $"{sourceExpression} AS base" : sourceExpression;
+        reference ??= needsAlias ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
         var quotedColumn = SourceProjection.RenderExpression(watermarkColumn, transform, reference);
         var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
-        return $"SELECT MAX({quotedColumn}) FROM {fromTable}{filterClause}";
+        return $"SELECT MAX({quotedColumn}) FROM {fromTable}{joins}{filterClause}";
     }
 
     /// <summary>
@@ -80,19 +95,27 @@ public static class WatermarkStatement
     /// reader in the first place — <c>ConfigValidation.ValidateQuerySourceReader</c> rejects that
     /// combination outright at save.
     /// </para>
+    /// <para>
+    /// **Phase 195S**: <paramref name="reference"/>, when supplied, overrides how
+    /// <paramref name="watermarkColumn"/> is written in place of the bare/<c>base.</c>-qualified default —
+    /// a relationship-sourced watermark column resolves to its own join alias instead. The caller passes
+    /// the fully resolved reference; this method still applies <paramref name="transform"/> on top of it,
+    /// exactly as it always has.
+    /// </para>
     /// </summary>
     public static string BuildRead(
         SqlDialect dialect, string schema, string table, string? query, string watermarkColumn, bool hasPreviousWatermark,
         string? filter, string projection = "*", bool bounded = false,
         IReadOnlyList<RelationshipConfig>? relationships = null,
         IReadOnlyDictionary<string, string>? relationshipAliases = null,
-        string? transform = null)
+        string? transform = null,
+        Func<string, string>? reference = null)
     {
         var joins = RelationshipJoins.Render(dialect, relationships, relationshipAliases);
         var needsAlias = joins.Length > 0 || query is not null;
         var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
         var fromTable = needsAlias ? $"{sourceExpression} AS base" : sourceExpression;
-        Func<string, string> reference = needsAlias ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
+        reference ??= needsAlias ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
         var quotedColumn = SourceProjection.RenderExpression(watermarkColumn, transform, reference);
         var predicate = hasPreviousWatermark
             ? $"{quotedColumn} > {dialect.ParameterReference(PreviousWatermarkParameter)}"

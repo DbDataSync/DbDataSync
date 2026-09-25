@@ -38,14 +38,15 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
     /// rest. Stated so the UI can say so rather than infer it.</summary>
     public bool DetectsDeletes => false;
 
-    /// <summary>The column a segment predicate scopes, or null for a full/no segment — <see
-    /// cref="AutoSegment"/> never reaches this reader unexpanded (see <see cref="ExpandAutoSegmentsAsync"/>),
-    /// so it isn't a case here.</summary>
-    private static string? SegmentColumnOf(BatchReloadSegment? segment) => segment switch
+    /// <summary>The column a segment predicate scopes (and, phase 195S, the relationship it's on — null
+    /// for the primary source), or (null, null) for a full/no segment — <see cref="AutoSegment"/> never
+    /// reaches this reader unexpanded (see <see cref="ExpandAutoSegmentsAsync"/>), so it isn't a case
+    /// here.</summary>
+    private static (string? Column, string? Relationship) SegmentColumnOf(BatchReloadSegment? segment) => segment switch
     {
-        ListSegment list => list.Column,
-        RangeSegment range => range.Column,
-        _ => null,
+        ListSegment list => (list.Column, list.Relationship),
+        RangeSegment range => (range.Column, range.Relationship),
+        _ => (null, null),
     };
 
     // No IReadIntentDeclaring: this reader has no incremental mode at all — every pass reloads,
@@ -65,6 +66,7 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyList<RelationshipConfig> relationships,
+        IReadOnlyDictionary<string, IReadOnlyList<CachedColumn>> relationshipColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {
@@ -78,26 +80,57 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         var canWrap = source.Query is null || source.AllowSubquery;
         var effectiveRelationships = canWrap ? relationships : [];
         var effectiveSegment = canWrap ? segment : null;
+        var (segmentColumn, segmentRelationship) = SegmentColumnOf(effectiveSegment);
 
-        var relationshipAliases = RelationshipAliases.Assign(effectiveRelationships, columnMappings);
+        // Phase 195S: a segment used only to scope — projecting no column of its own — still needs its
+        // relationship joined and aliased, or the predicate below would reference an alias nothing
+        // declared.
+        var relationshipAliases = RelationshipAliases.Assign(effectiveRelationships, columnMappings, segmentRelationship);
         var wrapForFeatures = effectiveSegment is not (null or FullSegment) ||
             columnMappings.Any(m => !string.IsNullOrWhiteSpace(m.Transform));
         var willWrap = source.Query is not null && (wrapForFeatures || relationshipAliases.Count > 0);
         var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases, sourceIsQuery: willWrap);
-        var segmentReference = SegmentColumnOf(effectiveSegment) is { } segmentColumn
-            ? SegmentScope.TransformAwareReference(segmentColumn, columnMappings, primaryReference ?? dialect.QuoteIdentifier)
-            : primaryReference;
+        var segmentReference = segmentColumn is null
+            ? primaryReference
+            : SegmentScope.TransformAwareReference(
+                segmentColumn, columnMappings,
+                segmentRelationship is null
+                    ? primaryReference ?? dialect.QuoteIdentifier
+                    : SourceProjection.ReferenceFor(
+                        dialect, segmentRelationship, dialect.QuoteIdentifier, relationshipAliases,
+                        $"Segment column '{segmentColumn}'"),
+                segmentRelationship);
 
         // Cache-only as of phase 91 — ExpandAutoSegmentsAsync (a different method entirely) is the one
         // place in this reader that still asks the live catalog, because it samples the column's actual
         // value distribution, which no cache could substitute for. This read of a segment's *shape* has
         // no such excuse. Resolved only for a segment that actually names a column: SegmentScope.Build
         // never consults it for null/FullSegment, so a plain reload shouldn't have to pay for a
-        // populated cache it doesn't need.
-        IReadOnlyList<ColumnMetadata> columns = effectiveSegment is ListSegment or RangeSegment
-            ? sourceColumns.RequireAll(mappingName, "source")
-            : [];
-        var scope = SegmentScope.Build(dialect, binder, effectiveSegment, columns, reference: segmentReference);
+        // populated cache it doesn't need. Phase 195S: a relationship-sourced segment resolves its
+        // column's type from that relationship's own cache instead of the primary source's.
+        IReadOnlyList<ColumnMetadata> columns = [];
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnMetadata>>? relationshipColumnMetadata = null;
+        if (effectiveSegment is ListSegment or RangeSegment)
+        {
+            if (segmentRelationship is null)
+            {
+                columns = sourceColumns.RequireAll(mappingName, "source");
+            }
+            else
+            {
+                var side = $"relationship '{segmentRelationship}'";
+                var cached = relationshipColumns.TryGetValue(segmentRelationship, out var found)
+                    ? found
+                    : throw new MetadataNotCachedException(mappingName, side);
+                relationshipColumnMetadata = new Dictionary<string, IReadOnlyList<ColumnMetadata>>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [segmentRelationship] = cached.RequireAll(mappingName, side),
+                };
+            }
+        }
+        var scope = SegmentScope.Build(
+            dialect, binder, effectiveSegment, columns, reference: segmentReference,
+            relationshipColumns: relationshipColumnMetadata);
 
         var projection = SourceProjection.Render(dialect, columnMappings, primaryReference, relationshipAliases);
         var rows = ReadRowsAsync(
@@ -126,19 +159,30 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         var canWrap = source.Query is null || source.AllowSubquery;
         var effectiveRelationships = canWrap ? request.Relationships : [];
         var effectiveSegment = canWrap ? segment : null;
+        var (segmentColumn, segmentRelationship) = SegmentColumnOf(effectiveSegment);
 
-        var relationshipAliases = RelationshipAliases.Assign(effectiveRelationships, request.ColumnMappings);
+        var relationshipAliases = RelationshipAliases.Assign(effectiveRelationships, request.ColumnMappings, segmentRelationship);
         var wrapForFeatures = effectiveSegment is not (null or FullSegment) ||
             request.ColumnMappings.Any(m => !string.IsNullOrWhiteSpace(m.Transform));
         var willWrap = source.Query is not null && (wrapForFeatures || relationshipAliases.Count > 0);
         var primaryReference = RelationshipAliases.PrimaryReference(dialect, relationshipAliases, sourceIsQuery: willWrap);
-        var segmentReference = SegmentColumnOf(effectiveSegment) is { } segmentColumn
-            ? SegmentScope.TransformAwareReference(segmentColumn, request.ColumnMappings, primaryReference ?? dialect.QuoteIdentifier)
-            : primaryReference;
+        var segmentReference = segmentColumn is null
+            ? primaryReference
+            : SegmentScope.TransformAwareReference(
+                segmentColumn, request.ColumnMappings,
+                segmentRelationship is null
+                    ? primaryReference ?? dialect.QuoteIdentifier
+                    : SourceProjection.ReferenceFor(
+                        dialect, segmentRelationship, dialect.QuoteIdentifier, relationshipAliases,
+                        $"Segment column '{segmentColumn}'"),
+                segmentRelationship);
 
-        // request.SourceColumns — phase 167V. Resolved once by PreviewService through ScriptedMetadata
-        // (so a bound metadataProvider script is honoured), not a live catalog.GetColumnsAsync call here.
-        var scope = SegmentScope.Build(dialect, binder, effectiveSegment, request.SourceColumns, reference: segmentReference);
+        // request.SourceColumns/RelationshipColumns — phase 167V/195S. Resolved once by PreviewService
+        // through ScriptedMetadata (so a bound metadataProvider script is honoured), not a live
+        // catalog.GetColumnsAsync call here.
+        var scope = SegmentScope.Build(
+            dialect, binder, effectiveSegment, request.SourceColumns, reference: segmentReference,
+            relationshipColumns: request.RelationshipColumns);
 
         return
         [
@@ -303,8 +347,7 @@ public static class BatchReloadStatement
     /// **Phase 191S**: <paramref name="query"/>, when set, always wraps — unlike <see cref="BuildRead"/>,
     /// there is no "run the operator's own statement unwrapped" alternative for an aggregate: the whole
     /// point of this statement is the <c>MIN</c>/<c>MAX</c> it computes, which is not something a raw
-    /// passthrough could produce. Relationship joins are not threaded through this statement yet — segmenting
-    /// (auto or otherwise) by a relationship column is deferred, tracked in phase 195S.
+    /// passthrough could produce.
     /// </para>
     /// <para>
     /// **Phase 192S**: <paramref name="transform"/>, when the auto-segmented column also carries a
@@ -312,16 +355,29 @@ public static class BatchReloadStatement
     /// stores — bucket boundaries computed against the raw column would land in the wrong value-space
     /// once <see cref="SourceProjection"/> starts projecting the transformed one.
     /// </para>
+    /// <para>
+    /// **Phase 195S**: <paramref name="relationships"/>/<paramref name="relationshipAliases"/> add one
+    /// <c>LEFT JOIN</c> per relationship actually referenced, mirroring <see cref="BuildRead"/>'s own
+    /// treatment — needed now that auto-segmenting can sample a relationship's own column.
+    /// <paramref name="reference"/> overrides how <paramref name="column"/> is written; the caller
+    /// resolves it (bare, <c>base.</c>-qualified, or a relationship's own join alias) and this method
+    /// only ever calls it once, exactly as <see cref="BuildRead"/>'s own override does.
+    /// </para>
     /// </summary>
     public static string BuildRange(
         SqlDialect dialect, string schema, string table, string? query, string column, string? filter,
-        string? transform = null)
+        string? transform = null,
+        IReadOnlyList<RelationshipConfig>? relationships = null,
+        IReadOnlyDictionary<string, string>? relationshipAliases = null,
+        Func<string, string>? reference = null)
     {
+        var joins = RelationshipJoins.Render(dialect, relationships, relationshipAliases);
+        var needsAlias = joins.Length > 0 || query is not null;
         var sourceExpression = query is not null ? $"({query})" : dialect.QualifyTable(schema, table);
-        var fromTable = query is not null ? $"{sourceExpression} AS base" : sourceExpression;
-        Func<string, string> reference = query is not null ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
+        var fromTable = needsAlias ? $"{sourceExpression} AS base" : sourceExpression;
+        reference ??= needsAlias ? c => $"base.{dialect.QuoteIdentifier(c)}" : dialect.QuoteIdentifier;
         var quoted = SourceProjection.RenderExpression(column, transform, reference);
         var filterClause = string.IsNullOrWhiteSpace(filter) ? "" : $" WHERE {filter}";
-        return $"SELECT MIN({quoted}), MAX({quoted}) FROM {fromTable}{filterClause}";
+        return $"SELECT MIN({quoted}), MAX({quoted}) FROM {fromTable}{joins}{filterClause}";
     }
 }

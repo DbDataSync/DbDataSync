@@ -84,6 +84,11 @@ public sealed record GeneratedColumnExpression(string Column, string Expression)
 /// to show the real statement it would run, joins included, so it needs the same input the real read
 /// does. Ignored by every non-reader implementer (staging providers, writers) and by every reader that
 /// doesn't support relationship joins.</param>
+/// <param name="RelationshipColumns">As <paramref name="SourceColumns"/>, keyed by
+/// <see cref="RelationshipConfig.Name"/> (case-insensitively) — phase 195S, the same input
+/// <see cref="IChangeReader.ReadChangesAsync"/>'s own <c>relationshipColumns</c> parameter receives. A
+/// reader that type-binds a relationship-sourced segment/watermark column's bounds reads this instead
+/// of asking its own <c>ITableCatalog</c>.</param>
 public sealed record PreviewRequest(
     DbConnection Connection,
     SourceTableRef Source,
@@ -93,7 +98,8 @@ public sealed record PreviewRequest(
     string? PreviousWatermark,
     IReadOnlyList<ColumnMetadata> SourceColumns,
     IReadOnlyList<ColumnMetadata> TargetColumns,
-    IReadOnlyList<RelationshipConfig> Relationships);
+    IReadOnlyList<RelationshipConfig> Relationships,
+    IReadOnlyDictionary<string, IReadOnlyList<ColumnMetadata>> RelationshipColumns);
 
 /// <summary>
 /// A reader, staging provider or writer that can say what it would run without running it.

@@ -85,7 +85,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
 
         return await _reader.ReadChangesAsync(
             _connection, Source(), watermark, ReadIntent.Changes,
-            [], MappingName, Columns(), [], options ?? new Dictionary<string, string>(),
+            [], MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options ?? new Dictionary<string, string>(),
             CancellationToken.None);
     }
 
@@ -278,7 +278,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
 
         var earliest = await _reader.ReadChangesAsync(
             _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromEarliest,
-            [], MappingName, Columns(), [], options, CancellationToken.None);
+            [], MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var earliestRows = await CollectAsync(earliest.Rows);
 
         Assert.Equal(2, earliestRows.Count);
@@ -304,7 +304,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
 
         var result = await _reader.ReadChangesAsync(
             _connection, Source(), previousWatermark: null, ReadIntent.ChangesFromLatest,
-            [], MappingName, Columns(), [], new Dictionary<string, string>(), CancellationToken.None);
+            [], MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(), CancellationToken.None);
         Assert.Empty(await CollectAsync(result.Rows));
 
         // A pass reading from the adopted position afterwards finds nothing behind it.
@@ -361,7 +361,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             var result = await _reader.ReadChangesAsync(
-                _connection, source, "0", ReadIntent.Changes, [], MappingName, keylessColumns, [], new Dictionary<string, string>(),
+                _connection, source, "0", ReadIntent.Changes, [], MappingName, keylessColumns, [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(),
                 CancellationToken.None);
             await CollectAsync(result.Rows);
         });
@@ -383,7 +383,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
         };
 
         var problem = await Assert.ThrowsAsync<InvalidOperationException>(() => _reader.ReadChangesAsync(
-            _connection, source, null, ReadIntent.InitialLoad, [], MappingName, [], [], new Dictionary<string, string>(), CancellationToken.None));
+            _connection, source, null, ReadIntent.InitialLoad, [], MappingName, [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(), CancellationToken.None));
 
         Assert.Contains("Setup card", problem.Message);
     }
@@ -407,7 +407,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
 
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
         var result = await reader.ReadChangesAsync(
-            _connection, Source(), start, ReadIntent.Changes, [], MappingName, Columns(), [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), start, ReadIntent.Changes, [], MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(), CancellationToken.None);
 
         // The key/non-key split is read lazily, as part of enumerating the row stream — so reaching a
         // row at all is the proof that it came from Columns() rather than ThrowingTableCatalog.
@@ -425,7 +425,7 @@ public sealed class TriggerAuditReaderTests(MsSqlTestDatabase db) : IClassFixtur
 
         await ExecuteAsync($"INSERT INTO dbo.[{_tableName}] (Id, Name) VALUES (2, 'Bob');");
         var result = await reader.ReadChangesAsync(
-            _connection, Source(), start, ReadIntent.Changes, [], MappingName, [], [], new Dictionary<string, string>(), CancellationToken.None);
+            _connection, Source(), start, ReadIntent.Changes, [], MappingName, [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), new Dictionary<string, string>(), CancellationToken.None);
 
         // MetadataNotCachedException, not ThrowingTableCatalog's InvalidOperationException — the empty
         // cache fails loudly on its own, before any live query, exactly as it does with a populated one.

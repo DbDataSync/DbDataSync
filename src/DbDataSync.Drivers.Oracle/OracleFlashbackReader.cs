@@ -85,6 +85,7 @@ public sealed class OracleFlashbackReader(OracleDialect dialect)
         string mappingName,
         IReadOnlyList<CachedColumn> sourceColumns,
         IReadOnlyList<RelationshipConfig> relationships,
+        IReadOnlyDictionary<string, IReadOnlyList<CachedColumn>> relationshipColumns,
         IReadOnlyDictionary<string, string> options,
         CancellationToken cancellationToken)
     {

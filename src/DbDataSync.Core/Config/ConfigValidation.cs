@@ -414,24 +414,40 @@ public static class ConfigValidation
             ("DeleteInsert" or "KeyReconcileDelete" or "KeyReconcileScd2Close" or "MsSqlMergeReconcile" or "MsSqlDeleteInsert"))
             return;
 
-        var column = readerKind == "Watermark"
-            ? readerOptions.GetValueOrDefault("watermarkColumn")
-            : SegmentSerializer.ReadOptional(readerOptions) switch
+        // Phase 195S: a segment or watermark can now name a relationship's own column instead of the
+        // primary source's — the mapped-column check below has to match on that same relationship, or a
+        // relationship-sourced column would either false-negative against an unrelated primary mapping
+        // sharing its name, or false-positive as "mapped" when it isn't.
+        string? column;
+        string? relationship;
+        if (readerKind == "Watermark")
+        {
+            column = readerOptions.GetValueOrDefault("watermarkColumn");
+            relationship = readerOptions.GetValueOrDefault("watermarkRelationship");
+            if (string.IsNullOrWhiteSpace(relationship))
+                relationship = null;
+        }
+        else
+        {
+            (column, relationship) = SegmentSerializer.ReadOptional(readerOptions) switch
             {
-                ListSegment list => list.Column,
-                RangeSegment range => range.Column,
-                AutoSegment auto => auto.Column,
-                _ => null,
+                ListSegment list => (list.Column, list.Relationship),
+                RangeSegment range => (range.Column, range.Relationship),
+                AutoSegment auto => (auto.Column, auto.Relationship),
+                _ => (null, null),
             };
+        }
 
         if (column is null)
             return;
 
         var mapped = mapping.ColumnMappings.Any(m =>
-            m.Relationship is null && string.Equals(m.SourceColumn, column, StringComparison.OrdinalIgnoreCase));
+            string.Equals(m.Relationship, relationship, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(m.SourceColumn, column, StringComparison.OrdinalIgnoreCase));
         if (!mapped)
             throw new ConfigValidationException(
-                $"Table mapping '{mapping.Name}' reads with '{readerKind}' scoped by column '{column}', and " +
+                $"Table mapping '{mapping.Name}' reads with '{readerKind}' scoped by column '{column}'" +
+                (relationship is null ? "" : $" on relationship '{relationship}'") + ", and " +
                 $"writes with the reconciling writer '{writerKind}'. A reconciling writer needs a real target " +
                 $"column to bind its delete-scope predicate against, so '{column}' must also have a column " +
                 "mapping — add one, or choose a non-reconciling writer.");

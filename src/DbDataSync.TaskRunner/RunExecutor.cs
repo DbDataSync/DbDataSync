@@ -913,7 +913,11 @@ public sealed class RunExecutor(
                 {
                     read = await reader.ReadChangesAsync(
                         sourceConnection, source, previousWatermark, intent, columnMappings, mapping.Name,
-                        mapping.SourceColumns, mapping.Relationships, readerOptions, cancellationToken);
+                        mapping.SourceColumns,
+                        mapping.Relationships,
+                        mapping.RelationshipColumns.ToDictionary(
+                            kv => kv.Key, IReadOnlyList<CachedColumn> (kv) => kv.Value, StringComparer.OrdinalIgnoreCase),
+                        readerOptions, cancellationToken);
                 }
                 catch (PositionExpiredException)
                 {

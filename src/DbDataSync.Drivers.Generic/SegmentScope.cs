@@ -42,19 +42,37 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
     /// </para>
     /// </summary>
     /// <param name="columnMappings">
-    /// Supplied by writers, omitted by readers. A segment names a column on the *source* table, but a
-    /// writer scopes the *target* — and a mapping is free to rename a column across the two. Passing
-    /// the mappings translates the segment's column name to its target-side counterpart, so a reload
-    /// segmented on a renamed column scopes the same rows on both sides instead of failing to find the
-    /// column (or, worse, finding an unrelated target column that happens to share the source name).
+    /// Supplied by writers, omitted by readers — the dispatch this method uses to tell which is calling.
+    /// A segment names a column on the *source* table, but a writer scopes the *target* — and a mapping
+    /// is free to rename a column across the two. Passing the mappings translates the segment's column
+    /// name to its target-side counterpart (matched on <see cref="ColumnMapping.Relationship"/> too, so a
+    /// relationship's own column and a same-named primary one are never conflated — phase 195S), so a
+    /// reload segmented on a renamed column scopes the same rows on both sides instead of failing to find
+    /// the column (or, worse, finding an unrelated target column that happens to share the source name).
+    /// A reader never translates — its segment already names a real column verbatim, on the primary
+    /// source or, phase 195S, on a declared relationship — so it omits this and relies on
+    /// <paramref name="relationshipColumns"/> instead when the segment is relationship-sourced.
     /// </param>
     /// <param name="reference">
-    /// How the segmented column is written *in this statement* — bare <c>dialect.QuoteIdentifier</c> by
-    /// default. A reader that joins the primary table under an alias (phase 187J's relationship joins)
-    /// passes something that produces <c>base.[Id]</c> instead: segmenting always names a column on the
-    /// primary table, and once a joined table is present, an unqualified reference is ambiguous the
-    /// moment the joined table happens to share that column's name — "Id" on both sides being the
-    /// obvious, common case.
+    /// How the segmented column is written *in this statement*, fully resolved by the caller — bare
+    /// <c>dialect.QuoteIdentifier</c> by default. A reader that joins the primary table under an alias
+    /// (phase 187J's relationship joins), that has a transform to apply (phase 192S), or that segments by
+    /// a relationship's own column (phase 195S) resolves and composes all of that itself — via
+    /// <see cref="TransformAwareReference"/> composed with <see cref="SourceProjection.ReferenceFor"/> —
+    /// before calling in; this method only ever calls the result once per bound. A writer never passes
+    /// this at all: its predicate scopes the target's own real column, which needs none of the above.
+    /// </param>
+    /// <param name="relationshipColumns">
+    /// One column list per declared relationship, keyed by <see cref="RelationshipConfig.Name"/>
+    /// (ordinal-insensitive) — phase 195S, consulted instead of <paramref name="columns"/> for a segment
+    /// whose own <c>Relationship</c> field names one, when reading (<paramref name="columnMappings"/> is
+    /// null — see its own doc comment). Never consulted when writing: a writer's target has no
+    /// relationships of its own, and the segment's relationship-sourced column has already been
+    /// translated to a real target column by the time it gets there. Omitted (or missing the named
+    /// relationship) while reading is a caller bug, not an operator-facing gap — the reader is expected
+    /// to have already required that relationship's cache non-empty
+    /// (<see cref="CachedMetadataLookup.RequireAll"/>) before calling in, the same way it already does
+    /// for <paramref name="columns"/>.
     /// </param>
     public static SegmentScope Build(
         SqlDialect dialect,
@@ -62,12 +80,15 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
         BatchReloadSegment? segment,
         IReadOnlyList<ColumnMetadata> columns,
         IReadOnlyList<ColumnMapping>? columnMappings = null,
-        Func<string, string>? reference = null) =>
+        Func<string, string>? reference = null,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnMetadata>>? relationshipColumns = null) =>
         segment switch
         {
             null or FullSegment => All,
-            ListSegment list => BuildList(dialect, binder, list, ResolveColumn(list.Column, columns, columnMappings), reference),
-            RangeSegment range => BuildRange(dialect, binder, range, ResolveColumn(range.Column, columns, columnMappings), reference),
+            ListSegment list => BuildList(dialect, binder, list,
+                ResolveColumn(list.Column, list.Relationship, columns, columnMappings, relationshipColumns), reference),
+            RangeSegment range => BuildRange(dialect, binder, range,
+                ResolveColumn(range.Column, range.Relationship, columns, columnMappings, relationshipColumns), reference),
             AutoSegment auto => throw new InvalidOperationException(
                 $"Auto segment on '{auto.Column}' reached execution unexpanded. Auto segments must be " +
                 "expanded into concrete ranges (ISegmentExpandingReader.ExpandAutoSegmentsAsync) when " +
@@ -117,9 +138,10 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
     }
 
     /// <summary>
-    /// Wraps <paramref name="reference"/> so that if <paramref name="columnName"/> also happens to be an
-    /// (unqualified) <see cref="ColumnMapping"/> carrying a <see cref="ColumnMapping.Transform"/>, the
-    /// segment or watermark predicate renders through that transform too — exactly the expression
+    /// Wraps <paramref name="reference"/> so that if <paramref name="columnName"/> (on
+    /// <paramref name="relationship"/>, or the primary source when it's null) also happens to be a
+    /// <see cref="ColumnMapping"/> carrying a <see cref="ColumnMapping.Transform"/>, the segment or
+    /// watermark predicate renders through that transform too — exactly the expression
     /// <see cref="SourceProjection.Render"/> would emit for that column. This is what keeps a source-side
     /// predicate and the target's already-*written* value agreeing on what "the column" means: the target
     /// stores the transformed value, so a predicate comparing the raw one would silently compare two
@@ -127,32 +149,64 @@ public sealed record SegmentScope(string Predicate, IReadOnlyList<DbParameter> P
     /// reuses these bounds verbatim against the target, which is correct once the source filters in the
     /// same space the target stores. See phase 192S.
     /// <para>
-    /// Only ever matches a *primary*-sourced <see cref="ColumnMapping"/> (<see
-    /// cref="ColumnMapping.Relationship"/> null) — a segment or watermark naming a relationship's own
-    /// column is a distinct, larger feature (deferred; see
-    /// <c>architecture/implementation/todo/phase-195S-segmenting-and-watermarking-by-relationship-columns.md</c>),
-    /// not something this method guesses at.
+    /// **Phase 195S**: <paramref name="relationship"/> generalizes what used to only ever match a
+    /// primary-sourced <see cref="ColumnMapping"/> — a segment or watermark naming a relationship's own
+    /// column now looks for a mapping sharing *that* relationship instead of none at all.
     /// </para>
     /// </summary>
     public static Func<string, string> TransformAwareReference(
-        string columnName, IReadOnlyList<ColumnMapping>? columnMappings, Func<string, string> reference)
+        string columnName, IReadOnlyList<ColumnMapping>? columnMappings, Func<string, string> reference,
+        string? relationship = null)
     {
         var transform = columnMappings?.FirstOrDefault(m =>
-            m.Relationship is null && string.Equals(m.SourceColumn, columnName, StringComparison.OrdinalIgnoreCase))?.Transform;
+            string.Equals(m.Relationship, relationship, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(m.SourceColumn, columnName, StringComparison.OrdinalIgnoreCase))?.Transform;
 
         return transform is null ? reference : name => SourceProjection.RenderExpression(name, transform, reference);
     }
 
     private static ColumnMetadata ResolveColumn(
-        string columnName, IReadOnlyList<ColumnMetadata> columns, IReadOnlyList<ColumnMapping>? columnMappings)
+        string columnName, string? relationship, IReadOnlyList<ColumnMetadata> columns,
+        IReadOnlyList<ColumnMapping>? columnMappings,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnMetadata>>? relationshipColumns)
     {
-        var resolvedName = columnMappings?
-            .FirstOrDefault(m => string.Equals(m.SourceColumn, columnName, StringComparison.OrdinalIgnoreCase))?
-            .TargetColumn ?? columnName;
+        // Writer mode: translate the segment's source-side name (relationship included, so a
+        // relationship's own column is never conflated with a same-named primary one) to its
+        // target-side counterpart, then look *that* up in the target's own single cache — a
+        // relationship-sourced segment reaching a writer has already been written as a real target
+        // column by the time it gets there (phase 192S's "no join or transform needed on the target"
+        // ruling), so relationshipColumns is never consulted here.
+        if (columnMappings is not null)
+        {
+            var resolvedName = columnMappings
+                .FirstOrDefault(m => string.Equals(m.Relationship, relationship, StringComparison.OrdinalIgnoreCase) &&
+                                      string.Equals(m.SourceColumn, columnName, StringComparison.OrdinalIgnoreCase))?
+                .TargetColumn ?? columnName;
 
-        return columns.FirstOrDefault(c => string.Equals(c.Name, resolvedName, StringComparison.OrdinalIgnoreCase))
+            return columns.FirstOrDefault(c => string.Equals(c.Name, resolvedName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException(
+                    $"Segment column '{resolvedName}' was not found (available: {string.Join(", ", columns.Select(c => c.Name))}).");
+        }
+
+        // Reader mode: the segment names a real column directly — on the primary source, or, phase
+        // 195S, on a declared relationship — with no translation involved.
+        if (relationship is null)
+            return columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException(
+                    $"Segment column '{columnName}' was not found (available: {string.Join(", ", columns.Select(c => c.Name))}).");
+
+        var candidates = relationshipColumns is not null && relationshipColumns.TryGetValue(relationship, out var found)
+            ? found
+            : throw new InvalidOperationException(
+                $"Segment/watermark column '{columnName}' names relationship '{relationship}', but no " +
+                "cached column metadata was supplied for it — the caller is expected to have required " +
+                "that relationship's cache non-empty before calling in, the same way it already does " +
+                "for the primary source.");
+
+        return candidates.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException(
-                $"Segment column '{resolvedName}' was not found (available: {string.Join(", ", columns.Select(c => c.Name))}).");
+                $"Segment/watermark column '{columnName}' was not found on relationship '{relationship}' " +
+                $"(available: {string.Join(", ", candidates.Select(c => c.Name))}).");
     }
 }
 

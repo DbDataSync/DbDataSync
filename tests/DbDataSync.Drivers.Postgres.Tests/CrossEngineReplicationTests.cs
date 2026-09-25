@@ -190,7 +190,7 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         var options = new Dictionary<string, string>();
 
         var read = await source.Reader.ReadChangesAsync(
-            _mssql, MsSqlSource(), null, ReadIntent.InitialLoad, Mappings, MappingName, MsSqlColumns(), [], options, CancellationToken.None);
+            _mssql, MsSqlSource(), null, ReadIntent.InitialLoad, Mappings, MappingName, MsSqlColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await target.Staging.StageAsync(
             _pg, PgTarget(), read.Rows, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
         var written = await target.Writer.ApplyAsync(
@@ -216,7 +216,7 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         var options = new Dictionary<string, string>();
 
         var read = await source.Reader.ReadChangesAsync(
-            _pg, PgSource(), null, ReadIntent.InitialLoad, Mappings, MappingName, PgColumns(), [], options, CancellationToken.None);
+            _pg, PgSource(), null, ReadIntent.InitialLoad, Mappings, MappingName, PgColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await target.Staging.StageAsync(
             _mssql, MsSqlTarget(), read.Rows, Mappings, MappingName, MsSqlColumns(), options, CancellationToken.None);
         var written = await target.Writer.ApplyAsync(
@@ -240,7 +240,7 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "modified_at" };
 
         var first = await source.Watermark.ReadChangesAsync(
-            _mssql, MsSqlSource(), null, ReadIntent.InitialLoad, Mappings, MappingName, MsSqlColumns(), [], options, CancellationToken.None);
+            _mssql, MsSqlSource(), null, ReadIntent.InitialLoad, Mappings, MappingName, MsSqlColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await target.Staging.StageAsync(
             _pg, PgTarget(), first.Rows, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
         await target.Writer.ApplyAsync(_pg, PgTarget(), staged, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
@@ -253,7 +253,7 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         await ExecAsync(_mssql, $"INSERT INTO dbo.[{_table}] VALUES (4, 'Dave', 7.77, '2026-04-01T08:00:00.250');");
 
         var second = await source.Watermark.ReadChangesAsync(
-            _mssql, MsSqlSource(), first.NewWatermark, ReadIntent.Changes, Mappings, MappingName, MsSqlColumns(), [], options, CancellationToken.None);
+            _mssql, MsSqlSource(), first.NewWatermark, ReadIntent.Changes, Mappings, MappingName, MsSqlColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var rows = new List<ChangeRow>();
         await foreach (var row in second.Rows)
             rows.Add(row);
@@ -272,7 +272,7 @@ public sealed class CrossEngineReplicationTests : IClassFixture<MsSqlScratchData
         async Task ReloadAsync()
         {
             var read = await source.Reader.ReadChangesAsync(
-                _mssql, MsSqlSource(), null, ReadIntent.InitialLoad, Mappings, MappingName, MsSqlColumns(), [], options, CancellationToken.None);
+                _mssql, MsSqlSource(), null, ReadIntent.InitialLoad, Mappings, MappingName, MsSqlColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
             var staged = await target.Staging.StageAsync(
                 _pg, PgTarget(), read.Rows, Mappings, MappingName, PgColumns(), options, CancellationToken.None);
             await target.Writer.ApplyAsync(_pg, PgTarget(), staged, Mappings, MappingName, PgColumns(), options, CancellationToken.None);

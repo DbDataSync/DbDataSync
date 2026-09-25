@@ -127,7 +127,7 @@ public sealed class PgCopyStagingTests(PostgresTestDatabase db) : IClassFixture<
         var options = new Dictionary<string, string>();
         var staging = Staging(stagingKind);
         var read = await _reader.ReadChangesAsync(
-            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, CachedColumns(), [], options, CancellationToken.None);
+            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, CachedColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await staging.StageAsync(
             _target, Target(), read.Rows, Mappings, MappingName, CachedColumns(), options, CancellationToken.None);
         try
@@ -323,7 +323,7 @@ public sealed class PgCopyStagingTests(PostgresTestDatabase db) : IClassFixture<
         var options = new Dictionary<string, string>();
 
         var read = await _reader.ReadChangesAsync(
-            _source, sourceRef, null, ReadIntent.InitialLoad, mappings, MappingName, cached, [], options, CancellationToken.None);
+            _source, sourceRef, null, ReadIntent.InitialLoad, mappings, MappingName, cached, [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         return await staging.StageAsync(
             _target, targetRef, read.Rows, mappings, MappingName, cached, options, CancellationToken.None);
     }

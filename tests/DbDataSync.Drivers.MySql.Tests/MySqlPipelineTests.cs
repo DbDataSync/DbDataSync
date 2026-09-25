@@ -86,7 +86,7 @@ public abstract class MySqlFamilyPipelineTestsBase<TFixture> : IClassFixture<TFi
     {
         options ??= new Dictionary<string, string>();
         var read = await _reader.ReadChangesAsync(
-            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [], options, CancellationToken.None);
+            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await _staging.StageAsync(
             _target, Target(), read.Rows, Mappings, MappingName, Columns(), options, CancellationToken.None);
         try
@@ -194,13 +194,13 @@ public abstract class MySqlFamilyPipelineTestsBase<TFixture> : IClassFixture<TFi
         var options = new Dictionary<string, string> { ["watermarkColumn"] = "modified_at" };
 
         var first = await _watermark.ReadChangesAsync(
-            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [], options, CancellationToken.None);
+            _source, Source(), null, ReadIntent.InitialLoad, Mappings, MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         Assert.Single(await CollectAsync(first.Rows));
 
         await ExecuteAsync(_source, $"INSERT INTO `{_sourceTable}` VALUES (2, 'b', 2, '2026-02-01 00:00:00');");
 
         var second = await _watermark.ReadChangesAsync(
-            _source, Source(), first.NewWatermark, ReadIntent.Changes, Mappings, MappingName, Columns(), [], options, CancellationToken.None);
+            _source, Source(), first.NewWatermark, ReadIntent.Changes, Mappings, MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var rows = await CollectAsync(second.Rows);
 
         Assert.Equal(2, (int)Assert.Single(rows)["id"]!);
@@ -238,7 +238,7 @@ public abstract class MySqlFamilyPipelineTestsBase<TFixture> : IClassFixture<TFi
             new("name", "varchar(50)", true, false, false),
         ];
 
-        var read = await _reader.ReadChangesAsync(_source, src, null, ReadIntent.InitialLoad, mappings, MappingName, [], [], options, CancellationToken.None);
+        var read = await _reader.ReadChangesAsync(_source, src, null, ReadIntent.InitialLoad, mappings, MappingName, [], [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await _staging.StageAsync(
             _target, tgt, read.Rows, mappings, MappingName, targetColumns, options, CancellationToken.None);
         var written = await _writer.ApplyAsync(

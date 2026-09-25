@@ -75,6 +75,16 @@ public sealed class PreviewService(
                 source.ConnectionName, sourceConnection, sourceDriver, source.Database, source.Schema, source.Table,
                 "source", problems, cancellationToken);
 
+            // One column list per declared relationship, the same path/failure handling as sourceColumns
+            // above — phase 195S, for a reader whose segment or watermark names a relationship's own
+            // column. Resolved against the source connection/driver: a relationship's foreign table lives
+            // on the source side, never the target's.
+            var relationshipColumns = new Dictionary<string, IReadOnlyList<ColumnMetadata>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var relationship in mapping.Relationships)
+                relationshipColumns[relationship.Name] = await ResolveColumnsAsync(
+                    source.ConnectionName, sourceConnection, sourceDriver, source.Database, relationship.Schema,
+                    relationship.Table, $"relationship '{relationship.Name}'", problems, cancellationToken);
+
             // The same substitution a pass makes before the reader ever sees the mappings: a scripted
             // column expression becomes a literal Transform, so what the projection renders here is
             // what it would render then.
@@ -104,7 +114,7 @@ public sealed class PreviewService(
                 $"reader '{processing.Reader.Kind}'", PreviewStages.SourceRead,
                 new PreviewRequest(
                     sourceConnection, source, target, columnMappings, processing.Reader.Options, previousWatermark,
-                    sourceColumns, targetColumns, mapping.Relationships),
+                    sourceColumns, targetColumns, mapping.Relationships, relationshipColumns),
                 statements, problems, cancellationToken);
 
             await DescribeAsync(
@@ -112,7 +122,7 @@ public sealed class PreviewService(
                 $"staging provider '{processing.Cache.Kind}'", PreviewStages.Staging,
                 new PreviewRequest(
                     targetConnection, source, target, columnMappings, processing.Cache.Options, previousWatermark,
-                    sourceColumns, targetColumns, mapping.Relationships),
+                    sourceColumns, targetColumns, mapping.Relationships, relationshipColumns),
                 statements, problems, cancellationToken);
 
             await DescribeAsync(
@@ -120,7 +130,7 @@ public sealed class PreviewService(
                 $"writer '{processing.Writer.Kind}'", PreviewStages.Write,
                 new PreviewRequest(
                     targetConnection, source, target, columnMappings, processing.Writer.Options, previousWatermark,
-                    sourceColumns, targetColumns, mapping.Relationships),
+                    sourceColumns, targetColumns, mapping.Relationships, relationshipColumns),
                 statements, problems, cancellationToken);
         }
         finally

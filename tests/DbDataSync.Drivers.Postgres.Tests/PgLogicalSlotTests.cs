@@ -106,7 +106,7 @@ public sealed class PgLogicalSlotTests(PostgresTestDatabase db) : IClassFixture<
         string? previousWatermark, ReadIntent intent = ReadIntent.Changes, bool advance = false)
     {
         var result = await _reader.ReadChangesAsync(
-            _source, Source(), previousWatermark, intent, Mappings, MappingName, Columns(), [], Options(advance),
+            _source, Source(), previousWatermark, intent, Mappings, MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), Options(advance),
             CancellationToken.None);
 
         var changes = new List<Change>();
@@ -399,7 +399,7 @@ public sealed class PgLogicalSlotTests(PostgresTestDatabase db) : IClassFixture<
         await ExecuteAsync($"INSERT INTO public.\"{_table}\" VALUES (1, 'Alice', NULL, NULL);");
 
         var result = await _reader.ReadChangesAsync(
-            _source, Source(), null, ReadIntent.Changes, Mappings, MappingName, Columns(), [], options,
+            _source, Source(), null, ReadIntent.Changes, Mappings, MappingName, Columns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options,
             CancellationToken.None);
         var rows = new List<ChangeRow>();
         await foreach (var row in result.Rows)

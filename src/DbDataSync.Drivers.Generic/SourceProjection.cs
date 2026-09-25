@@ -85,16 +85,29 @@ public static class SourceProjection
     /// isn't asked to.</summary>
     private static Func<string, string> ResolveReference(
         SqlDialect dialect, ColumnMapping mapping, Func<string, string> reference,
-        IReadOnlyDictionary<string, string> relationshipAliases)
+        IReadOnlyDictionary<string, string> relationshipAliases) =>
+        ReferenceFor(dialect, mapping.Relationship, reference, relationshipAliases, $"Column '{mapping.SourceColumn}'");
+
+    /// <summary>
+    /// As the private <c>ResolveReference</c> above, generalized to a bare <paramref name="relationship"/>
+    /// name rather than a whole <see cref="ColumnMapping"/> — for a caller with no mapping to hand, such
+    /// as <see cref="SegmentScope"/>'s segment/watermark predicates (phase 195S), which need the exact
+    /// same alias-qualification a relationship-sourced <see cref="ColumnMapping"/> would get.
+    /// </summary>
+    /// <param name="describedAs">How to name the thing asking, in the exception a missing alias throws
+    /// — <c>"Column 'X'"</c> for a column mapping, <c>"Segment column 'X'"</c> for a segment, etc.</param>
+    public static Func<string, string> ReferenceFor(
+        SqlDialect dialect, string? relationship, Func<string, string> reference,
+        IReadOnlyDictionary<string, string> relationshipAliases, string describedAs)
     {
-        if (mapping.Relationship is null)
+        if (relationship is null)
             return reference;
 
-        if (!relationshipAliases.TryGetValue(mapping.Relationship, out var alias))
+        if (!relationshipAliases.TryGetValue(relationship, out var alias))
             throw new InvalidOperationException(
-                $"Column '{mapping.SourceColumn}' names relationship '{mapping.Relationship}', which has " +
-                "no assigned join alias — either it isn't declared on this mapping, or the caller built " +
-                "relationshipAliases from a different columnMappings list than this one.");
+                $"{describedAs} names relationship '{relationship}', which has no assigned join alias — " +
+                "either it isn't declared on this mapping, or the caller built relationshipAliases from a " +
+                "different columnMappings/segment/watermark reference than this one.");
 
         return column => $"{alias}.{dialect.QuoteIdentifier(column)}";
     }

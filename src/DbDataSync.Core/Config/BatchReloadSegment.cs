@@ -38,7 +38,12 @@ public sealed record FullSegment : BatchReloadSegment
 }
 
 /// <summary>Rows whose <paramref name="Column"/> matches one of <paramref name="Values"/>.</summary>
-public sealed record ListSegment(string Column, IReadOnlyList<string> Values) : BatchReloadSegment
+/// <param name="Relationship">
+/// Null for a column on the mapping's primary source (every segment before phase 195S). Non-null names
+/// a declared <c>RelationshipConfig.Name</c> instead — <paramref name="Column"/> is then a column on
+/// that relationship's own foreign table, not the primary one.
+/// </param>
+public sealed record ListSegment(string Column, IReadOnlyList<string> Values, string? Relationship = null) : BatchReloadSegment
 {
     public override string Describe() => $"{Column} in ({string.Join(",", Values)})";
 
@@ -47,12 +52,13 @@ public sealed record ListSegment(string Column, IReadOnlyList<string> Values) : 
     // That's the wrong answer for a value type describing a scope, and the sort of thing that quietly
     // breaks a dedupe or an assertion rather than failing loudly.
     public bool Equals(ListSegment? other) =>
-        other is not null && Column == other.Column && Values.SequenceEqual(other.Values);
+        other is not null && Column == other.Column && Relationship == other.Relationship && Values.SequenceEqual(other.Values);
 
     public override int GetHashCode()
     {
         var hash = new HashCode();
         hash.Add(Column);
+        hash.Add(Relationship);
         foreach (var value in Values)
             hash.Add(value);
         return hash.ToHashCode();
@@ -71,7 +77,8 @@ public sealed record ListSegment(string Column, IReadOnlyList<string> Values) : 
 /// something better.
 /// </para>
 /// </param>
-public sealed record RangeSegment(string Column, string RangeMin, string RangeMax, string? Label = null)
+/// <param name="Relationship">As <see cref="ListSegment"/>'s own field of the same name — phase 195S.</param>
+public sealed record RangeSegment(string Column, string RangeMin, string RangeMax, string? Label = null, string? Relationship = null)
     : BatchReloadSegment
 {
     public override string Describe() => Label ?? $"{Column} [{RangeMin}, {RangeMax})";
@@ -83,7 +90,8 @@ public sealed record RangeSegment(string Column, string RangeMin, string RangeMa
 /// (<see cref="ISegmentExpandingReader"/>) — an <c>Auto</c> segment is never persisted as, or handed to
 /// a reader/writer as, a runtime segment.
 /// </summary>
-public sealed record AutoSegment(string Column, int BucketCount) : BatchReloadSegment
+/// <param name="Relationship">As <see cref="ListSegment"/>'s own field of the same name — phase 195S.</param>
+public sealed record AutoSegment(string Column, int BucketCount, string? Relationship = null) : BatchReloadSegment
 {
     public override string Describe() => $"{Column} auto/{BucketCount}";
 }
@@ -111,7 +119,8 @@ public sealed record AutoSegment(string Column, int BucketCount) : BatchReloadSe
 /// the same exemption <c>SegmentingStrategyRunner</c> enforced when this lived on the strategy.
 /// </para>
 /// </param>
-public sealed record CustomSegment(string StrategyName, string? Column = null) : BatchReloadSegment
+/// <param name="Relationship">As <see cref="ListSegment"/>'s own field of the same name — phase 195S.</param>
+public sealed record CustomSegment(string StrategyName, string? Column = null, string? Relationship = null) : BatchReloadSegment
 {
     public override string Describe() => Column is null ? $"custom/{StrategyName}" : $"custom/{StrategyName} over {Column}";
 }
