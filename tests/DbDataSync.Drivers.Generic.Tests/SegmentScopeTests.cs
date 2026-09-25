@@ -128,10 +128,10 @@ public sealed class SegmentScopeTests
     }
 
     [Fact]
-    public void TransformAwareReference_IgnoresARelationshipSourcedMappingSharingTheSameName()
+    public void TransformAwareReference_ForAPrimaryColumn_IgnoresARelationshipSourcedMappingSharingTheSameName()
     {
-        // A relationship-sourced column segment/watermark isn't supported yet (phase 195S) — this method
-        // must not accidentally apply a relationship's own transform to what is still a primary column.
+        // A primary-sourced segment (relationship left null, the default) must not accidentally pick up
+        // a relationship-sourced mapping's own transform just because the column name matches.
         var mappings = new List<ColumnMapping>
         {
             new() { SourceColumn = "Id", TargetColumn = "Id", Relationship = "Customer", Transform = "{{column}} + 1" },
@@ -139,6 +139,71 @@ public sealed class SegmentScopeTests
         var reference = SegmentScope.TransformAwareReference("Id", mappings, BracketDialect.Instance.QuoteIdentifier);
 
         Assert.Equal("[Id]", reference("Id"));
+    }
+
+    // ---- Phase 195S: relationship-sourced segments ------------------------------------------------
+
+    [Fact]
+    public void TransformAwareReference_ForARelationshipColumn_AppliesThatRelationshipsOwnTransform()
+    {
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Id", TargetColumn = "Id" }, // primary, same name — must not match instead
+            new() { SourceColumn = "Id", TargetColumn = "CustomerId", Relationship = "Customer", Transform = "{{column}} + 1" },
+        };
+        var reference = SegmentScope.TransformAwareReference(
+            "Id", mappings, BracketDialect.Instance.QuoteIdentifier, relationship: "Customer");
+
+        Assert.Equal("[Id] + 1", reference("Id"));
+    }
+
+    [Fact]
+    public void Build_WithARelationshipSourcedListSegment_ResolvesTheColumnFromThatRelationshipsCache()
+    {
+        var binder = new RecordingBinder();
+        var relationshipColumns = new Dictionary<string, IReadOnlyList<ColumnMetadata>>
+        {
+            ["Customer"] = [new("Label", "nvarchar(20)", IsNullable: true, IsPrimaryKey: false, IsIdentity: false)],
+        };
+        var relationshipAliases = new Dictionary<string, string> { ["Customer"] = "r0" };
+        var reference = SourceProjection.ReferenceFor(
+            BracketDialect.Instance, "Customer", BracketDialect.Instance.QuoteIdentifier, relationshipAliases, "Segment column 'Label'");
+
+        var scope = SegmentScope.Build(
+            BracketDialect.Instance, binder, new ListSegment("Label", ["EU"], Relationship: "Customer"), Columns,
+            reference: reference, relationshipColumns: relationshipColumns);
+
+        Assert.Equal("r0.[Label] IN (@seg0)", scope.Predicate);
+    }
+
+    [Fact]
+    public void Build_WithARelationshipSourcedSegment_AndNoRelationshipColumnsSupplied_ThrowsRatherThanMisresolve()
+    {
+        var binder = new RecordingBinder();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => SegmentScope.Build(
+            BracketDialect.Instance, binder, new ListSegment("Label", ["EU"], Relationship: "Customer"), Columns));
+
+        Assert.Contains("Customer", ex.Message);
+    }
+
+    [Fact]
+    public void Build_ForAWriter_TranslatesARelationshipSourcedSegmentColumn_ThroughTheMatchingRelationship()
+    {
+        // A writer never sees a relationship's own cache (its target has no relationships at all) — the
+        // segment's column translates to its target-side name via the mapping sharing *that* same
+        // relationship, then resolves in the target's own flat column list, same as a primary column.
+        var binder = new RecordingBinder();
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Label", TargetColumn = "Region" }, // primary, same source name — must not match instead
+            new() { SourceColumn = "Label", TargetColumn = "Region", Relationship = "Customer" },
+        };
+
+        var scope = SegmentScope.Build(
+            BracketDialect.Instance, binder, new ListSegment("Label", ["EU"], Relationship: "Customer"), Columns, mappings);
+
+        Assert.Equal("[Region] IN (@seg0)", scope.Predicate);
     }
 
     [Fact]
