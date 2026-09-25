@@ -31,6 +31,12 @@ public static class KnownDrivers
             "mysql.generic", "MySQL / MariaDB (generic)",
             "Watermark and batch-reload replication for MySQL or MariaDB, over MySqlConnector.",
             "mysql-connector", "mysql.generic.driver.yaml"),
+        new(
+            "mssql.odbc", "SQL Server (ODBC)",
+            "Watermark and batch-reload replication for SQL Server over System.Data.Odbc, for an " +
+                "environment that reaches it through an installed ODBC driver rather than " +
+                "Microsoft.Data.SqlClient.",
+            "system-data-odbc", "mssql.odbc.driver.yaml"),
     ];
 
     public static KnownDriverEntry? TryGetById(string id) =>

@@ -81,6 +81,7 @@ public static class DriverDescriptorReader
             DefaultDatabase: descriptor.Dialect.DefaultDatabase,
             DefaultPort: descriptor.Dialect.DefaultPort,
             DisplayName: descriptor.DisplayName,
-            TestQuery: descriptor.TestQuery);
+            TestQuery: descriptor.TestQuery,
+            FixedConnectionStringProperties: descriptor.Dialect.FixedProperties);
     }
 }

@@ -171,6 +171,20 @@ public sealed class DescriptorDialectYaml
     /// actually support <c>WITH TIES</c> despite being otherwise ANSI-shaped, say.
     /// </summary>
     public bool? SupportsTieSafeRowLimit { get; set; }
+
+    /// <summary>
+    /// See <see cref="DbDataSync.Drivers.Generic.GenericDriverSpec.FixedConnectionStringProperties"/>'s
+    /// own doc comment — the motivating case is an ODBC-backed descriptor (<c>library:
+    /// system-data-odbc</c>), which needs to name <em>which installed ODBC driver</em> to route through,
+    /// a constant the descriptor itself owns rather than something an operator configures per connection:
+    /// <c>{ Driver: "{ODBC Driver 18 for SQL Server}" }</c>, or <c>{ DSN: "MyDataSourceName" }</c> for a
+    /// DSN-based one. Empty (the default) for every engine that needs nothing baked in — every descriptor
+    /// written before this field existed, and every ADO.NET provider with its own real driver assembly
+    /// (Npgsql, MySqlConnector, …), which has no equivalent "which installed driver" question to answer.
+    /// Ignored by a JDBC-backed <see cref="DriverDescriptorYaml.Base"/> — <c>JdbcGenericDriver</c>'s own
+    /// <c>UrlTemplate</c>/<c>ConnectionStringKeys</c> cover the equivalent ground for that path already.
+    /// </summary>
+    public Dictionary<string, string> FixedProperties { get; set; } = new();
 }
 
 public sealed class DescriptorConnectionStringKeysYaml

@@ -35,6 +35,15 @@ public sealed class GenericDriver(GenericDriverSpec spec)
     {
         var keys = Spec.ConnectionStringKeys;
         var builder = new DbConnectionStringBuilder();
+
+        // The descriptor's own fixed entries (ODBC's Driver={...}/DSN=... being the motivating case —
+        // see this parameter's own doc comment) go in first, so everything below — including an
+        // operator's own ConnectionString/Properties — can still override one if a real connection
+        // genuinely needs to.
+        if (Spec.FixedConnectionStringProperties is { } fixedProperties)
+            foreach (var (key, value) in fixedProperties)
+                builder[key] = value;
+
         if (!string.IsNullOrWhiteSpace(connection.ConnectionString))
             builder.ConnectionString = connection.ConnectionString;
         else

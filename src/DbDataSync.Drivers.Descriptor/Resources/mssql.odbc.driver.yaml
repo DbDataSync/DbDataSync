@@ -1,0 +1,68 @@
+dialect:
+  quoteIdentifier: bracket
+  parameterPrefix: "@"
+  rowLimit: topN                   # TOP (n) [WITH TIES] at the front — real T-SQL, unchanged by going
+                                    # through ODBC instead of Microsoft.Data.SqlClient
+  # supportsTieSafeRowLimit: omitted — topN's own default (true) is correct here: SQL Server's own
+  # WITH TIES support doesn't depend on which client library reaches it.
+  supportsChangeDatabase: true
+  defaultDatabase: master
+  fixedProperties:                 # Baked into every connection this driver builds — see
+                                    # GenericDriverSpec.FixedConnectionStringProperties's own doc comment.
+    Driver: "{ODBC Driver 18 for SQL Server}"
+                                    # Names the ODBC driver actually installed on this machine (see
+                                    # odbcinst -j / /etc/odbcinst.ini) — DbDataSync installs
+                                    # System.Data.Odbc itself (library id below), never the vendor's own
+                                    # ODBC driver binary, which is an OS package, not a NuGet one.
+                                    # Edit this to whatever name your own odbcinst.ini registers if it
+                                    # isn't "ODBC Driver 18 for SQL Server" (an older "17" install, say).
+    TrustServerCertificate: "yes"   # Matches this repo's own test containers, which run on a
+                                    # self-signed certificate; a real deployment should remove this and
+                                    # let the driver verify a real one instead.
+  connectionStringKeys:
+    host: Server                   # Microsoft's ODBC driver has no separate port keyword — a
+    port: ~                        # non-default port needs Server set as "host,port" directly, which
+                                    # this mechanism doesn't compose; use connection.Properties.Server to
+                                    # supply that combined value yourself if you need one (it's applied
+                                    # last, so it overrides the host-only value this would otherwise set).
+    database: Database
+    username: UID
+    password: PWD
+    connectTimeout: "Login Timeout"
+
+# Native type name -> canonical. Same shape and same names SQL Server's own compiled dialect already
+# maps (DbDataSync.Core.Sql.MsSqlDialect.ToCanonicalType) — copied rather than shared, since a descriptor
+# driver's typeMap is data, not code, and duplicating a well-understood table is cheaper than a runtime
+# dependency between the two for one engine that happens to overlap.
+typeMap:
+  bit:              Boolean
+  tinyint:          Int8
+  smallint:         Int16
+  int:              Int32
+  bigint:           Int64
+  "decimal(p,s)":   { kind: Decimal, precision: p, scale: s }
+  "numeric(p,s)":   { kind: Decimal, precision: p, scale: s }
+  real:             Float
+  float:            Double
+  "nvarchar(n)":    { kind: String, length: n, unicode: true }
+  "varchar(n)":     { kind: String, length: n, unicode: false }
+  "nchar(n)":       { kind: String, length: n, unicode: true }
+  "char(n)":        { kind: String, length: n, unicode: false }
+  ntext:            { kind: String, max: true, unicode: true }
+  text:             { kind: String, max: true, unicode: false }
+  "varbinary(n)":   { kind: Binary, length: n }
+  binary:           { kind: Binary, max: true }
+  date:             Date
+  "time(s)":        { kind: Time, scale: s }
+  "datetime2(s)":   { kind: Timestamp, scale: s }
+  datetime:         Timestamp
+  smalldatetime:    Timestamp
+  "datetimeoffset(s)": { kind: TimestampTz, scale: s }
+  uniqueidentifier: Guid
+  xml:              Xml
+
+# Engine-neutral strategies to offer. All already exist in DbDataSync.Drivers.Generic.
+capabilities:
+  readers: [Watermark, BatchReload]
+  staging: [StagingTable]
+  writers: [DeleteInsert]

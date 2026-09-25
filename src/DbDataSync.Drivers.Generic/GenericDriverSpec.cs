@@ -55,6 +55,25 @@ public sealed record GenericConnectionStringKeys(
 /// (<c>GET /api/drivers</c>, phase 109d) — a descriptor's own <c>displayName</c>. Null falls back to
 /// <see cref="Id"/>, same as every built-in driver's <see cref="IDriver.DisplayName"/> default.</param>
 /// <param name="TestQuery">A descriptor's own <c>testQuery</c> — see <see cref="IGenericDriverSpec.TestQuery"/>.</param>
+/// <param name="FixedConnectionStringProperties">
+/// Connection-string entries every connection built from this driver carries, regardless of what an
+/// operator configures — as opposed to <see cref="ConnectionStringKeys"/>, which maps an operator's own
+/// per-connection values (host, port, …) to this engine's key spelling. The motivating case is ODBC: a
+/// <c>driver.yaml</c> naming <c>System.Data.Odbc</c> (catalog id <c>system-data-odbc</c>) as its
+/// <see cref="GenericDriverSpec"/>'s own <see cref="System.Data.Common.DbProviderFactory"/> needs to bake
+/// in *which installed ODBC driver* to route through — <c>Driver={ODBC Driver 18 for SQL Server}</c> — a
+/// constant that names the descriptor's own choice of driver, not something that varies per connection
+/// the way host/port/database do; a DSN-based descriptor's <c>DSN=MyDataSourceName</c> is the same shape.
+/// Applied before <see cref="GenericDriver"/>'s own host/database/credential unification, so an operator's
+/// own <see cref="DbDataSync.Core.Config.ConnectionConfig.Properties"/> — applied last, same as always —
+/// can still override a specific entry if a real connection genuinely needs to (matching the "operator's
+/// own explicit setting wins" precedent already used there). A connection that supplies its own complete
+/// <see cref="DbDataSync.Core.Config.ConnectionConfig.ConnectionString"/> instead of the host/port/database
+/// form fields overrides these entries entirely, not just individual keys — the same "a hand-specified
+/// connection string owns the whole string" precedent <c>JdbcGenericDriver</c>'s own URL template already
+/// follows; an operator going that route is expected to include the driver's own fixed entries themselves.
+/// Empty for every driver that doesn't need one (every entry before this parameter existed).
+/// </param>
 public sealed record GenericDriverSpec(
     string Id,
     SqlDialect Dialect,
@@ -68,7 +87,8 @@ public sealed record GenericDriverSpec(
     int? DefaultPort = null,
     ISegmentValueBinder? ValueBinder = null,
     string? DisplayName = null,
-    string? TestQuery = null) : IGenericDriverSpec
+    string? TestQuery = null,
+    IReadOnlyDictionary<string, string>? FixedConnectionStringProperties = null) : IGenericDriverSpec
 {
     /// <summary>The common shape: every generic Kind, <c>information_schema</c> catalog, default
     /// connection-string keys. What most descriptor-shaped engines want; override individual
