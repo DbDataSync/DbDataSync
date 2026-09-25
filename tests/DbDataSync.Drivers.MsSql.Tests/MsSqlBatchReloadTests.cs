@@ -98,6 +98,16 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         new("Name", "nvarchar(50)", false, false, false),
     ];
 
+    /// <summary>The standard source's shape — matches the fixture's own CREATE TABLE. A List/Range
+    /// segment reader needs this cached (phase 91's cache-only rule) to type-bind the segment's bounds;
+    /// an unsegmented or Full-segment reload doesn't ask for it at all.</summary>
+    private static List<CachedColumn> SourceColumns() =>
+    [
+        new("Id", "int", false, true, false),
+        new("Region", "nvarchar(20)", false, false, false),
+        new("Name", "nvarchar(50)", false, false, false),
+    ];
+
     /// <summary>One reload of one segment, end to end: read the segment, stage it, apply it — the same
     /// sequence RunExecutor performs per work item.</summary>
     private async Task<long> ReloadAsync(
@@ -106,13 +116,15 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         IReadOnlyList<ColumnMapping>? mappings = null,
         string? sourceTable = null,
         string? targetTable = null,
-        IReadOnlyList<CachedColumn>? targetColumns = null)
+        IReadOnlyList<CachedColumn>? targetColumns = null,
+        IReadOnlyList<CachedColumn>? sourceColumns = null)
     {
         var options = SegmentOptions(segment);
         var columnMappings = mappings ?? Mappings;
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(sourceTable), previousWatermark: null, ReadIntent.InitialLoad, [], MappingName, [], [], options, CancellationToken.None);
+            _sourceConnection, Source(sourceTable), previousWatermark: null, ReadIntent.InitialLoad, [], MappingName,
+            sourceColumns ?? SourceColumns(), [], options, CancellationToken.None);
         var staged = await _staging.StageAsync(
             _targetConnection, Target(targetTable), read.Rows, columnMappings, MappingName, [], new Dictionary<string, string>(),
             CancellationToken.None);
@@ -375,7 +387,8 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         source.Filter = "Name = 'keep'";
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, source, null, ReadIntent.InitialLoad, [], "mapping", [], [], SegmentOptions(new ListSegment("Region", ["EU"])), CancellationToken.None);
+            _sourceConnection, source, null, ReadIntent.InitialLoad, [], "mapping", SourceColumns(), [],
+            SegmentOptions(new ListSegment("Region", ["EU"])), CancellationToken.None);
 
         var ids = new List<object?>();
         await foreach (var row in read.Rows)

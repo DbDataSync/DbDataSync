@@ -12,11 +12,17 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DbDataSync.Api.Tests;
 
 /// <summary>
-/// Proves the raw-query source isn't a DuckDB-only feature: a real MsSql connection — an engine with a
-/// real catalog, unlike DuckDB — offers the same "a mapping's source is a query I wrote, not a table"
-/// capability, under the neutral "Query" Kind, and a real pass through it lands real rows. This is the
+/// Proves the query-shaped source isn't a DuckDB-only feature: a real MsSql connection — an engine with
+/// a real catalog, unlike DuckDB — offers the same "a mapping's source is a query I wrote, not a table"
+/// capability via <see cref="SourceTableSpec.Query"/>, on the same <c>BatchReload</c> reader every
+/// table-shaped MsSql source already uses, and a real pass through it lands real rows. This is the
 /// end-to-end counterpart to <see cref="DuckDbQueryPreviewTests"/>, which only ever proves the feature
 /// against the one engine it began on.
+/// <para>
+/// **Phase 191S**: the query-shaped source is a property of <see cref="SourceTableSpec"/>, not a
+/// distinct reader Kind — the old neutral <c>"Query"</c> Kind (and the DuckDB-specific one it stood in
+/// contrast to) was retired along with <c>RawQueryReader</c>.
+/// </para>
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class RawQuerySourceTests(TestApiFactory factory) : IClassFixture<TestApiFactory>, IAsyncLifetime
@@ -87,25 +93,6 @@ public sealed class RawQuerySourceTests(TestApiFactory factory) : IClassFixture<
         await ExecuteAsync(connection, $"DROP DATABASE [{_databaseName}];");
     }
 
-    /// <summary>The registration mechanism's own claim: an MsSql connection — which already has its own
-    /// catalog-backed readers — additionally offers the neutral "Query" reader, not "DuckDbQuery".</summary>
-    [Fact]
-    public async Task AnMsSqlConnection_OffersTheNeutralQueryReader_NotDuckDbsOwnName()
-    {
-        var response = await _client.GetAsync($"/api/connections/{_connectionName}/capabilities");
-        response.EnsureSuccessStatusCode();
-        var capabilities = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
-
-        var readers = capabilities.GetProperty("readers").EnumerateArray().Select(r => r.GetProperty("kind").GetString()).ToList();
-        Assert.Contains("Query", readers);
-        Assert.DoesNotContain("DuckDbQuery", readers);
-
-        var queryReader = capabilities.GetProperty("readers").EnumerateArray().Single(r => r.GetProperty("kind").GetString() == "Query");
-        var parameter = Assert.Single(queryReader.GetProperty("parameters").EnumerateArray());
-        Assert.Equal("query", parameter.GetProperty("name").GetString());
-        Assert.Equal("Sql", parameter.GetProperty("type").GetString());
-    }
-
     /// <summary>
     /// The claim this whole feature exists to prove: a query's own result-set shape, read off a real
     /// SqlClient DataReader — an int key that comes back non-nullable, a nullable nvarchar that comes
@@ -117,7 +104,7 @@ public sealed class RawQuerySourceTests(TestApiFactory factory) : IClassFixture<
     {
         var response = await _client.PostAsJsonAsync(
             $"/api/connections/{_connectionName}/query-preview",
-            new { query = $"SELECT Id, Region FROM dbo.[{_sourceTable}]", sampleRows = 20 },
+            new { query = $"SELECT Id, Region FROM dbo.[{_sourceTable}]", maxRows = 20 },
             JsonOptions);
         response.EnsureSuccessStatusCode();
         var result = (await response.Content.ReadFromJsonAsync<QueryPreviewResult>(JsonOptions))!;
@@ -151,11 +138,7 @@ public sealed class RawQuerySourceTests(TestApiFactory factory) : IClassFixture<
             Scheduling = new SchedulingConfig { Mode = ScheduleMode.Continuous, FrequencySeconds = 3600 },
             ChangeProcessing = new ChangeProcessingConfig
             {
-                Reader = new ReaderConfig
-                {
-                    Kind = "Query",
-                    Options = { ["query"] = $"SELECT Id, Region FROM dbo.[{_sourceTable}] WHERE Id = 1" },
-                },
+                Reader = new ReaderConfig { Kind = "BatchReload" },
                 Cache = new CacheConfig { Kind = "MsSqlStagingTable" },
                 Writer = new WriterConfig { Kind = "MsSqlDeleteInsert" },
             },
@@ -169,9 +152,12 @@ public sealed class RawQuerySourceTests(TestApiFactory factory) : IClassFixture<
         (await _client.PutAsJsonAsync($"/api/replications/{_replicationName}/table-mappings/main", new TableMappingConfig
         {
             Name = "main",
-            // Schema/Table left blank — the established "this is a query source" convention every
-            // other query-source mapping already uses.
-            Sources = [new SourceTableSpec { Schema = "", Table = "" }],
+            // Schema/Table left blank — Query is what makes this a query-shaped source.
+            Sources = [new SourceTableSpec
+            {
+                Query = $"SELECT Id, Region FROM dbo.[{_sourceTable}] WHERE Id = 1",
+                AllowSubquery = true,
+            }],
             Targets = [new TableSpec { Schema = "dbo", Table = _targetTable }],
             ColumnMappings =
             [
