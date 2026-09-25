@@ -2278,4 +2278,79 @@ public sealed class Shout : IValueColumnExpression
 
     expect((await page.request.put(`/api/replications/${REPLICATION_NAME}`, { data: before })).ok()).toBeTruthy()
   })
+
+  test('44 - a relationship names a real join to a foreign table, right on the mapping it scopes', async ({ page }) => {
+    // Phase 186J/189J. A throwaway mapping, not `items` — every earlier test in this file depends on
+    // that one staying exactly what test 05 left it as.
+    const relDemoTarget = 'PwTgtRelDemo'
+    runSql(`
+      IF OBJECT_ID('dbo.PwRegion', 'U') IS NOT NULL DROP TABLE dbo.PwRegion;
+      CREATE TABLE dbo.PwRegion (Id INT NOT NULL PRIMARY KEY, Label NVARCHAR(50) NOT NULL);
+      INSERT INTO dbo.PwRegion (Id, Label) VALUES (1, 'North'), (2, 'South');
+      IF OBJECT_ID('dbo.${relDemoTarget}', 'U') IS NOT NULL DROP TABLE dbo.${relDemoTarget};
+      CREATE TABLE dbo.${relDemoTarget} (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);
+    `, DB_NAME)
+
+    await page.goto(`/replications/${REPLICATION_NAME}`)
+    await page.getByTestId('tab-mappings').click()
+    await page.getByTestId('new-mapping-button').click()
+    await expect(page.getByTestId('mapping-notes-card')).toBeVisible()
+
+    await page.getByTestId('mapping-name-input').fill('relationships-demo')
+    await selectWhenReady(page, 'source-table-select', `dbo.${SOURCE_TABLE}`)
+    await page.getByTestId('target-schema-input').fill('dbo')
+    await page.getByTestId('target-table-input').fill(relDemoTarget)
+
+    await page.getByTestId('mapping-tab-columns').click()
+    // Same-name auto-suggest (Id, Name) — the relationship below is what this test is really about.
+    await expect(page.getByTestId('column-mappings-table').locator('.grid-row')).toHaveCount(2, { timeout: 15_000 })
+
+    await expect(page.getByTestId('relationships-card')).toBeVisible()
+    await page.getByTestId('add-relationship-button').click()
+    await page.getByTestId('relationship-name-0').fill('region')
+    await selectWhenReady(page, 'relationship-table-0', 'dbo.PwRegion')
+    await selectWhenReady(page, 'relationship-0-join-local-0', 'Id')
+    await selectWhenReady(page, 'relationship-0-join-foreign-0', 'Id')
+    // The foreign-column select only populates once the foreign table's own columns have loaded —
+    // waiting for its real value (rather than screenshotting the instant after the click) is what
+    // keeps this from racing that fetch.
+    await expect(page.getByTestId('relationship-0-join-foreign-0')).toHaveValue('Id')
+    await shot(page, '51-relationships-configured.png')
+
+    await page.getByTestId('save-mapping-button').click()
+    await expect(page.getByTestId('mapping-item-relationships-demo')).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('45 - a query-shaped source previews against the real engine before anything is saved', async ({ page }) => {
+    // Phase 190S–193S. Another throwaway mapping, for the same reason as the relationship one above —
+    // and this one is never saved at all: the point of this screenshot is the popup itself, reached
+    // from a brand-new, still-unsaved mapping route exactly like test 05's own starting point.
+    const queryDemoTarget = 'PwTgtQueryDemo'
+    runSql(`
+      IF OBJECT_ID('dbo.${queryDemoTarget}', 'U') IS NOT NULL DROP TABLE dbo.${queryDemoTarget};
+      CREATE TABLE dbo.${queryDemoTarget} (Id INT NOT NULL PRIMARY KEY, Name NVARCHAR(50) NOT NULL);
+    `, DB_NAME)
+
+    await page.goto(`/replications/${REPLICATION_NAME}`)
+    await page.getByTestId('tab-mappings').click()
+    await page.getByTestId('new-mapping-button').click()
+    await expect(page.getByTestId('mapping-notes-card')).toBeVisible()
+
+    await page.getByTestId('mapping-name-input').fill('query-source-demo')
+    await page.getByTestId('target-schema-input').fill('dbo')
+    await page.getByTestId('target-table-input').fill(queryDemoTarget)
+
+    // Turning this on replaces the schema/table pickers with the query button — there is nothing to
+    // pick from a catalog for a source that is a statement, not a table.
+    await page.getByTestId('source-query-source-toggle').click()
+    await page.getByTestId('source-query-open-button').click()
+    await expect(page.getByTestId('source-query-dialog')).toBeVisible()
+
+    await setCode(page, 'source-query-editor', `SELECT Id, Name FROM dbo.[${SOURCE_TABLE}]`)
+    await page.getByTestId('source-query-preview-button').click()
+    // A real pass against the real source connection, not a stub — the note names the row count only
+    // once the engine has actually answered.
+    await expect(page.getByTestId('source-query-preview-note')).toContainText('row', { timeout: 15_000 })
+    await shot(page, '52-query-source-editor.png')
+  })
 })

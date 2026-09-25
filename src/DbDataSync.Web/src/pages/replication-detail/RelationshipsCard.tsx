@@ -103,7 +103,12 @@ function RelationshipRow({ resolvedSource, sourceColumns, tables, relationship, 
     onChange({ ...relationship, joinKeys: [...relationship.joinKeys, { localColumn: '', foreignColumn: '' }] })
 
   return (
-    <div className="grid-row" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 14px' }}>
+    // .grid-row's own fixed 38px height is load-bearing for the dense tabular rows most of this app
+    // uses it for (see index.css's own comment) — wrong for this row, which stacks a name/table line
+    // and a join-keys line and genuinely grows. `.auto`, the same variant the Monitoring screen's own
+    // multi-line lag cell already uses for the identical reason, instead of a fixed height that clips
+    // the second line rather than showing it.
+    <div className="grid-row auto" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 14px' }}>
       <div className="row" style={{ gap: 8, alignItems: 'flex-end' }}>
         <Field label="Name">
           <input
