@@ -205,6 +205,22 @@ public sealed class PipelineStatementTests
     }
 
     [Fact]
+    public void Range_ARelationshipSourcedColumn_JoinsAndQualifiesTheAggregate()
+    {
+        // Phase 195S: auto-segmenting by a relationship's own column needs a real JOIN to sample
+        // MIN/MAX through — BuildRange never rendered one before this.
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            "SELECT MIN(r0.[Name]), MAX(r0.[Name]) FROM [dbo].[Orders] AS base\nLEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]",
+            BatchReloadStatement.BuildRange(
+                BracketDialect.Instance, "dbo", "Orders", null, "Name", filter: null,
+                relationships: relationships, relationshipAliases: aliases,
+                reference: c => $"r0.{BracketDialect.Instance.QuoteIdentifier(c)}"));
+    }
+
+    [Fact]
     public void Delete_ScopesToTheSegmentRatherThanTheWholeTable()
     {
         Assert.Equal(

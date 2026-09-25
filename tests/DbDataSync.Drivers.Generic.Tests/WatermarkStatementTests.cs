@@ -267,4 +267,61 @@ public sealed class WatermarkStatementTests
             "SELECT MAX(base.[ModifiedAt]) FROM (SELECT * FROM Orders) AS base",
             WatermarkStatement.BuildMaxWatermark(
                 BracketDialect.Instance, "dbo", "Orders", "SELECT * FROM Orders", "ModifiedAt", filter: null));
+
+    // ---- Phase 195S: relationship-sourced watermark columns ---------------------------------------
+
+    [Fact]
+    public void Read_ARelationshipSourcedWatermarkColumn_FiltersAndOrdersThroughItsOwnJoinAlias()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        // The watermark column itself lives on the relationship, not the primary table — every place
+        // this statement mentions it (the predicate, ORDER BY) has to go through the same r0. alias the
+        // JOIN declares, not base., which primary-column watermarking always defaulted to.
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders] AS base
+            LEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]
+            WHERE r0.[Name] > @previousWatermark
+            ORDER BY r0.[Name]
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", null, "Name", hasPreviousWatermark: true, filter: null,
+                relationships: relationships, relationshipAliases: aliases,
+                reference: c => $"r0.{BracketDialect.Instance.QuoteIdentifier(c)}"));
+    }
+
+    [Fact]
+    public void MaxWatermark_ARelationshipSourcedColumn_JoinsAndQualifiesTheAggregate()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            "SELECT MAX(r0.[Name]) FROM [dbo].[Orders] AS base\nLEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]",
+            WatermarkStatement.BuildMaxWatermark(
+                BracketDialect.Instance, "dbo", "Orders", null, "Name", filter: null,
+                relationships: relationships, relationshipAliases: aliases,
+                reference: c => $"r0.{BracketDialect.Instance.QuoteIdentifier(c)}"));
+    }
+
+    [Fact]
+    public void Read_ARelationshipSourcedWatermarkColumn_WithATransform_AppliesBoth()
+    {
+        var relationships = new List<RelationshipConfig> { Rel("region", "Region", ("RegionId", "Id")) };
+        var aliases = new Dictionary<string, string> { ["region"] = "r0" };
+
+        Assert.Equal(
+            """
+            SELECT * FROM [dbo].[Orders] AS base
+            LEFT JOIN [dbo].[Region] AS r0 ON base.[RegionId] = r0.[Id]
+            WHERE UPPER(r0.[Name]) > @previousWatermark
+            ORDER BY UPPER(r0.[Name])
+            """,
+            WatermarkStatement.BuildRead(
+                BracketDialect.Instance, "dbo", "Orders", null, "Name", hasPreviousWatermark: true, filter: null,
+                transform: "UPPER({{column}})", relationships: relationships, relationshipAliases: aliases,
+                reference: c => $"r0.{BracketDialect.Instance.QuoteIdentifier(c)}"));
+    }
 }
