@@ -108,7 +108,9 @@ public sealed class JdbcConnectionStringKeysYaml
 }
 
 /// <param name="QuoteIdentifier">backtick | doubleQuote | bracket</param>
-/// <param name="RowLimit">limitOffset | offsetFetch</param>
+/// <param name="RowLimit">limitOffset (<c>LIMIT n</c>) | offsetFetch (ANSI <c>FETCH FIRST n ROWS ...</c>)
+/// | topN (<c>TOP (n) ...</c> at the front, SQL-Server/Sybase-style) — see
+/// <see cref="DbDataSync.Core.Sql.RowLimitStyle"/>.</param>
 /// <param name="Catalog">Omitted (or <c>default</c>) | <c>query</c> — phase 168V. Omitted means this
 /// descriptor's <c>base</c> kind's own default catalog: <c>information_schema</c> for
 /// <c>GenericDriver</c>, <c>java.sql.DatabaseMetaData</c> for <c>JdbcGenericDriver</c>. <c>query</c> (see
@@ -156,6 +158,19 @@ public sealed class DescriptorDialectYaml
     /// </para>
     /// </summary>
     public bool ParameterNameIsBare { get; set; }
+
+    /// <summary>
+    /// Whether this engine's <see cref="RowLimit"/> syntax can express "and every row sharing the
+    /// boundary value too" — see <see cref="DbDataSync.Core.Sql.SqlDialect.RenderTieSafeRowLimit"/>'s own
+    /// doc comment for why that's the whole point of a bounded read. Null (the default, and every
+    /// descriptor written before this field existed) means "use <see cref="RowLimit"/>'s own
+    /// conventional default": true for <c>offsetFetch</c>/<c>topN</c> (matching every dialect in this
+    /// codebase that speaks either), false for <c>limitOffset</c> (no engine here has a tie-safe
+    /// <c>LIMIT</c> variant — see <c>MySqlDialect</c>'s own doc comment). Set explicitly only to state a
+    /// real exception to that default — an <c>offsetFetch</c> engine whose <c>FETCH FIRST</c> doesn't
+    /// actually support <c>WITH TIES</c> despite being otherwise ANSI-shaped, say.
+    /// </summary>
+    public bool? SupportsTieSafeRowLimit { get; set; }
 }
 
 public sealed class DescriptorConnectionStringKeysYaml

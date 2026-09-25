@@ -17,6 +17,30 @@ namespace DbDataSync.Core.Sql;
 public sealed record PreviewParameter(string Name, string SqlType, string Literal);
 
 /// <summary>
+/// The row-limiting syntax family a dialect speaks — a descriptive tag, not something
+/// <see cref="SqlDialect.RenderRowLimit"/>/<see cref="SqlDialect.RenderTieSafeRowLimit"/> are obligated
+/// to switch on. A compiled dialect (<c>MsSqlDialect</c>, <c>MySqlDialect</c>) still renders whatever
+/// its engine actually needs directly; this exists so that fact is queryable — for capability reporting
+/// (<see cref="DbDataSync.Drivers.Abstractions.DriverCapabilities"/>) and so <c>DescriptorDialect</c>
+/// (a YAML-configured driver with no hand-written rendering of its own) has something to switch on.
+/// </summary>
+public enum RowLimitStyle
+{
+    /// <summary>ANSI <c>FETCH FIRST n ROWS [WITH TIES]</c> — Postgres 13+, Oracle 12c+, and the base
+    /// class's own default rendering for both <c>RenderRowLimit</c>/<c>RenderTieSafeRowLimit</c>.</summary>
+    OffsetFetch,
+
+    /// <summary><c>LIMIT n</c> — MySQL/MariaDB and engines sharing its grammar. No engine in this
+    /// codebase's scope has a tie-safe variant of this form; see <c>MySqlDialect</c>'s own doc comment
+    /// for why that's a real, accepted gap rather than an oversight.</summary>
+    LimitOffset,
+
+    /// <summary><c>TOP (n) [WITH TIES]</c> at the front of the statement — SQL Server, and engines
+    /// sharing its grammar (Sybase ASE, Access).</summary>
+    TopN,
+}
+
+/// <summary>
 /// The small, mechanical ways SQL engines disagree — quoting, parameter placeholders, switching the
 /// current database — so that a statement whose *shape* is identical everywhere does not need one
 /// copy per engine.
@@ -156,6 +180,27 @@ public abstract class SqlDialect
     /// per-row source time, when the reader supplies one, so <c>ValidFrom</c>/<c>ValidTo</c> can use it
     /// instead of the pass time. SQL Server's <c>datetime2</c> by default; Postgres overrides.</summary>
     public virtual string ChangedAtColumnType => "DATETIME2";
+
+    /// <summary>
+    /// Which row-limiting syntax family this engine's own <see cref="RenderRowLimit"/>/
+    /// <see cref="RenderTieSafeRowLimit"/> actually render — see <see cref="Sql.RowLimitStyle"/>'s own
+    /// doc comment for what this is (and isn't) for. Defaults to <see cref="Sql.RowLimitStyle.OffsetFetch"/>,
+    /// matching this class's own default rendering of both methods.
+    /// </summary>
+    public virtual RowLimitStyle RowLimitStyle => RowLimitStyle.OffsetFetch;
+
+    /// <summary>
+    /// Whether this engine's row-limiting syntax can express "and every row sharing the boundary value
+    /// too" — see <see cref="RenderTieSafeRowLimit"/>'s own doc comment for why that's the whole point of
+    /// that method. Purely declarative: it does not change what this class's own <see
+    /// cref="RenderTieSafeRowLimit"/> renders (every dialect still renders that itself), it only makes
+    /// the fact queryable — for capability reporting
+    /// (<see cref="DbDataSync.Drivers.Abstractions.DriverCapabilities"/>) and for
+    /// <c>DescriptorDialect</c>, whose own rendering does switch on it. Defaults to <c>true</c>,
+    /// matching every dialect that doesn't override <see cref="RenderTieSafeRowLimit"/> at all —
+    /// <c>MySqlDialect</c> overrides both this and that method to agree with each other.
+    /// </summary>
+    public virtual bool SupportsTieSafeRowLimit => true;
 
     /// <summary>
     /// The two fragments that cap an ordered query at a row count *without splitting ties*: whatever

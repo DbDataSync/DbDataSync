@@ -57,6 +57,14 @@ public sealed class MySqlDialect : SqlDialect
 
     public override (string Prefix, string Suffix) RenderRowLimit(int n) => ("", $" LIMIT {n}");
 
+    /// <summary>Purely declarative — matches the rendering above, doesn't drive it. Also carries the
+    /// class doc comment's own admission that <c>RenderTieSafeRowLimit</c> isn't actually tie-safe here,
+    /// as a queryable fact instead of only as prose.</summary>
+    public override RowLimitStyle RowLimitStyle => RowLimitStyle.LimitOffset;
+
+    /// <inheritdoc/>
+    public override bool SupportsTieSafeRowLimit => false;
+
     /// <summary>MySQL's identity column, the same role Postgres's <c>BIGSERIAL</c>/
     /// <c>GENERATED ALWAYS AS IDENTITY</c> plays.</summary>
     public override string RenderStagingOrdinalColumn(string column) =>

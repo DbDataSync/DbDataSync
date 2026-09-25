@@ -856,6 +856,10 @@ export interface DriverCapabilities {
    * (as a placeholder) before an operator overrides it. Null for a driver with no sample query of
    * its own. */
   defaultTestQuery: string | null
+  /** Whether a bounded read's `maxRowsPerRead` cap on this driver actually guarantees no row sharing
+   * the boundary value is ever split across passes (WITH TIES or equivalent) — false for a driver
+   * with no known dialect at all, or one whose engine has no tie-safe row-limiting syntax. */
+  supportsTieSafeRowLimit: boolean
 }
 
 /** Kind-name-only view of a driver's capabilities for a catalogue listing (phase 118, the admin

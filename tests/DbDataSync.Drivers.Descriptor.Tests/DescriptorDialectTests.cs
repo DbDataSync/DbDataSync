@@ -171,6 +171,133 @@ public sealed class DescriptorDialectTests
         Assert.Contains("WITH TIES", suffix);
     }
 
+    // ---- Row-limit style / tie-safety capability -------------------------------------------------
+
+    private const string SybaseTopNYaml = """
+        id: sybase.generic
+        displayName: Sybase ASE (generic)
+        library: sybase-client
+        dialect:
+          quoteIdentifier: bracket
+          parameterPrefix: "@"
+          rowLimit: topN
+          catalog: informationSchema
+        capabilities:
+          readers: [Watermark]
+          staging: [StagingTable]
+          writers: [DeleteInsert]
+        """;
+
+    [Fact]
+    public void RenderRowLimit_TopNStyle_RendersATopPrefix()
+    {
+        var (prefix, suffix) = Dialect(SybaseTopNYaml).RenderRowLimit(10);
+
+        Assert.Equal("TOP (10) ", prefix);
+        Assert.Equal("", suffix);
+    }
+
+    [Fact]
+    public void RenderTieSafeRowLimit_TopNStyle_DefaultsToWithTies()
+    {
+        var (prefix, suffix) = Dialect(SybaseTopNYaml).RenderTieSafeRowLimit("batchSize");
+
+        Assert.Equal("TOP (@batchSize) WITH TIES ", prefix);
+        Assert.Equal("", suffix);
+    }
+
+    [Fact]
+    public void RenderRowLimit_LimitOffsetStyle_RendersAPlainLimitSuffix()
+    {
+        // Previously not overridden at all — a limitOffset descriptor's preview cap silently rendered
+        // the base class's ANSI FETCH FIRST form, which MySQL-shaped engines don't speak.
+        var (prefix, suffix) = Dialect().RenderRowLimit(10);
+
+        Assert.Equal("", prefix);
+        Assert.Contains("LIMIT 10", suffix);
+    }
+
+    [Fact]
+    public void RenderRowLimit_OffsetFetchStyle_UsesTheBaseClassesForm()
+    {
+        const string yaml = """
+            id: firebird.generic
+            displayName: Firebird (generic)
+            library: firebird-client
+            dialect:
+              quoteIdentifier: doubleQuote
+              parameterPrefix: "@"
+              rowLimit: offsetFetch
+              catalog: informationSchema
+            capabilities:
+              readers: [Watermark]
+              staging: [StagingTable]
+              writers: [DeleteInsert]
+            """;
+
+        var (prefix, suffix) = Dialect(yaml).RenderRowLimit(10);
+
+        Assert.Equal("", prefix);
+        Assert.Contains("FETCH FIRST 10 ROWS ONLY", suffix);
+    }
+
+    [Fact]
+    public void SupportsTieSafeRowLimit_DefaultsFalseForLimitOffset_AndTrueForOffsetFetchAndTopN()
+    {
+        Assert.False(Dialect().SupportsTieSafeRowLimit); // limitOffset (MySqlGenericYaml)
+        Assert.True(Dialect(SybaseTopNYaml).SupportsTieSafeRowLimit);
+        Assert.Equal(RowLimitStyle.LimitOffset, Dialect().RowLimitStyle);
+        Assert.Equal(RowLimitStyle.TopN, Dialect(SybaseTopNYaml).RowLimitStyle);
+    }
+
+    [Fact]
+    public void SupportsTieSafeRowLimit_ExplicitYamlValue_OverridesTheStylesOwnDefault()
+    {
+        const string yaml = """
+            id: sybase.generic
+            displayName: Sybase ASE (generic)
+            library: sybase-client
+            dialect:
+              quoteIdentifier: bracket
+              parameterPrefix: "@"
+              rowLimit: topN
+              supportsTieSafeRowLimit: false
+              catalog: informationSchema
+            capabilities:
+              readers: [Watermark]
+              staging: [StagingTable]
+              writers: [DeleteInsert]
+            """;
+        var dialect = Dialect(yaml);
+
+        Assert.False(dialect.SupportsTieSafeRowLimit);
+        var (prefix, suffix) = dialect.RenderTieSafeRowLimit("batchSize");
+        Assert.Equal("TOP (@batchSize) ", prefix);
+        Assert.DoesNotContain("WITH TIES", prefix + suffix);
+    }
+
+    [Fact]
+    public void UnknownRowLimitStyle_ThrowsNamingWhatWasExpected()
+    {
+        const string yaml = """
+            id: bogus.generic
+            displayName: Bogus (generic)
+            library: bogus-client
+            dialect:
+              quoteIdentifier: bracket
+              parameterPrefix: "@"
+              rowLimit: somethingElse
+              catalog: informationSchema
+            capabilities:
+              readers: [Watermark]
+              staging: [StagingTable]
+              writers: [DeleteInsert]
+            """;
+
+        var ex = Assert.Throws<NotSupportedException>(() => Dialect(yaml));
+        Assert.Contains("limitOffset, offsetFetch or topN", ex.Message);
+    }
+
     [Fact]
     public void RenderColumnType_IsNotSupported()
     {

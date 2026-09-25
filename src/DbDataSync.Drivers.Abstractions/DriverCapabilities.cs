@@ -1,4 +1,5 @@
 using DbDataSync.Core.Config;
+using DbDataSync.Core.Sql;
 
 namespace DbDataSync.Drivers.Abstractions;
 
@@ -31,7 +32,15 @@ public sealed record DriverCapabilities(
     /// connection's test-query field pre-fills from, before an operator overrides it. Null for a driver
     /// with no sample query of its own (including one that isn't an <see cref="IConnectionTester"/> at
     /// all).</summary>
-    string? DefaultTestQuery = null);
+    string? DefaultTestQuery = null,
+    /// <summary>Whether this driver's own <see cref="SqlDialect.RenderTieSafeRowLimit"/> can actually
+    /// guarantee no row sharing the boundary value is ever split across a bounded read's passes — see
+    /// that method's own doc comment. False for a driver that names no dialect at all (<see
+    /// cref="IDialectProvider"/>) — the same "hide an affordance that could never work" posture as
+    /// <see cref="SupportsConnectionTest"/> — or whose dialect admits the gap itself (<c>MySqlDialect</c>).
+    /// A UI offering <c>BoundedRead</c>'s <c>maxRowsPerRead</c> option uses this to warn, rather than
+    /// silently letting an operator configure a cap that can quietly skip rows.</summary>
+    bool SupportsTieSafeRowLimit = false);
 // Connection parameters used to be a field here. They moved out in phase 50, when they stopped being
 // a fixed list: what a connection takes now depends on what it has been given so far — Host is not a
 // setting once the operator picks connection-string addressing — and an answer that depends on values

@@ -102,6 +102,7 @@ public sealed class DriverRegistry
                 // name through DbProviderFactories) or no staging provider/writer of its own (DuckDb)
                 // has nothing this action could ever exercise.
                 driver.RequiredLibraryId is not null && driver.StagingProviders.Count > 0 && driver.Writers.Count > 0,
-                driver is IConnectionTester tester ? tester.DefaultTestQuery : null)
+                driver is IConnectionTester tester ? tester.DefaultTestQuery : null,
+                driver is IDialectProvider dialectProvider && dialectProvider.Dialect.SupportsTieSafeRowLimit)
             : null;
 }

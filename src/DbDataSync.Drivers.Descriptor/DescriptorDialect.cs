@@ -18,7 +18,8 @@ public sealed class DescriptorDialect : SqlDialect
     private readonly char _quoteClose;
     private readonly string _parameterPrefix;
     private readonly bool _parameterNameIsBare;
-    private readonly bool _limitOffsetStyle;
+    private readonly RowLimitStyle _rowLimitStyle;
+    private readonly bool _supportsTieSafeRowLimit;
     private readonly bool _supportsChangeDatabase;
     private readonly IReadOnlyDictionary<string, (IReadOnlyList<string> Placeholders, TypeMapEntryYaml Entry)> _typeMap;
 
@@ -34,13 +35,18 @@ public sealed class DescriptorDialect : SqlDialect
         };
         _parameterPrefix = spec.ParameterPrefix;
         _parameterNameIsBare = spec.ParameterNameIsBare;
-        _limitOffsetStyle = spec.RowLimit switch
+        _rowLimitStyle = spec.RowLimit switch
         {
-            "limitOffset" => true,
-            "offsetFetch" => false,
+            "limitOffset" => RowLimitStyle.LimitOffset,
+            "offsetFetch" => RowLimitStyle.OffsetFetch,
+            "topN" => RowLimitStyle.TopN,
             _ => throw new NotSupportedException(
-                $"Unknown rowLimit style '{spec.RowLimit}' (expected limitOffset or offsetFetch)."),
+                $"Unknown rowLimit style '{spec.RowLimit}' (expected limitOffset, offsetFetch or topN)."),
         };
+        // See DescriptorDialectYaml.SupportsTieSafeRowLimit's own doc comment for this default: every
+        // style but limitOffset is presumed tie-safe unless the descriptor says otherwise, matching what
+        // every dialect in this codebase that speaks that style already does.
+        _supportsTieSafeRowLimit = spec.SupportsTieSafeRowLimit ?? _rowLimitStyle != RowLimitStyle.LimitOffset;
         _supportsChangeDatabase = spec.SupportsChangeDatabase;
         _typeMap = BuildTypeMap(typeMap);
     }
@@ -84,17 +90,48 @@ public sealed class DescriptorDialect : SqlDialect
         return base.UseDatabaseAsync(connection, database, cancellationToken);
     }
 
+    /// <summary>Purely declarative — see the base class's own doc comment. Reflects exactly what
+    /// <see cref="RenderTieSafeRowLimit"/> below actually renders for this descriptor.</summary>
+    public override RowLimitStyle RowLimitStyle => _rowLimitStyle;
+
+    /// <inheritdoc/>
+    public override bool SupportsTieSafeRowLimit => _supportsTieSafeRowLimit;
+
     /// <summary>
-    /// <c>limitOffset</c> engines lose tie-safety (see the base class's own doc comment): a plain
-    /// <c>LIMIT n</c> can split a group of rows sharing the boundary value across two passes, silently
-    /// skipping the tied-but-unread ones. Accepted for this phase's scope — an engine that needs both
-    /// bulk batch reads and guaranteed-no-skip behaviour is exactly the signal to write a compiled
-    /// dialect instead of a descriptor one.
+    /// <c>limitOffset</c> has no tie-safe form at all in this codebase's scope (see the base class's own
+    /// doc comment and <c>MySqlDialect</c>'s) — a plain <c>LIMIT n</c> can split a group of rows sharing
+    /// the boundary value across two passes, silently skipping the tied-but-unread ones. Accepted for
+    /// this phase's scope: an engine that needs both bulk batch reads and guaranteed-no-skip behaviour on
+    /// that style is exactly the signal to write a compiled dialect instead of a descriptor one.
+    /// <para>
+    /// <c>offsetFetch</c>/<c>topN</c> render their real <c>WITH TIES</c> form when
+    /// <see cref="SupportsTieSafeRowLimit"/> says the engine actually has one, and fall back to the plain
+    /// (non-tie-safe) form otherwise — the same accepted gap as <c>limitOffset</c>, just for an engine
+    /// whose descriptor said so explicitly rather than one whose whole style implies it.
+    /// </para>
     /// </summary>
-    public override (string Prefix, string Suffix) RenderTieSafeRowLimit(string parameterName) =>
-        _limitOffsetStyle
-            ? ("", $"\nLIMIT {ParameterReference(parameterName)}")
-            : base.RenderTieSafeRowLimit(parameterName);
+    public override (string Prefix, string Suffix) RenderTieSafeRowLimit(string parameterName) => (_rowLimitStyle, _supportsTieSafeRowLimit) switch
+    {
+        (RowLimitStyle.LimitOffset, _) => ("", $"\nLIMIT {ParameterReference(parameterName)}"),
+        (RowLimitStyle.TopN, true) => ($"TOP ({ParameterReference(parameterName)}) WITH TIES ", ""),
+        (RowLimitStyle.TopN, false) => ($"TOP ({ParameterReference(parameterName)}) ", ""),
+        (RowLimitStyle.OffsetFetch, true) => base.RenderTieSafeRowLimit(parameterName),
+        (RowLimitStyle.OffsetFetch, false) => ("", $"\nFETCH FIRST {ParameterReference(parameterName)} ROWS ONLY"),
+        _ => throw new ArgumentOutOfRangeException(nameof(_rowLimitStyle), _rowLimitStyle, "Unknown row-limit style."),
+    };
+
+    /// <summary>The non-tie-safe sibling of <see cref="RenderTieSafeRowLimit"/> above — see the base
+    /// class's own doc comment for what it's for (a query preview's own cap, phase 193S). Not previously
+    /// overridden here at all, which meant a <c>limitOffset</c>/<c>topN</c>-style descriptor driver's
+    /// preview cap silently rendered the base class's ANSI <c>FETCH FIRST</c> form regardless of what its
+    /// engine actually speaks — a real, latent bug this fixes.</summary>
+    public override (string Prefix, string Suffix) RenderRowLimit(int n) => _rowLimitStyle switch
+    {
+        RowLimitStyle.LimitOffset => ("", $"\nLIMIT {n}"),
+        RowLimitStyle.TopN => ($"TOP ({n}) ", ""),
+        RowLimitStyle.OffsetFetch => base.RenderRowLimit(n),
+        _ => throw new ArgumentOutOfRangeException(nameof(_rowLimitStyle), _rowLimitStyle, "Unknown row-limit style."),
+    };
 
     /// <summary>
     /// A name-keyed lookup over <c>typeMap</c>, with <c>(p,s)</c>-style argument substitution — strictly

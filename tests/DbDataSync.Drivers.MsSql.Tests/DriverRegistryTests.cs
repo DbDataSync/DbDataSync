@@ -54,4 +54,18 @@ public sealed class DriverRegistryTests
         Assert.True(registry.SupportsWriter(DriverIds.MsSql, MsSqlDriverKinds.Merge));
         Assert.False(registry.SupportsWriter(DriverIds.MsSql, "Bogus"));
     }
+
+    [Fact]
+    public void Describe_ReflectsMsSqlsOwnTieSafeRowLimitCapability()
+    {
+        // MsSqlDialect's TOP (n) WITH TIES really does guarantee no split tie — this is what a UI would
+        // check before offering maxRowsPerRead without a caveat.
+        var registry = new DriverRegistry();
+        registry.Register(new MsSqlDriver());
+
+        var capabilities = registry.Describe(DriverIds.MsSql);
+
+        Assert.NotNull(capabilities);
+        Assert.True(capabilities.SupportsTieSafeRowLimit);
+    }
 }

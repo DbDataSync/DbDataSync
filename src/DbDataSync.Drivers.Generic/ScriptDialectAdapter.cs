@@ -5,19 +5,6 @@ using DbDataSync.Core.Sql;
 namespace DbDataSync.Drivers.Generic;
 
 /// <summary>
-/// A driver that can say which <see cref="SqlDialect"/> it speaks.
-/// <para>
-/// Opt-in by interface, like <c>ISegmentExpandingReader</c> and <c>IConnectionTester</c> — an ODBC or
-/// JDBC driver reaching an arbitrary engine may have no single dialect to name. Callers ask
-/// <c>driver is IDialectProvider</c>.
-/// </para>
-/// </summary>
-public interface IDialectProvider
-{
-    SqlDialect Dialect { get; }
-}
-
-/// <summary>
 /// A driver that can hand out the catalog its own components use.
 /// <para>
 /// Opt-in for the same reason as <see cref="IDialectProvider"/>, and useful for the same kind of

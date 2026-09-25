@@ -1,7 +1,14 @@
 dialect:
   quoteIdentifier: backtick        # backtick | doubleQuote | bracket
   parameterPrefix: "@"             # "@" -> @p , ":" -> :p , "?" -> positional
-  rowLimit: limitOffset            # LIMIT n OFFSET m   (vs. offsetFetch for OFFSET..FETCH)
+  rowLimit: limitOffset            # limitOffset (LIMIT n) | offsetFetch (FETCH FIRST n ROWS ...) |
+                                    # topN (TOP (n) ... at the front, SQL-Server/Sybase-style)
+  # supportsTieSafeRowLimit: false  # whether a bounded read's WITH TIES guarantee (no row sharing the
+                                    # boundary value ever split across passes) is real for this engine.
+                                    # Omitted means the row-limit style's own conventional answer: false
+                                    # for limitOffset (no engine here has a tie-safe LIMIT), true for
+                                    # offsetFetch/topN. Set explicitly only to state a real exception —
+                                    # this engine (MySQL/MariaDB) has none, so it's left at the default.
   # catalog: query                 # uncomment (+ a metadataQueries block below) if information_schema
                                     # doesn't fit this engine — omitted means the base's own default
                                     # (information_schema for the ADO.NET generic driver, this one)

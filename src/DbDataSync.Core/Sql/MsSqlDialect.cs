@@ -24,6 +24,11 @@ public sealed class MsSqlDialect : SqlDialect
 
     public override (string Prefix, string Suffix) RenderRowLimit(int n) => ($"TOP ({n}) ", "");
 
+    /// <summary>Purely declarative — matches the rendering above, doesn't drive it.
+    /// <c>SupportsTieSafeRowLimit</c> is left at the base class's own default (true): SQL Server's
+    /// <c>TOP (n) WITH TIES</c> really does promise it.</summary>
+    public override RowLimitStyle RowLimitStyle => RowLimitStyle.TopN;
+
     /// <summary>SQL Server has no <c>GENERATED ALWAYS AS IDENTITY</c>; the key is clustered because
     /// staging is only ever appended to in ordinal order, so the insert stays at the end of it.</summary>
     public override string RenderStagingOrdinalColumn(string column) =>
