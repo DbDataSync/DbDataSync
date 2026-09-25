@@ -117,14 +117,17 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         string? sourceTable = null,
         string? targetTable = null,
         IReadOnlyList<CachedColumn>? targetColumns = null,
-        IReadOnlyList<CachedColumn>? sourceColumns = null)
+        IReadOnlyList<CachedColumn>? sourceColumns = null,
+        IReadOnlyList<RelationshipConfig>? relationships = null,
+        IReadOnlyDictionary<string, IReadOnlyList<CachedColumn>>? relationshipColumns = null)
     {
         var options = SegmentOptions(segment);
         var columnMappings = mappings ?? Mappings;
 
         var read = await _reader.ReadChangesAsync(
-            _sourceConnection, Source(sourceTable), previousWatermark: null, ReadIntent.InitialLoad, [], MappingName,
-            sourceColumns ?? SourceColumns(), [],new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
+            _sourceConnection, Source(sourceTable), previousWatermark: null, ReadIntent.InitialLoad, columnMappings, MappingName,
+            sourceColumns ?? SourceColumns(), relationships ?? [],
+            relationshipColumns ?? new Dictionary<string, IReadOnlyList<CachedColumn>>(), options, CancellationToken.None);
         var staged = await _staging.StageAsync(
             _targetConnection, Target(targetTable), read.Rows, columnMappings, MappingName, [], new Dictionary<string, string>(),
             CancellationToken.None);
@@ -470,6 +473,96 @@ public sealed class MsSqlBatchReloadTests(MsSqlTestDatabase db) : IClassFixture<
         Assert.Equal("North", byId[1]); // matched: the looked-up value comes through
         Assert.Null(byId[2]);           // RegionId is NULL: no match, row still present, looked-up column null
         Assert.Null(byId[3]);           // RegionId points at nothing: no match, row still present
+    }
+
+    /// <summary>
+    /// Phase 195S, end to end against a real server: a segment scoped by a relationship's own column —
+    /// not a column on the primary source at all. The reader has to join the foreign table to even
+    /// evaluate the predicate; the reconciling writer, per phase 192S's own ruling, needs no join or
+    /// transform on its side at all, because the target already stores the resolved value under its own
+    /// real column — it scopes by that column's own name and the segment's bounds, unchanged.
+    /// </summary>
+    [Fact]
+    public async Task MergeReconcile_WithARelationshipSourcedSegment_ScopesByTheForeignRowsOwnColumn()
+    {
+        var src = $"ReloadRelSegSrc_{Guid.NewGuid():N}";
+        var lookup = $"ReloadRelSegLookup_{Guid.NewGuid():N}";
+        var target = $"ReloadRelSegTgt_{Guid.NewGuid():N}";
+        await ExecuteAsync(_sourceConnection, $"""
+            CREATE TABLE dbo.[{lookup}] (Id INT NOT NULL PRIMARY KEY, Label NVARCHAR(50) NOT NULL);
+            """);
+        await ExecuteAsync(_sourceConnection, $"""
+            CREATE TABLE dbo.[{src}] (Id INT NOT NULL PRIMARY KEY, RegionId INT NOT NULL);
+            """);
+        await ExecuteAsync(_targetConnection, $"""
+            CREATE TABLE dbo.[{target}] (Id INT NOT NULL PRIMARY KEY, RegionLabel NVARCHAR(50) NOT NULL);
+            """);
+
+        await ExecuteAsync(_sourceConnection, $"""
+            INSERT INTO dbo.[{lookup}] (Id, Label) VALUES (1, 'North'), (2, 'South');
+            """);
+        await ExecuteAsync(_sourceConnection, $"""
+            INSERT INTO dbo.[{src}] (Id, RegionId) VALUES (1, 1), (2, 1), (5, 2);
+            """);
+        // Id 2's RegionLabel already agrees with what the source resolves to (a reconciling writer only
+        // ever adds, removes, or corrects a *non-scope* column within a stable segment — a row moving
+        // from one segment to another isn't a scenario this mechanism covers, on a relationship-sourced
+        // scope column any more than on a primary one).
+        await ExecuteAsync(_targetConnection, $"""
+            INSERT INTO dbo.[{target}] (Id, RegionLabel) VALUES
+                (2, 'North'), (3, 'North'), (5, 'South');
+            """);
+
+        var relationships = new List<RelationshipConfig>
+        {
+            new()
+            {
+                Name = "region",
+                Schema = "dbo",
+                Table = lookup,
+                JoinKeys = [new RelationshipJoinKey { LocalColumn = "RegionId", ForeignColumn = "Id" }],
+            },
+        };
+        var mappings = new List<ColumnMapping>
+        {
+            new() { SourceColumn = "Id", TargetColumn = "Id" },
+            new() { SourceColumn = "Label", TargetColumn = "RegionLabel", Relationship = "region" },
+        };
+        var relationshipColumns = new Dictionary<string, IReadOnlyList<CachedColumn>>
+        {
+            ["region"] =
+            [
+                new("Id", "int", false, true, false),
+                new("Label", "nvarchar(50)", false, false, false),
+            ],
+        };
+        var targetColumns = new List<CachedColumn>
+        {
+            new("Id", "int", false, true, false),
+            new("RegionLabel", "nvarchar(50)", false, false, false),
+        };
+
+        await ReloadAsync(
+            new MsSqlMergeReconcileWriter(), new ListSegment("Label", ["North"], Relationship: "region"),
+            mappings, sourceTable: src, targetTable: target, targetColumns: targetColumns,
+            relationships: relationships, relationshipColumns: relationshipColumns);
+
+        var rows = await GetRegionLabelRowsAsync(target);
+        Assert.Equal("North", rows[1]);  // inserted: resolves to 'North', in segment
+        Assert.Equal("North", rows[2]);  // matched and kept: already agreed with the source
+        Assert.False(rows.ContainsKey(3)); // deleted: in the 'North' segment, but the source no longer has it
+        Assert.Equal("South", rows[5]);  // untouched: resolves to 'South', outside the segment entirely
+    }
+
+    private async Task<Dictionary<int, string>> GetRegionLabelRowsAsync(string table)
+    {
+        await using var cmd = _targetConnection.CreateCommand();
+        cmd.CommandText = $"SELECT Id, RegionLabel FROM dbo.[{table}];";
+        var results = new Dictionary<int, string>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            results[reader.GetInt32(0)] = reader.GetString(1);
+        return results;
     }
 
     [Fact]
