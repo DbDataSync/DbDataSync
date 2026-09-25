@@ -31,6 +31,16 @@ public interface ISegmentExpandingReader
     /// for the auto-segment's own column, so the sampled range agrees with what the target actually
     /// stores. A reader with no such concept ignores it.
     /// </param>
+    /// <param name="relationships">This mapping's own declared <see cref="RelationshipConfig"/>s — phase
+    /// 195S, the same list <see cref="IChangeReader.ReadChangesAsync"/> receives. Needed to render a
+    /// <c>JOIN</c> when an <see cref="AutoSegment"/> names a relationship's own column; a reader with no
+    /// such concept ignores it.</param>
+    /// <param name="relationshipColumns">As <paramref name="sourceColumns"/>, keyed by
+    /// <see cref="RelationshipConfig.Name"/> (case-insensitively) — phase 195S. An auto segment on a
+    /// relationship's own column still needs its declared type (for
+    /// <c>SegmentExpansion.BuildBuckets</c>'s own bucketing-kind classification), the same way a
+    /// primary-sourced one already does via <paramref name="sourceColumns"/> — the live <c>MIN</c>/<c>MAX</c>
+    /// sample this method takes has no equivalent "what kind of column is this" answer of its own.</param>
     Task<IReadOnlyList<BatchReloadSegment>> ExpandAutoSegmentsAsync(
         DbConnection sourceConnection,
         SourceTableRef source,
@@ -38,5 +48,7 @@ public interface ISegmentExpandingReader
         IReadOnlyList<CachedColumn> sourceColumns,
         string mappingName,
         IReadOnlyList<ColumnMapping> columnMappings,
+        IReadOnlyList<RelationshipConfig> relationships,
+        IReadOnlyDictionary<string, IReadOnlyList<CachedColumn>> relationshipColumns,
         CancellationToken cancellationToken);
 }

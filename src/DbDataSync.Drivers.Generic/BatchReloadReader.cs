@@ -208,6 +208,8 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
         IReadOnlyList<CachedColumn> sourceColumns,
         string mappingName,
         IReadOnlyList<ColumnMapping> columnMappings,
+        IReadOnlyList<RelationshipConfig> relationships,
+        IReadOnlyDictionary<string, IReadOnlyList<CachedColumn>> relationshipColumns,
         CancellationToken cancellationToken)
     {
         if (!segments.OfType<AutoSegment>().Any())
@@ -230,15 +232,41 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
                 continue;
             }
 
+            // Phase 195S: a relationship-sourced auto segment needs its own join/alias to sample MIN/MAX
+            // through, exactly like a manually-entered List/Range segment on the same relationship does.
+            var relationshipAliases = RelationshipAliases.Assign(relationships, columnMappings, auto.Relationship);
+            var reference = auto.Relationship is null
+                ? null
+                : SourceProjection.ReferenceFor(
+                    dialect, auto.Relationship, dialect.QuoteIdentifier, relationshipAliases,
+                    $"Auto segment column '{auto.Column}'");
+
             // The column's type — cache-only, phase 167V: no live catalog call here has a defense the
             // way GetRangeAsync's own live sampling below does. sourceColumns already holds every column
             // of the table (MappingColumnReader captures the whole catalog answer, not just mapped
             // columns), so an auto-segment column that isn't itself individually mapped is still here.
-            var column = sourceColumns.RequireColumn(mappingName, "source", auto.Column);
-            var transform = columnMappings.FirstOrDefault(m =>
-                m.Relationship is null && string.Equals(m.SourceColumn, auto.Column, StringComparison.OrdinalIgnoreCase))?.Transform;
+            // Phase 195S: a relationship-sourced one resolves from that relationship's own cache instead.
+            ColumnMetadata column;
+            if (auto.Relationship is null)
+            {
+                column = sourceColumns.RequireColumn(mappingName, "source", auto.Column);
+            }
+            else
+            {
+                var side = $"relationship '{auto.Relationship}'";
+                var cached = relationshipColumns.TryGetValue(auto.Relationship, out var found)
+                    ? found
+                    : throw new MetadataNotCachedException(mappingName, side);
+                column = cached.RequireColumn(mappingName, side, auto.Column);
+            }
 
-            var (min, max) = await GetRangeAsync(sourceConnection, source, column, transform, cancellationToken);
+            var transform = columnMappings.FirstOrDefault(m =>
+                string.Equals(m.Relationship, auto.Relationship, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(m.SourceColumn, auto.Column, StringComparison.OrdinalIgnoreCase))?.Transform;
+
+            var (min, max) = await GetRangeAsync(
+                sourceConnection, source, column, transform, relationships, relationshipAliases, reference,
+                cancellationToken);
             if (min is null || max is null)
             {
                 // No rows to divide up. One Full segment, not zero segments: an empty source still has
@@ -247,7 +275,8 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
                 continue;
             }
 
-            expanded.AddRange(SegmentExpansion.BuildBuckets(dialect, column.Name, column.NativeType, min, max, auto.BucketCount));
+            expanded.AddRange(SegmentExpansion.BuildBuckets(
+                dialect, column.Name, column.NativeType, min, max, auto.BucketCount, auto.Relationship));
         }
 
         return expanded;
@@ -255,11 +284,13 @@ public sealed class BatchReloadReader(SqlDialect dialect, ISegmentValueBinder bi
 
     private async Task<(object? Min, object? Max)> GetRangeAsync(
         DbConnection connection, SourceTableRef source, ColumnMetadata column, string? transform,
-        CancellationToken cancellationToken)
+        IReadOnlyList<RelationshipConfig> relationships, IReadOnlyDictionary<string, string> relationshipAliases,
+        Func<string, string>? reference, CancellationToken cancellationToken)
     {
         using var cmd = connection.CreateTimedCommand();
         cmd.CommandText = BatchReloadStatement.BuildRange(
-            dialect, source.Schema, source.Table, source.Query, column.Name, source.Filter, transform);
+            dialect, source.Schema, source.Table, source.Query, column.Name, source.Filter, transform,
+            relationships, relationshipAliases, reference);
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))

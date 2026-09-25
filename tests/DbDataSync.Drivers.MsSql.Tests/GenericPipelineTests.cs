@@ -211,7 +211,8 @@ public sealed class GenericPipelineTests(MsSqlTestDatabase db) : IClassFixture<M
             """);
 
         var expanded = await _reader.ExpandAutoSegmentsAsync(
-            _sourceConnection, Source(), [new AutoSegment("Id", 4)], Columns(), MappingName, [], CancellationToken.None);
+            _sourceConnection, Source(), [new AutoSegment("Id", 4)], Columns(), MappingName, [], [],
+            new Dictionary<string, IReadOnlyList<CachedColumn>>(), CancellationToken.None);
 
         Assert.Equal(4, expanded.Count);
 

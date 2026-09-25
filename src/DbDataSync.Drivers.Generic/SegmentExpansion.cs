@@ -33,13 +33,20 @@ public static class SegmentExpansion
     /// maximum row.
     /// </para>
     /// </summary>
+    /// <param name="relationship">
+    /// Carried onto every produced <see cref="RangeSegment"/> verbatim — phase 195S. Null for a
+    /// primary-sourced auto segment (every one before this phase); non-null means <paramref name="column"/>
+    /// was sampled off a declared relationship's own table, and every bucket this expands into needs to
+    /// say so too, or a downstream reader/writer would treat the expansion as primary-sourced instead.
+    /// </param>
     public static IReadOnlyList<RangeSegment> BuildBuckets(
-        SqlDialect dialect, string column, string nativeType, object minValue, object maxValue, int bucketCount)
+        SqlDialect dialect, string column, string nativeType, object minValue, object maxValue, int bucketCount,
+        string? relationship = null)
     {
         if (bucketCount < 1)
             throw new InvalidOperationException($"Auto segment on '{column}' needs a bucket count of at least 1.");
 
-        return dialect.ClassifyForBucketing(SqlTypeName.BaseOf(nativeType)) switch
+        var segments = dialect.ClassifyForBucketing(SqlTypeName.BaseOf(nativeType)) switch
         {
             // Integral columns get integral boundaries: a fractional bound rendered against an INT
             // column can't be bound as one (the parameter is typed to the column), so dividing an
@@ -61,6 +68,8 @@ public static class SegmentExpansion
                 $"Auto segmentation needs a column it can divide into ranges; '{column}' is " +
                 $"'{nativeType}'. Use an explicit list or range segment for this column instead."),
         };
+
+        return relationship is null ? segments : segments.Select(s => s with { Relationship = relationship }).ToList();
     }
 
     private static IReadOnlyList<RangeSegment> IntegralBuckets(string column, long min, long max, int bucketCount)
