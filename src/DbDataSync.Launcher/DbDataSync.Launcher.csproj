@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Phase 196L: the one binary the service and PATH run. It reads current.txt beside itself and calls into that
+    slot's DbDataSync.Cli.dll in its own process — see Program.cs. It must not change across an ordinary update,
+    so it references nothing: no project, no package. The layout it shares with the updater is one linked source
+    file (SlotPaths.cs), not a reference.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Its apphost is dbdatasync[.exe]: the same file name the legacy tool shim had, at the same path, so a
+         service registration or PATH entry made before phase 196L keeps naming the right file. -->
+    <AssemblyName>dbdatasync</AssemblyName>
+    <RootNamespace>DbDataSync.Launcher</RootNamespace>
+    <!-- At least as permissive as the payload it loads (DbDataSync.Cli.csproj sets the same). -->
+    <RollForward>latestMajor</RollForward>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Unused by the launcher's own code, and required: shared-framework assemblies come from the frameworks the
+         *host's* runtimeconfig names, never from a dll loaded later. Without this, `serve` cannot load
+         Microsoft.AspNetCore.*. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\DbDataSync.Updates\SlotPaths.cs" Link="SlotPaths.cs" />
+  </ItemGroup>
+
+</Project>

@@ -84,6 +84,8 @@
          which is what ApiOptions' beside-the-assembly resolution then finds. -->
     <ProjectReference Include="..\DbDataSync.TaskRunner\DbDataSync.TaskRunner.csproj" />
     <ProjectReference Include="..\DbDataSync.Updates\DbDataSync.Updates.csproj" />
+    <!-- Phase 196L: built first, never referenced — its output is copied under launcher/ by the targets at the end. -->
+    <ProjectReference Include="..\DbDataSync.Launcher\DbDataSync.Launcher.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -173,6 +175,51 @@
     </ItemGroup>
     <Copy SourceFiles="@(_Doc)" DestinationFolder="$(PublishDir)wwwroot/docs" />
     <Copy SourceFiles="@(_DocImage)" DestinationFiles="@(_DocImage->'$(PublishDir)wwwroot/%(Dest)')" />
+  </Target>
+
+  <!--
+    Phase 196L: every package carries the launcher, so any installed version can put it in place or repair it
+    (`service install`, `launcher repair`, and the automatic conversion of a pre-196L install). An apphost is a
+    native per-platform binary and this package is RID-agnostic, so it carries one complete launcher per RID under
+    launcher/<rid>/, and the installer picks by SlotPaths.PortableRuntimeIdentifier().
+
+    Publish (which pack runs) builds every RID in LauncherRuntimeIdentifiers — this needs the apphost packs, so
+    network on first use; set it to `none` where no launcher is wanted (the container image: not a tool install).
+    An ordinary build copies only this machine's launcher, built without a RID, so the inner loop and the tests
+    need nothing new. Its directory is named by the portable RID the installer will look for — not by the SDK's
+    own, which a distribution's source-built SDK reports as e.g. ubuntu.24.04-x64.
+  -->
+  <PropertyGroup>
+    <LauncherProject>$(MSBuildProjectDirectory)/../DbDataSync.Launcher/DbDataSync.Launcher.csproj</LauncherProject>
+    <LauncherRuntimeIdentifiers Condition="'$(LauncherRuntimeIdentifiers)' == ''">win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64</LauncherRuntimeIdentifiers>
+    <_LauncherArch>$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</_LauncherArch>
+    <_LauncherOwnRid Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-$(_LauncherArch)</_LauncherOwnRid>
+    <_LauncherOwnRid Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx-$(_LauncherArch)</_LauncherOwnRid>
+    <_LauncherOwnRid Condition="'$(_LauncherOwnRid)' == ''">linux-$(_LauncherArch)</_LauncherOwnRid>
+    <_DotnetForLauncher>$(DOTNET_HOST_PATH)</_DotnetForLauncher>
+    <_DotnetForLauncher Condition="'$(_DotnetForLauncher)' == ''">dotnet</_DotnetForLauncher>
+  </PropertyGroup>
+
+  <Target Name="CopyOwnLauncher" AfterTargets="Build">
+    <MSBuild Projects="$(LauncherProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_LauncherTarget" />
+    </MSBuild>
+    <ItemGroup>
+      <_OwnLauncherFile Include="%(_LauncherTarget.RootDir)%(_LauncherTarget.Directory)dbdatasync*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_OwnLauncherFile)" DestinationFolder="$(OutDir)launcher/$(_LauncherOwnRid)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishLaunchers" BeforeTargets="Publish" Condition="'$(LauncherRuntimeIdentifiers)' != 'none'">
+    <ItemGroup>
+      <_LauncherRid Include="$(LauncherRuntimeIdentifiers)" />
+    </ItemGroup>
+    <RemoveDir Directories="$(IntermediateOutputPath)launchers" />
+    <Exec Command="&quot;$(_DotnetForLauncher)&quot; build &quot;$(LauncherProject)&quot; -c $(Configuration) -r %(_LauncherRid.Identity) --no-self-contained -o &quot;$(IntermediateOutputPath)launchers/%(_LauncherRid.Identity)&quot; -nologo -v q" />
+    <ItemGroup>
+      <_PublishedLauncher Include="$(IntermediateOutputPath)launchers/**/dbdatasync*" Exclude="$(IntermediateOutputPath)launchers/**/*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PublishedLauncher)" DestinationFiles="@(_PublishedLauncher->'$(PublishDir)launcher/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
 </Project>

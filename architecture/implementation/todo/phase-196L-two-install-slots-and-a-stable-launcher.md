@@ -232,4 +232,9 @@ needs no console setting.
 
 ## Progress
 
-(Filled in as checkpoints land.)
+- **Checkpoint 2 (launcher + packaging)**: built. `src/DbDataSync.Launcher`, `SlotPaths` linked into it, and
+  launchers for all eight RIDs in a real `dotnet pack` (31 s, 1.1 MB; `win-*` carry `dbdatasync.exe`). The
+  release and snapshot workflows now fail a package that lacks any of them. The container build passes
+  `LauncherRuntimeIdentifiers=none`. `LauncherTests` runs the real launcher against this build laid out as a
+  slot: the version is printed, the exit code is passed through, and a missing pointer or empty slot names its
+  fix.

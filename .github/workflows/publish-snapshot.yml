@@ -173,6 +173,16 @@ jobs:
             exit 1
           fi
 
+          # Phase 196L: a launcher for every platform a slot install can convert on. Without them `service install`
+          # and `update --apply` on a pre-196L install refuse to convert, and nothing else notices.
+          for launcher in win-x64/dbdatasync.exe win-arm64/dbdatasync.exe linux-x64/dbdatasync linux-arm64/dbdatasync \
+                          linux-musl-x64/dbdatasync linux-musl-arm64/dbdatasync osx-x64/dbdatasync osx-arm64/dbdatasync; do
+            if [ ! -s "$(dirname "$wwwroot")/launcher/$launcher" ]; then
+              echo "::error::the packed nupkg is missing launcher/$launcher"
+              exit 1
+            fi
+          done
+
           # Phase 160: the docs ship in the package, every page of docs/ — compared with the folder rather than a count.
           for page in docs/*.md; do
             if [ ! -s "$wwwroot/docs/$(basename "$page")" ]; then

@@ -23,9 +23,11 @@ COPY tools/ ./tools/
 # development default applies, which is what an image built by hand should say. Set, it is the version `dbdatasync version`
 # prints and the one `dbdatasync update` compares against, so a published image must always be given it: without it an image
 # reports a build timestamp with `-alpha` on it, whatever release it really is.
+# LauncherRuntimeIdentifiers=none (phase 196L): the per-platform launchers are for converting a `dotnet tool` install to
+# slots; an image is never one, and building them would fetch eight apphost packs for nothing.
 ARG VERSION=""
 RUN dotnet publish src/DbDataSync.Cli/DbDataSync.Cli.csproj \
-    -c Release -o /app -p:SkipWebBuild=true ${VERSION:+-p:Version=$VERSION}
+    -c Release -o /app -p:SkipWebBuild=true -p:LauncherRuntimeIdentifiers=none ${VERSION:+-p:Version=$VERSION}
 
 COPY --from=web /src/DbDataSync.Web/dist/ /app/wwwroot/
 

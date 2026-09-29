@@ -13,6 +13,7 @@
     <Project Path="src/DbDataSync.Drivers.MySql/DbDataSync.Drivers.MySql.csproj" />
     <Project Path="src/DbDataSync.Drivers.Oracle/DbDataSync.Drivers.Oracle.csproj" />
     <Project Path="src/DbDataSync.Drivers.Postgres/DbDataSync.Drivers.Postgres.csproj" />
+    <Project Path="src/DbDataSync.Launcher/DbDataSync.Launcher.csproj" />
     <Project Path="src/DbDataSync.Libraries/DbDataSync.Libraries.csproj" />
     <Project Path="src/DbDataSync.Scripting/DbDataSync.Scripting.csproj" />
     <Project Path="src/DbDataSync.Scripting.Abstractions/DbDataSync.Scripting.Abstractions.csproj" />
