@@ -252,11 +252,10 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
     // two distinct *times* — see CdcCaptureJob.ScanUntilPastAsync's own doc comment for why a fixed delay
     // between the operations turned out not to be enough, and why these tests wait on that instead of on time.
 
-    // Disabled 2026-09-23, re-enabled 2026-09-24 after clearing the bar the disable decision itself set —
-    // see architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md's "20-run bar"
-    // section for the fix (CdcCaptureJob.ReleaseLogReaderAsync moved to test teardown) and the actual
-    // 20-consecutive-solo-run result for this test.
-    [Fact]
+    // Disabled 2026-09-23, re-enabled 2026-09-24 after clearing the local 20-run bar, disabled again 2026-09-29:
+    // the same "sp_replcmds" session collision recurred on five dev CI runs after the re-enable. See
+    // architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md's 2026-09-29 section.
+    [Fact(Skip = "Disabled again 2026-09-29 — see follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md; recurred on CI after clearing the local 20-run bar")]
     public async Task APassWithDuplicateAndSingletonKeys_AppliesEveryKeyCorrectly_WithNoPkViolation()
     {
         await ExecuteAsync(_sourceConnection, $"""
@@ -365,10 +364,9 @@ public sealed class Scd2CdcGuaranteedDeliveryIntegrationTests(MsSqlTestDatabase 
     /// version this pass opened is opened already closed, by the delete that follows it.
     /// </para>
     /// </summary>
-    // Disabled 2026-09-23, re-enabled 2026-09-24 — same fix and same cleared bar as the sibling test above;
-    // see architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md's "20-run bar"
-    // section.
-    [Fact]
+    // Disabled again 2026-09-29, with the sibling test above and for the same recurrence; see
+    // architecture/planning/todo/follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md's 2026-09-29 section.
+    [Fact(Skip = "Disabled again 2026-09-29 — see follow-up-phase-154-scd2-cdc-timestamp-mapping-race.md; recurred on CI after clearing the local 20-run bar")]
     public async Task ADuplicateKeyStartingOrEndingInADelete_LeavesTheSameVersionsTheRowByRowLoopDid()
     {
         await ExecuteAsync(_sourceConnection, $"""

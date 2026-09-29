@@ -763,7 +763,8 @@ public class UpdateCommandTests : IDisposable
         Assert.Equal(5 + 1, _events.Count);
         Assert.StartsWith($"dotnet tool install --tool-path {SlotA} DbDataSync --add-source ", _events[0]);
         Assert.EndsWith("--version 2026.9.16.1005", _events[0]);
-        Assert.Equal($"rebind dbdatasync -> {Path.Combine(ToolRoot, "dbdatasync")}", _events[1]);
+        // dbdatasync.exe on Windows: the launcher's apphost carries the platform's extension, like the shim it replaces.
+        Assert.Equal($"rebind dbdatasync -> {LauncherSetup.LauncherPath(ToolRoot)}", _events[1]);
         Assert.Equal([InstallIntoB(), "service stop", "service start", "health http://localhost:5080 90s"], _events[2..]);
         Assert.Equal("b", Layout.Current);
         Assert.Equal("launcher", File.ReadAllText(Path.Combine(ToolRoot, "dbdatasync")));

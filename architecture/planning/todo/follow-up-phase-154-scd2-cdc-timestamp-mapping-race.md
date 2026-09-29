@@ -345,3 +345,29 @@ re-enabling rather than another "looks right": the disable decision itself set a
 naming exactly what would count as enough before any run happened, and both tests cleared it — 40 solo runs
 and 5 class runs, not zero. The next `dev` `dotnet-integration` history is still the real proof; if either
 test recurs, that recurrence — not this doc's own local numbers — is what would reopen this.
+
+## The teardown-release fix was falsified on CI too (2026-09-29) — both tests disabled again
+
+The re-enable above named its own real proof: "the next `dev` `dotnet-integration` history". That history is now
+in. Since `83bf57d` (2026-09-24), these two tests have failed in five `dev` runs:
+- `36015178966` (09-24) and `36102912551` (09-25): `APassWithDuplicateAndSingletonKeys…`;
+- `36087077476` (09-25): both tests;
+- `36597842695` (09-29): `ADuplicateKeyStartingOrEndingInADelete…`;
+- `36604816612` (09-29): both tests.
+
+Every one is the same signature, unchanged from before the fix:
+
+> `cdc.lsn_time_mapping did not record a transaction after … within 90s (826 scan attempts …). capture jobs
+> enabled: 1; CDC scan errors: 2 (last: Another connection with session ID 81 is already running 'sp_replcmds'
+> for Change Data Capture in the current database.)`
+
+So moving `ReleaseLogReaderAsync` to teardown did not remove the collision on CI. It cleared the 40 solo runs and 5
+class runs here, as every earlier fix in this doc also passed clean locally first. The runs above are all pushes
+of unrelated work (phase 195S, the ODBC and golden-path commits, phase 196L's launcher). None of them touched CDC
+or these tests.
+
+**Decision: both tests disabled again, with `[Fact(Skip = ...)]`, per the standing CDC policy.** Not deleted,
+and no eighth fix attempted in the same pass. The 20-consecutive-solo-run bar above has now let through a fix
+that CI falsified. **Open question for the owner, not decided here:** should re-enabling also need CI evidence?
+For example, a `workflow_dispatch`-only job that runs just this class, repeatedly, against CI's own SQL Server
+container. Local runs on this idle box have not predicted CI once in this doc's history.
