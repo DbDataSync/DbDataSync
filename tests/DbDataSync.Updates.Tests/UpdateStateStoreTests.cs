@@ -2,103 +2,28 @@ namespace DbDataSync.Updates.Tests;
 
 public class UpdateStateStoreTests
 {
-    private static PendingUpdate Pending(string target = "2026.9.19.1432-snapshot.g65615e7") =>
-        new(target, new DateTimeOffset(2026, 9, 19, 14, 40, 0, TimeSpan.Zero), "dan");
-
-    private static UpdateRequest Applied(string target = "2026.9.19.1432-snapshot.g65615e7") => new(
-        target, "2026.9.18.1918", ReleaseChannel.Snapshot, InstallKind.ToolPath, "/opt/dbdatasync", null,
-        new DateTimeOffset(2026, 9, 19, 14, 40, 0, TimeSpan.Zero), "dan");
-
-    private static UpdateStateStore Store(TempDirectory root, TempDirectory? privileged = null) =>
-        new(new UpdateWorkspace(root.Path, privileged?.Path));
+    private static UpdateStateStore Store(TempDirectory root) => new(new UpdateWorkspace(root.Path));
 
     [Fact]
-    public void ThePendingRequest_HoldsAVersionAndWhoAsked_AndNothingElse()
+    public void TheWorkspace_IsTheDataRootsUpdatesDirectory_WithAbsolutePaths()
     {
-        using var root = new TempDirectory();
-        var store = Store(root);
+        var workspace = new UpdateWorkspace("data");
 
-        store.WritePending(Pending());
-
-        Assert.Equal(Pending(), store.ReadPending());
-        // There is nowhere in the request to put a source, a folder, a package or a path.
-        var properties = System.Text.Json.JsonDocument.Parse(File.ReadAllText(store.Workspace.PendingPath))
-            .RootElement.EnumerateObject().Select(p => p.Name).Order().ToArray();
-        Assert.Equal(["requestedBy", "requestedUtc", "targetVersion"], properties);
-    }
-
-    [Fact]
-    public void Applied_And_Confirmed_RoundTrip()
-    {
-        using var root = new TempDirectory();
-        var store = Store(root);
-
-        store.WriteApplied(Applied());
-        store.WriteConfirmed("2026.9.19.1432-snapshot.g65615e7");
-
-        Assert.Equal(Applied(), store.ReadApplied());
-        Assert.Equal("2026.9.19.1432-snapshot.g65615e7", store.ReadConfirmed()!.TargetVersion);
-    }
-
-    [Fact]
-    public void AbsentFiles_ReadAsNull_AndClearIsHarmless()
-    {
-        using var root = new TempDirectory();
-        var store = Store(root);
-
-        Assert.Null(store.ReadPending());
-        Assert.Null(store.ReadApplied());
-        Assert.Null(store.ReadConfirmed());
-        Assert.Empty(store.ReadState().History);
-        Assert.Null(store.ReadState().Current);
-        store.ClearPending();
-        store.ClearApplied();
-        store.ClearConfirmed();
-    }
-
-    [Fact]
-    public void Clear_RemovesTheFile()
-    {
-        using var root = new TempDirectory();
-        var store = Store(root);
-        store.WritePending(Pending());
-
-        store.ClearPending();
-
-        Assert.Null(store.ReadPending());
-        Assert.False(File.Exists(store.Workspace.PendingPath));
-    }
-
-    [Fact]
-    public void TheFilesAreReadableJson_WithEnumsAsWords()
-    {
-        using var root = new TempDirectory();
-        var store = Store(root);
-        store.WriteApplied(Applied());
-
-        var text = File.ReadAllText(store.Workspace.AppliedPath);
-
-        Assert.Contains("\"targetChannel\": \"snapshot\"", text);
-        Assert.Contains("\"installKind\": \"toolPath\"", text);
+        Assert.Equal(Path.Combine(Path.GetFullPath("data"), "updates", "update-state.json"), workspace.StatePath);
+        Assert.Equal(Path.Combine(Path.GetFullPath("data"), "updates", "update.log"), workspace.LogPath);
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("{ not json")]
     [InlineData("[]")]
-    public void ACorruptFile_IsTreatedAsAbsent_NotAsAnErrorThatWedgesEveryStart(string content)
+    public void ACorruptFile_IsTreatedAsAbsent(string content)
     {
         using var root = new TempDirectory();
         var store = Store(root);
         Directory.CreateDirectory(store.Workspace.Directory);
-        File.WriteAllText(store.Workspace.PendingPath, content);
-        File.WriteAllText(store.Workspace.ConfirmedPath, content);
-        File.WriteAllText(store.Workspace.AppliedPath, content);
         File.WriteAllText(store.Workspace.StatePath, content);
 
-        Assert.Null(store.ReadPending());
-        Assert.Null(store.ReadConfirmed());
-        Assert.Null(store.ReadApplied());
         Assert.Null(store.ReadState().Current);
     }
 
@@ -108,24 +33,37 @@ public class UpdateStateStoreTests
         using var root = new TempDirectory();
         var store = Store(root);
         Directory.CreateDirectory(store.Workspace.Directory);
-        File.WriteAllText(store.Workspace.PendingPath, "{\"targetVersion\":\"1.0\",\"padding\":\"" + new string('x', 100_000) + "\"}");
+        File.WriteAllText(store.Workspace.StatePath, "{\"current\":null,\"history\":[],\"padding\":\"" + new string('x', 100_000) + "\"}");
 
-        Assert.Null(store.ReadPending());
+        Assert.Null(store.ReadState().Current);
+        Assert.Empty(store.ReadState().History);
     }
 
-    // --- the service's directory is hostile ----------------------------------------------------------------
+    [Fact]
+    public void AStateFileWrittenBefore196L_WithItsRetiredPhases_StillReads()
+    {
+        using var root = new TempDirectory();
+        var store = Store(root);
+        Directory.CreateDirectory(store.Workspace.Directory);
+        File.WriteAllText(store.Workspace.StatePath,
+            """{"current":{"phase":"draining","message":"Waiting.","atUtc":"2026-09-19T00:00:00Z"},"history":[]}""");
+
+        Assert.Equal(UpdatePhase.Draining, store.ReadState().Current!.Phase);
+    }
+
+    // --- the directory is writable by the service, so it is read as hostile -------------------------------
 
     [NonWindowsFact]
-    public void ARequestThatIsASymbolicLink_IsNotFollowed()
+    public void AStateFileThatIsASymbolicLink_IsNotFollowed()
     {
         using var root = new TempDirectory();
         var store = Store(root);
         Directory.CreateDirectory(store.Workspace.Directory);
         var elsewhere = Path.Combine(root.Path, "elsewhere.json");
-        File.WriteAllText(elsewhere, "{\"targetVersion\":\"2026.9.18.1918\",\"requestedUtc\":\"2026-09-19T00:00:00Z\"}");
-        File.CreateSymbolicLink(store.Workspace.PendingPath, elsewhere);
+        File.WriteAllText(elsewhere, """{"current":{"phase":"succeeded","atUtc":"2026-09-19T00:00:00Z"},"history":[]}""");
+        File.CreateSymbolicLink(store.Workspace.StatePath, elsewhere);
 
-        Assert.Null(store.ReadPending());
+        Assert.Null(store.ReadState().Current);
     }
 
     [NonWindowsFact]
@@ -133,18 +71,18 @@ public class UpdateStateStoreTests
     {
         using var root = new TempDirectory();
         using var target = new TempDirectory();
-        File.WriteAllText(Path.Combine(target.Path, "pending-update.json"), "{\"targetVersion\":\"2026.9.18.1918\",\"requestedUtc\":\"2026-09-19T00:00:00Z\"}");
+        File.WriteAllText(Path.Combine(target.Path, "update-state.json"), """{"current":{"phase":"succeeded","atUtc":"2026-09-19T00:00:00Z"},"history":[]}""");
         Directory.CreateSymbolicLink(Path.Combine(root.Path, "updates"), target.Path);
         var store = Store(root);
 
-        Assert.Null(store.ReadPending());
+        Assert.Null(store.ReadState().Current);
         var ex = Assert.Throws<IOException>(() => store.Record(UpdatePhase.Failed, "x", null, null, null));
         Assert.Contains("symbolic link", ex.Message);
-        Assert.Equal(["pending-update.json"], Directory.GetFiles(target.Path).Select(Path.GetFileName));
+        Assert.Equal(["update-state.json"], Directory.GetFiles(target.Path).Select(Path.GetFileName));
     }
 
     [NonWindowsFact]
-    public void WritingOverAPathSweptForASymbolicLink_ReplacesTheLink_NotWhatItPointedAt()
+    public void WritingOverAPathSwappedForASymbolicLink_ReplacesTheLink_NotWhatItPointedAt()
     {
         using var root = new TempDirectory();
         var store = Store(root);
@@ -159,74 +97,6 @@ public class UpdateStateStoreTests
         Assert.Equal(UpdatePhase.Failed, store.ReadState().Current!.Phase);
     }
 
-    // --- the two trust levels ----------------------------------------------------------------------------------
-
-    [Fact]
-    public void WhatDecidesAnUpdate_LivesInRootsDirectory_AndWhatTheServiceWrites_InTheServices()
-    {
-        using var root = new TempDirectory();
-        using var privileged = new TempDirectory();
-        var store = Store(root, privileged);
-
-        store.WritePending(Pending());
-        store.WriteConfirmed("2026.9.19.1432-snapshot.g65615e7");
-        store.Record(UpdatePhase.Restarting, "waiting", "1.0", "2.0", null);
-        store.WriteApplied(Applied());
-
-        var service = Path.Combine(root.Path, "updates");
-        Assert.Equal(["confirmed-update.json", "pending-update.json", "update-state.json"], Directory.GetFiles(service).Select(Path.GetFileName).Order());
-        Assert.Equal(["applied-update.json"], Directory.GetFiles(privileged.Path).Select(Path.GetFileName));
-    }
-
-    [NonWindowsFact]
-    public void ThePrivilegedDirectory_IsCreatedReadableByAll_AndWritableOnlyByItsCreator()
-    {
-        using var root = new TempDirectory();
-        var privileged = Path.Combine(root.Path, "priv");
-        var store = new UpdateStateStore(new UpdateWorkspace(root.Path, privileged));
-
-        store.WriteApplied(Applied());
-
-        var mode = File.GetUnixFileMode(privileged);
-        Assert.False(mode.HasFlag(UnixFileMode.GroupWrite));
-        Assert.False(mode.HasFlag(UnixFileMode.OtherWrite));
-        Assert.True(mode.HasFlag(UnixFileMode.OtherRead));
-    }
-
-    [Fact]
-    public void WithoutABoundary_BothAreTheSameDirectory()
-    {
-        // GetFullPath because the workspace normalizes: "/var/lib/..." is rooted on the current drive on Windows.
-        var dataRoot = Path.GetFullPath("/var/lib/dbdatasync");
-        var workspace = new UpdateWorkspace(dataRoot);
-
-        Assert.Equal(workspace.Directory, workspace.PrivilegedDirectory);
-        Assert.Equal(Path.Combine(dataRoot, "updates", "pending-update.json"), workspace.PendingPath);
-        Assert.Equal(Path.Combine(dataRoot, "updates", "applied-update.json"), workspace.AppliedPath);
-    }
-
-    /// <summary>Found by running the real thing: the CLI was given <c>--state-dir state</c>, the child <c>dotnet</c>
-    /// runs from that directory, and a relative <c>--add-source state/rollback</c> became <c>state/state/rollback</c> —
-    /// so a rollback uninstalled the new version and could not install the old one.</summary>
-    [Fact]
-    public void RelativePaths_BecomeAbsolute_BecauseDotnetRunsFromADirectoryOfItsOwn()
-    {
-        var workspace = new UpdateWorkspace("data", "state");
-
-        Assert.Equal(Path.GetFullPath("data"), workspace.DataRoot);
-        Assert.Equal(Path.GetFullPath("state"), workspace.PrivilegedDirectory);
-        Assert.True(Path.IsPathRooted(workspace.RollbackDirectory));
-        Assert.True(Path.IsPathRooted(workspace.PendingPath));
-        Assert.True(Path.IsPathRooted(new UpdateWorkspace("data").PrivilegedDirectory));
-    }
-
-    [Fact]
-    public void TheDefaultPrivilegedDirectory_IsOutsideTheDataRoot_WhichTheServicesUserOwns()
-    {
-        Assert.Equal("/var/lib/dbdatasync-update", UpdateWorkspace.DefaultPrivilegedDirectory);
-        Assert.False(UpdateWorkspace.DefaultPrivilegedDirectory.StartsWith("/var/lib/dbdatasync/", StringComparison.Ordinal));
-    }
-
     // --- state ----------------------------------------------------------------------------------------------------
 
     [Fact]
@@ -235,11 +105,11 @@ public class UpdateStateStoreTests
         using var root = new TempDirectory();
         var store = Store(root);
 
-        store.Record(UpdatePhase.Draining, "Waiting for runs to finish.", "1.0", "2.0", "dan");
+        store.Record(UpdatePhase.Applying, "Installing 2.0 into slot b.", "1.0", "2.0", "dan");
 
         var state = store.ReadState();
-        Assert.Equal(UpdatePhase.Draining, state.Current!.Phase);
-        Assert.Equal("Waiting for runs to finish.", state.Current.Message);
+        Assert.Equal(UpdatePhase.Applying, state.Current!.Phase);
+        Assert.Equal("Installing 2.0 into slot b.", state.Current.Message);
         Assert.Equal("dan", state.Current.RequestedBy);
         Assert.Empty(state.History);
     }
@@ -277,49 +147,34 @@ public class UpdateStateStoreTests
     }
 
     [Fact]
-    public void Writes_LeaveNoTempFilesBehind_AndReplaceAnExistingFile()
+    public void Writes_LeaveNoTempFilesBehind()
     {
         using var root = new TempDirectory();
         var store = Store(root);
 
-        store.WritePending(Pending("2026.9.19.100"));
-        store.WritePending(Pending("2026.9.19.200"));
+        store.Record(UpdatePhase.Applying, "one", null, null, null);
+        store.Record(UpdatePhase.Succeeded, "two", null, null, null);
 
-        Assert.Equal("2026.9.19.200", store.ReadPending()!.TargetVersion);
+        Assert.Equal("two", store.ReadState().Current!.Message);
         Assert.Empty(Directory.GetFiles(store.Workspace.Directory, "*.tmp"));
     }
 
-    [NonWindowsFact]
-    public void AFileTheWriterDidNotCreateCanStillBeReplaced_WhichIsWhatARootOwnedFileNeeds()
-    {
-        // The privileged step and the service are different users: replacing by rename needs only the
-        // directory, so a file made by one can be replaced by the other. A read-only file stands in for that.
-        using var root = new TempDirectory();
-        var store = Store(root);
-        store.WritePending(Pending("2026.9.19.100"));
-        File.SetAttributes(store.Workspace.PendingPath, FileAttributes.ReadOnly);
-        try
-        {
-            File.SetUnixFileMode(store.Workspace.PendingPath, UnixFileMode.UserRead);
-
-            store.WritePending(Pending("2026.9.19.200"));
-
-            Assert.Equal("2026.9.19.200", store.ReadPending()!.TargetVersion);
-        }
-        finally
-        {
-            try { File.SetAttributes(store.Workspace.PendingPath, FileAttributes.Normal); } catch (IOException) { }
-        }
-    }
-
     [Fact]
-    public void NoGitignoreIsTouched_BecauseTheDataRootIsNotARepository()
+    public void Log_AppendsTimestampedLines_AndNeverThrows()
     {
         using var root = new TempDirectory();
         var store = Store(root);
 
-        store.WritePending(Pending());
+        store.Log("first");
+        store.Log("second");
 
-        Assert.False(File.Exists(Path.Combine(root.Path, ".gitignore")));
+        var lines = File.ReadAllLines(store.Workspace.LogPath);
+        Assert.Equal(2, lines.Length);
+        Assert.EndsWith("Z  first", lines[0]);
+
+        // A log that cannot be written (its path is a directory) is skipped, not an exception half way through.
+        Directory.Delete(store.Workspace.Directory, recursive: true);
+        Directory.CreateDirectory(store.Workspace.LogPath);
+        store.Log("third");
     }
 }

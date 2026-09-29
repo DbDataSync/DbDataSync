@@ -91,10 +91,7 @@ public static class ServeCommand
             Console.WriteLine($"  console            {url}");
 
             await app.RunAsync();
-
-            // Phase 159: 75 when the service stopped itself so that an update can be applied — the unit
-            // restarts it on that code (SuccessExitStatus/RestartForceExitStatus) and applies the update first.
-            return app.Services.GetRequiredService<UpdateService>().RequestedExitCode ?? 0;
+            return 0;
         }
         catch (Exception ex)
         {

@@ -67,50 +67,36 @@ public sealed class ReadinessChecksTests : IDisposable
         Assert.Contains("windows", check.Detail);
     }
 
-    private ReadinessContext SelfUpdateContext(bool enabled) =>
-        ReadinessChecks.BuildContext(["--repo", _root, $"--DbDataSync:Updates:Mode={(enabled ? "manual" : "disabled")}"]);
+    private ReadinessContext Context() => ReadinessChecks.BuildContext(["--repo", _root]);
 
-    /// <summary>Phase 159: with self-update enabled, an installed unit without the marker is one the console's
-    /// update button cannot work with.</summary>
+    /// <summary>Phase 196L: a unit from `service install --self-update` still runs the retired step before every
+    /// start — harmless now, but root for nothing, and the sign of a unit from before the launcher.</summary>
     [Fact]
-    public async Task ServiceRegistrationCheck_SelfUpdateOn_AnOldSystemdUnit_Warns()
+    public async Task ServiceRegistrationCheck_AUnitThatStillRunsTheRetiredApplyStep_Warns()
     {
         ServeCommand.Prepare(_root);
         ServiceRegistration.Write(_root, "dbdatasync", "linux");
         var unit = Path.Combine(_root, "old.service");
-        File.WriteAllText(unit, "[Service]\nExecStart=/usr/bin/dbdatasync serve\nRestart=on-failure\n");
+        File.WriteAllText(unit,
+            "[Service]\nExecStartPre=-+\"/opt/dbdatasync/dbdatasync\" internal apply-update --repo \"/var/lib/dbdatasync\"\n" +
+            "ExecStart=\"/opt/dbdatasync/dbdatasync\" serve\n");
 
-        var result = await new ServiceRegistrationCheck(unit).RunAsync(SelfUpdateContext(enabled: true), CancellationToken.None);
+        var result = await new ServiceRegistrationCheck(unit).RunAsync(Context(), CancellationToken.None);
 
         Assert.Equal(CheckStatus.Warn, result.Status);
-        Assert.Contains("does not apply updates", result.Detail);
-        Assert.Contains("service install --self-update", result.Fix);
-    }
-
-    /// <summary>A unit without the step is the default, and correct when self-update is off.</summary>
-    [Fact]
-    public async Task ServiceRegistrationCheck_SelfUpdateOff_AnOrdinaryUnit_IsOk()
-    {
-        ServeCommand.Prepare(_root);
-        ServiceRegistration.Write(_root, "dbdatasync", "linux");
-        var unit = Path.Combine(_root, "ordinary.service");
-        File.WriteAllText(unit, SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync"));
-
-        var result = await new ServiceRegistrationCheck(unit).RunAsync(SelfUpdateContext(enabled: false), CancellationToken.None);
-
-        Assert.Equal(CheckStatus.Ok, result.Status);
-        Assert.DoesNotContain("does not apply", result.Detail);
+        Assert.Contains("retired `internal apply-update` step", result.Detail);
+        Assert.Equal("sudo dbdatasync launcher repair", result.Fix);
     }
 
     [Fact]
-    public async Task ServiceRegistrationCheck_SelfUpdateOn_ACurrentUnit_IsOk()
+    public async Task ServiceRegistrationCheck_ACurrentUnit_IsOk()
     {
         ServeCommand.Prepare(_root);
         ServiceRegistration.Write(_root, "dbdatasync", "linux");
         var unit = Path.Combine(_root, "current.service");
-        File.WriteAllText(unit, SystemdService.RenderUnit("/usr/bin/dbdatasync", "/var/lib/dbdatasync", "http://localhost:5080", "dbdatasync", selfUpdate: true));
+        File.WriteAllText(unit, SystemdService.RenderUnit("/opt/dbdatasync/dbdatasync", "/var/lib/dbdatasync", "dbdatasync"));
 
-        var result = await new ServiceRegistrationCheck(unit).RunAsync(SelfUpdateContext(enabled: true), CancellationToken.None);
+        var result = await new ServiceRegistrationCheck(unit).RunAsync(Context(), CancellationToken.None);
 
         Assert.Equal(CheckStatus.Ok, result.Status);
     }
@@ -122,7 +108,7 @@ public sealed class ReadinessChecksTests : IDisposable
         ServiceRegistration.Write(_root, "dbdatasync", "linux");
 
         var result = await new ServiceRegistrationCheck(Path.Combine(_root, "not-there.service"))
-            .RunAsync(SelfUpdateContext(enabled: true), CancellationToken.None);
+            .RunAsync(Context(), CancellationToken.None);
 
         Assert.Equal(CheckStatus.Ok, result.Status);
     }
@@ -135,7 +121,7 @@ public sealed class ReadinessChecksTests : IDisposable
         var unit = Path.Combine(_root, "old.service");
         File.WriteAllText(unit, "[Service]\n");
 
-        var result = await new ServiceRegistrationCheck(unit).RunAsync(SelfUpdateContext(enabled: true), CancellationToken.None);
+        var result = await new ServiceRegistrationCheck(unit).RunAsync(Context(), CancellationToken.None);
 
         Assert.Equal(CheckStatus.Ok, result.Status);
     }

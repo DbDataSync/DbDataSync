@@ -71,20 +71,6 @@ internal static class SystemdService
 {
     internal const string UnitName = "dbdatasync";
 
-    /// <summary>Set in the unit's environment by <see cref="RenderUnit"/> when it is asked for self-update
-    /// (<c>service install --self-update</c>). The service reads it to know it is running under a unit that
-    /// applies updates before starting, and <c>config check</c> looks for the same text in an installed unit file.
-    /// <para>
-    /// **A root-level opt-in, not a default.** The unit step it enables runs as root, so it is only ever written
-    /// by someone running <c>service install</c> as root and asking for it — a configuration setting the service
-    /// itself can write would not be a decision root made.
-    /// </para></summary>
-    internal const string SelfUpdateMarker = "DBDATASYNC_SELF_UPDATE=1";
-
-    internal const string SelfUpdateEnvironmentVariable = "DBDATASYNC_SELF_UPDATE";
-
-    /// <summary>The exit code a service uses to ask systemd to restart it so an update can be applied.</summary>
-    internal const int SelfUpdateExitCode = 75;
     internal const string UnitPath = "/etc/systemd/system/dbdatasync.service";
 
     /// <summary>
@@ -120,8 +106,13 @@ internal static class SystemdService
             ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
             ?? ApiOptions.DefaultUrl;
         var user = CliOptions.Read(args, "--user") ?? "dbdatasync";
-        var selfUpdate = CliOptions.Has(args, "--self-update");
         var isManagedRoot = string.Equals(root, ManagedStateDirectoryRoot, StringComparison.Ordinal);
+
+        // Phase 196L: the unit runs the launcher, written once — an update then never touches what ExecStart names.
+        // From a pre-196L --tool-path install this converts it first (saying so); the launcher replaces the tool's
+        // shim at the same path, so ExecStart is the path it always was.
+        if (executableOverride is null)
+            executable = LauncherSetup.EnsureAsync(root, Console.Out, Console.Error, CancellationToken.None).GetAwaiter().GetResult() ?? executable;
 
         // A hardened unit's own ProtectHome=yes (below) hides a user-profile ExecStart from the
         // service — it would install cleanly and fail on first start, the exact bug phase 123 exists
@@ -163,7 +154,7 @@ internal static class SystemdService
         try
         {
             Directory.CreateDirectory(root);
-            env.WriteUnitFile(UnitPath, RenderUnit(executable, root, user, ResolveDotnetRoot(), selfUpdate));
+            env.WriteUnitFile(UnitPath, RenderUnit(executable, root, user, ResolveDotnetRoot()));
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
@@ -185,12 +176,11 @@ internal static class SystemdService
                 [DbDataSyncConfigFile.PathIn(root)], "Set 'DbDataSync:App:Url' in dbdatasync.config.yaml", CurrentUser.SystemAuthor);
         }
 
-        if (selfUpdate)
+        if (CliOptions.Has(args, "--self-update"))
         {
-            Console.WriteLine(
-                "Self-update is on for this unit: before every start it runs a privileged step that applies an update the " +
-                "service asked for, and rolls one back that never became healthy. Updating from the web console also needs " +
-                "DbDataSync:Updates:Mode set to manual.");
+            // Phase 196L retired the unit's privileged apply step: updates are applied from a shell, with
+            // `sudo dbdatasync update --apply`. Accepted rather than refused, so an old script still installs.
+            Console.WriteLine("--self-update is no longer needed and was ignored: apply updates with `sudo dbdatasync update --apply`.");
             Console.WriteLine();
         }
 
@@ -257,7 +247,7 @@ internal static class SystemdService
     /// unit; no machine-global side effect. Null omits the line entirely rather than emitting a wrong
     /// one — see <see cref="ResolveDotnetRoot"/>.
     /// </param>
-    internal static string RenderUnit(string executable, string root, string user, string? dotnetRoot = null, bool selfUpdate = false)
+    internal static string RenderUnit(string executable, string root, string user, string? dotnetRoot = null)
     {
         // No --url baked in: serve already resolves DbDataSync:App:Url from dbdatasync.config.yaml
         // (flag > env var > file), so baking one in here would win over that file forever — an
@@ -283,14 +273,6 @@ internal static class SystemdService
                """;
 
         var dotnetRootLine = dotnetRoot is null ? "" : $"Environment=DOTNET_ROOT={dotnetRoot}\n";
-        var selfUpdateEnvironment = selfUpdate ? $"Environment={SelfUpdateMarker}\n" : "";
-        var selfUpdateStep = selfUpdate
-            ? $"# `-` so that a step which fails, or does not exist (an update can go back to a version older than this feature),\n# never stops the service starting on whatever is installed; `+` so it runs outside this unit's own sandbox and\n# User=, which is what lets it write the tool directory. Both checked on systemd 255.\nExecStartPre=-+{QuoteForSystemd(executable)} internal apply-update --repo {QuoteForSystemd(root)}\n"
-            : "";
-        var selfUpdateExit = selfUpdate
-            ? $"SuccessExitStatus={SelfUpdateExitCode}\nRestartForceExitStatus={SelfUpdateExitCode}\n"
-            : "";
-
         return $"""
             [Unit]
             Description=DbDataSync — cross-database replication
@@ -299,13 +281,13 @@ internal static class SystemdService
 
             [Service]
             Type=notify
-            {dotnetRootLine}{selfUpdateEnvironment}{selfUpdateStep}ExecStart={execStart}
+            {dotnetRootLine}ExecStart={execStart}
             User={user}
             Group={user}
             WorkingDirectory={root}
             Restart=on-failure
             RestartSec=5
-            {selfUpdateExit}{serviceExtras}
+            {serviceExtras}
 
             [Install]
             WantedBy=multi-user.target

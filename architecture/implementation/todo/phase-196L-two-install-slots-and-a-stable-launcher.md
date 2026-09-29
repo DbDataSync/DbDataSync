@@ -93,12 +93,13 @@ created its SQLite state database (native `e_sqlite3`) and git repository (nativ
 An apphost is a native, per-platform binary, and the tool package is RID-agnostic. So the Cli pack builds the
 launcher once per RID and ships each complete output (apphost, dll, runtimeconfig, deps) under
 `tools/net10.0/any/launcher/<rid>/`. RIDs: `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `linux-musl-x64`,
-`linux-musl-arm64`, `osx-x64`, `osx-arm64`. That is under 1.5 MB. The launcher project lists them in
-`<RuntimeIdentifiers>` so one restore covers every inner build. Cross-RID apphosts build fine on Linux (checked:
-`win-x64` produced `dbdatasync.exe`, `linux-arm64` an ELF apphost). An ordinary `dotnet build` of the Cli copies
-only the build machine's launcher (`launcher/<own rid>/`), so the inner loop and tests stay offline-friendly.
+`linux-musl-arm64`, `osx-x64`, `osx-arm64`. That is under 1.5 MB. Publish runs one `dotnet build -r <rid>` of
+the launcher per RID (`PublishLaunchers` in the Cli csproj). A separate restore per RID keeps the apphost packs
+out of every ordinary restore. Cross-RID apphosts build fine on Linux (checked: `win-x64` produced
+`dbdatasync.exe`, `linux-arm64` an ELF apphost). An ordinary `dotnet build` of the Cli copies only the build
+machine's launcher (`launcher/<own rid>/`), so the inner loop and tests stay offline-friendly.
 
-Installing the launcher (`LauncherInstaller`) copies `launcher/<RuntimeInformation.RuntimeIdentifier>/` from the
+Installing the launcher (`LauncherInstaller`) copies `launcher/<SlotPaths.PortableRuntimeIdentifier()>/` from the
 **current slot's** payload into the tool directory. It only copies when a file differs, writes each file to a
 temp name and renames it into place, and on Windows first renames a file that is in use (the running launcher's
 own `.exe`) aside to `*.old`. `*.old` files are deleted best-effort on the next run. An unknown RID refuses
@@ -112,11 +113,14 @@ with a message; that install stays legacy, and the printed-commands path still w
   names an empty slot. It notes, not warns, when the current slot is **older** than the other one. That is the
   normal state after a rollback, so it is shown with the command that goes forward again. Shown by
   `update --status` and the console.
-- **Planning against the inactive slot.** `UpdatePlan.Location` becomes the inactive slot's tool path, and
-  `Installed` becomes **that slot's** version, not the running one. A new `PlanOperation.FreshInstall` covers an
-  empty slot (`dotnet tool install`). `UpdateCommands.Install` is otherwise unchanged. If the target is already
-  in the inactive slot, nothing is installed; the flow only flips. If the target is what is running, there is
-  nothing to do.
+- **Installing into the inactive slot** (`SlotInstaller`). *Changed while building:* the slot's directory is
+  deleted and the version gets a plain `dotnet tool install --tool-path` (`UpdateCommands.IntoEmptySlot`). This
+  replaces planning `update` or `uninstall + install` against the slot's version. The slot holds whatever was
+  current two updates ago: newer, older, or half-installed by an interrupted run. Nothing runs from it, so starting
+  clean is always right, and one command covers every case. The result is checked (exactly one runnable payload
+  of that version) before anything depends on it. If the target is already in the inactive slot, nothing is
+  installed; the flow only flips. If the target is what is running, there is nothing to do. `UpdatePlan` itself
+  is unchanged and still describes the update against the running version.
 - **`UpdateApplyFlow`**, one path for both directions, `--apply` and `--rollback`: install into the inactive
   slot (apply only) → stop the service → flip → start → health (`IHealthProbe`, unchanged). If healthy, record
   success; the old slot is untouched. If not, flip back, restart, and record a rollback. With no service it
@@ -187,7 +191,8 @@ What the page shows:
   commands for that version, each with a copy button.
   - Linux: `sudo dbdatasync update --to <v> --apply`.
   - Windows: the same without `sudo`, "in an elevated PowerShell".
-  - `--repo <path>` is added only when the data directory is not the default.
+  - `--repo <path>` is always added, because the server knows its data directory. *Changed while building:* the
+    default lives in the CLI project, and an explicit `--repo` is never wrong where a defaulted one could be.
   - Plus a one-line explanation of what will happen, including that a legacy install converts itself first.
 - **Roll back**: when the other slot holds a version, the `update --rollback` command.
 - **Progress**: when the CLI is mid-update (phases recorded in the state file), the same progress card as
@@ -232,6 +237,17 @@ needs no console setting.
 
 ## Progress
 
+- **Checkpoints 3–4 (update library + CLI)**: built and unit-tested (Updates 178, Cli 246 passing).
+  `SlotLayout`/`LauncherContext`, `SlotInstaller`, `LauncherInstaller`, `SlotMigration`, `UpdateCliCommands`;
+  `UpdateApplier`'s pending/confirm/applied/kept-package machinery and the privileged workspace are gone.
+  - `update --apply/--rollback/--status` run on slots, and Windows is on (`WindowsServiceControl` waits on the
+    SCM).
+  - The conversion is automatic and loud, and `launcher repair` exists. `service install` puts the launcher in
+    place (converting first if needed).
+  - `internal apply-update` is a no-op, and units lose the self-update lines. `config check` now warns about a unit
+    that still runs the retired step.
+  - API: the apply endpoint, drain, confirmation service and exit 75 are gone. `UpdateService` is read-only and
+    returns slots and commands.
 - **Checkpoint 2 (launcher + packaging)**: built. `src/DbDataSync.Launcher`, `SlotPaths` linked into it, and
   launchers for all eight RIDs in a real `dotnet pack` (31 s, 1.1 MB; `win-*` carry `dbdatasync.exe`). The
   release and snapshot workflows now fail a package that lacks any of them. The container build passes

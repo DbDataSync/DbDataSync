@@ -17,11 +17,11 @@ public static class Help
 
               dbdatasync service install|uninstall|status [--repo <path>] [--url <url>] [--account <account>]
                   On Windows: registers this tool as a Windows service. Needs an elevated prompt.
-              dbdatasync service install|uninstall|status [--repo <path>] [--url <url>] [--user <user>] [--self-update]
+              dbdatasync service install|uninstall|status [--repo <path>] [--url <url>] [--user <user>]
                   On Linux: registers a systemd unit (default user: dbdatasync). Needs root
                   (`sudo`); enables but does not start it — run `systemctl start dbdatasync` next.
-                  --self-update adds a privileged pre-start step that applies updates the web console
-                  asks for (see docs/install.md, "From the web console"). Off unless you ask for it.
+                  Either way the service runs the launcher, and a machine-wide install made before
+                  versioned slots is converted to them first (it says so).
 
               dbdatasync tool install|uninstall [--dir <path>]
                   Puts a `dotnet tool install --tool-path <dir>` copy of this CLI on the machine's
@@ -36,11 +36,18 @@ public static class Help
                   one, downloads it if it is a snapshot, and prints the commands that install it.
                   Set GITHUB_TOKEN to raise GitHub's anonymous rate limit; it is never required.
               dbdatasync update --to <version> --apply [--yes] [--url <url>] [--health-timeout <seconds>]
-                  Carries the update out instead of printing it: stops the service, installs, starts it
-                  and checks it answers, rolling back if it does not. Needs the rights to do those
-                  (sudo). Not available on Windows yet — there it prints the commands to run.
+                  Carries the update out instead of printing it: installs it into the slot that is not
+                  running, stops the service, switches slots, starts it and checks it answers — switching
+                  back if it does not. Needs root/an elevated prompt. The first run on a machine-wide
+                  install made before versioned slots converts it (it says so).
+              dbdatasync update --rollback [--yes] [--url <url>] [--health-timeout <seconds>]
+                  Switches back to the version in the other slot, the same way. Nothing is downloaded.
               dbdatasync update --status
-                  Shows what the last update did, and whether one is waiting or on trial.
+                  Shows both slots, what the last update did, and the recent history.
+
+              dbdatasync launcher repair [--repo <path>]
+                  Re-copies the running version's launcher (what the service and PATH run) over the
+                  installed one and re-points a registered service at it. Rarely needed.
 
               dbdatasync invite [--role Admin|Viewer] [--repo <path>] [--url <url>]
                   Prints a fresh single-use invitation URL. For when the first-run one has scrolled

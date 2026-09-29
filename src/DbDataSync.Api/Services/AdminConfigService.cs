@@ -110,24 +110,15 @@ public sealed class AdminConfigService(
                 "a convincingly crafted link, or a flaw in the library later. Leave it basic unless your team " +
                 "needs tables in notes."),
         new("DbDataSync:Updates:Mode",
-            "Whether, and how, an admin may update this installation from the Updates screen: manual or " +
-            "disabled. Disabled by default: it replaces the code the service runs, as the service's own " +
-            "account. Needs a systemd unit written by this version or later (`dbdatasync service install`); " +
-            "Linux only for now.",
+            "Whether the Updates screen looks up the releases available: manual or disabled. Disabled by " +
+            "default, because looking them up calls nuget.org and GitHub. Updates themselves are applied from " +
+            "a shell on the server (`dbdatasync update --apply`); the screen shows the commands either way.",
             SupportsWrite: true, AllowedValues: AllowedValuesFor<UpdatesMode>()),
         new("DbDataSync:Updates:Channels",
             "Which release channels the Updates screen may offer, comma-separated: stable, beta, snapshot. " +
             "A snapshot is a development build; its download is only checked against a checksum published " +
             "beside it.",
             SupportsWrite: true),
-        new("DbDataSync:Updates:DrainTimeoutSeconds",
-            "How long an update waits for running work to finish before restarting the service anyway. " +
-            "Anything interrupted is reconciled at the next start.",
-            SupportsWrite: true, Unit: "seconds"),
-        new("DbDataSync:Updates:ConfirmAfterSeconds",
-            "How long an updated version must have been serving before the update counts as having worked. " +
-            "Until then, a restart rolls the update back.",
-            SupportsWrite: true, Unit: "seconds"),
         new("DbDataSync:Auth:Network:Admin",
             "Trusts an unauthenticated request from loopback as Admin: loopback or disabled. There is no " +
             "\"from anywhere\" option for Admin — only Auth:Network:Viewer ever widens past loopback.",
@@ -402,8 +393,6 @@ public sealed class AdminConfigService(
         "DbDataSync:Notes:MarkdownRenderer" => Lower(apiOptions.NotesRenderer),
         "DbDataSync:Updates:Mode" => Lower(apiOptions.SelfUpdateMode),
         "DbDataSync:Updates:Channels" => string.Join(",", apiOptions.SelfUpdateChannels.Select(c => c.ToString().ToLowerInvariant())),
-        "DbDataSync:Updates:DrainTimeoutSeconds" => ((int)apiOptions.SelfUpdateDrainTimeout.TotalSeconds).ToString(),
-        "DbDataSync:Updates:ConfirmAfterSeconds" => ((int)apiOptions.SelfUpdateConfirmAfter.TotalSeconds).ToString(),
         "DbDataSync:Auth:Network:Admin" => Lower(authOptions.NetworkAdmin),
         "DbDataSync:Auth:Network:Viewer" => Lower(authOptions.NetworkViewer),
         "DbDataSync:Auth:Windows:Mode" => Lower(authOptions.WindowsMode),
@@ -447,8 +436,6 @@ public sealed class AdminConfigService(
         "DbDataSync:Notes:MarkdownRenderer" => Lower(ApiOptions.DefaultNotesRenderer),
         "DbDataSync:Updates:Mode" => Lower(ApiOptions.DefaultSelfUpdateMode),
         "DbDataSync:Updates:Channels" => ApiOptions.DefaultSelfUpdateChannels,
-        "DbDataSync:Updates:DrainTimeoutSeconds" => ApiOptions.DefaultSelfUpdateDrainTimeoutSeconds.ToString(),
-        "DbDataSync:Updates:ConfirmAfterSeconds" => ApiOptions.DefaultSelfUpdateConfirmAfterSeconds.ToString(),
         "DbDataSync:Auth:Network:Admin" => Lower(AdminNetworkTrust.Disabled),
         "DbDataSync:Auth:Network:Viewer" => Lower(ViewerNetworkTrust.Disabled),
         "DbDataSync:Auth:Windows:Mode" => Lower(FeatureMode.Enabled),

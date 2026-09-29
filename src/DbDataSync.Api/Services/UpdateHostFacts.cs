@@ -7,16 +7,13 @@ namespace DbDataSync.Api.Services;
 /// describe a different host without being on one.
 /// </summary>
 /// <param name="RunningVersion">This build's informational version.</param>
-/// <param name="RunsUnderSelfUpdateUnit">True when a systemd unit written by this version or later started this
-/// process: it sets <c>DBDATASYNC_SELF_UPDATE=1</c> and systemd sets <c>INVOCATION_ID</c>. That is what makes
-/// exiting to be updated safe — without the unit's apply step, the service would restart on the same version
-/// and the update would never happen.</param>
+/// <param name="Launcher">Set when a launcher started this process (phase 196L): the tool directory and the slot.</param>
 public sealed record UpdateHostFacts(
     string? RunningVersion,
     InstallLocation Location,
     bool IsWindows,
     bool IsLinux,
-    bool RunsUnderSelfUpdateUnit)
+    LauncherContext? Launcher = null)
 {
     public static UpdateHostFacts Current()
     {
@@ -25,6 +22,7 @@ public sealed record UpdateHostFacts(
 
         // The entry assembly is the tool itself (DbDataSync.Cli), whose version is what `dbdatasync version`
         // reports; the API assembly's own is the same only when the whole graph was built with one -p:Version.
+        // Under the launcher it is still the tool: the launcher sets the slot's assembly as the entry assembly.
         var assembly = System.Reflection.Assembly.GetEntryAssembly() ?? typeof(UpdateHostFacts).Assembly;
 
         return new UpdateHostFacts(
@@ -32,7 +30,6 @@ public sealed record UpdateHostFacts(
             InstallLocator.Locate(AppContext.BaseDirectory, globalTools, inContainer),
             OperatingSystem.IsWindows(),
             OperatingSystem.IsLinux(),
-            Environment.GetEnvironmentVariable("DBDATASYNC_SELF_UPDATE") == "1"
-                && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("INVOCATION_ID")));
+            LauncherContext.Current());
     }
 }

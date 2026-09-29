@@ -30,18 +30,25 @@ public static class UpdateCommands
             : [new ToolInvocation("update", ["tool", "update", .. install])];
     }
 
-    /// <summary>Puts the previous version back: uninstall what was just installed, install what was there. From
-    /// <paramref name="rollbackPackageDirectory"/> when the package was kept, otherwise from nuget.org by exact
-    /// version — which only a stable or beta version can be.</summary>
-    public static IReadOnlyList<ToolInvocation> Rollback(UpdateRequest applied, string? rollbackPackageDirectory)
-    {
-        var location = new InstallLocation(applied.InstallKind, applied.ToolRoot);
-        var install = new List<string>(Location(location)) { ReleaseSources.PackageId };
-        if (rollbackPackageDirectory is not null)
-            install.AddRange(["--add-source", rollbackPackageDirectory]);
-        install.AddRange(["--version", applied.PreviousVersion!]);
+    /// <summary>Whether a slot holding <paramref name="slotVersion"/> already holds <paramref name="version"/>.</summary>
+    public static bool SlotHolds(string? slotVersion, string version) =>
+        slotVersion is not null
+        && ReleaseVersion.TryParse(slotVersion, out var there) && ReleaseVersion.TryParse(version, out var wanted) && there.Equals(wanted);
 
-        return [Uninstall(location), new ToolInvocation("install", ["tool", "install", .. install])];
+    /// <summary>
+    /// Phase 196L: installs <paramref name="version"/> into an **empty** slot. The caller empties it first (deletes
+    /// the directory) rather than choosing <c>update</c> or uninstall + install by direction: the slot holds whatever
+    /// was current two updates ago, newer or older than the target or half-installed by an update that was
+    /// interrupted, and nothing runs from it — so starting clean is always right, and one command covers every case.
+    /// </summary>
+    /// <param name="sourceDirectory">A staged snapshot's folder, or a folder holding a package already on disk.</param>
+    public static ToolInvocation IntoEmptySlot(string slotDirectory, string version, string? sourceDirectory)
+    {
+        var install = new List<string>(Location(new InstallLocation(InstallKind.ToolPath, slotDirectory))) { ReleaseSources.PackageId };
+        if (sourceDirectory is not null)
+            install.AddRange(["--add-source", sourceDirectory]);
+        install.AddRange(["--version", version]);
+        return new ToolInvocation("install", ["tool", "install", .. install]);
     }
 
     private static ToolInvocation Uninstall(InstallLocation location) =>

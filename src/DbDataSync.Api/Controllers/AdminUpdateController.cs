@@ -7,9 +7,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace DbDataSync.Api.Controllers;
 
 /// <summary>
-/// Updating this installation from the console (phase 159). Admin-only, stated on every action per this
-/// repository's convention, and closed by default: <c>apply</c> is refused unless
-/// <c>DbDataSync:Updates:Mode</c> is set to <c>manual</c>.
+/// The console's Updates screen (phase 159; read-only since phase 196L). Admin-only, stated on every action per this
+/// repository's convention. Nothing here changes the install: the status carries the CLI commands that do. Looking up
+/// releases calls out to nuget.org and GitHub, so it is refused unless <c>DbDataSync:Updates:Mode</c> is <c>manual</c>.
 /// </summary>
 [ApiController]
 [Route("api/admin/update")]
@@ -25,9 +25,8 @@ public sealed class AdminUpdateController(UpdateService updates) : ControllerBas
     [HttpGet("releases")]
     public async Task<ActionResult> Releases([FromQuery] string? channel, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
     {
-        var capability = updates.Capability();
-        if (!capability.Enabled)
-            return StatusCode(StatusCodes.Status403Forbidden, new { error = capability.Reason });
+        if (!updates.Enabled)
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = updates.DisabledReason });
 
         ReleaseChannel? requested = null;
         if (!string.IsNullOrEmpty(channel))
@@ -52,25 +51,4 @@ public sealed class AdminUpdateController(UpdateService updates) : ControllerBas
             return StatusCode(StatusCodes.Status502BadGateway, new { error = ex.Message });
         }
     }
-
-    [Authorize(Policies.Admin)]
-    [HttpPost("apply")]
-    public async Task<ActionResult> Apply([FromBody] ApplyUpdateRequest body, CancellationToken cancellationToken)
-    {
-        var result = await updates.RequestAsync(body.Version ?? "", User.Identity?.Name, cancellationToken);
-
-        return result.Outcome switch
-        {
-            UpdateRequestOutcome.Accepted => Accepted(new { message = result.Message }),
-            UpdateRequestOutcome.Disabled or UpdateRequestOutcome.ChannelNotEnabled => StatusCode(StatusCodes.Status403Forbidden, new { error = result.Message }),
-            UpdateRequestOutcome.InvalidVersion => BadRequest(new { error = result.Message }),
-            UpdateRequestOutcome.NotFound => NotFound(new { error = result.Message }),
-            UpdateRequestOutcome.SourceUnavailable => StatusCode(StatusCodes.Status502BadGateway, new { error = result.Message }),
-            _ => Conflict(new { error = result.Message }),
-        };
-    }
 }
-
-/// <param name="Version">The version to install. Looked up in the pinned release sources; nothing else about
-/// the update — where it comes from, what package — is taken from the request.</param>
-public sealed record ApplyUpdateRequest(string? Version);

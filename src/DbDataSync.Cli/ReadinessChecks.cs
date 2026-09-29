@@ -200,17 +200,17 @@ internal sealed class ServiceRegistrationCheck(string unitPath = SystemdService.
             $"Registered for the '{registration.Account}' {registration.Platform} service account " +
             $"on {registration.RegisteredAtUtc:u}.";
 
-        // Phase 159: self-update is enabled but the installed unit has no step that applies an update before a start,
-        // so the console's update button would restart the service on the same version, forever. Judged only when
-        // it is enabled — a unit without the step is the default and correct otherwise — and only when the unit file
-        // is there: this runs in a terminal, not under the unit, and a missing file is not this check's business.
-        if (context.ApiOptions.SelfUpdateMode == UpdatesMode.Manual && registration.Platform == "linux" && File.Exists(unitPath)
-            && !File.ReadAllText(unitPath).Contains(SystemdService.SelfUpdateMarker, StringComparison.Ordinal))
+        // Phase 196L: a unit written by `service install --self-update` (phase 159) still runs the retired privileged
+        // apply step before every start. Harmless — it is a no-op now — but it runs as root for nothing, and it is the
+        // sign of a unit that predates the launcher. Only when the unit file is there: this runs in a terminal, not
+        // under the unit, and a missing file is not this check's business.
+        if (registration.Platform == "linux" && File.Exists(unitPath)
+            && File.ReadAllText(unitPath).Contains("internal apply-update", StringComparison.Ordinal))
         {
             return Task.FromResult(new CheckResult(
                 "Service registration", CheckStatus.Warn,
-                detail + " DbDataSync:Updates:Mode is manual, but its systemd unit does not apply updates, so the console's update button cannot work.",
-                Fix: $"sudo dbdatasync service install --self-update, then sudo systemctl restart {SystemdService.UnitName}"));
+                detail + " Its systemd unit still runs the retired `internal apply-update` step before every start.",
+                Fix: "sudo dbdatasync launcher repair"));
         }
 
         return Task.FromResult(new CheckResult("Service registration", CheckStatus.Ok, detail));

@@ -120,6 +120,11 @@ public static class ServiceCommand
             ?? ApiOptions.DefaultUrl;
         var account = CliOptions.Read(args, "--account");
 
+        // Phase 196L: registered against the launcher, once — an update then never touches what the service names.
+        // From a pre-196L --tool-path install this converts it first (saying so); the launcher replaces the tool's
+        // shim at the same path, so the path registered is the one it always was.
+        executable = LauncherSetup.EnsureAsync(root, Console.Out, Console.Error, CancellationToken.None).GetAwaiter().GetResult() ?? executable;
+
         // A warning, not a refusal — sc.exe has no equivalent of systemd's ProtectHome, so a
         // user-profile executable does not fail the service the way it can on Linux (SystemdService's
         // own hard error). It still breaks the moment that profile is cleaned up or the service is
@@ -139,7 +144,7 @@ public static class ServiceCommand
         // (flag > env var > file), so baking one in here would win over that file forever — an
         // operator editing Url through the Admin screen would see it silently ignored on every
         // restart. An explicit --url given here is written into the file itself, below, instead.
-        var binPath = $"\"{executable}\" serve --repo \"{root}\"";
+        var binPath = BinPath(executable, root);
 
         // sc.exe's parser wants each `key=` and its value as two SEPARATE argv tokens — exactly what
         // typing them at a cmd.exe prompt produces, since the unescaped space between "start=" and
@@ -298,7 +303,10 @@ public static class ServiceCommand
         return 1;
     }
 
-    private static int Sc(params string[] arguments)
+    /// <summary>What the service runs: the executable, <c>serve</c>, and the resolved data directory.</summary>
+    internal static string BinPath(string executable, string root) => $"\"{executable}\" serve --repo \"{root}\"";
+
+    internal static int Sc(params string[] arguments)
     {
         var startInfo = new ProcessStartInfo("sc.exe") { UseShellExecute = false };
         foreach (var argument in arguments)

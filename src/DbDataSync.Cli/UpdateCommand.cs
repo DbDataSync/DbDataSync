@@ -15,6 +15,8 @@ namespace DbDataSync.Cli;
 /// <param name="BaseDirectory">Where this tool's assemblies are; how an install is recognised (see
 /// <see cref="InstallLocator"/>).</param>
 /// <param name="ServiceLookup">Given the data directory, whether a service is registered against it.</param>
+/// <param name="RunnerFor">Runs <c>dotnet</c>, from the working directory given (a private one per update).</param>
+/// <param name="Launcher">What the launcher said about this process (phase 196L); null when it was not started by one.</param>
 internal sealed record UpdateEnvironment(
     string? InstalledVersion,
     string BaseDirectory,
@@ -27,8 +29,10 @@ internal sealed record UpdateEnvironment(
     string? GitHubToken,
     IServiceControl ServiceControl,
     IHealthProbe Health,
-    Func<UpdateWorkspace, IToolCommandRunner> RunnerFor,
-    string UserName)
+    Func<string, IToolCommandRunner> RunnerFor,
+    string UserName,
+    LauncherContext? Launcher,
+    IServiceRebinder Rebinder)
 {
     public static UpdateEnvironment Current() => new(
         typeof(Help).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
@@ -42,14 +46,16 @@ internal sealed record UpdateEnvironment(
         RegisteredService,
         Console.IsInputRedirected,
         Environment.GetEnvironmentVariable("GITHUB_TOKEN") ?? Environment.GetEnvironmentVariable("GH_TOKEN"),
-        new SystemctlServiceControl(new RealSystemdEnvironment()),
+        OperatingSystem.IsWindows() ? new WindowsServiceControl() : new SystemctlServiceControl(new RealSystemdEnvironment()),
         new HttpHealthProbe(),
-        workspace => new ProcessToolCommandRunner(workspace),
-        Environment.UserName);
+        workingDirectory => new ProcessToolCommandRunner(workingDirectory),
+        Environment.UserName,
+        LauncherContext.Current(),
+        new RealServiceRebinder(new RealSystemdEnvironment()));
 
     /// <summary>The phase 135 marker says whether <c>service install</c> ever registered a service against this
     /// data directory, and on which platform — which is what decides the stop/start steps of a plan.</summary>
-    private static ServiceSituation RegisteredService(string root) =>
+    internal static ServiceSituation RegisteredService(string root) =>
         ServiceRegistration.Read(root)?.Platform switch
         {
             "windows" when OperatingSystem.IsWindows() => new ServiceSituation(ServiceManager.WindowsService, ServiceCommand.ServiceName),
@@ -89,9 +95,12 @@ public static class UpdateCommand
 
         if (options.Status)
         {
-            WriteStatus(new UpdateStateStore(new UpdateWorkspace(DbDataSyncRoot.Resolve(args))), output);
+            WriteStatus(new UpdateStateStore(new UpdateWorkspace(DbDataSyncRoot.Resolve(args))), env, output);
             return 0;
         }
+
+        if (options.Rollback)
+            return await RollbackAsync(options, env, args, input, output, error, cancellationToken);
 
         var installed = ReleaseVersion.TryParse(env.InstalledVersion, out var parsed) ? parsed : null;
         var userAgent = $"DbDataSync-update/{installed?.Text ?? "unknown"}";
@@ -214,7 +223,26 @@ public static class UpdateCommand
 
         if (!options.Apply)
         {
+            if (env.Launcher is not null && plan.IsUpdatable && plan.Operation != PlanOperation.AlreadyInstalled)
+            {
+                // Phase 196L: the dotnet commands for this plan would write into the running slot — exactly what the
+                // slots exist to avoid. The one command that does it properly is this tool's own.
+                output.Write(UpdatePlanRenderer.RenderHeader(plan));
+                output.WriteLine();
+                output.WriteLine("Nothing has been changed. This install uses versioned slots; to install it into the other slot and switch to it:");
+                output.WriteLine();
+                output.WriteLine($"       {Commands(env, root).ApplyFor(plan.Target.Version.Text)}");
+                return 0;
+            }
+
             output.Write(UpdatePlanRenderer.Render(plan, env.IsWindows));
+            if (plan.IsUpdatable && plan.Location.Kind == InstallKind.ToolPath && plan.Operation != PlanOperation.AlreadyInstalled)
+            {
+                output.WriteLine();
+                output.WriteLine("Or let dbdatasync do all of that, converting this install to versioned slots first (once):");
+                output.WriteLine($"       {Commands(env, root).ApplyFor(plan.Target.Version.Text)}");
+            }
+
             return 0;
         }
 
@@ -243,74 +271,193 @@ public static class UpdateCommand
             return 1;
         }
 
-        if (env.IsWindows)
+        if (plan.Location.Kind == InstallKind.Global)
         {
-            // Not "not implemented" — deliberately off until it has been watched working on a real Windows
-            // host. A running dbdatasync.exe (and the service) hold their own files open, so the swap needs a
-            // helper that outlives them, and that has not been verified. The printed plan is the way.
-            error.WriteLine("Applying an update automatically is not available on Windows yet. Run the commands below instead.");
+            // Phase 196L: a global tool's directory belongs to `dotnet tool` — its shim, its manifest — and a launcher
+            // cannot live beside them. The printed commands still work for an install the user owns.
+            error.WriteLine(
+                "A global tool (`dotnet tool install -g`) cannot switch between versioned slots, so --apply is not available for it. " +
+                "Run the commands below instead — or install machine-wide (docs/install.md) to get --apply and --rollback.");
             error.WriteLine();
             output.Write(UpdatePlanRenderer.Render(plan, env.IsWindows).Split("\n\n", 2)[^1]);
             return 1;
         }
 
-        if (!options.Yes)
+        var toolRoot = env.Launcher?.Root ?? plan.Location.ToolRoot!;
+        if (!LauncherSetup.CanWrite(toolRoot))
         {
-            if (env.InputRedirected)
-            {
-                error.WriteLine("Applying an update stops and restarts the service. Pass --yes to do that without a prompt.");
-                return 1;
-            }
-
-            output.Write(plan.Service.Manager == ServiceManager.None
-                ? "Apply this update now? [y/N] "
-                : "Apply this update now? The service will be stopped and started again. [y/N] ");
-            var answer = (await input.ReadLineAsync(cancellationToken))?.Trim();
-            if (!string.Equals(answer, "y", StringComparison.OrdinalIgnoreCase) && !string.Equals(answer, "yes", StringComparison.OrdinalIgnoreCase))
-            {
-                output.WriteLine("Cancelled.");
-                return 0;
-            }
+            error.WriteLine($"Cannot write {toolRoot}, so nothing was changed. {Elevation(env)}");
+            return 1;
         }
 
-        // The operator is the one running this, so there is no boundary to keep — but the rollback package and the
-        // log still go in a directory of their own, not the service's (`updates/`, which it can write), so a
-        // compromised service cannot plant a package for a rollback to install. Kept if anything failed, so there
-        // is a log to read.
-        var privateDirectory = Directory.CreateTempSubdirectory("dbdatasync-update-cli-");
-        var workspace = new UpdateWorkspace(root, privateDirectory.FullName);
-        var applier = new UpdateApplier(new UpdateStateStore(workspace), env.RunnerFor(workspace));
-        var request = new UpdateRequest(
-            plan.Target.Version.Text, plan.Installed?.Text, plan.Target.Channel,
-            plan.Location.Kind, plan.Location.ToolRoot!, plan.SourceDirectory, DateTimeOffset.UtcNow, env.UserName);
-        var url = options.Url
-            ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
-            ?? "http://localhost:5080";
+        if (!await ConfirmAsync(plan.Service, "Apply this update now?", options, env, input, output, error, cancellationToken))
+            return options.Yes || !env.InputRedirected ? 0 : 1;
 
-        var exit = await UpdateApplyFlow.RunAsync(
-            request, plan.Service, applier, env.ServiceControl, env.Health, url, options.HealthTimeout, output, error, cancellationToken);
-        if (exit == 0)
-            privateDirectory.Delete(recursive: true);
-        return exit;
+        var store = new UpdateStateStore(new UpdateWorkspace(root));
+        var work = Directory.CreateTempSubdirectory("dbdatasync-update-");
+        try
+        {
+            SlotLayout layout;
+            if (env.Launcher is null)
+            {
+                // Phase 196L: a pre-slot --tool-path install converts itself, once, before its first update — loudly.
+                if (plan.Installed is null)
+                {
+                    error.WriteLine("The running version could not be read, so this install cannot be converted to versioned slots.");
+                    return 1;
+                }
+
+                var launcherPath = await LauncherSetup.ConvertAsync(
+                    toolRoot, plan.Installed.Text, env.BaseDirectory, root, output, error, cancellationToken, env.RunnerFor);
+                if (launcherPath is null)
+                    return 1;
+
+                if (plan.Service.Manager != ServiceManager.None && env.Rebinder.Rebind(root, launcherPath, plan.Service, output) != 0)
+                    error.WriteLine("The service could not be pointed at the launcher; run `dbdatasync launcher repair` after this.");
+                output.WriteLine();
+                layout = new SlotLayout(toolRoot);
+            }
+            else
+            {
+                layout = new SlotLayout(toolRoot);
+                LauncherInstaller.CleanUp(layout.Root);
+                if (SlotMigration.RemoveLegacyStore(layout))
+                    output.WriteLine($"Removed {Path.Combine(layout.Root, ".store")}, left behind by the install from before versioned slots.");
+            }
+
+            var from = layout.Current ?? env.Launcher?.Slot ?? SlotPaths.SlotA;
+            var change = new SlotSwitch(
+                layout, from, SlotPaths.Other(from), plan.Installed?.Text, plan.Target.Version.Text,
+                plan.SourceDirectory, Install: true, env.UserName);
+            return await UpdateApplyFlow.RunAsync(
+                change, plan.Service, store, env.RunnerFor(work.FullName), env.ServiceControl, env.Health,
+                HealthUrl(options, root), options.HealthTimeout, output, error, cancellationToken);
+        }
+        finally
+        {
+            try
+            {
+                work.Delete(recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
     }
 
-    private static void WriteStatus(UpdateStateStore store, TextWriter output)
+    /// <summary><c>--rollback</c>: switch to the other slot — the same flow as an update, without the install.</summary>
+    private static async Task<int> RollbackAsync(
+        Options options, UpdateEnvironment env, string[] args, TextReader input, TextWriter output, TextWriter error, CancellationToken cancellationToken)
     {
+        var root = DbDataSyncRoot.Resolve(args);
+        if (env.Launcher is null)
+        {
+            error.WriteLine(
+                "This install has no versioned slots, so there is nothing to switch back to. The first `dbdatasync update --apply` " +
+                "converts a machine-wide install; from then on the version before each update is kept.");
+            return 1;
+        }
+
+        var layout = new SlotLayout(env.Launcher.Root);
+        var from = layout.Current ?? env.Launcher.Slot;
+        var target = layout.Slot(SlotPaths.Other(from));
+        if (target.Version is null)
+        {
+            error.WriteLine(target.Ambiguous
+                ? $"Slot {target.Slot} holds more than one install, so it cannot be switched to."
+                : $"Slot {target.Slot} is empty — there is no earlier version to switch back to.");
+            return 1;
+        }
+
+        var running = layout.Slot(from).Version;
+        output.WriteLine($"Running     {running ?? "(unknown)"}  (slot {from})");
+        output.WriteLine($"Switch to   {target.Version}  (slot {target.Slot})");
+        output.WriteLine();
+
+        if (!LauncherSetup.CanWrite(layout.Root))
+        {
+            error.WriteLine($"Cannot write {layout.Root}, so nothing was changed. {Elevation(env)}");
+            return 1;
+        }
+
+        var service = env.ServiceLookup(root);
+        if (!await ConfirmAsync(service, "Switch back now?", options, env, input, output, error, cancellationToken))
+            return options.Yes || !env.InputRedirected ? 0 : 1;
+
+        var change = new SlotSwitch(layout, from, target.Slot, running, target.Version, null, Install: false, env.UserName);
+        return await UpdateApplyFlow.RunAsync(
+            change, service, new UpdateStateStore(new UpdateWorkspace(root)), env.RunnerFor(Path.GetTempPath()), env.ServiceControl,
+            env.Health, HealthUrl(options, root), options.HealthTimeout, output, error, cancellationToken);
+    }
+
+    /// <summary>Asks before stopping anything. False means do not go on: cancelled at the prompt (a clean exit), or no
+    /// terminal to ask on and no <c>--yes</c> (an error, already reported).</summary>
+    private static async Task<bool> ConfirmAsync(
+        ServiceSituation service, string question, Options options, UpdateEnvironment env,
+        TextReader input, TextWriter output, TextWriter error, CancellationToken cancellationToken)
+    {
+        if (options.Yes)
+            return true;
+
+        if (env.InputRedirected)
+        {
+            error.WriteLine("This stops and restarts the service. Pass --yes to do that without a prompt.");
+            return false;
+        }
+
+        output.Write(service.Manager == ServiceManager.None
+            ? $"{question} [y/N] "
+            : $"{question} The service will be stopped and started again. [y/N] ");
+        var answer = (await input.ReadLineAsync(cancellationToken))?.Trim();
+        if (string.Equals(answer, "y", StringComparison.OrdinalIgnoreCase) || string.Equals(answer, "yes", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        output.WriteLine("Cancelled.");
+        return false;
+    }
+
+    private static string HealthUrl(Options options, string root) =>
+        options.Url
+        ?? DbDataSyncConfigFile.Read(root).GetValueOrDefault("DbDataSync:App:Url")
+        ?? "http://localhost:5080";
+
+    private static string Elevation(UpdateEnvironment env) =>
+        env.IsWindows ? "Run it from an elevated prompt (Run as administrator)." : "Run it with sudo.";
+
+    private static UpdateCliCommands Commands(UpdateEnvironment env, string root) =>
+        UpdateCliCommands.For(env.IsWindows, string.Equals(Path.GetFullPath(root), Path.GetFullPath(CliOptions.DefaultRoot), StringComparison.Ordinal) ? null : root);
+
+    private static void WriteStatus(UpdateStateStore store, UpdateEnvironment env, TextWriter output)
+    {
+        if (env.Launcher is { } launcher)
+        {
+            var layout = new SlotLayout(launcher.Root);
+            var current = layout.Current;
+            output.WriteLine($"Slots ({layout.Root})");
+            foreach (var slot in new[] { SlotPaths.SlotA, SlotPaths.SlotB })
+            {
+                var held = layout.Slot(slot);
+                var holds = held.Ambiguous ? "(more than one install)" : held.Version ?? "(empty)";
+                output.WriteLine($"  {slot}  {holds}{(slot == current ? "  current" : "")}");
+            }
+
+            foreach (var check in layout.Check())
+                output.WriteLine($"  {check.Level.ToString().ToLowerInvariant()}: {check.Message}");
+            output.WriteLine();
+        }
+        else if (InstallLocator.Locate(env.BaseDirectory, env.GlobalToolsDirectory, env.InContainer).Kind == InstallKind.ToolPath)
+        {
+            output.WriteLine("Slots: none yet — this install predates them. The first `dbdatasync update --apply` converts it.");
+            output.WriteLine();
+        }
+
         output.WriteLine($"Update state ({store.Workspace.Directory})");
-
-        var pending = store.ReadPending();
-        if (pending is not null)
-            output.WriteLine($"  requested, not yet applied: {pending.TargetVersion} (by {pending.RequestedBy ?? "?"}, {pending.RequestedUtc:yyyy-MM-dd HH:mm} UTC) — applied at the next start of the service");
-
         var state = store.ReadState();
         if (state.Current is null)
         {
             output.WriteLine("  no update has been attempted here.");
             return;
         }
-
-        if (state.Current.Phase == UpdatePhase.Restarting)
-            output.WriteLine("  on trial: installed, and rolls back at the next start unless the new version proves itself");
 
         output.WriteLine($"  now: {Describe(state.Current)}");
         if (state.History.Count > 0)
@@ -446,6 +593,7 @@ public static class UpdateCommand
             Apply = CliOptions.Has(args, "--apply"),
             Yes = CliOptions.Has(args, "--yes"),
             Status = CliOptions.Has(args, "--status"),
+            Rollback = CliOptions.Has(args, "--rollback"),
             Url = CliOptions.Read(args, "--url"),
             HealthTimeout = TimeSpan.FromSeconds(healthSeconds),
         };
@@ -465,6 +613,7 @@ public static class UpdateCommand
         public bool Apply { get; init; }
         public bool Yes { get; init; }
         public bool Status { get; init; }
+        public bool Rollback { get; init; }
         public string? Url { get; init; }
         public TimeSpan HealthTimeout { get; init; } = TimeSpan.FromSeconds(DefaultHealthTimeoutSeconds);
     }

@@ -4,23 +4,16 @@ using System.Text.Json.Serialization;
 namespace DbDataSync.Updates;
 
 /// <summary>
-/// Reads and writes the small JSON files that carry an update between the processes involved in it — and keeps
-/// the two trust levels of <see cref="UpdateWorkspace"/> apart.
+/// Reads and writes <see cref="UpdateWorkspace.StatePath"/> — what an update is doing and how the last few ended —
+/// and appends to its log.
 /// <para>
-/// **Reads from the service's directory are treated as hostile.** Anything the service can write, a compromised
-/// service can write: so a symbolic link, an oversized file or malformed JSON is simply "absent". The privileged
-/// step then goes on to use only what it can verify itself.
+/// **Reads are treated as hostile.** The service can write this directory, so a symbolic link, an oversized file or
+/// malformed JSON is simply "absent", and text read back is cleaned before it is shown (<see cref="Clean"/>).
 /// </para>
 /// <para>
-/// **Every write is a temp file moved over the target**, never an in-place overwrite. That is what lets the
-/// service replace a file the privileged step created (rename needs only write access to the directory) — and it
-/// means writing over a path that was swapped for a symlink replaces the link, not what it pointed at. Writing
-/// into the service's directory refuses if that directory is itself a link.
-/// </para>
-/// <para>
-/// No <c>.gitignore</c> is touched: the data root is not a git repository (the config repo is its <c>config/</c>
-/// subdirectory), and appending to a file in a directory the service controls, as root, is not something to do
-/// for a convention that means nothing here.
+/// **Every write is a temp file moved over the target**, never an in-place overwrite, so writing over a path that was
+/// swapped for a symlink replaces the link, not what it pointed at; writing into a directory that is itself a link is
+/// refused.
 /// </para>
 /// </summary>
 public sealed class UpdateStateStore(UpdateWorkspace workspace)
@@ -39,21 +32,6 @@ public sealed class UpdateStateStore(UpdateWorkspace workspace)
 
     public UpdateWorkspace Workspace { get; } = workspace;
 
-    // --- the service's directory: untrusted ---------------------------------------------------------------
-
-    public PendingUpdate? ReadPending() => Read<PendingUpdate>(Workspace.PendingPath);
-
-    public void WritePending(PendingUpdate request) => Write(Workspace.PendingPath, request);
-
-    public void ClearPending() => Delete(Workspace.PendingPath);
-
-    public ConfirmedUpdate? ReadConfirmed() => Read<ConfirmedUpdate>(Workspace.ConfirmedPath);
-
-    public void WriteConfirmed(string targetVersion) =>
-        Write(Workspace.ConfirmedPath, new ConfirmedUpdate(targetVersion, DateTimeOffset.UtcNow));
-
-    public void ClearConfirmed() => Delete(Workspace.ConfirmedPath);
-
     public UpdateStateFile ReadState() =>
         Read<UpdateStateFile>(Workspace.StatePath) ?? new UpdateStateFile(null, []);
 
@@ -70,17 +48,21 @@ public sealed class UpdateStateStore(UpdateWorkspace workspace)
         return progress;
     }
 
-    // --- root's directory: trusted -------------------------------------------------------------------------
+    /// <summary>Appends a timestamped line to the log. Never throws: a log that cannot be written must not stop an
+    /// update half way.</summary>
+    public void Log(string line)
+    {
+        try
+        {
+            Directory.CreateDirectory(Workspace.Directory);
+            File.AppendAllText(Workspace.LogPath, $"{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss}Z  {line}{Environment.NewLine}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 
-    public UpdateRequest? ReadApplied() => Read<UpdateRequest>(Workspace.AppliedPath);
-
-    public void WriteApplied(UpdateRequest request) => Write(Workspace.AppliedPath, request);
-
-    public void ClearApplied() => Delete(Workspace.AppliedPath);
-
-    // --- plumbing -------------------------------------------------------------------------------------------
-
-    private T? Read<T>(string path) where T : class
+    private static T? Read<T>(string path) where T : class
     {
         try
         {
@@ -92,16 +74,15 @@ public sealed class UpdateStateStore(UpdateWorkspace workspace)
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            // A half-written, hand-edited or unreadable file is treated as absent rather than wedging every
-            // start: the caller acts on what it can read, and the next write replaces it.
+            // A half-written, hand-edited or unreadable file is treated as absent: the next write replaces it.
             return null;
         }
     }
 
-    private void Write<T>(string path, T value)
+    private static void Write<T>(string path, T value)
     {
         var directory = Path.GetDirectoryName(path)!;
-        EnsureDirectory(directory);
+        Directory.CreateDirectory(directory);
         if (IsLinkedDirectory(directory))
             throw new IOException($"'{directory}' is a symbolic link; refusing to write through it.");
 
@@ -110,30 +91,10 @@ public sealed class UpdateStateStore(UpdateWorkspace workspace)
         File.Move(temp, path, overwrite: true);
     }
 
-    private static void Delete(string path)
-    {
-        if (File.Exists(path) || new FileInfo(path).LinkTarget is not null)
-            File.Delete(path);
-    }
-
-    /// <summary>The privileged directory is created readable by everyone and writable by its creator — root, on
-    /// Linux — so the service and an admin can read the log and the record without being able to change them.</summary>
-    private void EnsureDirectory(string directory)
-    {
-        if (Directory.Exists(directory))
-            return;
-
-        if (OperatingSystem.IsWindows() || !string.Equals(directory, Workspace.PrivilegedDirectory, StringComparison.Ordinal))
-            Directory.CreateDirectory(directory);
-        else
-            Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-                | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-    }
-
     private static bool IsLinkedDirectory(string directory) => new DirectoryInfo(directory).LinkTarget is not null;
 
     /// <summary>Display text only, but it is shown in a browser and written to a log: no control characters, and
-    /// bounded, whatever a compromised service put in it.</summary>
+    /// bounded, whatever was put in the file.</summary>
     internal static string? Clean(string? text)
     {
         if (text is null)

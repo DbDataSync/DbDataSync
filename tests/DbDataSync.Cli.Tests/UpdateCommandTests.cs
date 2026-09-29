@@ -85,7 +85,8 @@ public class UpdateCommandTests : IDisposable
     private UpdateEnvironment Env(
         string? installed = "2026.9.16.1005", string baseDirectory = ToolPathBase, bool container = false,
         bool windows = false, bool inputRedirected = true, ServiceSituation? service = null, Action<string>? onLookup = null,
-        int stopExit = 0, int startExit = 0, bool healthy = true, Func<IReadOnlyList<string>, int>? dotnetExit = null) =>
+        int stopExit = 0, int startExit = 0, bool healthy = true, Func<IReadOnlyList<string>, int>? dotnetExit = null,
+        LauncherContext? launcher = null) =>
         new(installed, baseDirectory, "/home/dan/.dotnet/tools", container, windows, Path.Combine(_temp, "stage"),
             root =>
             {
@@ -94,7 +95,16 @@ public class UpdateCommandTests : IDisposable
             },
             inputRedirected, GitHubToken: null,
             new FakeServiceControl(_events, stopExit, startExit), new FakeHealth(_events, healthy),
-            _ => new RecordingRunner(_events, dotnetExit), "dan");
+            _ => new RecordingRunner(_events, dotnetExit), "dan", launcher, new FakeRebinder(_events));
+
+    private sealed class FakeRebinder(List<string> events) : IServiceRebinder
+    {
+        public int Rebind(string dataRoot, string launcherPath, ServiceSituation service, TextWriter output)
+        {
+            events.Add($"rebind {service.Name} -> {launcherPath}");
+            return 0;
+        }
+    }
 
     private sealed class FakeServiceControl(List<string> events, int stopExit, int startExit) : IServiceControl
     {
@@ -120,14 +130,28 @@ public class UpdateCommandTests : IDisposable
         }
     }
 
+    /// <summary>Records each <c>dotnet</c> run and, for a successful <c>tool install --tool-path</c>, lays the payload
+    /// down where the real one would — what the flow checks before it switches.</summary>
     private sealed class RecordingRunner(List<string> events, Func<IReadOnlyList<string>, int>? exit) : IToolCommandRunner
     {
         public Task<ToolCommandResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
         {
             events.Add("dotnet " + string.Join(' ', arguments));
             var code = exit?.Invoke(arguments) ?? 0;
+            if (code == 0 && arguments is ["tool", "install", "--tool-path", var slot, ..])
+                PutPayload(slot, arguments[arguments.ToList().IndexOf("--version") + 1]);
             return Task.FromResult(new ToolCommandResult(code, code == 0 ? "ok" : "it broke"));
         }
+    }
+
+    /// <summary>What <c>dotnet tool install --tool-path</c> leaves, as far as a slot is concerned; returns the payload
+    /// directory (what AppContext.BaseDirectory is when that slot runs).</summary>
+    private static string PutPayload(string slotDirectory, string version)
+    {
+        var any = Path.Combine(slotDirectory, ".store", "dbdatasync", version, "dbdatasync", version, "tools", "net10.0", "any");
+        Directory.CreateDirectory(any);
+        File.WriteAllText(Path.Combine(any, SlotPaths.PayloadAssemblyName), "payload");
+        return any + Path.DirectorySeparatorChar;
     }
 
     private async Task<(int Exit, string Out, string Err)> RunAsync(
@@ -496,108 +520,165 @@ public class UpdateCommandTests : IDisposable
         Assert.Contains("Cancelled.", output);
     }
 
-    // --- --apply -------------------------------------------------------------------------------------------
+    // --- --apply: a slot install (phase 196L) ----------------------------------------------------------------
 
     private static readonly ServiceSituation Systemd = new(ServiceManager.Systemd, "dbdatasync");
 
     private string DataRoot => Path.Combine(_temp, "data");
 
+    private string ToolRoot => Path.Combine(_temp, "tool");
+
+    private string SlotA => SlotPaths.SlotDirectory(ToolRoot, "a");
+
+    private string SlotB => SlotPaths.SlotDirectory(ToolRoot, "b");
+
     private string[] Apply(params string[] extra) => ["--to", "2026.9.18.1918", "--apply", "--repo", DataRoot, .. extra];
 
     private UpdateStateStore Store() => new(new UpdateWorkspace(DataRoot));
 
-    [Fact]
-    public async Task Apply_UnderAService_StopsInstallsStartsAndChecksHealth_ThenRecordsSuccess()
+    private SlotLayout Layout => new(ToolRoot);
+
+    /// <summary>A slot install running 2026.9.16.1005 from slot a, as the launcher would have started it.</summary>
+    private UpdateEnvironment SlotEnv(
+        ServiceSituation? service = null, bool healthy = true, int stopExit = 0, Func<IReadOnlyList<string>, int>? dotnetExit = null,
+        bool inputRedirected = true, bool windows = false, string? otherSlot = null)
     {
-        var (exit, output, error) = await RunAsync(Apply("--yes"), Env(service: Systemd), Network());
+        var payload = PutPayload(SlotA, "2026.9.16.1005");
+        if (otherSlot is not null)
+            PutPayload(SlotB, otherSlot);
+        Layout.Flip("a");
+        return Env(baseDirectory: payload, service: service, healthy: healthy, stopExit: stopExit, dotnetExit: dotnetExit,
+            inputRedirected: inputRedirected, windows: windows, launcher: new LauncherContext(ToolRoot, "a"));
+    }
+
+    private string InstallIntoB(string version = "2026.9.18.1918") =>
+        $"dotnet tool install --tool-path {SlotB} DbDataSync --version {version}";
+
+    [Fact]
+    public async Task Apply_UnderAService_InstallsIntoTheOtherSlot_ThenStopsSwitchesStartsAndChecks()
+    {
+        var (exit, output, error) = await RunAsync(Apply("--yes"), SlotEnv(service: Systemd), Network());
 
         Assert.Equal(0, exit);
         Assert.Equal("", error);
-        Assert.Equal(
-            [
-                "service stop",
-                "dotnet tool update --tool-path /opt/dbdatasync DbDataSync --version 2026.9.18.1918",
-                "service start",
-                "health http://localhost:5080 90s",
-            ],
-            _events);
-        Assert.Contains("Updated to 2026.9.18.1918; the service is answering.", output);
-        Assert.DoesNotContain("Nothing has been changed", output);
+        Assert.Equal([InstallIntoB(), "service stop", "service start", "health http://localhost:5080 90s"], _events);
+        Assert.Equal("b", Layout.Current);
+        Assert.Equal("2026.9.16.1005", Layout.Slot("a").Version);
+        Assert.Contains("Updated to 2026.9.18.1918. The service is answering.", output);
+        Assert.Contains("`dbdatasync update --rollback` switches back", output);
         Assert.Equal(UpdatePhase.Succeeded, Store().ReadState().Current!.Phase);
-        Assert.Null(Store().ReadApplied());
     }
 
     [Fact]
-    public async Task Apply_TheServiceNeverAnswers_RollsBack_AndRestartsTheOldVersion()
+    public async Task Apply_TheServiceNeverAnswers_SwitchesBack_WithNothingToReinstall()
     {
-        var (exit, output, error) = await RunAsync(Apply("--yes", "--health-timeout", "5"), Env(service: Systemd, healthy: false), Network());
+        var (exit, output, error) = await RunAsync(Apply("--yes", "--health-timeout", "5"), SlotEnv(service: Systemd, healthy: false), Network());
 
         Assert.Equal(1, exit);
         Assert.Contains("did not answer at http://localhost:5080 within 5 seconds", output);
-        Assert.Contains("Rolled back: 2026.9.16.1005 is installed again", error);
+        Assert.Contains("Switched back: 2026.9.16.1005 is running again", error);
         Assert.Equal(
-            [
-                "service stop",
-                "dotnet tool update --tool-path /opt/dbdatasync DbDataSync --version 2026.9.18.1918",
-                "service start",
-                "health http://localhost:5080 5s",
-                "service stop",
-                "dotnet tool uninstall --tool-path /opt/dbdatasync DbDataSync",
-                "dotnet tool install --tool-path /opt/dbdatasync DbDataSync --version 2026.9.16.1005",
-                "service start",
-            ],
+            [InstallIntoB(), "service stop", "service start", "health http://localhost:5080 5s", "service stop", "service start"],
             _events);
+        Assert.Equal("a", Layout.Current);
+        Assert.Equal("2026.9.18.1918", Layout.Slot("b").Version);
         Assert.Equal(UpdatePhase.RolledBack, Store().ReadState().Current!.Phase);
     }
 
     [Fact]
-    public async Task Apply_AServiceThatCannotBeStopped_ChangesNothing_AndSaysToUseSudo()
+    public async Task Apply_AServiceThatCannotBeStopped_SwitchesNothing_AndSaysToUseSudo()
     {
-        var (exit, _, error) = await RunAsync(Apply("--yes"), Env(service: Systemd, stopExit: 1), Network());
+        var (exit, _, error) = await RunAsync(Apply("--yes"), SlotEnv(service: Systemd, stopExit: 1), Network());
 
         Assert.Equal(1, exit);
-        Assert.Contains("Could not stop the service, so nothing was changed", error);
+        Assert.Contains("Could not stop the service, so nothing was switched", error);
         Assert.Contains("sudo", error);
-        Assert.Equal(["service stop"], _events);
+        Assert.Equal([InstallIntoB(), "service stop"], _events);
+        Assert.Equal("a", Layout.Current);
     }
 
     [Fact]
-    public async Task Apply_AFailedInstall_RestartsTheServiceOnWhatWasAlreadyThere()
+    public async Task Apply_AFailedInstall_NeverStopsTheService()
     {
-        var (exit, output, error) = await RunAsync(Apply("--yes"), Env(service: Systemd, dotnetExit: _ => 1), Network());
+        var (exit, _, error) = await RunAsync(Apply("--yes"), SlotEnv(service: Systemd, dotnetExit: _ => 1), Network());
 
         Assert.Equal(1, exit);
         Assert.Contains("failed (exit 1)", error);
-        Assert.Contains("Starting the service again on the version that was already installed", output);
-        Assert.Equal(["service stop", "dotnet tool update --tool-path /opt/dbdatasync DbDataSync --version 2026.9.18.1918", "service start"], _events);
+        Assert.Contains("Nothing was switched", error);
+        Assert.Equal([InstallIntoB()], _events);
+        Assert.Equal("a", Layout.Current);
+        Assert.Equal(UpdatePhase.Failed, Store().ReadState().Current!.Phase);
     }
 
     [Fact]
-    public async Task Apply_WithNoService_JustInstalls_AndSaysToRestartServe()
+    public async Task Apply_WithNoService_JustInstallsAndSwitches()
     {
-        var (exit, output, _) = await RunAsync(Apply("--yes"), Env(), Network());
+        var (exit, output, _) = await RunAsync(Apply("--yes"), SlotEnv(), Network());
 
         Assert.Equal(0, exit);
-        Assert.Equal(["dotnet tool update --tool-path /opt/dbdatasync DbDataSync --version 2026.9.18.1918"], _events);
-        Assert.Contains("restart `dbdatasync serve`", output);
-        Assert.Equal(UpdatePhase.Succeeded, Store().ReadState().Current!.Phase);
+        Assert.Equal([InstallIntoB()], _events);
+        Assert.Equal("b", Layout.Current);
+        Assert.Contains("restart a running `dbdatasync serve` yourself", output);
+    }
+
+    [Fact]
+    public async Task Apply_TheTargetAlreadyInTheOtherSlot_DownloadsNothing_AndOnlySwitches()
+    {
+        var (exit, output, _) = await RunAsync(Apply("--yes"), SlotEnv(service: Systemd, otherSlot: "2026.9.18.1918"), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Contains("Slot b already holds 2026.9.18.1918", output);
+        Assert.Equal(["service stop", "service start", "health http://localhost:5080 90s"], _events);
+        Assert.Equal("b", Layout.Current);
+    }
+
+    [Fact]
+    public async Task Apply_OverAnOlderVersionInTheOtherSlot_ReplacesIt()
+    {
+        var (exit, _, _) = await RunAsync(Apply("--yes"), SlotEnv(otherSlot: "2026.9.11.532"), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["2026.9.18.1918"], SlotPaths.InstalledVersions(SlotB));
+    }
+
+    [Fact]
+    public async Task Apply_OnWindows_WorksTheSameWay()
+    {
+        var windowsService = new ServiceSituation(ServiceManager.WindowsService, "DbDataSync");
+
+        var (exit, _, _) = await RunAsync(Apply("--yes"), SlotEnv(service: windowsService, windows: true), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Equal([InstallIntoB(), "service stop", "service start", "health http://localhost:5080 90s"], _events);
+        Assert.Equal("b", Layout.Current);
+    }
+
+    [Fact]
+    public async Task Apply_ASnapshot_IsStagedThenInstalledIntoTheOtherSlotFromThere()
+    {
+        var (exit, _, _) = await RunAsync(["--to", SnapshotA, "--apply", "--yes", "--repo", DataRoot], SlotEnv(), Network());
+
+        Assert.Equal(0, exit);
+        var staged = Path.Combine(_temp, "stage", SnapshotA);
+        Assert.Equal([$"dotnet tool install --tool-path {SlotB} DbDataSync --add-source {staged} --version {SnapshotA}"], _events);
     }
 
     [Fact]
     public async Task Apply_AsksFirst_AndAnythingButYesCancels()
     {
-        var (exit, output, _) = await RunAsync(Apply(), Env(service: Systemd, inputRedirected: false), Network(), input: "n\n");
+        var (exit, output, _) = await RunAsync(Apply(), SlotEnv(service: Systemd, inputRedirected: false), Network(), input: "n\n");
 
         Assert.Equal(0, exit);
         Assert.Contains("Apply this update now? The service will be stopped and started again. [y/N]", output);
         Assert.Contains("Cancelled.", output);
         Assert.Empty(_events);
+        Assert.Equal("a", Layout.Current);
     }
 
     [Fact]
     public async Task Apply_AYesAtThePrompt_Proceeds()
     {
-        var (exit, _, _) = await RunAsync(Apply(), Env(inputRedirected: false), Network(), input: "y\n");
+        var (exit, _, _) = await RunAsync(Apply(), SlotEnv(inputRedirected: false), Network(), input: "y\n");
 
         Assert.Equal(0, exit);
         Assert.Single(_events);
@@ -606,7 +687,7 @@ public class UpdateCommandTests : IDisposable
     [Fact]
     public async Task Apply_WithNoTerminal_AndNoYes_RefusesRatherThanGuess()
     {
-        var (exit, _, error) = await RunAsync(Apply(), Env(service: Systemd, inputRedirected: true), Network());
+        var (exit, _, error) = await RunAsync(Apply(), SlotEnv(service: Systemd), Network());
 
         Assert.Equal(1, exit);
         Assert.Contains("Pass --yes", error);
@@ -614,17 +695,90 @@ public class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Apply_OnWindows_IsNotAvailable_AndPrintsTheCommandsInstead()
+    public async Task Apply_TheVersionAlreadyRunning_IsNothingToDo()
     {
-        var env = Env(
-            baseDirectory: @"C:\Program Files\DbDataSync\.store\dbdatasync\2026.9.16.1005\dbdatasync\2026.9.16.1005\tools\net10.0\any\",
-            windows: true, service: new ServiceSituation(ServiceManager.WindowsService, "DbDataSync"));
+        var (exit, output, _) = await RunAsync(["--to", "2026.9.16.1005", "--apply", "--yes", "--repo", DataRoot], SlotEnv(), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Contains("is already installed", output);
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public async Task Apply_UsesTheConfiguredUrl_OrTheOneGiven()
+    {
+        await RunAsync(Apply("--yes", "--url", "https://example.test:5443"), SlotEnv(service: Systemd), Network());
+
+        Assert.Contains("health https://example.test:5443 90s", _events);
+    }
+
+    [Fact]
+    public async Task WithoutApply_UnderTheLauncher_ItPrintsTheApplyCommand_NotDotnetCommandsIntoTheRunningSlot()
+    {
+        var (exit, output, _) = await RunAsync(["--to", "2026.9.18.1918", "--repo", DataRoot], SlotEnv(), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Contains($"sudo dbdatasync update --to 2026.9.18.1918 --apply --repo {DataRoot}", output);
+        Assert.DoesNotContain("dotnet tool", output);
+    }
+
+    [Fact]
+    public async Task WithoutApply_FromALegacyToolPathInstall_ItAlsoOffersTheApplyCommand()
+    {
+        var (exit, output, _) = await RunAsync(["--to", "2026.9.18.1918"], Env(), Network());
+
+        Assert.Equal(0, exit);
+        Assert.Contains("dotnet tool update --tool-path /opt/dbdatasync", output);
+        Assert.Contains("converting this install to versioned slots first", output);
+    }
+
+    // --- --apply: converting a pre-196L install ----------------------------------------------------------------
+
+    /// <summary>A pre-196L machine-wide install at <see cref="ToolRoot"/>: its shim, its store holding the running
+    /// version's package, and that version's launcher beside its payload — what this process would be.</summary>
+    private string LegacyPayload()
+    {
+        var version = "2026.9.16.1005";
+        var kept = Path.Combine(ToolRoot, ".store", "dbdatasync", version, "dbdatasync", version);
+        var payload = Path.Combine(kept, "tools", "net10.0", "any");
+        var launcher = Path.Combine(payload, SlotPaths.LauncherDirectoryName, SlotPaths.PortableRuntimeIdentifier()!);
+        Directory.CreateDirectory(launcher);
+        File.WriteAllText(Path.Combine(kept, $"dbdatasync.{version}.nupkg"), "package");
+        File.WriteAllText(Path.Combine(payload, SlotPaths.PayloadAssemblyName), "payload");
+        File.WriteAllText(Path.Combine(launcher, "dbdatasync"), "launcher");
+        File.WriteAllText(Path.Combine(ToolRoot, "dbdatasync"), "legacy shim");
+        return payload + Path.DirectorySeparatorChar;
+    }
+
+    [Fact]
+    public async Task Apply_OnALegacyInstall_ConvertsItFirst_Loudly_ThenUpdatesIntoSlotB()
+    {
+        var env = Env(baseDirectory: LegacyPayload(), service: Systemd);
+
+        var (exit, output, error) = await RunAsync(Apply("--yes"), env, Network());
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Contains("predates versioned slots; converting it", output);
+        Assert.Equal(5 + 1, _events.Count);
+        Assert.StartsWith($"dotnet tool install --tool-path {SlotA} DbDataSync --add-source ", _events[0]);
+        Assert.EndsWith("--version 2026.9.16.1005", _events[0]);
+        Assert.Equal($"rebind dbdatasync -> {Path.Combine(ToolRoot, "dbdatasync")}", _events[1]);
+        Assert.Equal([InstallIntoB(), "service stop", "service start", "health http://localhost:5080 90s"], _events[2..]);
+        Assert.Equal("b", Layout.Current);
+        Assert.Equal("launcher", File.ReadAllText(Path.Combine(ToolRoot, "dbdatasync")));
+    }
+
+    [Fact]
+    public async Task Apply_OnAGlobalInstall_RefusesAndPrintsTheCommandsInstead()
+    {
+        var env = Env(baseDirectory: "/home/dan/.dotnet/tools/.store/dbdatasync/2026.9.16.1005/dbdatasync/2026.9.16.1005/tools/net10.0/any/");
 
         var (exit, output, error) = await RunAsync(Apply("--yes"), env, Network());
 
         Assert.Equal(1, exit);
-        Assert.Contains("not available on Windows yet", error);
-        Assert.Contains("sc.exe stop DbDataSync", output);
+        Assert.Contains("A global tool", error);
+        Assert.Contains("dotnet tool update --global DbDataSync --version 2026.9.18.1918", output);
         Assert.Empty(_events);
     }
 
@@ -640,34 +794,39 @@ public class UpdateCommandTests : IDisposable
         Assert.Empty(_events);
     }
 
+    // --- --rollback --------------------------------------------------------------------------------------------
+
     [Fact]
-    public async Task Apply_TheVersionAlreadyInstalled_IsNothingToDo()
+    public async Task Rollback_SwitchesToTheOtherSlot_TheSameWay_WithoutInstallingAnything()
     {
-        var (exit, output, _) = await RunAsync(["--to", "2026.9.16.1005", "--apply", "--yes", "--repo", DataRoot], Env(), Network());
+        var (exit, output, _) = await RunAsync(
+            ["--rollback", "--yes", "--repo", DataRoot], SlotEnv(service: Systemd, otherSlot: "2026.9.11.532"), Network());
 
         Assert.Equal(0, exit);
-        Assert.Contains("is already installed", output);
+        Assert.Contains("Switch to   2026.9.11.532  (slot b)", output);
+        Assert.Contains("Rolled back to 2026.9.11.532.", output);
+        Assert.Equal(["service stop", "service start", "health http://localhost:5080 90s"], _events);
+        Assert.Equal("b", Layout.Current);
+    }
+
+    [Fact]
+    public async Task Rollback_WithAnEmptyOtherSlot_HasNothingToGoBackTo()
+    {
+        var (exit, _, error) = await RunAsync(["--rollback", "--yes", "--repo", DataRoot], SlotEnv(service: Systemd), Network());
+
+        Assert.Equal(1, exit);
+        Assert.Contains("Slot b is empty", error);
         Assert.Empty(_events);
+        Assert.Equal("a", Layout.Current);
     }
 
     [Fact]
-    public async Task Apply_ASnapshot_IsStagedThenInstalledFromThere()
+    public async Task Rollback_OnAnInstallWithoutSlots_SaysSo()
     {
-        var (exit, _, _) = await RunAsync(["--to", SnapshotA, "--apply", "--yes", "--repo", DataRoot], Env(), Network());
+        var (exit, _, error) = await RunAsync(["--rollback", "--yes"], Env(), Network());
 
-        Assert.Equal(0, exit);
-        var staged = Path.Combine(_temp, "stage", SnapshotA);
-        Assert.Equal(
-            [$"dotnet tool update --tool-path /opt/dbdatasync DbDataSync --add-source {staged} --version {SnapshotA}"],
-            _events);
-    }
-
-    [Fact]
-    public async Task Apply_UsesTheConfiguredUrl_OrTheOneGiven()
-    {
-        await RunAsync(Apply("--yes", "--url", "https://example.test:5443"), Env(service: Systemd), Network());
-
-        Assert.Contains("health https://example.test:5443 90s", _events);
+        Assert.Equal(1, exit);
+        Assert.Contains("no versioned slots", error);
     }
 
     [Theory]
@@ -691,24 +850,23 @@ public class UpdateCommandTests : IDisposable
         var (exit, output, _) = await RunAsync(["--status", "--repo", DataRoot], Env(), network);
 
         Assert.Equal(0, exit);
+        Assert.Contains("Slots: none yet", output);
         Assert.Contains("no update has been attempted here", output);
         Assert.Empty(network.Requested);
     }
 
     [Fact]
-    public async Task Status_AfterAnUpdate_ShowsTheOutcome_AndAnythingWaitingOrOnTrial()
+    public async Task Status_ShowsBothSlots_WhichIsCurrent_AndTheHistory()
     {
-        await RunAsync(Apply("--yes"), Env(), Network());
-        var store = Store();
-        store.WritePending(new PendingUpdate("2026.9.20.100", DateTimeOffset.UtcNow, "dan"));
-        store.Record(UpdatePhase.Restarting, "waiting", "2026.9.18.1918", "2026.9.19.100", "dan");
+        var env = SlotEnv(otherSlot: "2026.9.18.1918");
+        Store().Record(UpdatePhase.RolledBack, "2026.9.18.1918 did not answer", "2026.9.16.1005", "2026.9.18.1918", "dan");
 
-        var (_, output, _) = await RunAsync(["--status", "--repo", DataRoot], Env(), Network());
+        var (_, output, _) = await RunAsync(["--status", "--repo", DataRoot], env, Network());
 
-        Assert.Contains("requested, not yet applied: 2026.9.20.100 (by dan", output);
-        Assert.Contains("on trial: installed", output);
-        Assert.Contains("now: ", output);
-        Assert.Contains("succeeded", output);
+        Assert.Contains("  a  2026.9.16.1005  current", output);
+        Assert.Contains("  b  2026.9.18.1918\n", output);
+        Assert.Contains("note: Running 2026.9.16.1005, the older of the two installed", output);
+        Assert.Contains("rolledback", output);
         Assert.Contains("history, newest first:", output);
     }
 }

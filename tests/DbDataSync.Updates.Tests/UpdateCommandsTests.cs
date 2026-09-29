@@ -53,29 +53,32 @@ public class UpdateCommandsTests
         Assert.Empty(UpdateCommands.Install(Plan("2026.9.18.1918", "2026.9.18.1918", ReleaseChannel.Stable, ToolPath)));
     }
 
-    private static UpdateRequest Applied(string? previous, InstallKind kind = InstallKind.ToolPath) => new(
-        "2026.9.19.1432-snapshot.g65615e7", previous, ReleaseChannel.Snapshot, kind,
-        kind == InstallKind.Global ? "/home/dan/.dotnet/tools" : "/opt/dbdatasync", "/stage/x", DateTimeOffset.UnixEpoch, null);
+    // --- phase 196L: into a slot that is not running ----------------------------------------------------------
 
     [Fact]
-    public void Rollback_FromAKeptPackage_UsesItAsASource()
+    public void IntoAnEmptySlot_IsOneInstall_AtTheSlotsToolPath()
     {
-        Assert.Equal(
-            [
-                "remove: tool uninstall --tool-path /opt/dbdatasync DbDataSync",
-                "install: tool install --tool-path /opt/dbdatasync DbDataSync --add-source /var/lib/dbdatasync/updates/rollback --version 2026.9.18.1918",
-            ],
-            Lines(UpdateCommands.Rollback(Applied("2026.9.18.1918"), "/var/lib/dbdatasync/updates/rollback")));
+        var step = UpdateCommands.IntoEmptySlot("/opt/dbdatasync/versions/b", "2026.9.18.1918", null);
+
+        Assert.Equal("install: tool install --tool-path /opt/dbdatasync/versions/b DbDataSync --version 2026.9.18.1918", Lines([step])[0]);
     }
 
     [Fact]
-    public void Rollback_WithNoKeptPackage_InstallsByExactVersionFromNuGet()
+    public void IntoAnEmptySlot_ASnapshotOrAKeptPackage_AddsItsFolderAsASource()
     {
+        var step = UpdateCommands.IntoEmptySlot("/opt/dbdatasync/versions/a", "2026.9.19.1432-snapshot.g65615e7", "/stage/x");
+
         Assert.Equal(
-            [
-                "remove: tool uninstall --global DbDataSync",
-                "install: tool install --global DbDataSync --version 2026.9.18.1918",
-            ],
-            Lines(UpdateCommands.Rollback(Applied("2026.9.18.1918", InstallKind.Global), null)));
+            "install: tool install --tool-path /opt/dbdatasync/versions/a DbDataSync --add-source /stage/x --version 2026.9.19.1432-snapshot.g65615e7",
+            Lines([step])[0]);
     }
+
+    [Theory]
+    [InlineData("2026.9.18.1918", "2026.9.18.1918", true)]
+    [InlineData("2026.9.19.1432-snapshot.g65615e7", "2026.9.19.1432-snapshot.g65615e7", true)]
+    [InlineData("2026.9.16.1005", "2026.9.18.1918", false)]
+    [InlineData(null, "2026.9.18.1918", false)]
+    [InlineData("not-a-version", "2026.9.18.1918", false)]
+    public void SlotHolds_ComparesVersions_NotStrings(string? slot, string wanted, bool expected) =>
+        Assert.Equal(expected, UpdateCommands.SlotHolds(slot, wanted));
 }

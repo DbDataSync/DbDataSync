@@ -35,12 +35,9 @@ public sealed class ApiOptions
     public const FeatureMode DefaultNugetSearchMode = FeatureMode.Enabled;
     public const NotesRenderer DefaultNotesRenderer = NotesRenderer.Basic;
 
-    // Phase 159: applying an update from the console replaces the code the service runs, as the service's
-    // own account, so every default here is the closed one.
+    // Phase 159/196L: the Updates screen calls nuget.org and GitHub to list releases, so it is closed by default.
     public const UpdatesMode DefaultSelfUpdateMode = UpdatesMode.Disabled;
     public const string DefaultSelfUpdateChannels = "stable";
-    public const int DefaultSelfUpdateDrainTimeoutSeconds = 120;
-    public const int DefaultSelfUpdateConfirmAfterSeconds = 60;
 
     public required string RepoRoot { get; init; }
     public required string StateDbPath { get; init; }
@@ -180,10 +177,9 @@ public sealed class ApiOptions
     public NotesRenderer NotesRenderer { get; init; } = DefaultNotesRenderer;
 
     /// <summary>
-    /// Phase 159/164: whether, and how, an admin may update this installation from the web console.
-    /// <see cref="UpdatesMode.Disabled"/> by default — a page that can replace the code a service runs is
-    /// a capability an operator turns on deliberately. <see cref="UpdatesMode.Manual"/> is today's "on":
-    /// an admin triggers it themselves from the Updates screen.
+    /// Phase 159/164/196L: whether the Updates screen looks up the releases available. <see cref="UpdatesMode.Disabled"/>
+    /// by default, because that calls out to nuget.org and GitHub. Since phase 196L the screen never applies an update
+    /// — it gives the commands to run on the server — so this no longer gates anything that changes the install.
     /// </summary>
     public UpdatesMode SelfUpdateMode { get; init; } = DefaultSelfUpdateMode;
 
@@ -191,14 +187,6 @@ public sealed class ApiOptions
     /// <c>snapshot</c>. Only <c>stable</c> by default — a beta is a prerelease, and a snapshot is a development
     /// build whose only integrity check is a same-origin checksum.</summary>
     public IReadOnlyList<ReleaseChannel> SelfUpdateChannels { get; init; } = [ReleaseChannel.Stable];
-
-    /// <summary>How long an update waits for running work to finish before it restarts the service anyway.
-    /// What is interrupted is reconciled at the next start; this only bounds how polite the wait is.</summary>
-    public TimeSpan SelfUpdateDrainTimeout { get; init; } = TimeSpan.FromSeconds(DefaultSelfUpdateDrainTimeoutSeconds);
-
-    /// <summary>How long a freshly updated version must have been serving before it counts as having worked.
-    /// Not merely "ready": a version that starts and then dies ten seconds later must still be rolled back.</summary>
-    public TimeSpan SelfUpdateConfirmAfter { get; init; } = TimeSpan.FromSeconds(DefaultSelfUpdateConfirmAfterSeconds);
 
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
@@ -244,14 +232,6 @@ public sealed class ApiOptions
             NotesRenderer = ConfigEnum.Parse(notes["MarkdownRenderer"], DefaultNotesRenderer),
             SelfUpdateMode = ConfigEnum.Parse(updates["Mode"], DefaultSelfUpdateMode),
             SelfUpdateChannels = ReadChannels(updates["Channels"]),
-            SelfUpdateDrainTimeout = TimeSpan.FromSeconds(
-                int.TryParse(updates["DrainTimeoutSeconds"], out var drain) && drain >= 0
-                    ? drain
-                    : DefaultSelfUpdateDrainTimeoutSeconds),
-            SelfUpdateConfirmAfter = TimeSpan.FromSeconds(
-                int.TryParse(updates["ConfirmAfterSeconds"], out var confirm) && confirm >= 0
-                    ? confirm
-                    : DefaultSelfUpdateConfirmAfterSeconds),
         };
     }
 
