@@ -33,7 +33,9 @@ public sealed record SlotCheck(SlotCheckLevel Level, string Message);
 /// </summary>
 public sealed class SlotLayout(string root)
 {
-    public string Root { get; } = Path.GetFullPath(root);
+    /// <summary>Without a trailing separator — the launcher reports its <see cref="AppContext.BaseDirectory"/>, which
+    /// has one, and this path is shown to people.</summary>
+    public string Root { get; } = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
 
     public string PointerPath => SlotPaths.PointerPath(Root);
 

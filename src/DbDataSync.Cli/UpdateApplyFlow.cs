@@ -148,7 +148,8 @@ internal static class UpdateApplyFlow
         if (change.Install)
         {
             store.Record(UpdatePhase.Applying, $"Installing {change.ToVersion} into slot {change.To}.", change.FromVersion, change.ToVersion, change.RequestedBy);
-            output.WriteLine($"Installing {change.ToVersion} into slot {change.To} ({SlotPaths.SlotDirectory(change.Layout.Root, change.To)}) …");
+            if (!UpdateCommands.SlotHolds(change.Layout.Slot(change.To).Version, change.ToVersion))
+                output.WriteLine($"Installing {change.ToVersion} into slot {change.To} ({SlotPaths.SlotDirectory(change.Layout.Root, change.To)}) …");
             var installed = await new SlotInstaller(runner, store).InstallAsync(
                 change.Layout, change.To, change.ToVersion, change.SourceDirectory, cancellationToken);
             if (!installed.Succeeded)

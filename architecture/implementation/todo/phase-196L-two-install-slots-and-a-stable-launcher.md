@@ -1,6 +1,7 @@
 # Phase 196L — Two install slots and a single stable launcher
 
-**Status**: Planned.
+**Status**: Built. Verified end to end on Linux against a real release; Windows and a real systemd unit are not
+verified yet (see Progress).
 **Plan reference**: `architecture/planning/done/two-install-slots-and-a-stable-launcher.md`. That doc settles
 the design; this one says how it lands in this codebase. It also corrects two points there that did not survive
 contact with the code (the load context and the process-global values; see "Where this departs from the plan").
@@ -237,6 +238,40 @@ needs no console setting.
 
 ## Progress
 
+**Built for Linux and Windows; verified end to end on Linux only.** It stays in `todo/` until a real Windows host
+and a real systemd system unit have run it, as 159K did.
+
+- **End to end, for real (2026-09-29, Linux, no service).** A `dotnet pack` of this code as 2026.9.29.1 was
+  installed the pre-196L way (`dotnet tool install --tool-path tool`).
+  - `tool/dbdatasync update --to 2026.9.25.1104 --apply --yes`, against the real nuget.org release, printed the
+    conversion. It installed 2026.9.29.1 into `versions/a` from its own kept nupkg (offline) and replaced the shim
+    with the launcher. It then installed 2026.9.25.1104 into `versions/b` from nuget.org and flipped to `b`.
+  - `tool/dbdatasync version` then printed 2026.9.25.1104, so **the launcher ran a real release built before the
+    launcher existed**.
+  - With the pointer set back to `a` by hand (slot b's code predates slots): `update --status` listed both slots,
+    and `update --rollback --yes` flipped to `b`, which then ran.
+  - `update --to 2026.9.25.1104 --apply` from `a` found it already in `b` and only flipped. That run also removed
+    the legacy `.store`. `launcher repair` found the launcher up to date.
+  - `serve` through the launcher answered `/api/admin/update/status` with the right running version,
+    `installKind` `ToolPath`, both slots, and the commands. So the entry-assembly and base-directory overrides hold
+    in a real host.
+  - Two cosmetic things it found were fixed: a trailing `/` on the tool directory, and an "Installing …" line
+    printed when the slot already held the version.
+- **Not verified, because it needs a host this was not built on**:
+  - Windows as a whole: `WindowsServiceControl` against the real SCM, renaming the running `dbdatasync.exe` aside
+    during conversion or repair, the apphost finding `hostfxr` under a service account, and `sc config` on
+    conversion.
+  - The stop, flip, start and health sequence under a real systemd **system** unit as root, and the unit rewrite on
+    conversion.
+  - The health-failure switch-back is covered by tests with a fake service and health probe only.
+  - macOS apphost signing: the `osx-*` launchers are built on Linux and not signed.
+- **Checkpoints 5–6 (web console + docs)**: built. Admin → Updates keeps its page. It shows both slots, a "How to
+  update" card with the list/apply/rollback/status commands, and a **Commands…** dialog per release with that
+  version's exact command. Every command has a copy button and a sentence on where to run it and what it does. An
+  update run from a shell shows its progress, including through the restart gap. The Playwright spec (10 tests)
+  passes in Chromium, including reading the copied text back from the clipboard. Its screenshots are
+  `screenshots/admin-updates/196-*`; the `159-*` ones showed the retired apply flow and are removed.
+  `docs/install.md` and `docs/configuration.md` describe slots; 159K's doc notes what this supersedes.
 - **Checkpoints 3–4 (update library + CLI)**: built and unit-tested (Updates 178, Cli 246 passing).
   `SlotLayout`/`LauncherContext`, `SlotInstaller`, `LauncherInstaller`, `SlotMigration`, `UpdateCliCommands`;
   `UpdateApplier`'s pending/confirm/applied/kept-package machinery and the privileged workspace are gone.
@@ -254,3 +289,23 @@ needs no console setting.
   `LauncherRuntimeIdentifiers=none`. `LauncherTests` runs the real launcher against this build laid out as a
   slot: the version is printed, the exit code is passed through, and a missing pointer or empty slot names its
   fix.
+
+## Retrospective
+
+- **The plan's load context would have broken every driver plugin.** "A custom `AssemblyLoadContext`" reads as the
+  textbook answer. But `DriverPluginLoadContext` and `LibraryRegistry` both defer shared contracts to Default. A grep
+  for `AssemblyLoadContext` before writing the phase doc caught it; the spike would not have, because it exercised
+  no plugin.
+- **A launcher needs more than the plan listed.** Two things were missing. First, the ASP.NET framework reference:
+  frameworks come from the host's runtimeconfig. Second, `APP_CONTEXT_DEPS_FILES` and `Assembly.SetEntryAssembly`
+  as well as the base directory. The entry assembly decides the running version the console reports, and the deps
+  file decides MVC's application parts. Setting all of them once, in the launcher, was simpler and harder to get
+  partly wrong than fixing call sites.
+- **An apphost is per-platform and a tool package is not.** That became eight launchers in every package, picked by
+  a portable RID computed from OS and architecture. The distribution-built SDK here reports `ubuntu.24.04-x64`,
+  which would never match a directory name.
+- **Emptying the inactive slot beat planning against it.** The slot holds whatever was current two updates ago:
+  newer, older, or half-installed. Deleting it and running one `tool install` covers all of those. Choosing
+  `update` or `uninstall + install` by direction would have needed a case per possibility.
+- **The first end-to-end run found only cosmetics** (a trailing slash, one misleading line). The one path it could
+  not reach, the real service on either OS, is the one the Progress section lists as unverified.
