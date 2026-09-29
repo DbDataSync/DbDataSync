@@ -298,16 +298,15 @@ export function useRestartRequired() {
   return useQuery({ queryKey: keys.restartRequired, queryFn: api.admin.restartRequired.get })
 }
 
-/** The phases in which an update is in flight — the service is staging, winding down, restarting, or the new
- * version has not yet proved itself. */
+/** The phases in which an update is in flight — recorded by `dbdatasync update --apply` as it installs into the other
+ * slot and switches to it. `staging`/`draining` are phase 159's, kept so an old state file still reads. */
 export const ACTIVE_UPDATE_PHASES: readonly UpdatePhase[] = ['staging', 'draining', 'applying', 'restarting']
 
 /**
- * Where the update stands (phase 159). Polls while one is in flight — and **keeps polling through the failures a
- * restart causes**: `applying` is the last thing the old process reports before it exits, so when the requests
- * start failing the last known phase is still an active one and this carries on until the service is back.
- * `retry: false` so a request that fails during that gap is a data point to try again in two seconds, not
- * something for react-query to back off from.
+ * Where the update stands. Polls while one is in flight — and **keeps polling through the failures a restart
+ * causes**: the CLI stops and starts the service while it switches slots, so for a few seconds every request fails,
+ * and the last known phase is still an active one. `retry: false` so a request that fails during that gap is a data
+ * point to try again in two seconds, not something for react-query to back off from.
  */
 export function useUpdateStatus() {
   return useQuery({
@@ -330,14 +329,6 @@ export function useUpdateReleases(channel: string | undefined, enabled: boolean)
     enabled: enabled && !!channel,
     retry: false,
     staleTime: 60_000,
-  })
-}
-
-export function useApplyUpdate() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (version: string) => api.admin.update.apply(version),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.updateStatus }),
   })
 }
 

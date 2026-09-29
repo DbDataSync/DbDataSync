@@ -3,14 +3,14 @@ import { AdminTabs } from '../components/AdminTabs'
 import { AppShell } from '../components/AppShell'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { useIsAdmin } from '../components/useIsAdmin'
-import { ACTIVE_UPDATE_PHASES, useApplyUpdate, useUpdateReleases, useUpdateStatus } from '../api/hooks'
-import type { UpdateChannel, UpdateHistoryEntry, UpdatePhase, UpdateRelease, UpdateStatus } from '../api/types'
+import { ACTIVE_UPDATE_PHASES, useUpdateReleases, useUpdateStatus } from '../api/hooks'
+import type { UpdateChannel, UpdateCommands, UpdateHistoryEntry, UpdatePhase, UpdateRelease, UpdateStatus } from '../api/types'
 
 // A fixed last column, not `auto`: every row is its own grid, so an `auto` track is sized by that row's own button and
 // the header — which has none — would stop lining up with the rows.
-const COLUMNS = '1.8fr 1.4fr 1fr 110px'
+const COLUMNS = '1.8fr 1.4fr 1fr 130px'
 
-/** How long the service may be unreachable, after it said it was restarting, before the page stops waiting
+/** How long the service may be unreachable, after the CLI said it was switching, before the page stops waiting
  * quietly and says something. A restart takes seconds; this is for one that did not come back. */
 const RESTART_PATIENCE_MS = 120_000
 
@@ -18,10 +18,10 @@ const PHASE_LABEL: Record<UpdatePhase, string> = {
   idle: 'No update in progress',
   staging: 'Downloading',
   draining: 'Waiting for running work to finish',
-  applying: 'Restarting to install',
-  restarting: 'Installed — proving itself',
+  applying: 'Installing beside the running version',
+  restarting: 'Switched — starting the new version',
   succeeded: 'Updated',
-  rolledback: 'Rolled back',
+  rolledback: 'Switched back',
   failed: 'Failed',
 }
 
@@ -32,23 +32,24 @@ function formatUtc(iso: string | null): string {
 }
 
 /**
- * Updating this installation from the console (phase 159): the releases on each enabled channel, an Update button
- * on each, and what happens after it is pressed.
+ * The Updates screen: what is running, what is available, and **the commands that update it** (phase 196L).
  *
- * What the page has to be honest about is that the service **goes away**. Pressing Update winds work down and
- * restarts the process, so for a few seconds every request fails, and the page keeps asking through that rather
- * than reporting an error — the same session cookie still works afterwards, because sessions live in the state
- * database, not in memory. If the service is not back within two minutes it says so, and where to look.
+ * The console does not apply updates itself any more. An update is run from a shell on the server —
+ * `dbdatasync update --apply` — which installs the new version beside the running one, switches the service over,
+ * and switches back on its own if the new version does not answer. This page hands the admin exactly that command,
+ * for exactly this server (its OS, its data directory), with a copy button; the server builds the text.
  *
- * Closed by default on the server: with `DbDataSync:Updates:Mode` disabled nothing here can apply anything, and
- * the page says how to turn it on rather than showing buttons that would refuse.
+ * It still watches: the CLI records what it is doing where this page reads it, so an update started from a shell
+ * shows its progress here — including through the few seconds the service is down while it switches.
+ *
+ * Looking up releases calls nuget.org and GitHub, so that part is off unless `DbDataSync:Updates:Mode` turns it on.
+ * The commands are shown either way: `dbdatasync update --list` asks from the server's own shell.
  */
 export function AdminUpdatesPage() {
   const isAdmin = useIsAdmin()
   const { data: status, error: statusError, isError: statusFailed } = useUpdateStatus()
   const [channel, setChannel] = useState<UpdateChannel | undefined>(undefined)
-  const [confirming, setConfirming] = useState<UpdateRelease | null>(null)
-  const apply = useApplyUpdate()
+  const [chosen, setChosen] = useState<UpdateRelease | null>(null)
 
   // The first enabled channel, until the admin picks another — the list of channels arrives with the status.
   const activeChannel = channel ?? status?.channels[0]
@@ -68,46 +69,24 @@ export function AdminUpdatesPage() {
     )
   }
 
-  const confirm = async (release: UpdateRelease) => {
-    try {
-      await apply.mutateAsync(release.version)
-    } catch {
-      // Shown by the error banner below, from the mutation's own state.
-    }
-    setConfirming(null)
-  }
-
   return (
     <AppShell crumbs={[{ label: 'Admin' }]} tabs={<AdminTabs />}>
       <div className="pane">
         <div className="page-head">
           <h1 className="page-title">Updates</h1>
           <span className="page-note">
-            Install a newer version of DbDataSync on this server. The service restarts to apply it, and rolls
-            back on its own if the new version does not come up healthy.
+            See what is available, and get the commands that update this server. An update is run from a shell on the
+            server: the new version is installed beside the running one, then the service switches to it — and
+            switches back on its own if the new version does not come up.
           </span>
         </div>
 
-        <ErrorBanner error={apply.error ?? (statusFailed && !active ? statusError : null)} />
+        <ErrorBanner error={statusFailed && !active ? statusError : null} />
 
-        {status && !status.enabled && (
-          <div className="banner" data-testid="updates-disabled">
+        {status && !status.commands && status.commandsUnavailableReason && (
+          <div className="banner" data-testid="updates-no-commands">
             <span className="mark">!</span>
-            <span>
-              Updating from the console is turned off. Set <span className="mono">DbDataSync:Updates:Mode</span>{' '}
-              to <span className="mono">true</span> under Configuration to turn it on — it replaces the code the
-              service runs, so it is off unless someone chooses it.
-            </span>
-          </div>
-        )}
-
-        {status?.enabled && !status.canApply && (
-          <div className="banner" data-testid="updates-cannot-apply">
-            <span className="mark">!</span>
-            <span>
-              {status.cannotApplyReason} You can still see what is available; run{' '}
-              <span className="mono">dbdatasync update</span> on the server to install it.
-            </span>
+            <span>{status.commandsUnavailableReason}</span>
           </div>
         )}
 
@@ -118,6 +97,20 @@ export function AdminUpdatesPage() {
         )}
 
         {status && !active && status.phase !== 'idle' && <LastResult status={status} />}
+
+        {status?.commands && <HowToUpdateCard commands={status.commands} />}
+
+        {status && !status.enabled && (
+          <div className="banner" data-testid="updates-disabled">
+            <span className="mark">i</span>
+            <span>
+              Looking up releases here is turned off, because it calls nuget.org and GitHub. Set{' '}
+              <span className="mono">DbDataSync:Updates:Mode</span> to <span className="mono">manual</span> under
+              Configuration to list them on this page — or run <span className="mono">dbdatasync update --list</span>{' '}
+              on the server.
+            </span>
+          </div>
+        )}
 
         {status?.enabled && (
           <div className="card flush" data-testid="updates-releases">
@@ -163,8 +156,8 @@ export function AdminUpdatesPage() {
               <ReleaseRow
                 key={release.version}
                 release={release}
-                disabled={!status.canApply || active || apply.isPending}
-                onUpdate={() => setConfirming(release)}
+                disabled={!status.commands}
+                onChoose={() => setChosen(release)}
               />
             ))}
           </div>
@@ -172,13 +165,12 @@ export function AdminUpdatesPage() {
 
         {status && status.history.length > 0 && <HistoryCard history={status.history} />}
 
-        {confirming && (
-          <ConfirmDialog
-            release={confirming}
-            runningVersion={status?.runningVersion ?? null}
-            busy={apply.isPending}
-            onConfirm={() => confirm(confirming)}
-            onCancel={() => setConfirming(null)}
+        {chosen && status?.commands && (
+          <CommandsDialog
+            release={chosen}
+            commands={status.commands}
+            runningVersion={status.runningVersion}
+            onClose={() => setChosen(null)}
           />
         )}
       </div>
@@ -200,26 +192,142 @@ function useOutageStart(unreachable: boolean): number | null {
   return since
 }
 
+/** A command, as text the admin can select, with a button that copies it. */
+function CopyableCommand({ command, testId }: { command: string; testId: string }) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopied(true)
+    } catch {
+      // Clipboard access can be denied by the browser; the command is still selectable as text.
+    }
+  }
+
+  return (
+    <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+      <span
+        className="mono"
+        style={{
+          flex: 1, userSelect: 'all', overflowWrap: 'anywhere', padding: '6px 10px',
+          background: 'var(--sunken)', border: '1px solid var(--card-inner-edge)', borderRadius: 6,
+        }}
+        data-testid={testId}
+      >
+        {command}
+      </span>
+      <button type="button" className="btn btn-sm" onClick={copy} data-testid={`${testId}-copy`}>
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
 function InstallationCard({ status }: { status: UpdateStatus }) {
+  const slots = status.slots
   return (
     <div className="card" data-testid="updates-installation">
       <div className="card-head">
         <span className="card-title">This installation</span>
       </div>
-      {/* .card-body is a column; this one is a row of facts. */}
-      <div className="card-body row" style={{ flexDirection: 'row', gap: 28, flexWrap: 'wrap' }}>
-        <span>
-          <span className="hint">Running </span>
-          <span className="mono" data-testid="updates-running-version">{status.runningVersion ?? 'unknown'}</span>
-        </span>
-        <span>
-          <span className="hint">Installed as </span>
-          <span className="mono">{status.installKind}</span>
-        </span>
-        <span>
-          <span className="hint">Channels </span>
-          <span className="mono">{status.channels.join(', ')}</span>
-        </span>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="row" style={{ flexDirection: 'row', gap: 28, flexWrap: 'wrap' }}>
+          <span>
+            <span className="hint">Running </span>
+            <span className="mono" data-testid="updates-running-version">{status.runningVersion ?? 'unknown'}</span>
+          </span>
+          <span>
+            <span className="hint">Installed as </span>
+            <span className="mono">{status.installKind}</span>
+          </span>
+          <span>
+            <span className="hint">Channels </span>
+            <span className="mono">{status.channels.join(', ')}</span>
+          </span>
+        </div>
+        {slots && (
+          <div className="row" style={{ flexDirection: 'row', gap: 28, flexWrap: 'wrap' }} data-testid="updates-slots">
+            {slots.slots.map((slot) => (
+              <span key={slot.name} data-testid={`updates-slot-${slot.name}`}>
+                <span className="hint">Slot {slot.name} </span>
+                <span className="mono">
+                  {slot.ambiguous ? 'more than one install' : slot.version ?? 'empty'}
+                </span>
+                {slot.current && <span className="hint"> · running</span>}
+                {!slot.current && slot.version && <span className="hint"> · kept, to switch back to</span>}
+              </span>
+            ))}
+            <span className="hint mono">{slots.root}</span>
+          </div>
+        )}
+        {slots?.checks.map((check) => (
+          <span key={check.message} className="hint" data-testid="updates-slot-check">
+            <strong>{check.level === 'warning' ? 'Warning' : 'Note'}:</strong> {check.message}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** The commands, in the order an admin uses them, and where to run them. */
+function HowToUpdateCard({ commands }: { commands: UpdateCommands }) {
+  const applyTemplate = commands.apply.replace(commands.versionPlaceholder, '<version>')
+  return (
+    <div className="card" data-testid="updates-how">
+      <div className="card-head">
+        <span className="card-title">How to update</span>
+      </div>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <span className="hint" data-testid="updates-where">{commands.where}</span>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span>1. See what is available (no privileges needed):</span>
+          <CopyableCommand command={commands.list} testId="updates-command-list" />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span>
+            2. {commands.printsOnly ? 'Print the commands that install a version' : 'Install a version and switch to it'} —
+            or choose one below for its exact command:
+          </span>
+          <CopyableCommand command={applyTemplate} testId="updates-command-apply" />
+        </div>
+
+        {commands.rollback && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span>3. Switch back to the version before, if the new one misbehaves later:</span>
+            <CopyableCommand command={commands.rollback} testId="updates-command-rollback" />
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span>{commands.rollback ? '4' : '3'}. See both installed versions and the last update:</span>
+          <CopyableCommand command={commands.status} testId="updates-command-status" />
+        </div>
+
+        {commands.convertsFirst && (
+          <span className="hint" data-testid="updates-converts-first">
+            This install predates versioned slots. The first update converts it, once: the running version is kept as
+            one slot and a small launcher takes the place of the <span className="mono">dbdatasync</span> command. The
+            service and PATH need no change. From then on, update with these commands rather than{' '}
+            <span className="mono">dotnet tool update</span>.
+          </span>
+        )}
+        {commands.printsOnly && (
+          <span className="hint" data-testid="updates-prints-only">
+            This is a per-user global tool, which cannot keep two versions side by side, so the command prints the{' '}
+            <span className="mono">dotnet tool</span> commands to run. Install machine-wide (see the install docs) to
+            update and switch back with one command.
+          </span>
+        )}
       </div>
     </div>
   )
@@ -240,6 +348,7 @@ function ProgressCard({ status, outageSince }: { status: UpdateStatus; outageSin
       <div className="card-head">
         <span className="card-title">
           {status.toVersion ? `Updating to ${status.toVersion}` : 'Updating'}
+          {status.requestedBy ? <span className="hint"> · started by {status.requestedBy} from a shell</span> : null}
         </span>
       </div>
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -252,15 +361,8 @@ function ProgressCard({ status, outageSince }: { status: UpdateStatus; outageSin
         {status.message && !outageSince && <span className="hint">{status.message}</span>}
         {overdue && (
           <span className="hint" data-testid="updates-overdue">
-            The service has not answered for two minutes. On the server, check{' '}
-            <span className="mono">journalctl -u dbdatasync</span> and <span className="mono">{status.logPath}</span>{' '}
-            — if the new version cannot start, the next start rolls it back.
-          </span>
-        )}
-        {status.phase === 'restarting' && !outageSince && (
-          <span className="hint">
-            The new version is running. It counts as having worked once it has been serving for a while; until then
-            a restart rolls it back.
+            The service has not answered for two minutes. Look at the terminal the update was run from, and at{' '}
+            <span className="mono">{status.logPath}</span> on the server.
           </span>
         )}
       </div>
@@ -285,10 +387,10 @@ function LastResult({ status }: { status: UpdateStatus }) {
   )
 }
 
-function ReleaseRow({ release, disabled, onUpdate }: {
+function ReleaseRow({ release, disabled, onChoose }: {
   release: UpdateRelease
   disabled: boolean
-  onUpdate: () => void
+  onChoose: () => void
 }) {
   const state = release.installed ? 'running' : release.newer ? 'newer' : 'older'
 
@@ -311,10 +413,10 @@ function ReleaseRow({ release, disabled, onUpdate }: {
           type="button"
           className="btn btn-sm"
           disabled={disabled || release.installed}
-          onClick={onUpdate}
-          data-testid={`updates-apply-${release.version}`}
+          onClick={onChoose}
+          data-testid={`updates-commands-${release.version}`}
         >
-          {release.newer ? 'Update…' : 'Install…'}
+          Commands…
         </button>
       </span>
     </div>
@@ -348,49 +450,64 @@ function HistoryCard({ history }: { history: UpdateHistoryEntry[] }) {
   )
 }
 
-/** The one gate: what pressing Confirm does, said plainly — and, for a snapshot, what its trust rests on. */
-function ConfirmDialog({ release, runningVersion, busy, onConfirm, onCancel }: {
+/** One release's command, ready to copy — and what running it does, said plainly. */
+function CommandsDialog({ release, commands, runningVersion, onClose }: {
   release: UpdateRelease
+  commands: UpdateCommands
   runningVersion: string | null
-  busy: boolean
-  onConfirm: () => void
-  onCancel: () => void
+  onClose: () => void
 }) {
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel])
+  }, [onClose])
 
   const older = !release.newer && !release.installed
+  const command = commands.apply.replace(commands.versionPlaceholder, release.version)
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
         className="modal"
         role="dialog"
         aria-modal="true"
-        aria-label={`Confirm updating to ${release.version}`}
-        data-testid="updates-confirm-dialog"
+        aria-label={`Commands for ${release.version}`}
+        data-testid="updates-commands-dialog"
       >
         <div className="card-head">
-          <span className="card-title">{older ? 'Install' : 'Update to'} {release.version}?</span>
+          <span className="card-title">{older ? 'Install' : 'Update to'} {release.version}</span>
         </div>
         <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <span className="hint">
-            {runningVersion ? <>Running <span className="mono">{runningVersion}</span>. </> : null}
-            The service stops starting new work, lets what is running finish, then <strong>restarts</strong> to
-            install this. Anything still running when the wait ends is picked up again after the restart. If the new
-            version does not come up healthy, the next start puts the current one back.
-          </span>
+          <span className="hint">{commands.where}</span>
+          <CopyableCommand command={command} testId="updates-dialog-command" />
+          {commands.printsOnly ? (
+            <span className="hint">
+              This prints the <span className="mono">dotnet tool</span> commands that install it; nothing is changed until
+              you run those.
+            </span>
+          ) : (
+            <span className="hint" data-testid="updates-dialog-explanation">
+              {runningVersion ? <>Running <span className="mono">{runningVersion}</span>. </> : null}
+              It installs {release.version} beside the running version, then stops the service, switches to the new
+              version and starts it — a few seconds of downtime. If it does not answer, it switches back on its own.
+              The version you are leaving stays installed, so{' '}
+              <span className="mono">dbdatasync update --rollback</span> returns to it later without downloading
+              anything. It asks before stopping anything; add <span className="mono">--yes</span> to skip the question.
+            </span>
+          )}
+          {commands.convertsFirst && (
+            <span className="hint">
+              The first time, it also converts this install to versioned slots, and says so as it does.
+            </span>
+          )}
           {older && (
-            <span className="hint" data-testid="updates-confirm-older">
-              This is <strong>older</strong> than the running version. It is installed by removing the current one and
-              installing this one.
+            <span className="hint" data-testid="updates-dialog-older">
+              This is <strong>older</strong> than the running version.
             </span>
           )}
           {release.channel === 'snapshot' && (
-            <span className="hint" data-testid="updates-confirm-snapshot">
+            <span className="hint" data-testid="updates-dialog-snapshot">
               A snapshot is a <strong>development build</strong>: the newest commit that passed automated tests, not
               a release. Its download is checked against a checksum published beside it, which catches a corrupted
               or truncated download — not a tampered one.
@@ -400,17 +517,8 @@ function ConfirmDialog({ release, runningVersion, busy, onConfirm, onCancel }: {
             <span className="hint">A beta is a prerelease, published ahead of a stable release.</span>
           )}
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-            <button type="button" className="btn" onClick={onCancel} data-testid="updates-confirm-cancel">
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={busy}
-              onClick={onConfirm}
-              data-testid="updates-confirm"
-            >
-              {busy ? 'Starting…' : 'Update and restart'}
+            <button type="button" className="btn" onClick={onClose} data-testid="updates-dialog-close">
+              Close
             </button>
           </div>
         </div>

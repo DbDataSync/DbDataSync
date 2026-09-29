@@ -44,17 +44,20 @@ dbdatasync config check
 `--account` sets the service account. A connection using integrated authentication connects as that
 account.
 
-To update:
+`service install` also sets up versioned slots in that directory (see [Updating](#updating)), and says so. To
+update, from an elevated prompt:
 
 ```powershell
-dotnet tool update --tool-path "$env:ProgramFiles\DbDataSync" DbDataSync
+dbdatasync update --to <version> --apply
 ```
+
+Once the slots exist, don't run `dotnet tool update --tool-path` on this directory.
 
 To remove:
 
 ```powershell
 dbdatasync tool uninstall
-dotnet tool uninstall --tool-path "$env:ProgramFiles\DbDataSync" DbDataSync
+Remove-Item -Recurse "$env:ProgramFiles\DbDataSync"
 ```
 
 ## Linux machine-wide install
@@ -80,22 +83,26 @@ dbdatasync config check
 This runs as a dedicated `dbdatasync` system user by default (`--user` to override). It's enabled but
 not started — start it with `sudo systemctl start dbdatasync`.
 
-To update:
+`service install` also sets up versioned slots in that directory (see [Updating](#updating)), and says so. To
+update:
 
 ```sh
-sudo dotnet tool update --tool-path /opt/dbdatasync DbDataSync
+sudo dbdatasync update --to <version> --apply
 ```
+
+Once the slots exist, don't run `dotnet tool update --tool-path` on this directory.
 
 To remove:
 
 ```sh
 sudo dbdatasync tool uninstall
-sudo dotnet tool uninstall --tool-path /opt/dbdatasync DbDataSync
+sudo rm -r /opt/dbdatasync
 ```
 
 ## Updating
 
-`dbdatasync update` lists what can be installed, lets you choose, and prints the commands to install it:
+`dbdatasync update` lists what can be installed and lets you choose. With `--apply` it installs the version you
+choose and switches to it ([below](#applying-it)). Without `--apply` it only prints what to do:
 
 ```sh
 dbdatasync update
@@ -117,10 +124,8 @@ snapshot
 Install which one? Type a number or a version (empty to cancel):
 ```
 
-It **never changes your installation** — it prints the commands (stop the service, `dotnet tool
-update`, start the service, check the version) and you run them. Use `dbdatasync update --list` to only
-list, `--channel stable|beta|snapshot` to narrow it, `--json` for scripts, and `--to <version>` to skip
-the prompt.
+Without `--apply` it changes nothing. Use `dbdatasync update --list` to only list, `--channel stable|beta|snapshot`
+to narrow it, `--json` for scripts, and `--to <version>` to skip the prompt.
 
 | channel | what it is | where it comes from |
 | --- | --- | --- |
@@ -130,78 +135,79 @@ the prompt.
 
 A **snapshot** is downloaded for you into a per-user staging folder (`~/.local/share/DbDataSync/updates`,
 `%LOCALAPPDATA%\DbDataSync\updates`; `--stage-dir` to change it), checked against the SHA-512 published
-beside it, and the printed command installs from that folder — no token or private feed is involved.
+beside it, and installed from that folder — no token or private feed is involved.
 That checksum catches a corrupted or truncated download, **not** a tampered release; a snapshot is a
 development build, and its trust rests on TLS to `github.com` and who can publish to the repository.
 Stable and beta go through `dotnet tool` from nuget.org as usual.
 
-`dotnet tool update` will not go *down* to an older version, so choosing one prints an `uninstall`
-followed by an `install` instead. If this copy was not installed as a dotnet tool (a development build)
-or is a container image, there is nothing to update in place and it says so — for a container, pull a
-newer image tag.
+If this copy was not installed as a dotnet tool (a development build) or is a container image, there is nothing to
+update in place and it says so. For a container, pull a newer image tag.
 
 The release list is read from public APIs, anonymously; GitHub limits that to 60 requests an hour per
 address. Set `GITHUB_TOKEN` (or `GH_TOKEN`) to raise it — it is never required.
 
-### Applying it for you
-
-Add `--apply` and `dbdatasync update` carries the plan out instead of printing it — stop the service, install,
-start it, and check it answers, putting the previous version back if it does not:
+### Applying it
 
 ```sh
 sudo dbdatasync update --to 2026.9.18.1918 --apply
 ```
 
-It asks first (`--yes` to skip the prompt, which is required when there is no terminal). It needs the same rights
-the printed commands would, which is why the example uses `sudo`. `--url` says where to check the service answers
-(default: the configured `DbDataSync:App:Url`), and `--health-timeout` how many seconds to wait for it (default 90).
-`dbdatasync update --status` shows what the last update did, and whether one is waiting or on trial. If an apply fails, its log is kept in a temporary directory whose path is printed.
+On Windows, run the same command without `sudo` from an elevated prompt.
 
-**Windows** does not have `--apply` yet: a running `dbdatasync.exe` and its service hold their own files open, so it
-needs a helper that outlives them, and that has not been verified on a real host. There, `update` prints the
-commands and you run them.
+A machine-wide install keeps **two versions side by side**, in two slots. The service and `PATH` run a small
+launcher, which runs whichever slot `current.txt` names. In `/opt/dbdatasync/` (Windows:
+`C:\Program Files\DbDataSync\`):
+
+- the launcher — the file named `dbdatasync` (`dbdatasync.exe`), which the service and `PATH` run
+- `current.txt` — `a` or `b`
+- `versions/a/` and `versions/b/` — one dotnet tool install each
+
+`--apply` does this:
+
+1. Installs the version into the slot that is **not** running. Nothing in use is touched, which is what makes this
+   work on Windows.
+2. Stops the service.
+3. Switches `current.txt`.
+4. Starts the service, and checks it answers.
+
+If the service does not answer, `--apply` switches back and starts the previous version again. There is nothing to
+reinstall. The previous version stays in the other slot, and this command switches back to it later:
+
+```sh
+sudo dbdatasync update --rollback
+```
+
+It asks first (`--yes` skips the prompt, and is required when there is no terminal). `--url` says where to check the
+service answers (default: the configured `DbDataSync:App:Url`). `--health-timeout` says how many seconds to wait
+(default 90). `dbdatasync update --status` shows both slots, what the last update did, and the history. Each run's
+commands and output are logged to `<data directory>/updates/update.log`.
+
+**An install from before versioned slots** converts itself the first time you run `--apply` or `service install`, and
+says so. The running version becomes slot `a`, and the launcher replaces the tool's own `dbdatasync` at the same path,
+so the service and `PATH` need no change. The old `.store` is removed on a later run. After that, update with
+`dbdatasync update`, not `dotnet tool update --tool-path`, which would write over the launcher.
+
+A **global tool** (`dotnet tool install -g`) cannot keep two versions side by side. There, `update` prints the
+`dotnet tool` commands to run instead.
+
+The launcher itself does not change when you update. `dbdatasync launcher repair` replaces it with the running
+version's copy and re-points a registered service at it; that is rarely needed.
 
 ### From the web console
 
-Admin → **Updates** lists the releases and has an **Update** button on each. It is **off by default**, and it needs
-three things — the first is a decision only root can make:
+Admin → **Updates** shows the running version and what each slot holds. It gives the commands above for this server,
+with its data directory filled in, each with a copy button. Each listed release has a **Commands…** button with that
+version's exact `--apply` command. The console does not apply updates itself: run the command on the server.
 
-1. **A systemd unit that applies updates.** Linux, installed as a dotnet tool, running as a systemd service that was
-   registered with `--self-update`:
+While an update runs from a shell, the page shows its progress. The service is unreachable for a few seconds while it
+switches; the page keeps asking rather than reporting an error, and you don't have to sign in again (sessions live in
+the state database).
 
-   ```sh
-   sudo dbdatasync service install --self-update
-   sudo systemctl restart dbdatasync
-   ```
-
-   That adds a step which runs **as root, outside the service's own sandbox**, before every start, to apply an update
-   the service asked for. It is opt-in, and is only ever added by running that command as root: the service runs with
-   fewer rights on purpose, and a setting the service itself could write must not be what switches a
-   root-privileged step on. Without it, an ordinary unit is unchanged and the console will say why it cannot update.
-2. `DbDataSync:Updates:Mode` set to `manual` (Admin → Configuration, or `dbdatasync.config.yaml`).
-   `dbdatasync config check` warns when this is on and the unit was not registered with `--self-update`.
-3. Only `stable` is offered unless you allow more: `DbDataSync:Updates:Channels` (`stable`, `beta`, `snapshot`,
-   comma-separated). A snapshot is a development build — its download is checked only against a checksum published
-   beside it, which catches corruption, not tampering.
-
-What pressing it does: the service stops starting new work (the scheduler pauses and changes over the API answer
-`409`), waits for running work to finish — up to `Updates:DrainTimeoutSeconds`, default 120; anything left is picked
-up again after the restart — then exits with code 75, which its unit treats as a clean restart. Before the service
-starts again, systemd runs `dbdatasync internal apply-update` to install the new version. The new version counts as
-having worked once it has been serving for `Updates:ConfirmAfterSeconds` (default 60). **If it crashes or hangs
-before then, the next start puts the previous version back** — from a copy of its package kept aside for the purpose —
-with nothing watching it but the restart systemd does anyway.
-
-**What the service can and cannot ask for.** The request the service leaves behind is a version and who asked, nothing
-more. The privileged step looks that version up in the pinned release sources itself, works out which installation it
-is from its own location, and downloads any package itself — so a compromised service cannot point an update at other
-code, only ask for a genuine release. Its own records (what is on trial, the spare package, the log) are in
-`/var/lib/dbdatasync-update/`, which the service cannot write; what the service writes, and the console shows, is under
-`<data directory>/updates/`. A failed or rolled-back update says so on the page and names `update.log` in the root-only
-directory.
-
-The service is unreachable for a few seconds while it restarts, and the page keeps asking rather than reporting an
-error. Signing in again is not needed: sessions live in the state database.
+Listing releases on the page calls nuget.org and GitHub, so it is **off by default**. Set `DbDataSync:Updates:Mode` to
+`manual` (Admin → Configuration, or `dbdatasync.config.yaml`) to turn it on. The commands are shown either way. Only
+`stable` is listed unless you allow more with `DbDataSync:Updates:Channels` (`stable`, `beta`, `snapshot`,
+comma-separated). A snapshot is a development build: its download is checked only against a checksum published beside
+it, which catches corruption, not tampering.
 
 ## Running in a container
 

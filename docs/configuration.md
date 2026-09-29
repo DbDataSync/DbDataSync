@@ -332,10 +332,8 @@ verification run's `TaskRuns` row is pruned, but its result file and index entry
 
 | key | env var | default | notes |
 | --- | --- | --- | --- |
-| `Updates:Mode` | `DbDataSync__Updates__Mode` | `disabled` | `manual` or `disabled` — whether an admin may update this installation from the Updates screen (phase 159/164). Disabled by default — it replaces the code the service runs. `manual` means an admin triggers it themselves; room for a future `auto`. Linux with a systemd unit from this version or later only, for now; see [Installing → Updating](install.md#updating) |
-| `Updates:Channels` | `DbDataSync__Updates__Channels` | `stable` | which channels the Updates screen may offer, comma-separated: `stable`, `beta`, `snapshot`. A snapshot is a development build, checked only against a checksum published beside it |
-| `Updates:DrainTimeoutSeconds` | `DbDataSync__Updates__DrainTimeoutSeconds` | `120` | how long an update waits for running work to finish before restarting the service anyway; anything interrupted is reconciled at the next start |
-| `Updates:ConfirmAfterSeconds` | `DbDataSync__Updates__ConfirmAfterSeconds` | `60` | how long an updated version must have been serving before the update counts as having worked; until then a restart rolls it back |
+| `Updates:Mode` | `DbDataSync__Updates__Mode` | `disabled` | `manual` or `disabled` — whether the Updates screen looks up the releases available, which calls nuget.org and GitHub. The screen never applies an update; it gives the commands to run on the server either way (phase 196L). See [Installing → Updating](install.md#updating) |
+| `Updates:Channels` | `DbDataSync__Updates__Channels` | `stable` | which channels the Updates screen lists, comma-separated: `stable`, `beta`, `snapshot`. A snapshot is a development build, checked only against a checksum published beside it |
 
 ### `DbDataSync:Auth:Network:*`
 

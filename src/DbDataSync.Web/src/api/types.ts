@@ -1839,30 +1839,61 @@ export interface UpdateHistoryEntry {
   requestedBy: string | null
 }
 
+/** The commands that update this installation from a shell on the server (phase 196L) — the console itself never
+ * applies an update. Built by the server, which knows its OS and data directory. */
+export interface UpdateCommands {
+  /** Where to run them, and with what privilege, in a sentence. */
+  where: string
+  list: string
+  status: string
+  /** Has `versionPlaceholder` where the chosen version goes. */
+  apply: string
+  /** Null when there is no earlier version in the other slot to switch back to. */
+  rollback: string | null
+  versionPlaceholder: string
+  /** A machine-wide install from before versioned slots: the first apply converts it, once, and says so. */
+  convertsFirst: boolean
+  /** A global tool: `apply` only prints the `dotnet tool` commands to run. */
+  printsOnly: boolean
+}
+
+export interface UpdateSlot {
+  name: 'a' | 'b'
+  /** Null when the slot is empty. */
+  version: string | null
+  current: boolean
+  ambiguous: boolean
+}
+
+export interface UpdateSlots {
+  /** The tool directory: the launcher, `current.txt` and `versions/`. */
+  root: string
+  current: 'a' | 'b' | null
+  slots: UpdateSlot[]
+  /** The pointer checked against what is on disk: `warning`s stop the launcher starting; `note`s are worth knowing. */
+  checks: { level: 'note' | 'warning'; message: string }[]
+}
+
 export interface UpdateStatus {
-  /** `DbDataSync:Updates:Mode`. Disabled by default. */
+  /** `DbDataSync:Updates:Mode`: whether releases are looked up. Disabled by default; the commands are given either way. */
   enabled: boolean
   runningVersion: string | null
   /** `ToolPath`, `Global`, `Container` or `NotAToolInstall`. */
   installKind: string
   /** The channels the operator has allowed the console to offer. */
   channels: UpdateChannel[]
-  /** Whether this installation can apply an update right now; when it cannot, `cannotApplyReason` says why
-   * in a sentence an admin can act on. */
-  canApply: boolean
-  cannotApplyReason: string | null
+  /** Null for a container or a copy that is not a tool install; `commandsUnavailableReason` says why. */
+  commands: UpdateCommands | null
+  commandsUnavailableReason: string | null
+  /** Null when this process was not started by the launcher (an install from before versioned slots). */
+  slots: UpdateSlots | null
+  /** What the CLI last recorded — an update run from a shell shows here while it runs. */
   phase: UpdatePhase
   message: string | null
   atUtc: string | null
   fromVersion: string | null
   toVersion: string | null
   requestedBy: string | null
-  /** An update has been requested and not yet applied. */
-  pending: boolean
-  /** An update has been applied and its new version has not yet proved itself. */
-  onTrial: boolean
-  /** Where the privileged step logs what it did — a path to tell an admin about; on Linux it is in a directory the
-   * service itself cannot write. */
   logPath: string
   history: UpdateHistoryEntry[]
 }

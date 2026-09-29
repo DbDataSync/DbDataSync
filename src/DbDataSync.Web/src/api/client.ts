@@ -118,9 +118,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const put = <T>(path: string, body: unknown) =>
   request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
 
-const post = <T>(path: string, body: unknown) =>
-  request<T>(path, { method: 'POST', body: JSON.stringify(body) })
-
 /**
  * The query string `runs` and `runs/watermark-times` both build from — one function rather than two
  * copies of the same four `if`s, because the two calls have to ask about exactly the same page (see
@@ -414,15 +411,12 @@ export const api = {
     restartRequired: {
       get: () => request<RestartRequiredStatus>('/api/admin/restart-required'),
     },
-    /** Updating this installation (phase 159). Every call is admin-only. */
+    /** The Updates screen (phase 159; read-only since 196L — an update is applied from a shell). Every call is admin-only. */
     update: {
       status: () => request<UpdateStatus>('/api/admin/update/status'),
       /** Read from the pinned release sources on each call — nothing polls them in the background. */
       releases: (channel: string) =>
         request<UpdateReleases>(`/api/admin/update/releases?channel=${encodeURIComponent(channel)}&limit=15`),
-      /** Names only a version: the server looks it up in its own sources and refuses anything else. `202`
-       * means the service is winding down to restart. */
-      apply: (version: string) => post<{ message: string }>('/api/admin/update/apply', { version }),
     },
   },
   users: {

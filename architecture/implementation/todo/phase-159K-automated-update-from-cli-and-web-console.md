@@ -1,5 +1,18 @@
 # Phase 159 — apply an update automatically, from the CLI and the web console (planned)
 
+**Updated 2026-09-29 (phase 196L): the apply mechanism below is superseded.** An update now installs into the
+inactive one of two slots, and a stable launcher runs whichever slot `current.txt` names. `--apply` switches
+slots and switches back if health fails, on Linux and Windows. Retired as a result:
+- the privileged `internal apply-update` step (now a no-op);
+- `service install --self-update` and exit 75;
+- the kept rollback package;
+- the console's apply button, drain and confirmation service, and `Updates:DrainTimeoutSeconds`/`ConfirmAfterSeconds`.
+
+The console keeps its Updates page, which now gives copyable CLI commands. What this doc still owns is the release
+listing, `update --status`, the health probe, and the reasoning about trust, which 196L kept (the CLI runs `dotnet`
+from a private directory with a pinned `nuget.config`). See
+`architecture/implementation/todo/phase-196L-two-install-slots-and-a-stable-launcher.md`.
+
 **Updated 2026-09-21 (phase 164):** every `DbDataSync:SelfUpdate*` key this doc names below was renamed
 under phase 164's config reorg — `SelfUpdateEnabled` (bool) is now `Updates:Mode` (`manual`/`disabled`),
 and `SelfUpdateChannels`/`SelfUpdateDrainTimeoutSeconds`/`SelfUpdateConfirmAfterSeconds` are now
