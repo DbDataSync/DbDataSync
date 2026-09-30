@@ -286,12 +286,17 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
     {
         await ExecuteAsync(_adminConnection, $"INSERT INTO dbo.[{_sourceTable}] (Id, Name) VALUES (1, 'Alice');");
 
-        // Long enough that the worker is still waiting when the second pass arrives, short enough that
-        // the test ends in seconds.
-        await SetUpConfigAsync(frequencySeconds: 2, idleTimeoutSeconds: 6);
+        // Long enough to outlast the bulk load below. The idle clock only resets on a Primary pass that reads
+        // rows (RunExecutor.MarkProductive), and "first" reads none: it captures a position and requests a
+        // Bulk Load, which by design does not count. So the clock runs from the worker's start, through the
+        // whole load. With 6 seconds here, a CI runner slow enough to spend longer than that on the load saw
+        // the worker idle out before "second" was enqueued (CI run 36658733172). The test stops the worker
+        // itself once "second" has succeeded, so this length never costs wall-clock time.
+        await SetUpConfigAsync(frequencySeconds: 2, idleTimeoutSeconds: 120);
 
+        using var stop = new CancellationTokenSource();
         var first = _workQueueStore.Enqueue("e2e-sync", RunKind.Primary, "main");
-        var worker = _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), CancellationToken.None);
+        var worker = _executor.ExecuteWorkerAsync("e2e-sync", WorkerLanes.Uniform(1), stop.Token);
 
         // Wait for the first pass to land, then produce more work for a worker that is already idle.
         var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
@@ -311,7 +316,22 @@ public sealed class RunExecutorIntegrationTests : IAsyncLifetime
 
         // The same call is still running — nothing respawned a worker, because nothing had to.
         Assert.False(worker.IsCompleted, "the worker left between passes.");
-        await worker;
+
+        deadline = DateTimeOffset.UtcNow.AddSeconds(60);
+        while (DateTimeOffset.UtcNow < deadline && _taskRunStore.GetRun(second)?.Status != RunStatus.Succeeded)
+            await Task.Delay(100);
+        Assert.False(worker.IsCompleted, "the worker left before running the second pass.");
+
+        // Done with it: stop it rather than wait out the idle timeout. Cancellation surfaces as
+        // OperationCanceledException (see ExecuteWorkerAsync).
+        await stop.CancelAsync();
+        try
+        {
+            await worker;
+        }
+        catch (OperationCanceledException)
+        {
+        }
 
         Assert.Equal(RunStatus.Succeeded, _taskRunStore.GetRun(second)!.Status);
         Assert.Equal(new Dictionary<int, string> { [1] = "Alice", [2] = "Bob" }, await GetTargetRowsAsync());
