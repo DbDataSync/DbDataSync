@@ -371,3 +371,30 @@ and no eighth fix attempted in the same pass. The 20-consecutive-solo-run bar ab
 that CI falsified. **Open question for the owner, not decided here:** should re-enabling also need CI evidence?
 For example, a `workflow_dispatch`-only job that runs just this class, repeatedly, against CI's own SQL Server
 container. Local runs on this idle box have not predicted CI once in this doc's history.
+
+## Who holds the log reader: its own database's Agent capture job — the job is now dropped, both tests re-enabled (2026-09-29)
+
+Asked whether this is contention with tests running at the same time: **it cannot be.** Two facts already in the
+code rule it out:
+- `sp_replcmds`, the log reader the error names, is exclusive **per database**. Every `MsSqlTestDatabase` creates
+  its own `DbDataSyncTest_<guid>` database, and the Api tests that use CDC get their own databases too.
+- This assembly already runs one test at a time (`AssemblyInfo.cs`, `DisableTestParallelization = true`). So the
+  "remove parallelism for this test" option already exists and is not the fix.
+
+That leaves one candidate for "another connection … is already running 'sp_replcmds'": **the database's own SQL
+Agent capture job.** Every failure's diagnostic did read `capture jobs enabled: 1`, but that is weaker evidence than it
+looks: `DiagnoseAsync` counts enabled capture jobs across all of `msdb`, not this database's. The stronger argument
+is elimination. The helpers only ever *stopped* this database's job,
+and `CdcCaptureJob`'s own doc says `sp_cdc_enable_table` restarts it. So "stopped" was a state the job could leave
+between our stop and our scan, most easily on a loaded CI runner. Locally the job rarely got the chance, which
+fits every fix here passing locally.
+
+**Change:** `CdcCaptureJob.RemoveCaptureJobAsync` stops the job, waits for it to halt, then drops it
+(`sys.sp_cdc_drop_job @job_type = N'capture'`). Both `ScanAsync` and `ScanUntilPastAsync` use it in place of the
+bare stop. A dropped job cannot restart. Product code never scans and never needs the job, so dropping it in
+tests loses nothing.
+
+**Both tests re-enabled on this basis, straight into CI, at the owner's direction.** The local 20-run bar was only
+ever meant to show the tests could run stably locally before CI was worth worrying about, and they already have.
+If either test recurs now, the Agent-job theory is falsified. The next step would then be recording who
+`session ID N` is (`sys.dm_exec_sessions` `program_name`/`login_name`) at the moment of the error, not another fix.

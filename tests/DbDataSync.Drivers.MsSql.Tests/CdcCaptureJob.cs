@@ -11,8 +11,9 @@ namespace DbDataSync.Drivers.MsSql.Tests;
 /// <para>
 /// These fixtures instead drive the scan themselves with <see cref="ScanAsync"/>: it stops the Agent
 /// capture job, waits for it to actually halt (<c>sp_cdc_stop_job</c> returns before the job does),
-/// and runs <c>sys.sp_cdc_scan</c> — after which everything committed beforehand is captured, with no
-/// polling, latency, or a background job fighting it for the log reader. <see cref="DiagnoseAsync"/>
+/// drops it so it cannot come back (<see cref="RemoveCaptureJobAsync"/>), and runs <c>sys.sp_cdc_scan</c> —
+/// after which everything committed beforehand is captured, with no polling, latency, or a background job
+/// fighting it for the log reader. <see cref="DiagnoseAsync"/>
 /// stays for the messages on the deadlock/other retries that remain.
 /// </para>
 /// </summary>
@@ -50,7 +51,7 @@ internal static class CdcCaptureJob
     /// </summary>
     public static async Task<DateTime> ScanAsync(SqlConnection connection)
     {
-        await StopCaptureJobAsync(connection);
+        await RemoveCaptureJobAsync(connection);
         return await ScanOnceAsync(connection);
     }
 
@@ -161,7 +162,7 @@ internal static class CdcCaptureJob
     /// </summary>
     public static async Task<DateTime> ScanUntilPastAsync(SqlConnection connection, DateTime after)
     {
-        await StopCaptureJobAsync(connection);
+        await RemoveCaptureJobAsync(connection);
         var deadline = DateTime.UtcNow + ScanUntilPastDeadline;
         var attempts = 0;
         while (true)
@@ -207,6 +208,30 @@ internal static class CdcCaptureJob
                 return;
             await Task.Delay(250);
         }
+    }
+
+    /// <summary>
+    /// Stops the Agent capture job (waiting until it has halted) and then **drops it**, so nothing but this
+    /// test's own <c>sp_cdc_scan</c> ever reads this database's log again (2026-09-29).
+    /// <para>
+    /// Stopping alone was a race, not a guarantee. <c>sp_cdc_enable_table</c> restarts the job, and so does
+    /// anything else that starts Agent jobs. CI runs `36015178966`, `36087077476`, `36102912551`, `36597842695`
+    /// and `36604816612` all timed out on "Another connection … is already running 'sp_replcmds'". The log reader is per database, and every test gets its own database with
+    /// this assembly's tests run one at a time. So the only other reader of this database was its own Agent
+    /// capture job. A dropped job cannot restart. Nothing in the product scans or needs the job to exist; it
+    /// only names it in error messages. <c>sp_cdc_enable_table</c> recreates the job only for a database's first
+    /// CDC table, so this is repeated on every scan: it is cheap, and a no-op once the job is gone.
+    /// </para>
+    /// </summary>
+    public static async Task RemoveCaptureJobAsync(SqlConnection connection)
+    {
+        await StopCaptureJobAsync(connection);
+
+        var exists = await ScalarAsync(connection, """
+            SELECT COUNT(*) FROM msdb.dbo.cdc_jobs WHERE database_id = DB_ID() AND job_type = N'capture';
+            """);
+        if (exists is int count && count > 0)
+            await ExecuteAsync(connection, "EXEC sys.sp_cdc_drop_job @job_type = N'capture';");
     }
 
     /// <summary>Whether an Agent capture-job step is live against this database right now.</summary>
