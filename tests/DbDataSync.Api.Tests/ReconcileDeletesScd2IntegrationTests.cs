@@ -11,6 +11,7 @@ using DbDataSync.Drivers.Generic;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.Api.Tests;
 
@@ -102,8 +103,7 @@ public sealed class ReconcileDeletesScd2IntegrationTests : IClassFixture<TestApi
 
         await using var connection = new SqlConnection(ServerConnectionString);
         await connection.OpenAsync();
-        await ExecuteAsync(connection, $"ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-        await ExecuteAsync(connection, $"DROP DATABASE [{_databaseName}];");
+        await MsSqlScratch.DropDatabaseAsync(connection, _databaseName);
     }
 
     /// <summary>

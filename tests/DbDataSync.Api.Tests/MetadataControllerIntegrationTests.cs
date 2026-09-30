@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using DbDataSync.Core.Config;
 using Microsoft.Data.SqlClient;
 using Xunit;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.Api.Tests;
 
@@ -46,8 +47,7 @@ public sealed class MetadataControllerIntegrationTests : IClassFixture<TestApiFa
     {
         await using var connection = new SqlConnection(ServerConnectionString);
         await connection.OpenAsync();
-        await ExecuteAsync(connection, $"ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-        await ExecuteAsync(connection, $"DROP DATABASE [{_databaseName}];");
+        await MsSqlScratch.DropDatabaseAsync(connection, _databaseName);
     }
 
     private static async Task ExecuteAsync(SqlConnection connection, string sql)

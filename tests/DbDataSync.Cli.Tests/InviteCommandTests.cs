@@ -2,6 +2,7 @@ using DbDataSync.Core.Config;
 using DbDataSync.Core.Secrets;
 using DbDataSync.Libraries;
 using Microsoft.Data.SqlClient;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.Cli.Tests;
 
@@ -57,8 +58,7 @@ public sealed class InviteCommandTests : IDisposable
 
         try
         {
-            Execute(ServerConnectionString, $"ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-            Execute(ServerConnectionString, $"DROP DATABASE [{_databaseName}];");
+            MsSqlScratch.DropDatabase(ServerConnectionString, _databaseName);
         }
         catch (Exception)
         {

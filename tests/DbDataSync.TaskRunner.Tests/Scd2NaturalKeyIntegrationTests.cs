@@ -11,6 +11,7 @@ using DbDataSync.State;
 using LibGit2Sharp;
 using Microsoft.Data.SqlClient;
 using Xunit;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.TaskRunner.Tests;
 
@@ -118,8 +119,7 @@ public sealed class Scd2NaturalKeyIntegrationTests : IAsyncLifetime
 
         await using var bootstrap = new SqlConnection(ServerConnectionString);
         await bootstrap.OpenAsync();
-        await ExecuteAsync(bootstrap, $"ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-        await ExecuteAsync(bootstrap, $"DROP DATABASE [{_databaseName}];");
+        await MsSqlScratch.DropDatabaseAsync(bootstrap, _databaseName);
 
         GitTempDirectory.DeleteRecursively(_repoRoot);
     }

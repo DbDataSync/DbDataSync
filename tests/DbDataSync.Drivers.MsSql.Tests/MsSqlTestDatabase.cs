@@ -1,5 +1,6 @@
 using Microsoft.Data.SqlClient;
 using Xunit;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.Drivers.MsSql.Tests;
 
@@ -32,8 +33,7 @@ public sealed class MsSqlTestDatabase : IAsyncLifetime
     {
         await using var connection = new SqlConnection(ServerConnectionString);
         await connection.OpenAsync();
-        await ExecuteAsync(connection, $"ALTER DATABASE [{DatabaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-        await ExecuteAsync(connection, $"DROP DATABASE [{DatabaseName}];");
+        await MsSqlScratch.DropDatabaseAsync(connection, DatabaseName);
     }
 
     /// <param name="pooled">

@@ -5,6 +5,7 @@ using DbDataSync.Core.Config;
 using DbDataSync.Drivers.Abstractions;
 using Microsoft.Data.SqlClient;
 using Xunit;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.Api.Tests;
 
@@ -67,31 +68,12 @@ public sealed class ApplyProvisioningCacheIntegrationTests : IClassFixture<TestA
 
     public async Task DisposeAsync()
     {
-        // The API under test keeps pooled connections to these scratch databases. SET SINGLE_USER
-        // kicks its live sessions off, but a pooled one can reconnect into the freed single-user slot
-        // before DROP runs — "database is currently in use". Emptying the pools first stops that, and
-        // a short retry covers the window that remains.
-        SqlConnection.ClearAllPools();
-
+        // The API under test keeps pooled connections to these scratch databases, which can reconnect into the
+        // single-user slot a separate DROP needs. MsSqlScratch kicks and drops in one batch, retried as a whole.
         await using var connection = new SqlConnection(ServerConnectionString);
         await connection.OpenAsync();
         foreach (var db in new[] { _sourceDb, _targetDb })
-        {
-            await ExecuteAsync(connection, $"ALTER DATABASE [{db}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-            for (var attempt = 1; ; attempt++)
-            {
-                try
-                {
-                    await ExecuteAsync(connection, $"DROP DATABASE [{db}];");
-                    break;
-                }
-                catch (SqlException) when (attempt < 5)
-                {
-                    SqlConnection.ClearAllPools();
-                    await Task.Delay(500);
-                }
-            }
-        }
+            await MsSqlScratch.DropDatabaseAsync(connection, db);
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DbDataSync.Core.Config;
 using Microsoft.Data.SqlClient;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.Api.Tests;
 
@@ -81,8 +82,7 @@ public sealed class RelationshipMetadataRefreshTests(TestApiFactory factory) : I
     {
         await using var connection = new SqlConnection(ServerConnectionString);
         await connection.OpenAsync();
-        await ExecuteAsync(connection, $"ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-        await ExecuteAsync(connection, $"DROP DATABASE [{_databaseName}];");
+        await MsSqlScratch.DropDatabaseAsync(connection, _databaseName);
     }
 
     [Fact]

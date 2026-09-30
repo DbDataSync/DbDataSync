@@ -1,5 +1,6 @@
 using Microsoft.Data.SqlClient;
 using Npgsql;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.State.Tests;
 
@@ -63,8 +64,7 @@ public sealed class StateEngineFixture : IDisposable
         {
             if (_engine == StateEngineIds.MsSql)
             {
-                Execute(MsSqlServer, $"ALTER DATABASE [{_databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-                Execute(MsSqlServer, $"DROP DATABASE [{_databaseName}];");
+                MsSqlScratch.DropDatabase(MsSqlServer, _databaseName);
             }
             else
             {

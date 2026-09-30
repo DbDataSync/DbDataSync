@@ -33,4 +33,9 @@
     <ProjectReference Include="..\..\src\DbDataSync.Libraries\DbDataSync.Libraries.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- One scratch-database teardown for every test project that makes one; see its doc comment. -->
+    <Compile Include="..\Shared\MsSqlScratch.cs" Link="Shared\MsSqlScratch.cs" />
+  </ItemGroup>
+
 </Project>

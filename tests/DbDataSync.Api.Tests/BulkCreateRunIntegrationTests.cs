@@ -8,6 +8,7 @@ using DbDataSync.Core.Secrets;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using DbDataSync.TestSupport;
 
 namespace DbDataSync.Api.Tests;
 
@@ -109,8 +110,7 @@ public sealed class BulkCreateRunIntegrationTests : IClassFixture<TestApiFactory
         await connection.OpenAsync();
         foreach (var db in new[] { _sourceDb, _targetDb })
         {
-            await ExecuteAsync(connection, $"ALTER DATABASE [{db}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-            await ExecuteAsync(connection, $"DROP DATABASE [{db}];");
+            await MsSqlScratch.DropDatabaseAsync(connection, db);
         }
     }
 
