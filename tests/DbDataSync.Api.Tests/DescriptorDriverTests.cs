@@ -115,10 +115,33 @@ public sealed class DescriptorDriverTests : IClassFixture<DescriptorDriverApiFac
         await using (var admin = OpenMySql(""))
             await ExecAsync(admin, $"DROP DATABASE IF EXISTS `{_mySqlDatabase}`;");
 
+        // The replication InitializeAsync creates is enabled and continuous, so the host's scheduler starts a
+        // pass straight away: a spawned TaskRunner with its own connections (and its own pool) to the target.
+        // A test as short as DriversEndpoint_ListsTheDescriptorDriver reaches this point while that pass is
+        // still running. SINGLE_USER WITH ROLLBACK IMMEDIATE kicks it off, and it can reconnect into the one
+        // freed slot before a separate DROP — "Cannot drop database … because it is currently in use" (CI run
+        // 36655178044). So the kick and the drop go in one batch, with no client round trip between them, and a
+        // failure repeats the whole batch: re-kicking whoever took the slot. Clearing this process's pools only
+        // helps with the host's own connections; the TaskRunner's are in another process.
+        SqlConnection.ClearAllPools();
         await using var mssql = new SqlConnection(MsSqlServerConnectionString);
         await mssql.OpenAsync();
-        await ExecAsync(mssql, $"ALTER DATABASE [{_targetDatabase}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;");
-        await ExecAsync(mssql, $"DROP DATABASE [{_targetDatabase}];");
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await ExecAsync(mssql, $"""
+                    ALTER DATABASE [{_targetDatabase}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                    DROP DATABASE [{_targetDatabase}];
+                    """);
+                return;
+            }
+            catch (SqlException ex) when (attempt < 10 && ex.Message.Contains("currently in use", StringComparison.OrdinalIgnoreCase))
+            {
+                SqlConnection.ClearAllPools();
+                await Task.Delay(500);
+            }
+        }
     }
 
     private DbConnection OpenMySql(string database)
