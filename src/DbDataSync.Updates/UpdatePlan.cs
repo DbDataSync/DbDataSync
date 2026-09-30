@@ -72,13 +72,16 @@ public static class UpdatePlanner
         && location.Kind != InstallKind.Container
         && operation != PlanOperation.AlreadyInstalled;
 
+    /// <param name="alreadyOnDisk">The target is already installed somewhere this plan will use — the inactive slot
+    /// of a slot install (phase 196L) — so a snapshot needs no staging.</param>
     public static UpdatePlan Build(
         ReleaseVersion? installed,
         ReleaseInfo target,
         InstallLocation location,
         string? stagedDirectory,
         ServiceSituation service,
-        bool needsElevation)
+        bool needsElevation,
+        bool alreadyOnDisk = false)
     {
         var operation = OperationFor(installed, target.Version);
 
@@ -87,7 +90,7 @@ public static class UpdatePlanner
             target.Channel == ReleaseChannel.Snapshot ? stagedDirectory : null,
             service, needsElevation);
 
-        if (plan.IsUpdatable && NeedsStagedPackage(target, location, operation) && stagedDirectory is null)
+        if (plan.IsUpdatable && !alreadyOnDisk && NeedsStagedPackage(target, location, operation) && stagedDirectory is null)
             throw new ArgumentException("A snapshot has to be staged before it can be planned.", nameof(stagedDirectory));
 
         return plan;

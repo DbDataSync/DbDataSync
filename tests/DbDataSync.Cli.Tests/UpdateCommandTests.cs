@@ -633,6 +633,37 @@ public class UpdateCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Apply_ToAPrunedSnapshotStillInTheOtherSlot_NeedsNoNetwork_AndOnlySwitches()
+    {
+        // Retention keeps the newest 20 snapshots; this one is no longer listed anywhere, but slot b still has it.
+        const string pruned = "2026.9.1.100-snapshot.g1111111";
+        var network = Network();
+
+        var (exit, output, error) = await RunAsync(
+            ["--to", pruned, "--apply", "--yes", "--repo", DataRoot], SlotEnv(service: Systemd, otherSlot: pruned), network);
+
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Empty(network.Requested);
+        Assert.DoesNotContain("Downloading", output);
+        Assert.Contains($"Slot b already holds {pruned}", output);
+        Assert.Equal(["service stop", "service start", "health http://localhost:5080 90s"], _events);
+        Assert.Equal("b", Layout.Current);
+    }
+
+    [Fact]
+    public async Task Apply_ASnapshotNotInEitherSlot_IsStillLookedUpAndDownloaded()
+    {
+        var network = Network();
+
+        var (exit, _, _) = await RunAsync(["--to", SnapshotA, "--apply", "--yes", "--repo", DataRoot], SlotEnv(otherSlot: "2026.9.11.532"), network);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(network.Requested, url => url.EndsWith(".nupkg", StringComparison.Ordinal));
+        Assert.Equal(SnapshotA, Layout.Slot("b").Version);
+    }
+
+    [Fact]
     public async Task Apply_OverAnOlderVersionInTheOtherSlot_ReplacesIt()
     {
         var (exit, _, _) = await RunAsync(Apply("--yes"), SlotEnv(otherSlot: "2026.9.11.532"), Network());

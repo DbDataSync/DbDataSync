@@ -177,12 +177,15 @@ public static class UpdateCommand
             return 1;
         }
 
-        // The version already running is answered without a network round trip — and without needing it to
-        // still be listed: retention prunes old snapshots, so an installed one can outlive its release.
-        var releases = installed is not null && installed.Equals(wanted)
+        // The version already running — or, under the launcher, already in the other slot — is answered without a
+        // network round trip, and without needing it to still be listed: retention prunes old snapshots, so an
+        // installed one can outlive its release. That is what lets `--to` go back to a pruned snapshot the other
+        // slot still holds, exactly as `--rollback` would.
+        var onDisk = (installed is not null && installed.Equals(wanted)) || OtherSlotHolds(env, wanted);
+        var releases = onDisk
             ? []
             : await catalog.ListAsync(channel, 1000, cancellationToken);
-        var chosen = installed is not null && installed.Equals(wanted)
+        var chosen = onDisk
             ? new ReleaseInfo(wanted, channel)
             : releases.FirstOrDefault(r => r.Version.Equals(wanted));
         if (chosen is null)
@@ -201,8 +204,11 @@ public static class UpdateCommand
         var location = InstallLocator.Locate(env.BaseDirectory, env.GlobalToolsDirectory, env.InContainer);
         var operation = UpdatePlanner.OperationFor(installed, chosen.Version);
 
+        // A snapshot the other slot already holds is installed from nowhere — the switch just flips to it — so it is
+        // not downloaded again.
+        var inOtherSlot = OtherSlotHolds(env, chosen.Version);
         string? stagedDirectory = null;
-        if (UpdatePlanner.NeedsStagedPackage(chosen, location, operation))
+        if (!inOtherSlot && UpdatePlanner.NeedsStagedPackage(chosen, location, operation))
         {
             // Absolute: it ends up on a `dotnet` command line, which is run from a working directory of its own.
             var stageRoot = Path.GetFullPath(options.StageDirectory ?? env.DefaultStageDirectory);
@@ -219,7 +225,8 @@ public static class UpdateCommand
         var plan = UpdatePlanner.Build(
             installed, chosen, location, stagedDirectory,
             env.ServiceLookup(root),
-            needsElevation: location.Kind == InstallKind.ToolPath && !CliOptions.IsUnderUserProfile(location.ToolRoot));
+            needsElevation: location.Kind == InstallKind.ToolPath && !CliOptions.IsUnderUserProfile(location.ToolRoot),
+            alreadyOnDisk: inOtherSlot);
 
         if (!options.Apply)
         {
@@ -414,6 +421,17 @@ public static class UpdateCommand
 
         output.WriteLine("Cancelled.");
         return false;
+    }
+
+    /// <summary>Under the launcher: whether the slot that is not current already holds <paramref name="version"/>.</summary>
+    private static bool OtherSlotHolds(UpdateEnvironment env, ReleaseVersion version)
+    {
+        if (env.Launcher is not { } launcher)
+            return false;
+
+        var layout = new SlotLayout(launcher.Root);
+        var current = layout.Current ?? launcher.Slot;
+        return UpdateCommands.SlotHolds(layout.Slot(SlotPaths.Other(current)).Version, version.Text);
     }
 
     private static string HealthUrl(Options options, string root) =>
