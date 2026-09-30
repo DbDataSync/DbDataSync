@@ -196,8 +196,11 @@ internal static class CdcCaptureJob
         {
             await ExecuteAsync(connection, "EXEC sys.sp_cdc_stop_job @job_type = N'capture';");
         }
-        catch (SqlException ex) when (ex.Message.Contains("not currently running", StringComparison.OrdinalIgnoreCase))
+        catch (SqlException ex) when (ex.Message.Contains("not currently running", StringComparison.OrdinalIgnoreCase)
+                                      || ex.Message.Contains("does not exist in the system table", StringComparison.OrdinalIgnoreCase))
         {
+            // Not running, or already dropped by RemoveCaptureJobAsync (every scan after a test's first): both are
+            // the goal state.
             return;
         }
 
