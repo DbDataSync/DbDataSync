@@ -61,6 +61,12 @@ public sealed class AdminConfigService(
             "Console/API bind address. Only `dbdatasync serve`/`dbdatasync health` resolve this themselves " +
             "before translating it to Kestrel's --urls; the raw `dotnet run` entry point ignores it.",
             SupportsWrite: true),
+        new("DbDataSync:App:Server",
+            "Which web server hosts the console: kestrel (default) or httpsys (Windows only). HTTP.sys " +
+            "lets other processes share this port, told apart by host name — but it ignores the " +
+            "Kestrel:Certificates:* settings, so https needs a certificate bound with netsh instead, and " +
+            "App:Url must be a host-name prefix, not a path. Takes effect on restart; see configuration.md.",
+            SupportsWrite: true, AllowedValues: AllowedValuesFor<WebServer>()),
         new("DbDataSync:App:AlternateUrls",
             "Every other origin this deployment is also reached at, beyond App:Url — comma- or " +
             "semicolon-separated. Purely additive: App:Url's own origin is always trusted for passkeys " +
@@ -379,6 +385,7 @@ public sealed class AdminConfigService(
     {
         "DbDataSync:App:RepoRoot" => apiOptions.RepoRoot,
         "DbDataSync:App:Url" => apiOptions.Url,
+        "DbDataSync:App:Server" => Lower(apiOptions.Server),
         "DbDataSync:App:AlternateUrls" => string.Join(", ", apiOptions.AlternateUrls),
         "DbDataSync:App:TaskRunnerDllPath" => apiOptions.TaskRunnerDllPath,
         "DbDataSync:State:DbPath" => apiOptions.StateDbPath,
@@ -426,6 +433,7 @@ public sealed class AdminConfigService(
     private static string? DefaultValueFor(string key) => key switch
     {
         "DbDataSync:App:Url" => ApiOptions.DefaultUrl,
+        "DbDataSync:App:Server" => Lower(WebServerSelection.Default),
         "DbDataSync:State:Engine" => ApiOptions.DefaultStateEngine,
         "DbDataSync:State:Port" => ApiOptions.DefaultStatePort.ToString(),
         "DbDataSync:State:Retention:RunDays" => ApiOptions.DefaultRunRetentionDays.ToString(),

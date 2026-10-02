@@ -263,6 +263,7 @@ the old flat names is migrated automatically the first time `serve`/`setup` runs
 | --- | --- | --- | --- |
 | `App:RepoRoot` | `DbDataSync__App__RepoRoot` | `<cwd>/dbdatasync-repo` under raw `dotnet run`; the CLI's `--repo` default under `dbdatasync serve` | git-tracked config store root |
 | `App:Url` | `DbDataSync__App__Url` | `http://localhost:5080` | `dbdatasync serve`/`dbdatasync health` read this themselves (see above) and translate it to `--urls`/Kestrel's bind address; also this deployment's own always-trusted passkey origin (see `Auth:Passkeys:*`, below) |
+| `App:Server` | `DbDataSync__App__Server` | `kestrel` | `kestrel` or `httpsys`. `httpsys` is Windows-only and exists so the port can be shared with other processes — see "Sharing a port with HTTP.sys," below. Anything else refuses to start. Takes effect on restart |
 | `App:AlternateUrls` | `DbDataSync__App__AlternateUrls` | none | every other origin this deployment is also reached at, beyond `App:Url` — comma- or semicolon-separated. Purely additive: `App:Url`'s own origin is always trusted for passkeys without needing to be listed here too |
 | `App:TaskRunnerDllPath` | `DbDataSync__App__TaskRunnerDllPath` | resolved automatically | see below |
 | `App:CliDllPath` | `DbDataSync__App__CliDllPath` | resolved automatically | where `DbDataSync.Cli.dll` is, for the deep connection-scoped library-validation check to spawn itself in its own process |
@@ -425,6 +426,37 @@ environment variable, CLI flag), and what `dbdatasync config cert bind` writes i
 
 **Nothing takes effect until the process restarts** — resolved once at startup, same as every other
 `DbDataSync:*` setting.
+
+### Sharing a port with HTTP.sys
+
+Opt-in, Windows only: set `DbDataSync:App:Server` to `httpsys` and the console is served by HTTP.sys, the
+kernel-mode listener, instead of Kestrel. The reason to do it is that HTTP.sys lets several processes
+listen on the same port, routed by host name. Kestrel is still the default, and still what Linux, the
+container and the systemd unit use. The runner-state listener (`State:Port`) is a separate loopback-only
+server and stays on Kestrel either way.
+
+```yaml
+DbDataSync:
+  App:
+    Server: httpsys
+    Url: http://dbdatasync.example.com:80
+```
+
+What changes, and what you do about it:
+
+| | Kestrel | HTTP.sys |
+| --- | --- | --- |
+| `App:Url` | any bind address, including `http://0.0.0.0:8080` | a URL *prefix*: `http://dbdatasync.example.com:80` only answers requests whose `Host` is that name. `http://+:80` takes any host and `http://*:80` is the weak wildcard (anything nobody else claimed). `0.0.0.0` is not valid. **Share by host name, not by path** — the console is served from the root of its origin, so a path prefix such as `/dbdatasync/` is not supported (startup logs a warning if you try) |
+| Permission to bind | the port is free or it is not | a URL reservation for the service account unless it is `LocalSystem` or an administrator: `netsh http add urlacl url=http://dbdatasync.example.com:80/ user="<the service account>"`. `dbdatasync service install` does not create it yet |
+| Certificate for https | `Kestrel:Certificates:Default:*` — what `dbdatasync config cert bind`, `use-pem`, `use-pfx` and `new-self-signed` write | **Ignored** (startup logs a warning if it is set). Bind a certificate from the machine store to the port in the OS: `netsh http add sslcert hostnameport=dbdatasync.example.com:443 certhash=<thumbprint> appid={<any guid>} certstorename=MY`. The certificate screens, `cert status` and the expiry notification still read the Kestrel keys, so they do not describe an HTTP.sys binding |
+| Windows sign-in | the Negotiate package, inside this process | HTTP.sys authenticates in the kernel and hands over a Windows identity; the same sign-in endpoint turns it into a session, with the same groups and the same rules |
+| Request limits | Kestrel defaults | HTTP.sys defaults (its own request-size, timeout and queue limits). The file upload endpoint's 200 MB limit is set per request on both, but has not been verified under HTTP.sys |
+
+Another process on the same port must claim a different host name (or prefix) with HTTP.sys itself —
+IIS and anything built on `HttpListener` or `UseHttpSys` do. A Kestrel process cannot share the port.
+
+Not every difference is closed yet; `architecture/implementation/todo/phase-196H-opt-in-httpsys-for-port-sharing.md`
+lists what is deliberately left for later, so this stays opt-in until it is.
 
 ### Standard ASP.NET Core variables
 

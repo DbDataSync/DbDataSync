@@ -22,6 +22,7 @@ using DbDataSync.Drivers.Descriptor;
 using DbDataSync.Drivers.Postgres;
 using DbDataSync.Libraries;
 using DbDataSync.State;
+using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
 
 namespace DbDataSync.Api;
@@ -59,6 +60,21 @@ public static class DbDataSyncHost
         // merely exists) and routes logging to the journal format. Same "only when it's real" guard.
         else if (Microsoft.Extensions.Hosting.Systemd.SystemdHelpers.IsSystemdService())
             builder.Host.UseSystemd();
+
+        // Opt-in, Windows only: HTTP.sys instead of Kestrel, so the port can be shared with other
+        // processes. Resolved off builder.Configuration (not DI) for the same reason the certificate
+        // and Negotiate decisions below are: the server has to be chosen before the container exists.
+        var webServer = WebServerSelection.Resolve(builder.Configuration);
+        var windowsAuthEnabled = OperatingSystem.IsWindows()
+            && AuthOptions.FromConfiguration(builder.Configuration).WindowsEnabled;
+        if (webServer == WebServer.HttpSys)
+        {
+            if (!OperatingSystem.IsWindows())
+                throw new InvalidOperationException(
+                    $"'{WebServerSelection.ConfigKey}' is 'httpsys', which only exists on Windows. " +
+                    "Use 'kestrel' on this platform.");
+            HttpSysHosting.Use(builder, windowsAuthEnabled);
+        }
 
         builder.Services.AddControllers()
             // Named explicitly, because controller discovery starts from the *entry* assembly and the
@@ -327,8 +343,21 @@ public static class DbDataSyncHost
         // certificateRepoRoot above does: this runs before builder.Build(). A deployment with no
         // Windows group configured gets nothing to lose here either way — Negotiate existing but never
         // being the effective scheme was already true whenever nothing could ever satisfy it.
-        if (OperatingSystem.IsWindows() && AuthOptions.FromConfiguration(builder.Configuration).WindowsEnabled)
+        if (windowsAuthEnabled && webServer == WebServer.HttpSys)
+        {
+            // HTTP.sys authenticates in the kernel and hands the request a Windows principal; the
+            // Negotiate package's handler would be the wrong thing to run here (it wants Kestrel's
+            // connection features). A scheme under Negotiate's own name that forwards to HTTP.sys's
+            // handler keeps AuthController's [Authorize(AuthenticationSchemes = "Negotiate")] — and so
+            // the sign-in endpoint, WindowsSignIn and everything after it — unchanged.
+            authentication.AddPolicyScheme(
+                NegotiateDefaults.AuthenticationScheme, displayName: null,
+                options => options.ForwardDefault = HttpSysHosting.AuthenticationScheme);
+        }
+        else if (windowsAuthEnabled)
+        {
             authentication.AddNegotiate();
+        }
 
         builder.Services.AddAuthorizationBuilder()
             .AddPolicy(Policies.Admin, policy => policy.RequireRole(nameof(UserRole.Admin)))
@@ -352,6 +381,9 @@ public static class DbDataSyncHost
         // Windows authentication may be the only method this deployment intends to use.
         if (app.Services.GetRequiredService<PasskeyOptions>().Problem() is { } passkeyProblem)
             app.Logger.LogWarning("Passkeys are misconfigured and will not work: {Problem}", passkeyProblem);
+
+        if (webServer == WebServer.HttpSys)
+            WarnAboutHttpSysTls(app);
 
         if (app.Environment.IsDevelopment())
             app.MapOpenApi();
@@ -417,6 +449,28 @@ public static class DbDataSyncHost
         .AllowAnonymous();
 
         return app;
+    }
+
+    /// <summary>
+    /// HTTP.sys never reads <c>Kestrel:Certificates:*</c> — a certificate is bound to the port in the
+    /// operating system (<c>netsh http add sslcert</c>). Said at startup because the failure is
+    /// otherwise silent: the config looks right, the service starts, and https just is not there.
+    /// </summary>
+    private static void WarnAboutHttpSysTls(WebApplication app)
+    {
+        if (app.Configuration.GetSection("Kestrel:Certificates").GetChildren().Any())
+        {
+            app.Logger.LogWarning(
+                "Kestrel:Certificates:* is configured but '{Key}' is httpsys, which ignores it. Bind the " +
+                "certificate to the port with 'netsh http add sslcert' instead.", WebServerSelection.ConfigKey);
+        }
+
+        if (app.Urls.Any(u => Uri.TryCreate(u, UriKind.Absolute, out var uri) && uri.AbsolutePath.Length > 1))
+        {
+            app.Logger.LogWarning(
+                "A URL with a path prefix is bound under HTTP.sys. The web console is served from the root of " +
+                "its origin, so share the port by host name, not by path.");
+        }
     }
 
     /// <summary>

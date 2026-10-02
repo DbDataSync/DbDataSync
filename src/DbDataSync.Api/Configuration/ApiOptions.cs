@@ -50,6 +50,9 @@ public sealed class ApiOptions
     /// </summary>
     public string Url { get; init; } = DefaultUrl;
 
+    /// <summary>Which server hosts the console/API — <see cref="WebServerSelection"/>.</summary>
+    public WebServer Server { get; init; } = WebServerSelection.Default;
+
     /// <summary>
     /// Every other origin this deployment is also legitimately reached at, beyond <see cref="Url"/> —
     /// purely additive, never a replacement (see <see cref="Auth.PasskeyOptions.Origins"/>, its one
@@ -206,6 +209,7 @@ public sealed class ApiOptions
         {
             RepoRoot = repoRoot,
             Url = string.IsNullOrWhiteSpace(app["Url"]) ? DefaultUrl : app["Url"]!,
+            Server = WebServerSelection.Resolve(configuration),
             AlternateUrls = ReadList(app["AlternateUrls"]),
             StateDbPath = stateDbPath,
             CliDllPath = cliDllPath,
