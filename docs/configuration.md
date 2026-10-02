@@ -455,7 +455,7 @@ What changes, and what you do about it:
 Another process on the same port must claim a different host name (or prefix) with HTTP.sys itself —
 IIS and anything built on `HttpListener` or `UseHttpSys` do. A Kestrel process cannot share the port.
 
-Not every difference is closed yet; `architecture/implementation/todo/phase-196H-opt-in-httpsys-for-port-sharing.md`
+Not every difference is closed yet; `architecture/implementation/done/phase-196H-opt-in-httpsys-for-port-sharing.md`
 lists what is deliberately left for later, so this stays opt-in until it is.
 
 ### Standard ASP.NET Core variables

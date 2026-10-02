@@ -1,7 +1,8 @@
 # Phase 196H — Opt-in HTTP.sys for port sharing
 
-**Status**: Implemented; the HTTP.sys runtime path has **not yet been exercised on Windows**. Move to `done/`
-once the verification list below has been run on a real host.
+**Status**: Built. CI on Windows exercises only the host build and the auth bridge's forward target; the
+HTTP.sys runtime path (listening, sharing a port, sign-in, SignalR, uploads) has **not been run on a real
+host**. That verification is carried by phase 199H rather than holding this one open.
 
 ## Why
 
@@ -31,7 +32,15 @@ view.
 - Unchanged on purpose: `StateHost` (a separate loopback Kestrel server for the task runners — it never
   needed to share a port), SignalR, static files, the SPA fallback, `/api/health`.
 
-## Verification still owed (Windows)
+## Found by CI on Windows
+
+The first push forwarded the `Negotiate` bridge to a scheme name written from memory
+(`Microsoft.AspNetCore.Server.HttpSys`); HTTP.sys's real scheme is `Windows` (`HttpSysDefaults`). It would have
+failed at the first Windows sign-in. HTTP.sys also registers that scheme in its server's constructor, i.e. at
+startup, so a built-but-unstarted host does not have it — the test now compares the bridge's forward target
+with the real constant instead of looking the scheme up. Read from the decompiled 10.0.12 assembly.
+
+## Verification not yet done (now phase 199H)
 
 1. `serve` with `Server: httpsys`, plain http on a host-name prefix, with another HTTP.sys listener on the same
    port and a different host name: both answer.
@@ -46,26 +55,22 @@ view.
 
 ## Deliberately left for later (the gap to Kestrel)
 
-1. **Certificates.** Everything certificate-shaped still speaks Kestrel: `cert bind`, `use-pem`, `use-pfx`,
-   `new-self-signed`, the readiness check, the Admin certificate screen, the TUI tab and
-   `CertificateExpiryService` all read or write `Kestrel:Certificates:Default:*`. Under HTTP.sys the
-   certificate is bound to the port in the OS. Needed: a binding abstraction over both models (PEM/PFX files
-   would have to be imported to the store before binding), expiry and status reading the HTTP.sys binding,
-   and a restart-free rebind, which HTTP.sys allows. This is the largest gap and the main reason the default
-   should not flip yet — an existing install's certificate would silently stop being used.
-2. **URL reservations.** `service install` does not run `netsh http add urlacl` (and `uninstall` does not
-   remove it), so a non-admin service account fails to bind until an operator does it by hand.
-3. **Path prefixes.** Sharing by path (`/dbdatasync/`) does not work: HTTP.sys sets `PathBase` from the prefix,
-   but the SPA, its assets and `/api` calls assume the root of the origin. Needs a base path in the Vite build
-   or served `<base>`, and the fallback/hub routes to honour it.
-4. **URL grammar.** `App:Url` means a different thing: `0.0.0.0` is invalid and `localhost` only matches that
-   `Host`. Anything else that consumes `App:Url` (`health`, `invite`, `serve`'s own messages) has not been checked
-   against the HTTP.sys meaning. Worth normalising or at least validating up front with a clear message.
+Each item has its own phase doc in `todo/`:
+
+1. **Certificates** — phase 197H. The largest gap and the main reason the default should not flip yet: an
+   existing install's certificate would silently stop being used.
+2. **URL reservations, `App:Url` grammar, startup-failure messages** — phase 198H.
+3. **Real-host verification and CI coverage** — phase 199H.
+4. **Path prefixes** — phase 200H.
 5. **Request limits and timeouts.** No settings surface for HTTP.sys's own `MaxRequestBodySize`, timeouts or
-   request queue; Kestrel's are not configurable here either, so this is parity work, not a regression.
-6. **Test coverage.** `TestServer` has neither Kestrel's nor HTTP.sys's connection features, so the
-   authentication path only has the Windows-only build test; real coverage needs a Windows CI job that starts
-   the host.
-7. **Startup-failure reporting** (phase 136) does not yet recognise `HttpSysException` (access denied,
-   prefix already registered) to give the actionable message it gives for a port conflict.
-8. **Default.** Decide Kestrel vs HTTP.sys as the default for a Windows service once 1–4 are closed.
+   request queue. Kestrel's are not configurable here either, so this is parity work, not a regression; take it
+   up if a deployment needs it.
+6. **Default.** Decide Kestrel vs HTTP.sys as the default for a Windows service once 197H and 198H are closed
+   and 199H has run clean.
+
+## Retrospective
+
+- The auth bridge's first version forwarded to a scheme name written from memory; CI on Windows caught it
+  (see "Found by CI on Windows"). Anything that names an HTTP.sys type, scheme or option should be checked
+  against the shipped assembly, not recalled — a decompiler on the Windows runtime package is a quick way,
+  since the Linux reference assembly for HTTP.sys is a stub.

@@ -18,8 +18,13 @@ internal static class HttpSysHosting
 {
     private const string AssemblyName = "Microsoft.AspNetCore.Server.HttpSys";
 
-    /// <summary><c>HttpSysDefaults.AuthenticationScheme</c> — the scheme HTTP.sys registers its handler under.</summary>
-    public const string AuthenticationScheme = "Microsoft.AspNetCore.Server.HttpSys";
+    /// <summary>
+    /// <c>HttpSysDefaults.AuthenticationScheme</c> — the scheme HTTP.sys registers its handler under.
+    /// Registered by the server itself when it is constructed at startup (and only when a scheme is
+    /// offered), so it is not in the scheme provider of a host that has been built but not started.
+    /// A test pins this against the real constant.
+    /// </summary>
+    public const string AuthenticationScheme = "Windows";
 
     /// <summary>
     /// Switches <paramref name="builder"/> to HTTP.sys. Anonymous requests stay allowed, because the SPA,
