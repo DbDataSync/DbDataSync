@@ -25,7 +25,7 @@ public sealed class MyExpression : ISqlColumnExpression
 const SQL_STARTER = `-- {{target}}, {{targetSchema}}, {{targetTable}}, {{source}}, {{staging}} are quoted
 -- identifiers, substituted textually. @replication, @mapping, @runId, @runKind, @segment,
 -- @segmentIndex, @segmentCount, @isLastSegment, @rowsStaged, @rowsWritten, @watermark are bound
--- values. Not every one is available at every hook point — see the phase 26 doc.
+-- values. Not every one is available at every hook point.
 UPDATE STATISTICS {{target}};
 `
 

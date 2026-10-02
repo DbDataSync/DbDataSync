@@ -848,6 +848,9 @@ the former is a lettered add-on, the latter is its own numbered phase.
    it into `done/` in the same commit as the implementation. A phase's document and its implementation
    land together; there is no state where a phase is "done" in the repo's code but its plan still sits
    in `todo/`, or vice versa.
+   If the phase changes anything an operator or user can see — a setting, a command, a screen, a
+   limitation — the **public documentation in `docs/` is updated in that same commit**, written for the
+   reader and not by reference to this folder (see "`docs/` is public documentation, not planning" below).
 4. If a planned phase turns out to be bigger than expected mid-implementation, split it — write
    additional `todo/` phase files for the remaining scope (numbered after the current highest, same as
    any new phase) rather than silently absorbing unplanned scope into what was originally described as
@@ -1010,6 +1013,28 @@ auto-retry the flaky job against (c) fix every catalogued flake, and recommended
 adopted as the durable rule, not a one-time cleanup pass, so a fresh session picks it up automatically
 instead of needing to be told again. A retry-based workaround (b) is still never adopted for a *known*
 flake under this rule; it only ever hides whether the mechanism was actually understood.
+
+## `docs/` is public documentation, not planning
+
+`docs/` is the product's documentation: it is published with the repository, embedded in the tool and the
+container, and rendered in the console, so it is read by operators who have never seen this folder and
+often cannot (an installed copy has no `architecture/`). Planning and build history belong **here**, in
+`architecture/`; what a user needs to know belongs in `docs/`. The two never point at each other in the
+direction that matters:
+
+- **Nothing in `docs/` refers to a phase, a phase doc, or anything under `architecture/`** — no `phase 164`
+  tags, no "see `architecture/...`", no "tracked in a planning doc". A link there is a dead end for the
+  reader, and a phase number is a fact about our process, not about the product.
+- **If a reader needs the detail, put the detail in `docs/`.** When a phase leaves a gap, a limitation or a
+  decision a user has to know about (a feature that is not supported yet, a setting that behaves
+  differently in one mode, a command that does not do what its name suggests), state it plainly in the
+  relevant `docs/` page. Do not write "see the phase doc" instead, and do not leave it only in the phase doc.
+- **Describe history in the reader's terms**, when it matters at all: "earlier versions did X", "this
+  setting replaces `Y`" — not the number of the phase that changed it.
+- Phase docs may and should link *to* `docs/` pages. The reverse is what is forbidden.
+
+A test (`DocsArePublicContentTests`) fails if a page in `docs/` mentions a phase or links into
+`architecture/implementation` or `architecture/planning`, so this does not rely on anybody remembering it.
 
 ## Phase doc structure
 

@@ -98,7 +98,7 @@ internal static class LegacyConfigMigration
         {
             new GitCommitService(root).CommitChanges(
                 [DbDataSyncConfigFile.PathIn(root)],
-                "Migrate dbdatasync.config.yaml to phase 164's grouped key names:\n\n" + string.Join('\n', changes),
+                "Migrate dbdatasync.config.yaml to the grouped key names:\n\n" + string.Join('\n', changes),
                 CurrentUser.SystemAuthor);
         }
 

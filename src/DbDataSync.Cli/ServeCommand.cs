@@ -159,7 +159,7 @@ public static class ServeCommand
             var migrated = LegacyConfigMigration.Migrate(root);
             if (migrated.Count > 0)
             {
-                Console.WriteLine("dbdatasync.config.yaml used pre-phase-164 key names — migrated automatically:");
+                Console.WriteLine("dbdatasync.config.yaml used the old flat key names — migrated automatically:");
                 foreach (var change in migrated)
                     Console.WriteLine($"  {change}");
             }

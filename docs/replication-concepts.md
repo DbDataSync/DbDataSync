@@ -45,10 +45,8 @@ replication behaves.
 PostgreSQL has `PgLogicalSlot` as its CDC-equivalent; without it, its options are `Watermark`,
 `TriggerAudit` and `BatchReload`, the same as any generic engine reached through a
 [descriptor driver](drivers-and-libraries.md#descriptor-drivers). MySQL/MariaDB's options are those
-same three — the binlog-based native alternative is still open work, see
-`architecture/planning/todo/change-tracking-mysql.md`. Oracle adds `OracleFlashback` to them as its own
-native option; LogMiner is still open work, see
-`architecture/planning/todo/change-tracking-oracle.md`.
+same three — the binlog-based native alternative is not supported yet. Oracle adds `OracleFlashback` to
+them as its own native option; LogMiner is not supported yet.
 
 **MySQL/MariaDB's `Watermark` reader has one real, unresolved gap worth knowing before combining it with
 a per-pass row cap**: the bounded read that caps a `Primary` pass at N rows relies on the engine

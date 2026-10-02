@@ -32,7 +32,7 @@ Tracking has nothing to report and no incremental run will ever repair it — `v
 until you trigger a backfill with a reconciling writer.
 
 `tools/dev-harness help` lists every verb and option. The tool itself is
-`tools/DbDataSync.DevHarness`; see `architecture/implementation/done/phase-011-dev-harness.md`.
+`tools/DbDataSync.DevHarness`.
 
 ## Prerequisites
 
@@ -144,5 +144,5 @@ indexes them) — including the ones embedded in [Getting started](getting-start
   `--target-engine postgres`). Not part of the shipped product.
 - `tools/DbDataSync.Benchmarks` — `tools/benchmarks`, which measures how much the in-memory shape of a
   change batch costs, through a real `SqlBulkCopy` and through a typed sink. Also not shipped.
-- `architecture/` — design docs; `architecture/implementation/` has a written summary of each build
-  phase, including real bugs found and how they were fixed.
+- `architecture/` — the project's design and planning records, for contributors; it is not part of the
+  product documentation in `docs/`.

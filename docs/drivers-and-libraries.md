@@ -19,9 +19,6 @@ Every driver — built-in or descriptor — names exactly one library its connec
 driver whose library isn't installed yet fails loudly, naming the exact command that fixes it — never a
 silent fallback or a confusing connection-string error.
 
-See `architecture/planning/done/nuget-loaded-drivers.md` for the full design behind this — this page is
-the how-to, that doc is the why.
-
 ## Libraries
 
 An installed library lives at `<RepoRoot>/libraries/<id>/` — `library.json` (its id, the resolved
@@ -106,9 +103,9 @@ library installed before they can actually connect to anything, exactly like a d
 | `DriverType` | library it needs | notes |
 | --- | --- | --- |
 | `MsSql` | `microsoft-data-sqlclient` | Change Tracking, CDC, and TriggerAudit readers |
-| `Postgres` | `npgsql` | Watermark, TriggerAudit, BatchReload, KeyReconcile and `PgLogicalSlot` (logical decoding through wal2json) readers; binary `COPY` staging. `pgoutput` is still open work — see `change-tracking-postgres.md` |
-| `MySql` | `mysql-connector` | MySQL and MariaDB, one driver — Watermark, TriggerAudit, BatchReload and KeyReconcile readers; the binlog-based native alternative is still open work, see `architecture/planning/todo/change-tracking-mysql.md` |
-| `Oracle` | `oracle-managed-data-access` | Watermark, TriggerAudit, BatchReload, KeyReconcile, and Flashback Version Query readers; LogMiner is still open work, see `architecture/planning/todo/change-tracking-oracle.md` |
+| `Postgres` | `npgsql` | Watermark, TriggerAudit, BatchReload, KeyReconcile and `PgLogicalSlot` (logical decoding through wal2json) readers; binary `COPY` staging. `pgoutput` is not supported yet |
+| `MySql` | `mysql-connector` | MySQL and MariaDB, one driver — Watermark, TriggerAudit, BatchReload and KeyReconcile readers; the binlog-based native alternative is not supported yet |
+| `Oracle` | `oracle-managed-data-access` | Watermark, TriggerAudit, BatchReload, KeyReconcile, and Flashback Version Query readers; LogMiner is not supported yet |
 | `DuckDb` | `duckdb` (installs itself — see above) | embedded, file path or `:memory:`, nothing to authenticate to |
 
 Configuring a connection with `DriverType: MsSql`/`Postgres`/`MySql`/`Oracle` before its library is

@@ -96,6 +96,6 @@ public sealed class JdbcDialect : SqlDialect
             "first and reports the plan as Unsupported instead."),
 
         _ => throw new NotSupportedException(
-            $"JdbcDialect.RenderColumnType: '{type.Kind}' is out of scope for phase 165V's spike dialect."),
+            $"JdbcDialect.RenderColumnType: '{type.Kind}' is out of scope for the JDBC spike dialect."),
     };
 }

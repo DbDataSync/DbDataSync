@@ -100,7 +100,7 @@ public sealed class AdminConfigService(
             "How often the retention sweep runs.",
             SupportsWrite: true, Unit: "minutes"),
         new("DbDataSync:State:Retention:ChangeCheckDays",
-            "How long the scheduler's change-check history (phase 75) is kept. 0 keeps forever.",
+            "How long the scheduler's change-check history is kept. 0 keeps forever.",
             SupportsWrite: true, Unit: "days"),
         new("DbDataSync:Nuget:Search:Mode",
             "Whether the Libraries screen's search box may call the public NuGet index (enabled/disabled). " +
@@ -155,9 +155,8 @@ public sealed class AdminConfigService(
             "configure a relying-party id and still turn this off without clearing it.",
             SupportsWrite: true, AllowedValues: AllowedValuesFor<FeatureMode>()),
         new("DbDataSync:Auth:Passkeys:RelyingPartyId",
-            "Bare domain passkeys are scoped to. Deliberately independent of App:Url — see " +
-            "architecture/planning/todo/passkey-relying-party-migration.md for why changing this " +
-            "invalidates every already-registered passkey, whatever sets it.",
+            "Bare domain passkeys are scoped to. Deliberately independent of App:Url. " +
+            "Changing this invalidates every already-registered passkey, whatever sets it.",
             SupportsWrite: true),
         new("DbDataSync:Auth:Passkeys:RelyingPartyName",
             "Shown in the OS passkey prompt.",

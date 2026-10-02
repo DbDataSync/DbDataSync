@@ -92,7 +92,7 @@ public static class Help
                     driver    list | uninstall <id>
                         Adds a whole new SQL engine — a driver.yaml descriptor plus its restored
                         library — without a DbDataSync rebuild. Watermark and batch-reload
-                        replication only; see architecture/planning/todo/nuget-loaded-drivers.md
+                        replication only; see docs/drivers-and-libraries.md
                         for what a descriptor can and can't do.
 
               dbdatasync version
